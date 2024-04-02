@@ -986,6 +986,9 @@ impl super::Nexus {
                 //
                 // If the operation failed, kick the sled agent error back up to
                 // the caller to let it decide how to handle it.
+                //
+                // When creating the zone for the first time, we just get
+                // Ok(None) here, which is a no-op in write_returned_instance_state.
                 match instance_put_result {
                     Ok(state) => self
                         .write_returned_instance_state(&instance_id, state)
@@ -1559,7 +1562,7 @@ impl super::Nexus {
             // an instance's state changes.
             //
             // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-            self.unassign_producer(instance_id).await?;
+            self.unassign_producer(opctx, instance_id).await?;
         }
 
         // Write the new instance and VMM states back to CRDB. This needs to be

@@ -623,6 +623,60 @@
         }
       }
     },
+    "/omicron-physical-disks": {
+      "get": {
+        "operationId": "omicron_physical_disks_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "omicron_physical_disks_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisksManagementResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/omicron-zones": {
       "get": {
         "operationId": "omicron_zones_get",
@@ -1359,6 +1413,51 @@
         "required": [
           "part_number",
           "serial_number"
+        ]
+      },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdPeerConfig": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "remote": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchLocation"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
         ]
       },
       "BgpConfig": {
@@ -3526,6 +3625,112 @@
           "vendor"
         ]
       },
+      "DiskManagementError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zpool_uuid_mismatch"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "expected": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "observed": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "expected",
+                  "observed"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "key_manager"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "DiskManagementStatus": {
+        "description": "Identifies how a single disk management operation may have succeeded or failed.",
+        "type": "object",
+        "properties": {
+          "err": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiskManagementError"
+              }
+            ]
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      },
       "DiskRequest": {
         "description": "DiskRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"device\", \"name\", \"read_only\", \"slot\", \"volume_construction_request\" ], \"properties\": { \"device\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"read_only\": { \"type\": \"boolean\" }, \"slot\": { \"$ref\": \"#/components/schemas/Slot\" }, \"volume_construction_request\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } } } ``` </details>",
         "type": "object",
@@ -3864,6 +4069,21 @@
         "enum": [
           "U2",
           "M2"
+        ]
+      },
+      "DisksManagementResult": {
+        "description": "The result from attempting to manage underlying disks.\n\nThis is more complex than a simple \"Error\" type because it's possible for some disks to be initialized correctly, while others can fail.\n\nThis structure provides a mechanism for callers to learn about partial failures, and handle them appropriately on a per-disk basis.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiskManagementStatus"
+            }
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "Duration": {
@@ -5267,6 +5487,12 @@
           },
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
+          },
+          "zpools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryZpool"
+            }
           }
         },
         "required": [
@@ -5277,7 +5503,8 @@
           "sled_id",
           "sled_role",
           "usable_hardware_threads",
-          "usable_physical_ram"
+          "usable_physical_ram",
+          "zpools"
         ]
       },
       "InventoryDisk": {
@@ -5299,6 +5526,23 @@
           "identity",
           "slot",
           "variant"
+        ]
+      },
+      "InventoryZpool": {
+        "description": "Identifies information about zpools managed by the control plane",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "id",
+          "total_size"
         ]
       },
       "IpNet": {
@@ -5746,6 +5990,50 @@
               "type"
             ]
           }
+        ]
+      },
+      "OmicronPhysicalDiskConfig": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "pool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "identity",
+          "pool_id"
+        ]
+      },
+      "OmicronPhysicalDisksConfig": {
+        "type": "object",
+        "properties": {
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
+          },
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disks",
+          "generation"
         ]
       },
       "OmicronZoneConfig": {
@@ -6408,6 +6696,14 @@
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
+          "bfd": {
+            "description": "BFD configuration for connecting the rack to external networks",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeerConfig"
+            }
+          },
           "bgp": {
             "description": "BGP configurations for connecting the rack to external networks",
             "type": "array",

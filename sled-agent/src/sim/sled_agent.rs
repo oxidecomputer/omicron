@@ -15,13 +15,13 @@ use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::HttpServer;
+use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
@@ -35,15 +35,18 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::disk::DiskIdentity;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
@@ -73,6 +76,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub log: Logger,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -154,7 +158,6 @@ impl SledAgent {
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                Arc::clone(&nexus_client),
                 config.storage.ip,
                 storage_log,
             )),
@@ -171,6 +174,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            log,
         })
     }
 
@@ -238,9 +242,7 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
-        // This is currently unused, but will be included as part of work
-        // tracked in https://github.com/oxidecomputer/omicron/issues/4851.
-        _metadata: InstanceMetadata,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -294,6 +296,7 @@ impl SledAgent {
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
+                    metadata: metadata.into(),
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -400,7 +403,28 @@ impl SledAgent {
                     ));
                 }
                 InstanceStateRequested::Running => {
-                    propolis_client::types::InstanceStateRequested::Run
+                    let instances = self.instances.clone();
+                    let log = self.log.new(
+                        o!("component" => "SledAgent-insure_instance_state"),
+                    );
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        match instances
+                            .sim_ensure(&instance_id, current, Some(state))
+                            .await
+                        {
+                            Ok(state) => {
+                                let instance_state: nexus_client::types::SledInstanceState = state.into();
+                                info!(log, "sim_ensure success"; "instance_state" => #?instance_state);
+                            }
+                            Err(instance_put_error) => {
+                                error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
+                            }
+                        }
+                    });
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
                 }
                 InstanceStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
@@ -498,19 +522,26 @@ impl SledAgent {
     /// Adds a Physical Disk to the simulated sled agent.
     pub async fn create_external_physical_disk(
         &self,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: Uuid,
+        identity: DiskIdentity,
     ) {
         let variant = sled_hardware::DiskVariant::U2;
         self.storage
             .lock()
             .await
-            .insert_physical_disk(vendor, serial, model, variant)
+            .insert_physical_disk(id, identity, variant)
             .await;
     }
 
-    pub async fn get_zpools(&self) -> Vec<Uuid> {
+    pub async fn get_all_physical_disks(
+        &self,
+    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+        self.storage.lock().await.get_all_physical_disks()
+    }
+
+    pub async fn get_zpools(
+        &self,
+    ) -> Vec<nexus_client::types::ZpoolPutRequest> {
         self.storage.lock().await.get_all_zpools()
     }
 
@@ -525,15 +556,13 @@ impl SledAgent {
     pub async fn create_zpool(
         &self,
         id: Uuid,
-        vendor: String,
-        serial: String,
-        model: String,
+        physical_disk_id: Uuid,
         size: u64,
     ) {
         self.storage
             .lock()
             .await
-            .insert_zpool(id, vendor, serial, model, size)
+            .insert_zpool(id, physical_disk_id, size)
             .await;
     }
 
@@ -739,6 +768,8 @@ impl SledAgent {
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        let storage = self.storage.lock().await;
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -753,19 +784,39 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
-            disks: self
-                .storage
-                .lock()
-                .await
+            disks: storage
                 .physical_disks()
-                .iter()
-                .map(|(identity, info)| crate::params::InventoryDisk {
-                    identity: identity.clone(),
+                .values()
+                .map(|info| crate::params::InventoryDisk {
+                    identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
                 })
                 .collect(),
+            zpools: storage
+                .zpools()
+                .iter()
+                .map(|(id, zpool)| {
+                    Ok(crate::params::InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::try_from(zpool.total_size())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
+    }
+
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_list().await
+    }
+
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_ensure(config).await
     }
 
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {

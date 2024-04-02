@@ -15,6 +15,7 @@ base64.workspace = true
 bb8.workspace = true
 camino.workspace = true
 chrono.workspace = true
+const_format.workspace = true
 cookie.workspace = true
 diesel.workspace = true
 diesel-dtrace.workspace = true
@@ -36,12 +37,14 @@ rand.workspace = true
 ref-cast.workspace = true
 samael.workspace = true
 schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 serde_with.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
 strum.workspace = true
@@ -61,6 +64,13 @@ omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
+
+# only enabled during tests or via the `testing` feature
+omicron-test-utils = { workspace = true, optional = true }
+
+[features]
+# Enable to export `datastore_test`
+testing = ["omicron-test-utils"]
 
 [dev-dependencies]
 assert_matches.workspace = true

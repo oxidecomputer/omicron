@@ -22,19 +22,17 @@ use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
-    ZoneBundleMetadata, Zpool,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
+    VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
-use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use ddm_admin_client::Client as DdmAdminClient;
 use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
@@ -65,16 +63,17 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service,
     retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use oximeter::types::ProducerRegistry;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use illumos_utils::running_zone::ZoneBuilderFactory;
@@ -161,8 +160,9 @@ pub enum Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            // Service errors can convert themselves into the external error
+            // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
+            Error::Storage(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
             },
@@ -342,7 +342,6 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
-        underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -357,7 +356,7 @@ impl SledAgent {
 
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .boot_disk()
             .ok_or_else(|| Error::BootDiskNotFound)?;
@@ -382,11 +381,6 @@ impl SledAgent {
 
         info!(log, "Mounting backing filesystems");
         crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
-
-        // Ensure we have a thread that automatically reaps process contracts
-        // when they become empty. See the comments in
-        // illumos-utils/src/running_zone.rs for more detail.
-        illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
 
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
@@ -465,16 +459,6 @@ impl SledAgent {
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
         );
-
-        // Inform the `StorageMonitor` that the underlay is available so that
-        // it can try to contact nexus.
-        underlay_available_tx
-            .send(UnderlayAccess {
-                nexus_client: nexus_client.clone(),
-                sled_id: request.body.id,
-            })
-            .map_err(|_| ())
-            .expect("Failed to send to StorageMonitor");
 
         // Configure the VMM reservoir as either a percentage of DRAM or as an
         // exact size in MiB.
@@ -807,6 +791,28 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
+    /// Requests the set of physical disks currently managed by the Sled Agent.
+    ///
+    /// This should be contrasted by the set of disks in the inventory, which
+    /// may contain a slightly different set, if certain disks are not expected
+    /// to be in-use by the broader control plane.
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, Error> {
+        Ok(self.storage().omicron_physical_disks_list().await?)
+    }
+
+    /// Ensures that the specific set of Omicron Physical Disks are running
+    /// on this sled, and that no other disks are being used by the control
+    /// plane (with the exception of M.2s, which are always automatically
+    /// in-use).
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, Error> {
+        Ok(self.storage().omicron_physical_disks_ensure(config).await?)
+    }
+
     /// List the Omicron zone configuration that's currently running
     pub async fn omicron_zones_list(
         &self,
@@ -854,7 +860,7 @@ impl SledAgent {
     pub async fn zpools_get(&self) -> Vec<Zpool> {
         self.inner
             .storage
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .get_all_zpools()
             .into_iter()
@@ -1107,18 +1113,38 @@ impl SledAgent {
         } else {
             crate::params::SledRole::Gimlet
         };
-        let disks = self
-            .storage()
-            .get_latest_resources()
-            .await
-            .disks()
-            .iter()
-            .map(|(identity, (disk, _pool))| crate::params::InventoryDisk {
+
+        let mut disks = vec![];
+        let mut zpools = vec![];
+        let all_disks = self.storage().get_latest_disks().await;
+        for (identity, variant, slot) in all_disks.iter_all() {
+            disks.push(crate::params::InventoryDisk {
                 identity: identity.clone(),
-                variant: disk.variant(),
-                slot: disk.slot(),
-            })
-            .collect();
+                variant,
+                slot,
+            });
+        }
+        for zpool in all_disks.all_u2_zpools() {
+            let info =
+                match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
+                {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Failed to access zpool info";
+                            "zpool" => %zpool,
+                            "err" => %err
+                        );
+                        continue;
+                    }
+                };
+
+            zpools.push(crate::params::InventoryZpool {
+                id: zpool.id(),
+                total_size: ByteCount::try_from(info.size())?,
+            });
+        }
 
         Ok(Inventory {
             sled_id,
@@ -1129,6 +1155,7 @@ impl SledAgent {
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
             disks,
+            zpools,
         })
     }
 }
@@ -1169,7 +1196,7 @@ pub enum AddSledError {
         err: bootstrap_agent_client::Error,
     },
     #[error("Failed to connect to DDM")]
-    DdmAdminClient(#[source] ddm_admin_client::DdmError),
+    DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}: {err}")]

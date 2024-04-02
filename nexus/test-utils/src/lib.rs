@@ -7,6 +7,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
+use chrono::Utc;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
@@ -24,6 +25,10 @@ use nexus_config::MgdConfig;
 use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
@@ -54,6 +59,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, error, o, Logger};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -76,6 +82,7 @@ pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
 pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
+pub const PHYSICAL_DISK_UUID: &str = "fbf4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
@@ -743,8 +750,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             log.clone(),
         );
 
-        let dns_config =
-            self.rack_init_builder.internal_dns_config.clone().build();
+        let dns_config = self
+            .rack_init_builder
+            .internal_dns_config
+            .clone()
+            .build_full_config_for_initial_generation();
 
         slog::info!(log, "DNS population: {:#?}", dns_config);
         dns_config_client.dns_config_put(&dns_config).await.expect(
@@ -785,12 +795,54 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             user_password_hash,
         };
 
+        let blueprint = {
+            let mut blueprint_zones = BTreeMap::new();
+            for (maybe_sled_agent, zones) in [
+                (self.sled_agent.as_ref(), &self.omicron_zones),
+                (self.sled_agent2.as_ref(), &self.omicron_zones2),
+            ] {
+                if let Some(sa) = maybe_sled_agent {
+                    blueprint_zones.insert(
+                        sa.sled_agent.id,
+                        BlueprintZonesConfig {
+                            generation: Generation::new().next(),
+                            zones: zones
+                                .iter()
+                                .map(|z| {
+                                    BlueprintZoneConfig {
+                                        config: z.clone(),
+                                        // All initial zones are in-service
+                                        disposition:
+                                            BlueprintZoneDisposition::InService,
+                                    }
+                                })
+                                .collect(),
+                        },
+                    );
+                }
+            }
+            Blueprint {
+                id: Uuid::new_v4(),
+                blueprint_zones,
+                parent_blueprint_id: None,
+                internal_dns_version: dns_config
+                    .generation
+                    .try_into()
+                    .expect("bad internal DNS generation"),
+                external_dns_version: Generation::new(),
+                time_created: Utc::now(),
+                creator: "nexus-test-utils".to_string(),
+                comment: "initial test blueprint".to_string(),
+            }
+        };
+
         // Handoff all known service information to Nexus
         let server = N::start(
             self.nexus_internal
                 .take()
                 .expect("Must launch internal nexus first"),
-            &self.config,
+            self.config,
+            blueprint,
             self.rack_init_builder.services.clone(),
             // NOTE: We should probably hand off
             // "self.rack_init_builder.datasets" here, but Nexus won't be happy
@@ -809,6 +861,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             //   (b) These sled-agent-created zpools are registered with Nexus
             //   asynchronously, and we're not making any effort (currently) to
             //   wait for them to be known to Nexus.
+            vec![],
+            vec![],
             vec![],
             dns_config,
             &external_dns_zone_name,
@@ -1363,6 +1417,7 @@ pub async fn start_oximeter(
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
         db,
+        refresh_interval: oximeter_collector::default_refresh_interval(),
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
     let args = oximeter_collector::OximeterArguments {

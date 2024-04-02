@@ -353,6 +353,8 @@ pub struct BackgroundTaskConfig {
     pub dns_internal: DnsTasksConfig,
     /// configuration for external DNS background tasks
     pub dns_external: DnsTasksConfig,
+    /// configuration for metrics producer garbage collection background task
+    pub metrics_producer_gc: MetricsProducerGcConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
     /// configuration for nat table garbage collector
@@ -367,6 +369,8 @@ pub struct BackgroundTaskConfig {
     pub sync_service_zone_nat: SyncServiceZoneNatConfig,
     /// configuration for the bfd manager task
     pub bfd_manager: BfdManagerConfig,
+    /// configuration for the switch port settings manager task
+    pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement task
     pub region_replacement: RegionReplacementConfig,
 }
@@ -391,6 +395,15 @@ pub struct DnsTasksConfig {
 
     /// maximum number of concurrent DNS server updates
     pub max_concurrent_server_updates: usize,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MetricsProducerGcConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// garbage collects metrics producers whose leases have expired
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 #[serde_as]
@@ -427,6 +440,15 @@ pub struct SyncServiceZoneNatConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SwitchPortSettingsManagerConfig {
+    /// Interval (in seconds) for periodic activations of this background task.
+    /// This task is also activated on-demand when any of the switch port settings
+    /// api endpoints are called.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InventoryConfig {
@@ -703,6 +725,7 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
             bfd_manager.period_secs = 30
@@ -713,6 +736,7 @@ mod test {
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
@@ -804,6 +828,9 @@ mod test {
                             period_secs_propagation: Duration::from_secs(7),
                             max_concurrent_server_updates: 8,
                         },
+                        metrics_producer_gc: MetricsProducerGcConfig {
+                            period_secs: Duration::from_secs(60)
+                        },
                         external_endpoints: ExternalEndpointsConfig {
                             period_secs: Duration::from_secs(9),
                         },
@@ -828,6 +855,10 @@ mod test {
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
                         },
+                        switch_port_settings_manager:
+                            SwitchPortSettingsManagerConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -883,6 +914,7 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
             bfd_manager.period_secs = 30
@@ -893,6 +925,7 @@ mod test {
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"

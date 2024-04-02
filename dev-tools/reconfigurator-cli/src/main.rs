@@ -8,19 +8,34 @@ use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
+use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
+use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use nexus_reconfigurator_execution::blueprint_external_dns_config;
+use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
+use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::OmicronZonesConfig;
+use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::Name;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneKind, TypedUuid};
 use reedline::{Reedline, Signal};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io::BufRead;
+use std::net::IpAddr;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -41,7 +56,99 @@ struct ReconfiguratorSim {
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
 
+    /// external IPs allocated to services
+    ///
+    /// In the real system, external IPs have IDs, but those IDs only live in
+    /// CRDB - they're not part of the zone config sent from Reconfigurator to
+    /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
+    /// we need.
+    external_ips: RefCell<IndexMap<IpAddr, Uuid>>,
+
+    /// internal DNS configurations
+    internal_dns: BTreeMap<Generation, DnsConfigParams>,
+    /// external DNS configurations
+    external_dns: BTreeMap<Generation, DnsConfigParams>,
+
+    /// Set of silo names configured
+    ///
+    /// These are used to determine the contents of external DNS.
+    silo_names: Vec<Name>,
+
+    /// External DNS zone name configured
+    external_dns_zone_name: String,
+
+    /// Policy overrides
+    num_nexus: Option<u16>,
+
     log: slog::Logger,
+}
+
+impl ReconfiguratorSim {
+    fn blueprint_lookup(&self, id: Uuid) -> Result<&Blueprint, anyhow::Error> {
+        self.blueprints
+            .get(&id)
+            .ok_or_else(|| anyhow!("no such blueprint: {}", id))
+    }
+
+    fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
+        let previous = self.blueprints.insert(blueprint.id, blueprint);
+        assert!(previous.is_none());
+    }
+
+    fn blueprint_insert_loaded(
+        &mut self,
+        blueprint: Blueprint,
+    ) -> Result<(), anyhow::Error> {
+        let entry = self.blueprints.entry(blueprint.id);
+        if let indexmap::map::Entry::Occupied(_) = &entry {
+            return Err(anyhow!("blueprint already exists: {}", blueprint.id));
+        }
+        let _ = entry.or_insert(blueprint);
+        Ok(())
+    }
+
+    fn planning_input(
+        &self,
+        parent_blueprint: &Blueprint,
+    ) -> anyhow::Result<PlanningInput> {
+        let policy = self.system.to_policy().context("generating policy")?;
+        let service_external_ips = parent_blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                let Ok(Some(ip)) = zone.zone_type.external_ip() else {
+                    return None;
+                };
+                let service_id =
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                let external_ip = ExternalIp {
+                    id: *self
+                        .external_ips
+                        .borrow_mut()
+                        .entry(ip)
+                        .or_insert_with(Uuid::new_v4),
+                    ip: ip.into(),
+                };
+                Some((service_id, external_ip))
+            })
+            .collect();
+        let service_nics = parent_blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                let nic = zone.zone_type.service_vnic()?;
+                let service_id =
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                let nic = ServiceNetworkInterface {
+                    id: nic.id,
+                    mac: nic.mac,
+                    ip: nic.ip.into(),
+                    slot: nic.slot,
+                    primary: nic.primary,
+                };
+                Some((service_id, nic))
+            })
+            .collect();
+        Ok(PlanningInput { policy, service_external_ips, service_nics })
+    }
 }
 
 /// interactive REPL for exploring the planner
@@ -65,7 +172,13 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
+        external_ips: RefCell::new(IndexMap::new()),
+        internal_dns: BTreeMap::new(),
+        external_dns: BTreeMap::new(),
         log,
+        silo_names: vec!["example-silo".parse().unwrap()],
+        external_dns_zone_name: String::from("oxide.example"),
+        num_nexus: None,
     };
 
     if let Some(input_file) = cmd.input_file {
@@ -162,18 +275,26 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
+        Commands::SiloList => cmd_silo_list(sim),
+        Commands::SiloAdd(args) => cmd_silo_add(sim, args),
+        Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
         Commands::BlueprintFromInventory(args) => {
             cmd_blueprint_from_inventory(sim, args)
         }
+        Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
+        Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
         Commands::BlueprintDiffInventory(args) => {
             cmd_blueprint_diff_inventory(sim, args)
         }
+        Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
+        Commands::Show => cmd_show(sim),
+        Commands::Set(args) => cmd_set(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
@@ -206,6 +327,13 @@ enum Commands {
     /// show details about one sled
     SledShow(SledArgs),
 
+    /// list silos
+    SiloList,
+    /// add a silo
+    SiloAdd(SiloAddRemoveArgs),
+    /// remove a silo
+    SiloRemove(SiloAddRemoveArgs),
+
     /// list all inventory collections
     InventoryList,
     /// generates an inventory collection from the configured sleds
@@ -217,12 +345,24 @@ enum Commands {
     BlueprintFromInventory(InventoryArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
+    /// edit contents of a blueprint directly
+    BlueprintEdit(BlueprintEditArgs),
     /// show details about a blueprint
     BlueprintShow(BlueprintArgs),
     /// show differences between two blueprints
     BlueprintDiff(BlueprintDiffArgs),
+    /// show differences between a blueprint and a particular DNS version
+    BlueprintDiffDns(BlueprintDiffDnsArgs),
     /// show differences between a blueprint and an inventory collection
     BlueprintDiffInventory(BlueprintDiffInventoryArgs),
+    /// write one blueprint to a file
+    BlueprintSave(BlueprintSaveArgs),
+
+    /// show system properties
+    Show,
+    /// set system properties
+    #[command(subcommand)]
+    Set(SetArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -245,6 +385,12 @@ struct SledArgs {
 }
 
 #[derive(Debug, Args)]
+struct SiloAddRemoveArgs {
+    /// name of the silo
+    silo_name: Name,
+}
+
+#[derive(Debug, Args)]
 struct InventoryArgs {
     /// id of the inventory collection to use in planning
     collection_id: Uuid,
@@ -259,9 +405,48 @@ struct BlueprintPlanArgs {
 }
 
 #[derive(Debug, Args)]
+struct BlueprintEditArgs {
+    /// id of the blueprint to edit
+    blueprint_id: Uuid,
+    /// "creator" field for the new blueprint
+    #[arg(long)]
+    creator: Option<String>,
+    /// "comment" field for the new blueprint
+    #[arg(long)]
+    comment: Option<String>,
+    #[command(subcommand)]
+    edit_command: BlueprintEditCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintEditCommands {
+    /// add a Nexus instance to a particular sled
+    AddNexus {
+        /// sled on which to deploy the new instance
+        sled_id: Uuid,
+    },
+}
+
+#[derive(Debug, Args)]
 struct BlueprintArgs {
     /// id of the blueprint
     blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintDiffDnsArgs {
+    /// DNS group (internal or external)
+    dns_group: CliDnsGroup,
+    /// DNS version to diff against
+    dns_version: u32,
+    /// id of the blueprint
+    blueprint_id: Uuid,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliDnsGroup {
+    Internal,
+    External,
 }
 
 #[derive(Debug, Args)]
@@ -273,11 +458,27 @@ struct BlueprintDiffInventoryArgs {
 }
 
 #[derive(Debug, Args)]
+struct BlueprintSaveArgs {
+    /// id of the blueprint
+    blueprint_id: Uuid,
+    /// output file
+    filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct BlueprintDiffArgs {
     /// id of the first blueprint
     blueprint1_id: Uuid,
     /// id of the second blueprint
     blueprint2_id: Uuid,
+}
+
+#[derive(Debug, Subcommand)]
+enum SetArgs {
+    /// target number of Nexus instances (for planning)
+    NumNexus { num_nexus: u16 },
+    /// system's external DNS zone name (suffix)
+    ExternalDnsZoneName { zone_name: String },
 }
 
 #[derive(Debug, Args)]
@@ -303,6 +504,40 @@ struct SaveArgs {
 }
 
 // Command handlers
+
+fn cmd_silo_list(
+    sim: &mut ReconfiguratorSim,
+) -> anyhow::Result<Option<String>> {
+    let mut s = String::new();
+    for silo_name in &sim.silo_names {
+        swriteln!(s, "{}", silo_name);
+    }
+    Ok(Some(s))
+}
+
+fn cmd_silo_add(
+    sim: &mut ReconfiguratorSim,
+    args: SiloAddRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    if sim.silo_names.contains(&args.silo_name) {
+        bail!("silo already exists: {:?}", &args.silo_name);
+    }
+
+    sim.silo_names.push(args.silo_name);
+    Ok(None)
+}
+
+fn cmd_silo_remove(
+    sim: &mut ReconfiguratorSim,
+    args: SiloAddRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    let size_before = sim.silo_names.len();
+    sim.silo_names.retain(|n| *n != args.silo_name);
+    if sim.silo_names.len() == size_before {
+        bail!("no such silo: {:?}", &args.silo_name);
+    }
+    Ok(None)
+}
 
 fn cmd_sled_list(
     sim: &mut ReconfiguratorSim,
@@ -463,7 +698,7 @@ fn cmd_blueprint_from_inventory(
         "generated blueprint {} from inventory collection {}",
         blueprint.id, collection_id
     );
-    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.blueprint_insert_new(blueprint);
     Ok(Some(rv))
 }
 
@@ -473,23 +708,44 @@ fn cmd_blueprint_plan(
 ) -> anyhow::Result<Option<String>> {
     let parent_blueprint_id = args.parent_blueprint_id;
     let collection_id = args.collection_id;
-    let parent_blueprint = sim
-        .blueprints
-        .get(&parent_blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", parent_blueprint_id))?;
+    let parent_blueprint = sim.blueprint_lookup(parent_blueprint_id)?;
     let collection = sim
         .collections
         .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-    let dns_version = Generation::new();
-    let policy = sim.system.to_policy().context("generating policy")?;
     let creator = "reconfigurator-sim";
+    let planning_input = sim.planning_input(parent_blueprint)?;
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
-        dns_version,
-        dns_version,
-        &policy,
+        // The internal and external DNS numbers that go here are supposed to be
+        // the _current_ internal and external DNS generations at the point
+        // when planning happened.  This is racy (these generations can change
+        // immediately after they're fetched from the database) but correctness
+        // only requires that the values here be *no newer* than the real
+        // values so it's okay if the real values get changed.
+        //
+        // The problem is we have no real system here to fetch these values
+        // from.  What should the value be?
+        //
+        // - If we assume that the parent blueprint here was successfully
+        //   executed immediately before generating this plan, then the values
+        //   here should come from the generation number produced by executing
+        //   the parent blueprint.
+        //
+        // - If the parent blueprint was never executed, or execution is still
+        //   in progress, or if other blueprints have been executed in the
+        //   meantime that changed DNS, then the values here could be different
+        //   (older if the blueprint was never executed or is currently
+        //   executing and newer if other blueprints have changed DNS in the
+        //   meantime).
+        //
+        // But in this CLI, there's no execution at all.  As a result, there's
+        // no way to really choose between these -- and it doesn't really
+        // matter, either.  We'll just pick the parent blueprint's.
+        parent_blueprint.internal_dns_version,
+        parent_blueprint.external_dns_version,
+        &planning_input,
         creator,
         collection,
     )
@@ -499,7 +755,49 @@ fn cmd_blueprint_plan(
         "generated blueprint {} based on parent blueprint {}",
         blueprint.id, parent_blueprint_id,
     );
-    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.blueprint_insert_new(blueprint);
+    Ok(Some(rv))
+}
+
+fn cmd_blueprint_edit(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintEditArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+    let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
+    let planning_input = sim.planning_input(blueprint)?;
+    let mut builder = BlueprintBuilder::new_based_on(
+        &sim.log,
+        &blueprint,
+        blueprint.internal_dns_version,
+        blueprint.external_dns_version,
+        &planning_input,
+        creator,
+    )
+    .context("creating blueprint builder")?;
+
+    if let Some(comment) = args.comment {
+        builder.comment(comment);
+    }
+
+    let label = match args.edit_command {
+        BlueprintEditCommands::AddNexus { sled_id } => {
+            let current = builder.sled_num_nexus_zones(sled_id);
+            let added = builder
+                .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
+                .context("failed to add Nexus zone")?;
+            assert_matches::assert_matches!(added, EnsureMultiple::Added(1));
+            format!("added Nexus zone to sled {}", sled_id)
+        }
+    };
+
+    let new_blueprint = builder.build();
+    let rv = format!(
+        "blueprint {} created from blueprint {}: {}",
+        new_blueprint.id, blueprint_id, label
+    );
+    sim.blueprint_insert_new(new_blueprint);
     Ok(Some(rv))
 }
 
@@ -507,10 +805,7 @@ fn cmd_blueprint_show(
     sim: &mut ReconfiguratorSim,
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
-    let blueprint = sim
-        .blueprints
-        .get(&args.blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", args.blueprint_id))?;
+    let blueprint = sim.blueprint_lookup(args.blueprint_id)?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -518,19 +813,121 @@ fn cmd_blueprint_diff(
     sim: &mut ReconfiguratorSim,
     args: BlueprintDiffArgs,
 ) -> anyhow::Result<Option<String>> {
+    let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
     let blueprint2_id = args.blueprint2_id;
-    let blueprint1 = sim
-        .blueprints
-        .get(&blueprint1_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
-    let blueprint2 = sim
-        .blueprints
-        .get(&blueprint2_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
+    let blueprint1 = sim.blueprint_lookup(blueprint1_id)?;
+    let blueprint2 = sim.blueprint_lookup(blueprint2_id)?;
 
-    let diff = blueprint1.diff_sleds(&blueprint2);
-    Ok(Some(diff.display().to_string()))
+    let sled_diff = blueprint2
+        .diff_since_blueprint(&blueprint1)
+        .context("failed to diff blueprints")?;
+    swriteln!(rv, "{}", sled_diff.display());
+
+    // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
+    // each blueprint.  To do that we need to construct a list of sleds suitable
+    // for the executor.
+    let sleds_by_id = make_sleds_by_id(&sim)?;
+    let internal_dns_config1 = blueprint_internal_dns_config(
+        &blueprint1,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
+    let internal_dns_config2 = blueprint_internal_dns_config(
+        &blueprint2,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
+    let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
+        .context("failed to assemble DNS diff")?;
+    swriteln!(rv, "internal DNS:\n{}", dns_diff);
+
+    let external_dns_config1 = blueprint_external_dns_config(
+        &blueprint1,
+        &sim.silo_names,
+        sim.external_dns_zone_name.clone(),
+    );
+    let external_dns_config2 = blueprint_external_dns_config(
+        &blueprint2,
+        &sim.silo_names,
+        sim.external_dns_zone_name.clone(),
+    );
+    let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
+        .context("failed to assemble external DNS diff")?;
+    swriteln!(rv, "external DNS:\n{}", dns_diff);
+
+    Ok(Some(rv))
+}
+
+fn make_sleds_by_id(
+    sim: &ReconfiguratorSim,
+) -> Result<BTreeMap<Uuid, nexus_reconfigurator_execution::Sled>, anyhow::Error>
+{
+    let collection = sim
+        .system
+        .to_collection_builder()
+        .context(
+            "unexpectedly failed to create collection for current set of sleds",
+        )?
+        .build();
+    let sleds_by_id: BTreeMap<_, _> = collection
+        .sled_agents
+        .iter()
+        .map(|(sled_id, sled_agent_info)| {
+            let sled = nexus_reconfigurator_execution::Sled::new(
+                *sled_id,
+                sled_agent_info.sled_agent_address,
+                sled_agent_info.sled_role == SledRole::Scrimlet,
+            );
+            (*sled_id, sled)
+        })
+        .collect();
+    Ok(sleds_by_id)
+}
+
+fn cmd_blueprint_diff_dns(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintDiffDnsArgs,
+) -> anyhow::Result<Option<String>> {
+    let dns_group = args.dns_group;
+    let dns_version = Generation::from(args.dns_version);
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let existing_dns_config = match dns_group {
+        CliDnsGroup::Internal => sim.internal_dns.get(&dns_version),
+        CliDnsGroup::External => sim.external_dns.get(&dns_version),
+    }
+    .ok_or_else(|| {
+        anyhow!("no such {:?} DNS version: {}", dns_group, dns_version)
+    })?;
+
+    let blueprint_dns_zone = match dns_group {
+        CliDnsGroup::Internal => {
+            let sleds_by_id = make_sleds_by_id(sim)?;
+            blueprint_internal_dns_config(
+                &blueprint,
+                &sleds_by_id,
+                &Default::default(),
+            )
+            .with_context(|| {
+                format!(
+                    "computing internal DNS config for blueprint {}",
+                    blueprint_id
+                )
+            })?
+        }
+        CliDnsGroup::External => blueprint_external_dns_config(
+            &blueprint,
+            &sim.silo_names,
+            sim.external_dns_zone_name.clone(),
+        ),
+    };
+
+    let existing_dns_zone = existing_dns_config.sole_zone()?;
+    let dns_diff = DnsDiff::new(&existing_dns_zone, &blueprint_dns_zone)
+        .context("failed to assemble DNS diff")?;
+    Ok(Some(dns_diff.to_string()))
 }
 
 fn cmd_blueprint_diff_inventory(
@@ -542,14 +939,26 @@ fn cmd_blueprint_diff_inventory(
     let collection = sim.collections.get(&collection_id).ok_or_else(|| {
         anyhow!("no such inventory collection: {}", collection_id)
     })?;
-    let blueprint = sim
-        .blueprints
-        .get(&blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
-
-    let zones = collection.all_omicron_zones().map(|z| z.id).collect();
-    let diff = blueprint.diff_sleds_from_collection(&collection, &zones);
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+    let diff = blueprint
+        .diff_since_collection(&collection)
+        .context("failed to diff blueprint from inventory collection")?;
     Ok(Some(diff.display().to_string()))
+}
+
+fn cmd_blueprint_save(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintSaveArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let output_path = &args.filename;
+    let output_str = serde_json::to_string_pretty(&blueprint)
+        .context("serializing blueprint")?;
+    std::fs::write(&output_path, &output_str)
+        .with_context(|| format!("write {:?}", output_path))?;
+    Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
 }
 
 fn cmd_save(
@@ -561,21 +970,90 @@ fn cmd_save(
         policy,
         collections: sim.collections.values().cloned().collect(),
         blueprints: sim.blueprints.values().cloned().collect(),
+        internal_dns: sim.internal_dns.clone(),
+        external_dns: sim.external_dns.clone(),
+        silo_names: sim.silo_names.clone(),
+        external_dns_zone_names: vec![sim.external_dns_zone_name.clone()],
     };
 
     let output_path = &args.filename;
-    let outfile = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(output_path)
-        .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&outfile, &saved)
-        .with_context(|| format!("writing to {:?}", output_path))
-        .unwrap_or_else(|e| panic!("{:#}", e));
+    let output_str =
+        serde_json::to_string_pretty(&saved).context("serializing state")?;
+    std::fs::write(&output_path, &output_str)
+        .with_context(|| format!("write {:?}", output_path))?;
     Ok(Some(format!(
         "saved policy, collections, and blueprints to {:?}",
         output_path
     )))
+}
+
+fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    let mut s = String::new();
+    do_print_properties(&mut s, sim);
+    swriteln!(
+        s,
+        "target number of Nexus instances: {}",
+        match sim.num_nexus {
+            Some(n) => n.to_string(),
+            None => String::from("default"),
+        }
+    );
+    Ok(Some(s))
+}
+
+fn do_print_properties(s: &mut String, sim: &ReconfiguratorSim) {
+    swriteln!(
+        s,
+        "configured external DNS zone name: {}",
+        sim.external_dns_zone_name,
+    );
+    swriteln!(
+        s,
+        "configured silo names: {}",
+        sim.silo_names
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    swriteln!(
+        s,
+        "internal DNS generations: {}",
+        sim.internal_dns
+            .keys()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    swriteln!(
+        s,
+        "external DNS generations: {}",
+        sim.external_dns
+            .keys()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+}
+
+fn cmd_set(
+    sim: &mut ReconfiguratorSim,
+    args: SetArgs,
+) -> anyhow::Result<Option<String>> {
+    Ok(Some(match args {
+        SetArgs::NumNexus { num_nexus } => {
+            let rv = format!("{:?} -> {}", sim.num_nexus, num_nexus);
+            sim.num_nexus = Some(num_nexus);
+            sim.system.target_nexus_zone_count(usize::from(num_nexus));
+            rv
+        }
+        SetArgs::ExternalDnsZoneName { zone_name } => {
+            let rv =
+                format!("{:?} -> {:?}", sim.external_dns_zone_name, zone_name);
+            sim.external_dns_zone_name = zone_name;
+            rv
+        }
+    }))
 }
 
 fn read_file(
@@ -583,7 +1061,8 @@ fn read_file(
 ) -> anyhow::Result<UnstableReconfiguratorState> {
     let file = std::fs::File::open(input_path)
         .with_context(|| format!("open {:?}", input_path))?;
-    serde_json::from_reader(file)
+    let bufread = std::io::BufReader::new(file);
+    serde_json::from_reader(bufread)
         .with_context(|| format!("read {:?}", input_path))
 }
 
@@ -659,30 +1138,21 @@ fn cmd_load(
             continue;
         };
 
-        let inventory_sp = match &inventory_sled_agent.baseboard_id {
-            Some(baseboard_id) => {
-                let inv_sp = primary_collection
-                    .sps
-                    .get(baseboard_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "error: load sled {}: missing SP inventory",
-                            sled_id
-                        )
-                    })?;
-                let inv_rot = primary_collection
-                    .rots
-                    .get(baseboard_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "error: load sled {}: missing RoT inventory",
-                            sled_id
-                        )
-                    })?;
-                Some(SledHwInventory { baseboard_id, sp: inv_sp, rot: inv_rot })
-            }
-            None => None,
-        };
+        let inventory_sp = inventory_sled_agent.baseboard_id.as_ref().and_then(
+            |baseboard_id| {
+                let inv_sp = primary_collection.sps.get(baseboard_id);
+                let inv_rot = primary_collection.rots.get(baseboard_id);
+                if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
+                    Some(SledHwInventory {
+                        baseboard_id: &baseboard_id,
+                        sp: inv_sp,
+                        rot: inv_rot,
+                    })
+                } else {
+                    None
+                }
+            },
+        );
 
         let result = sim.system.sled_full(
             sled_id,
@@ -714,18 +1184,43 @@ fn cmd_load(
     }
 
     for blueprint in loaded.blueprints {
-        if sim.blueprints.contains_key(&blueprint.id) {
-            swriteln!(
-                s,
-                "blueprint {}: skipped (one with the \
-                same id is already loaded)",
-                blueprint.id
-            );
-        } else {
-            swriteln!(s, "blueprint {} loaded", blueprint.id);
-            sim.blueprints.insert(blueprint.id, blueprint);
+        let blueprint_id = blueprint.id;
+        match sim.blueprint_insert_loaded(blueprint) {
+            Ok(_) => {
+                swriteln!(s, "blueprint {} loaded", blueprint_id);
+            }
+            Err(error) => {
+                swriteln!(
+                    s,
+                    "blueprint {}: skipped ({:#})",
+                    blueprint_id,
+                    error
+                );
+            }
         }
     }
+
+    let ranges = format!("{:?}", loaded.policy.service_ip_pool_ranges);
+    sim.system.service_ip_pool_ranges(loaded.policy.service_ip_pool_ranges);
+    swriteln!(s, "loaded service IP pool ranges: {:?}", ranges);
+
+    sim.internal_dns = loaded.internal_dns;
+    sim.external_dns = loaded.external_dns;
+    sim.silo_names = loaded.silo_names;
+
+    let nnames = loaded.external_dns_zone_names.len();
+    if nnames > 0 {
+        if nnames > 1 {
+            swriteln!(
+                s,
+                "warn: found {} external DNS names; using only the first one",
+                nnames
+            );
+        }
+        sim.external_dns_zone_name =
+            loaded.external_dns_zone_names.into_iter().next().unwrap();
+    }
+    do_print_properties(&mut s, sim);
 
     swriteln!(s, "loaded data from {:?}", input_path);
     Ok(Some(s))
@@ -765,6 +1260,15 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
             blueprint.time_created
         );
     }
+
+    swriteln!(s, "internal DNS generations: {:?}", loaded.internal_dns.keys(),);
+    swriteln!(s, "external DNS generations: {:?}", loaded.external_dns.keys(),);
+    swriteln!(s, "silo names: {:?}", loaded.silo_names);
+    swriteln!(
+        s,
+        "external DNS zone names: {}",
+        loaded.external_dns_zone_names.join(", ")
+    );
 
     Ok(Some(s))
 }

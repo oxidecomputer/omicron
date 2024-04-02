@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, ByteCount, Hostname, IdentityMetadataCreateParams,
+    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
     SemverVersion,
@@ -88,6 +88,7 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
+id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
@@ -1814,24 +1815,6 @@ pub struct BgpStatusSelector {
     pub name_or_id: NameOrId,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
-}
-
 /// Information about a bidirectional forwarding detection (BFD) session.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BfdSessionEnable {
@@ -2071,4 +2054,11 @@ pub struct ProbeCreate {
 pub struct ProbeListSelector {
     /// A name or id to use when selecting a probe.
     pub name_or_id: Option<NameOrId>,
+}
+
+/// A timeseries query string, written in the Oximeter query language.
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct TimeseriesQuery {
+    /// A timeseries query string, written in the Oximeter query language.
+    pub query: String,
 }

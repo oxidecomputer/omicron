@@ -24,6 +24,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use camino::Utf8PathBuf;
 use chrono::SecondsFormat;
+use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
@@ -35,8 +36,6 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
-use dropshot::PaginationOrder;
-use futures::StreamExt;
 use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
@@ -72,27 +71,23 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
-use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
-use nexus_reconfigurator_preparation::policy_from_db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
-use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
-use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::LookupType;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
@@ -257,7 +252,7 @@ enum DbCommands {
     /// Print information about sleds
     Sleds,
     /// Print information about customer instances
-    Instances,
+    Instances(InstancesOptions),
     /// Print information about the network
     Network(NetworkArgs),
     /// Print information about snapshots
@@ -344,6 +339,13 @@ impl CliDnsGroup {
             CliDnsGroup::External => DnsGroup::External,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct InstancesOptions {
+    /// Only show the running instances
+    #[arg(short, long, action=ArgAction::SetTrue)]
+    running: bool,
 }
 
 #[derive(Debug, Args)]
@@ -511,7 +513,6 @@ impl DbArgs {
                 cmd_db_reconfigurator_save(
                     &opctx,
                     &datastore,
-                    &self.fetch_opts,
                     reconfig_save_args,
                 )
                 .await
@@ -539,8 +540,14 @@ impl DbArgs {
             DbCommands::Sleds => {
                 cmd_db_sleds(&opctx, &datastore, &self.fetch_opts).await
             }
-            DbCommands::Instances => {
-                cmd_db_instances(&opctx, &datastore, &self.fetch_opts).await
+            DbCommands::Instances(instances_options) => {
+                cmd_db_instances(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    instances_options.running,
+                )
+                .await
             }
             DbCommands::Network(NetworkArgs {
                 command: NetworkCommands::ListEips,
@@ -583,11 +590,18 @@ impl DbArgs {
 /// incompatible because in practice it may well not matter and it's very
 /// valuable for this tool to work if it possibly can.
 async fn check_schema_version(datastore: &DataStore) {
-    let expected_version = nexus_db_model::schema::SCHEMA_VERSION;
+    let expected_version = nexus_db_model::SCHEMA_VERSION;
     let version_check = datastore.database_schema_version().await;
 
     match version_check {
-        Ok(found_version) => {
+        Ok((found_version, found_target)) => {
+            if let Some(target) = found_target {
+                eprintln!(
+                    "note: database schema target exists (mid-upgrade?) ({})",
+                    target
+                );
+            }
+
             if found_version == expected_version {
                 eprintln!(
                     "note: database schema version matches expected ({})",
@@ -1621,6 +1635,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    running: bool,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -1673,6 +1688,10 @@ async fn cmd_db_instances(
         } else {
             "-".to_string()
         };
+
+        if running && i.effective_state() != InstanceState::Running {
+            continue;
+        }
 
         let cir = CustomerInstanceRow {
             id: i.instance().id().to_string(),
@@ -2101,7 +2120,7 @@ async fn cmd_db_network_list_vnics(
     struct NicRow {
         ip: IpNetwork,
         mac: MacAddr,
-        slot: i16,
+        slot: u8,
         primary: bool,
         kind: &'static str,
         subnet: String,
@@ -2222,7 +2241,7 @@ async fn cmd_db_network_list_vnics(
         let row = NicRow {
             ip: nic.ip,
             mac: *nic.mac,
-            slot: nic.slot,
+            slot: *nic.slot,
             primary: nic.primary,
             kind,
             subnet,
@@ -3215,7 +3234,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.label());
+                println!("      zone {} (type {})", z.id, z.zone_type.kind());
             }
         } else {
             println!("  warning: no zone information found");
@@ -3268,96 +3287,15 @@ impl LongStringFormatter {
 async fn cmd_db_reconfigurator_save(
     opctx: &OpContext,
     datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
     reconfig_save_args: &ReconfiguratorSaveArgs,
 ) -> Result<(), anyhow::Error> {
     // See Nexus::blueprint_planning_context().
-    eprint!("assembling policy ... ");
-    let sled_rows = datastore
-        .sled_list_all_batched(opctx)
-        .await
-        .context("listing sleds")?;
-    let zpool_rows = datastore
-        .zpool_list_all_external_batched(opctx)
-        .await
-        .context("listing zpools")?;
-    let ip_pool_range_rows = {
-        let (authz_service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(opctx)
-            .await
-            .context("fetching IP services pool")?;
-        datastore
-            .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
-            .await
-            .context("listing services IP pool ranges")?
-    };
-
-    let policy = policy_from_db(
-        &sled_rows,
-        &zpool_rows,
-        &ip_pool_range_rows,
-        NEXUS_REDUNDANCY,
+    eprint!("assembling reconfigurator state ... ");
+    let state = nexus_reconfigurator_preparation::reconfigurator_state_load(
+        opctx, datastore,
     )
-    .context("assembling policy")?;
-    eprintln!("done.");
-
-    eprint!("loading inventory collections ... ");
-    let collection_ids = datastore
-        .inventory_collections()
-        .await
-        .context("listing collections")?;
-    let collections = futures::stream::iter(collection_ids)
-        .filter_map(|id| async move {
-            let read = datastore
-                .inventory_collection_read(opctx, id)
-                .await
-                .with_context(|| format!("reading collection {}", id));
-            if let Err(error) = &read {
-                eprintln!("warning: {}", error);
-            }
-            read.ok()
-        })
-        .collect::<Vec<Collection>>()
-        .await;
-    eprintln!("done.");
-
-    eprint!("loading blueprints ... ");
-    let limit = fetch_opts.fetch_limit;
-    let pagparams = DataPageParams {
-        marker: None,
-        direction: PaginationOrder::Ascending,
-        limit,
-    };
-    let blueprint_ids = datastore
-        .blueprints_list(opctx, &pagparams)
-        .await
-        .context("listing blueprints")?;
-    check_limit(&blueprint_ids, limit, || "listing blueprint ids");
-    let blueprints = futures::stream::iter(blueprint_ids)
-        .filter_map(|bpm| async move {
-            let blueprint_id = bpm.id;
-            let read = datastore
-                .blueprint_read(
-                    opctx,
-                    &nexus_db_queries::authz::Blueprint::new(
-                        nexus_db_queries::authz::FLEET,
-                        blueprint_id,
-                        LookupType::ById(blueprint_id),
-                    ),
-                )
-                .await
-                .with_context(|| format!("reading blueprint {}", blueprint_id));
-            if let Err(error) = &read {
-                eprintln!("warning: {}", error);
-            }
-            read.ok()
-        })
-        .collect::<Vec<Blueprint>>()
-        .await;
-    eprintln!("done.");
-
-    let state =
-        UnstableReconfiguratorState { policy: policy, collections, blueprints };
+    .await?;
+    eprintln!("done");
 
     let output_path = &reconfig_save_args.output_file;
     let file = std::fs::OpenOptions::new()

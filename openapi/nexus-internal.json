@@ -489,6 +489,34 @@
         }
       }
     },
+    "/deployment/blueprints/import": {
+      "post": {
+        "summary": "Imports a client-provided blueprint",
+        "description": "This is intended for development and support, not end users or operators.",
+        "operationId": "blueprint_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Blueprint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/blueprints/regenerate": {
       "post": {
         "summary": "Generates a new blueprint for the current system, re-evaluating anything",
@@ -775,6 +803,72 @@
         }
       }
     },
+    "/metrics/collectors/{collector_id}/producers": {
+      "get": {
+        "summary": "List all metric producers assigned to an oximeter collector.",
+        "operationId": "cpapi_assigned_producers_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collector_id",
+            "description": "The ID of the oximeter collector.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProducerEndpointResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/metrics/producers": {
       "post": {
         "summary": "Accept a registration from a new metric producer",
@@ -843,65 +937,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/physical-disk": {
-      "put": {
-        "summary": "Report that a physical disk for the specified sled has come online.",
-        "operationId": "physical_disk_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhysicalDiskPutResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Report that a physical disk for the specified sled has gone offline.",
-        "operationId": "physical_disk_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskDeleteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1211,60 +1246,6 @@
         }
       }
     },
-    "/sled-agents/{sled_id}/zpools/{zpool_id}": {
-      "put": {
-        "summary": "Report that a pool for a specified sled has come online.",
-        "operationId": "zpool_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ZpoolPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ZpoolPutResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/sleds/add": {
       "post": {
         "summary": "Add sled to initialized rack",
@@ -1500,6 +1481,51 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdPeerConfig": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "remote": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchLocation"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
         ]
       },
       "BgpConfig": {
@@ -2544,6 +2570,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_zones": {
+            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintZonesConfig"
+            }
+          },
           "comment": {
             "description": "human-readable string describing why this blueprint was created (for debugging)",
             "type": "string"
@@ -2573,13 +2606,6 @@
               }
             ]
           },
-          "omicron_zones": {
-            "description": "mapping: sled id -> zones deployed on each sled A sled is considered part of the control plane cluster iff it has an entry in this map.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/OmicronZonesConfig"
-            }
-          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2590,26 +2616,16 @@
             "description": "when this blueprint was generated (for debugging)",
             "type": "string",
             "format": "date-time"
-          },
-          "zones_in_service": {
-            "description": "Omicron zones considered in-service (which generally means that they should appear in DNS)",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "uniqueItems": true
           }
         },
         "required": [
+          "blueprint_zones",
           "comment",
           "creator",
           "external_dns_version",
           "id",
           "internal_dns_version",
-          "omicron_zones",
-          "time_created",
-          "zones_in_service"
+          "time_created"
         ]
       },
       "BlueprintMetadata": {
@@ -2727,6 +2743,76 @@
         "required": [
           "enabled",
           "target_id"
+        ]
+      },
+      "BlueprintZoneConfig": {
+        "description": "Describes one Omicron-managed zone in a blueprint.\n\nThis is a wrapper around an [`OmicronZoneConfig`] that also includes a [`BlueprintZoneDisposition`].\n\nPart of [`BlueprintZonesConfig`].",
+        "type": "object",
+        "properties": {
+          "config": {
+            "description": "The underlying zone configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronZoneConfig"
+              }
+            ]
+          },
+          "disposition": {
+            "description": "The disposition (desired state) of this zone recorded in the blueprint.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintZoneDisposition"
+              }
+            ]
+          }
+        },
+        "required": [
+          "config",
+          "disposition"
+        ]
+      },
+      "BlueprintZoneDisposition": {
+        "description": "The desired state of an Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZoneConfig`].",
+        "oneOf": [
+          {
+            "description": "The zone is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The zone is not in service.",
+            "type": "string",
+            "enum": [
+              "quiesced"
+            ]
+          }
+        ]
+      },
+      "BlueprintZonesConfig": {
+        "description": "Information about an Omicron zone as recorded in a blueprint.\n\nCurrently, this is similar to [`OmicronZonesConfig`], but also contains a per-zone [`BlueprintZoneDisposition`].\n\nPart of [`Blueprint`].",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "Generation number of this configuration.\n\nThis generation number is owned by the control plane. See [`OmicronZonesConfig::generation`] for more details.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "zones": {
+            "description": "The list of running zones.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlueprintZoneConfig"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "zones"
         ]
       },
       "ByteCount": {
@@ -5790,31 +5876,6 @@
           }
         ]
       },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the set of Omicron-managed zones running on a sled\", \"type\": \"object\", \"required\": [ \"generation\", \"zones\" ], \"properties\": { \"generation\": { \"description\": \"generation number of this configuration\\n\\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\\n\\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Generation\" } ] }, \"zones\": { \"description\": \"list of running zones\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/OmicronZoneConfig\" } } } } ``` </details>",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
-        ]
-      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -5834,30 +5895,6 @@
           "collector_id"
         ]
       },
-      "PhysicalDiskDeleteRequest": {
-        "type": "object",
-        "properties": {
-          "model": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "string"
-          },
-          "sled_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "vendor": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "model",
-          "serial",
-          "sled_id",
-          "vendor"
-        ]
-      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
@@ -5869,6 +5906,10 @@
       "PhysicalDiskPutRequest": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "model": {
             "type": "string"
           },
@@ -5887,15 +5928,13 @@
           }
         },
         "required": [
+          "id",
           "model",
           "serial",
           "sled_id",
           "variant",
           "vendor"
         ]
-      },
-      "PhysicalDiskPutResponse": {
-        "type": "object"
       },
       "PortConfigV1": {
         "type": "object",
@@ -6091,6 +6130,27 @@
           "kind"
         ]
       },
+      "ProducerEndpointResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProducerEndpoint"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "ProducerKind": {
         "description": "The kind of metric producer this is.",
         "oneOf": [
@@ -6252,6 +6312,14 @@
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
+          "blueprint": {
+            "description": "Blueprint describing services initialized by RSS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Blueprint"
+              }
+            ]
+          },
           "certs": {
             "description": "x.509 Certificates used to encrypt communication with the external API.",
             "type": "array",
@@ -6293,6 +6361,13 @@
               "$ref": "#/components/schemas/IpRange"
             }
           },
+          "physical_disks": {
+            "description": "\"Managed\" physical disks owned by the control plane",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhysicalDiskPutRequest"
+            }
+          },
           "rack_network_config": {
             "description": "Initial rack network configuration",
             "allOf": [
@@ -6315,24 +6390,42 @@
             "items": {
               "$ref": "#/components/schemas/ServicePutRequest"
             }
+          },
+          "zpools": {
+            "description": "Zpools created within the physical disks created by the control plane.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZpoolPutRequest"
+            }
           }
         },
         "required": [
+          "blueprint",
           "certs",
           "datasets",
           "external_dns_zone_name",
           "external_port_count",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
+          "physical_disks",
           "rack_network_config",
           "recovery_silo",
-          "services"
+          "services",
+          "zpools"
         ]
       },
       "RackNetworkConfigV1": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
+          "bfd": {
+            "description": "BFD configuration for connecting the rack to external networks",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeerConfig"
+            }
+          },
           "bgp": {
             "description": "BGP configurations for connecting the rack to external networks",
             "type": "array",
@@ -7483,36 +7576,27 @@
         "type": "string"
       },
       "ZpoolPutRequest": {
-        "description": "Sent by a sled agent on startup to Nexus to request further instruction",
+        "description": "Identifies information about a Zpool that should be part of the control plane.",
         "type": "object",
         "properties": {
-          "disk_model": {
-            "type": "string"
+          "id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "disk_serial": {
-            "type": "string"
+          "physical_disk_id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "disk_vendor": {
-            "type": "string"
-          },
-          "size": {
-            "description": "Total size of the pool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
-          "disk_model",
-          "disk_serial",
-          "disk_vendor",
-          "size"
+          "id",
+          "physical_disk_id",
+          "sled_id"
         ]
-      },
-      "ZpoolPutResponse": {
-        "type": "object"
       },
       "SemverVersion": {
         "type": "string",

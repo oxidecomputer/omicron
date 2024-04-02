@@ -229,13 +229,11 @@ mod test {
 
         // Create a fake zpool that backs our fake datasets.
         let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(
-            zpool_id,
-            sled_id,
-            Uuid::new_v4(),
-            (1 << 30).try_into().unwrap(),
-        );
-        datastore.zpool_upsert(zpool).await.expect("failed to upsert zpool");
+        let zpool = Zpool::new(zpool_id, sled_id, Uuid::new_v4());
+        datastore
+            .zpool_upsert(opctx, zpool)
+            .await
+            .expect("failed to upsert zpool");
 
         // Inserting a new dataset should succeed.
         let dataset1 = datastore

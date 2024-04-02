@@ -8,8 +8,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use omicron_common::api::internal::shared::NetworkInterface;
 use std::convert::TryFrom;
+use std::fmt;
+use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use types::{
+    BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig,
+};
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -30,6 +35,7 @@ progenitor::generate_api!(
     //     replace directives below?
     replace = {
         ByteCount = omicron_common::api::external::ByteCount,
+        DiskIdentity = omicron_common::disk::DiskIdentity,
         Generation = omicron_common::api::external::Generation,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
@@ -52,25 +58,65 @@ impl Eq for types::OmicronZoneConfig {}
 impl Eq for types::OmicronZoneType {}
 impl Eq for types::OmicronZoneDataset {}
 
-impl types::OmicronZoneType {
-    /// Human-readable label describing what kind of zone this is
-    ///
-    /// This is just use for testing and reporting.
-    pub fn label(&self) -> impl std::fmt::Display {
+/// Like [`types::OmicronZoneType`], but without any associated data.
+///
+/// We have a few enums of this form floating around. This particular one is
+/// meant to correspond exactly 1:1 with `OmicronZoneType`.
+///
+/// The [`fmt::Display`] impl for this type is a human-readable label, meant
+/// for testing and reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ZoneKind {
+    BoundaryNtp,
+    Clickhouse,
+    ClickhouseKeeper,
+    CockroachDb,
+    Crucible,
+    CruciblePantry,
+    ExternalDns,
+    InternalDns,
+    InternalNtp,
+    Nexus,
+    Oximeter,
+}
+
+impl fmt::Display for ZoneKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",
-            types::OmicronZoneType::Clickhouse { .. } => "clickhouse",
+            ZoneKind::BoundaryNtp => write!(f, "boundary_ntp"),
+            ZoneKind::Clickhouse => write!(f, "clickhouse"),
+            ZoneKind::ClickhouseKeeper => write!(f, "clickhouse_keeper"),
+            ZoneKind::CockroachDb => write!(f, "cockroach_db"),
+            ZoneKind::Crucible => write!(f, "crucible"),
+            ZoneKind::CruciblePantry => write!(f, "crucible_pantry"),
+            ZoneKind::ExternalDns => write!(f, "external_dns"),
+            ZoneKind::InternalDns => write!(f, "internal_dns"),
+            ZoneKind::InternalNtp => write!(f, "internal_ntp"),
+            ZoneKind::Nexus => write!(f, "nexus"),
+            ZoneKind::Oximeter => write!(f, "oximeter"),
+        }
+    }
+}
+
+impl types::OmicronZoneType {
+    /// Returns the [`ZoneKind`] corresponding to this variant.
+    pub fn kind(&self) -> ZoneKind {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            types::OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
             types::OmicronZoneType::ClickhouseKeeper { .. } => {
-                "clickhouse_keeper"
+                ZoneKind::ClickhouseKeeper
             }
-            types::OmicronZoneType::CockroachDb { .. } => "cockroach_db",
-            types::OmicronZoneType::Crucible { .. } => "crucible",
-            types::OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
-            types::OmicronZoneType::ExternalDns { .. } => "external_dns",
-            types::OmicronZoneType::InternalDns { .. } => "internal_dns",
-            types::OmicronZoneType::InternalNtp { .. } => "internal_ntp",
-            types::OmicronZoneType::Nexus { .. } => "nexus",
-            types::OmicronZoneType::Oximeter { .. } => "oximeter",
+            types::OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
+            types::OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
+            types::OmicronZoneType::CruciblePantry { .. } => {
+                ZoneKind::CruciblePantry
+            }
+            types::OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
+            types::OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
+            types::OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
+            types::OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
+            types::OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
         }
     }
 
@@ -106,6 +152,24 @@ impl types::OmicronZoneType {
             | types::OmicronZoneType::CruciblePantry { .. }
             | types::OmicronZoneType::ExternalDns { .. }
             | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// Identifies whether this a Crucible (not Crucible pantry) zone
+    pub fn is_crucible(&self) -> bool {
+        match self {
+            types::OmicronZoneType::Crucible { .. } => true,
+
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::ExternalDns { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Nexus { .. }
             | types::OmicronZoneType::Oximeter { .. } => false,
         }
     }
@@ -164,16 +228,6 @@ impl types::OmicronZoneType {
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<types::DiskIdentity> for omicron_common::disk::DiskIdentity {
-    fn from(identity: types::DiskIdentity) -> Self {
-        Self {
-            vendor: identity.vendor,
-            serial: identity.serial,
-            model: identity.model,
-        }
     }
 }
 
@@ -603,5 +657,62 @@ impl TestInterfaces for Client {
             .send()
             .await
             .expect("disk_finish_transition() failed unexpectedly");
+    }
+}
+
+impl Eq for BgpConfig {}
+
+impl Hash for BgpConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.asn.hash(state);
+        self.originate.hash(state);
+    }
+}
+
+impl Hash for BgpPeerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addr.hash(state);
+        self.asn.hash(state);
+        self.port.hash(state);
+        self.hold_time.hash(state);
+        self.connect_retry.hash(state);
+        self.delay_open.hash(state);
+        self.idle_hold_time.hash(state);
+        self.keepalive.hash(state);
+    }
+}
+
+impl Hash for RouteConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.destination.hash(state);
+        self.nexthop.hash(state);
+    }
+}
+
+impl Eq for PortConfigV1 {}
+
+impl Hash for PortConfigV1 {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addresses.hash(state);
+        self.autoneg.hash(state);
+        self.bgp_peers.hash(state);
+        self.port.hash(state);
+        self.routes.hash(state);
+        self.switch.hash(state);
+        self.uplink_port_fec.hash(state);
+        self.uplink_port_speed.hash(state);
+    }
+}
+
+impl Eq for BfdPeerConfig {}
+
+impl Hash for BfdPeerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.local.hash(state);
+        self.remote.hash(state);
+        self.detection_threshold.hash(state);
+        self.required_rx.hash(state);
+        self.mode.hash(state);
+        self.switch.hash(state);
     }
 }

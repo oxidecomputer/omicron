@@ -33,6 +33,7 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+metrics_producer_gc.period_secs = 60
 # How frequently we check the list of stored TLS certificates.  This is
 # approximately an upper bound on how soon after updating the list of
 # certificates it will take _other_ Nexus instances to notice and stop serving
@@ -51,6 +52,7 @@ phantom_disks.period_secs = 30
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
 sync_service_zone_nat.period_secs = 30
+switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
 
 [default_region_allocation_strategy]

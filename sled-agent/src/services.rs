@@ -41,7 +41,6 @@ use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
@@ -87,6 +86,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
@@ -94,6 +94,7 @@ use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware_types::Baseboard;
+use sled_storage::config::MountConfig;
 use sled_storage::dataset::{
     DatasetKind, DatasetName, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
 };
@@ -118,7 +119,7 @@ use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
     #[error("Failed to initialize CockroachDb: {err}")]
     CockroachInit {
@@ -661,7 +662,7 @@ pub(crate) enum TimeSyncConfig {
     // Skips timesync unconditionally.
     Skip,
     // Fails timesync unconditionally.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     Fail,
 }
 
@@ -734,12 +735,12 @@ impl ServiceManager {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
         self.inner.image_directory_override.set(path).unwrap();
     }
@@ -752,7 +753,7 @@ impl ServiceManager {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
-        let resources = self.inner.storage.get_latest_resources().await;
+        let resources = self.inner.storage.get_latest_disks().await;
         resources
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -764,7 +765,7 @@ impl ServiceManager {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(ZONES_LEDGER_FILENAME)];
         }
-        let resources = self.inner.storage.get_latest_resources().await;
+        let resources = self.inner.storage.get_latest_disks().await;
         resources
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -1508,11 +1509,12 @@ impl ServiceManager {
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
-        if let Some((_, boot_zpool)) =
-            self.inner.storage.get_latest_resources().await.boot_disk()
-        {
-            zone_image_paths
-                .push(boot_zpool.dataset_mountpoint(INSTALL_DATASET));
+        let all_disks = self.inner.storage.get_latest_disks().await;
+        if let Some((_, boot_zpool)) = all_disks.boot_disk() {
+            zone_image_paths.push(boot_zpool.dataset_mountpoint(
+                &all_disks.mount_config.root,
+                INSTALL_DATASET,
+            ));
         }
 
         let zone_type_str = match &request {
@@ -2754,14 +2756,57 @@ impl ServiceManager {
                         }
                         SwitchService::Mgd => {
                             info!(self.inner.log, "Setting up mgd service");
-                            smfh.setprop("config/admin_host", "::")?;
+                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
+                            for address in &request.zone.addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_servers",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                    break;
+                                }
+                            }
                             smfh.refresh()?;
                         }
                         SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "Setting up mg-ddm service");
-
                             smfh.setprop("config/mode", &mode)?;
-                            smfh.setprop("config/admin_host", "::")?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
+                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            for address in &request.zone.addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_servers",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                    break;
+                                }
+                            }
 
                             let is_gimlet = is_gimlet().map_err(|e| {
                                 Error::Underlay(
@@ -2863,6 +2908,7 @@ impl ServiceManager {
     // storage configuration against the reality of the current sled.
     async fn start_omicron_zone(
         &self,
+        mount_config: &MountConfig,
         zone: &OmicronZoneConfig,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
@@ -2881,7 +2927,11 @@ impl ServiceManager {
 
         // Ensure that this zone's storage is ready.
         let root = self
-            .validate_storage_and_pick_mountpoint(&zone, &all_u2_pools)
+            .validate_storage_and_pick_mountpoint(
+                mount_config,
+                &zone,
+                &all_u2_pools,
+            )
             .await?;
 
         let config = OmicronZoneConfigLocal { zone: zone.clone(), root };
@@ -2910,6 +2960,7 @@ impl ServiceManager {
     // to start.
     async fn start_omicron_zones(
         &self,
+        mount_config: &MountConfig,
         requests: impl Iterator<Item = &OmicronZoneConfig> + Clone,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
@@ -2926,6 +2977,7 @@ impl ServiceManager {
 
         let futures = requests.map(|zone| async move {
             self.start_omicron_zone(
+                mount_config,
                 &zone,
                 time_is_synchronized,
                 all_u2_pools,
@@ -3149,7 +3201,8 @@ impl ServiceManager {
         }
 
         // Collect information that's necessary to start new zones
-        let storage = self.inner.storage.get_latest_resources().await;
+        let storage = self.inner.storage.get_latest_disks().await;
+        let mount_config = &storage.mount_config;
         let all_u2_pools = storage.all_u2_zpools();
         let time_is_synchronized =
             match self.timesync_get_locked(&existing_zones).await {
@@ -3162,6 +3215,7 @@ impl ServiceManager {
         // Concurrently boot all new zones
         let StartZonesResult { new_zones, errors } = self
             .start_omicron_zones(
+                mount_config,
                 zones_to_be_added,
                 time_is_synchronized,
                 &all_u2_pools,
@@ -3262,6 +3316,7 @@ impl ServiceManager {
     // is valid.
     async fn validate_storage_and_pick_mountpoint(
         &self,
+        mount_config: &MountConfig,
         zone: &OmicronZoneConfig,
         all_u2_pools: &Vec<ZpoolName>,
     ) -> Result<Utf8PathBuf, Error> {
@@ -3320,14 +3375,16 @@ impl ServiceManager {
                     device: format!("zpool: {data_pool}"),
                 });
             }
-            data_pool.dataset_mountpoint(ZONE_DATASET)
+            data_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
         } else {
             // If the zone it not coupled to other datsets, we pick one
             // arbitrarily.
             let mut rng = rand::thread_rng();
             all_u2_pools
                 .choose(&mut rng)
-                .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
+                .map(|pool| {
+                    pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
+                })
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone()
         };
@@ -3434,7 +3491,7 @@ impl ServiceManager {
         let skip_timesync = match &self.inner.time_sync_config {
             TimeSyncConfig::Normal => false,
             TimeSyncConfig::Skip => true,
-            #[cfg(test)]
+            #[cfg(all(test, target_os = "illumos"))]
             TimeSyncConfig::Fail => {
                 info!(self.inner.log, "Configured to fail timesync checks");
                 return Err(Error::TimeNotSynchronized);
@@ -3944,12 +4001,65 @@ impl ServiceManager {
                             // Only configured in
                             // `ensure_switch_zone_uplinks_configured`
                         }
-                        SwitchService::MgDdm { mode } => {
-                            smfh.delpropvalue("config/mode", "*")?;
-                            smfh.addpropvalue("config/mode", &mode)?;
+                        SwitchService::SpSim => {
+                            // nothing to configure
+                        }
+                        SwitchService::Mgd => {
+                            info!(self.inner.log, "configuring mgd service");
+                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
+                            for address in &request.addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_servers",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                    break;
+                                }
+                            }
                             smfh.refresh()?;
                         }
-                        _ => (),
+                        SwitchService::MgDdm { mode } => {
+                            info!(self.inner.log, "configuring mg-ddm service");
+                            smfh.delpropvalue("config/mode", "*")?;
+                            smfh.addpropvalue("config/mode", &mode)?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
+                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            for address in &request.addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_servers",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                    break;
+                                }
+                            }
+                            smfh.refresh()?;
+                        }
                     }
                 }
             }
@@ -4032,10 +4142,9 @@ impl ServiceManager {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 mod test {
     use super::*;
-    use illumos_utils::zpool::ZpoolName;
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -4044,9 +4153,8 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use sled_storage::disk::{RawDisk, SyntheticDisk};
 
-    use sled_storage::manager::{FakeStorageManager, StorageHandle};
+    use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -4270,18 +4378,21 @@ mod test {
     ) -> Result<(), Error> {
         let zone_prefix = format!("oxz_{}", zone_type.zone_type_str());
         let _expectations = expect_new_service(&zone_prefix);
-        mgr.ensure_all_omicron_zones_persistent(
-            OmicronZonesConfig {
-                generation,
-                zones: vec![OmicronZoneConfig {
-                    id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
-                    zone_type,
-                }],
-            },
-            Some(&tmp_dir),
-        )
-        .await
+        let r = mgr
+            .ensure_all_omicron_zones_persistent(
+                OmicronZonesConfig {
+                    generation,
+                    zones: vec![OmicronZoneConfig {
+                        id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type,
+                    }],
+                },
+                Some(&tmp_dir),
+            )
+            .await;
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        r
     }
 
     // Prepare to call "ensure" for a service which already exists. We should
@@ -4364,31 +4475,25 @@ mod test {
         }
     }
 
-    async fn setup_storage() -> StorageHandle {
-        let (manager, handle) = FakeStorageManager::new();
-
-        // Spawn the storage manager as done by sled-agent
-        tokio::spawn(async move {
-            manager.run().await;
-        });
-
-        let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
-        let internal_disk: RawDisk =
-            SyntheticDisk::new(internal_zpool_name, 0).into();
-        handle.upsert_disk(internal_disk).await;
-        let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
-        let external_disk: RawDisk =
-            SyntheticDisk::new(external_zpool_name, 1).into();
-        handle.upsert_disk(external_disk).await;
-
-        handle
+    async fn setup_storage(log: &Logger) -> StorageManagerTestHarness {
+        let mut harness = StorageManagerTestHarness::new(&log).await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_test.vdev", "m2_test.vdev"]).await;
+        harness.handle().key_manager_ready().await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Failed to ensure disks");
+        assert!(!result.has_error(), "{:?}", result);
+        harness
     }
 
-    #[derive(Clone)]
     struct LedgerTestHelper<'a> {
         log: slog::Logger,
         ddmd_client: DdmAdminClient,
-        storage_handle: StorageHandle,
+        storage_test_harness: StorageManagerTestHarness,
         zone_bundler: ZoneBundler,
         test_config: &'a TestConfig,
     }
@@ -4399,41 +4504,45 @@ mod test {
             test_config: &'a TestConfig,
         ) -> LedgerTestHelper {
             let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
-            let storage_handle = setup_storage().await;
+            let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(
                 log.clone(),
-                storage_handle.clone(),
+                storage_test_harness.handle().clone(),
                 Default::default(),
             );
 
             LedgerTestHelper {
                 log,
                 ddmd_client,
-                storage_handle,
+                storage_test_harness,
                 zone_bundler,
                 test_config,
             }
         }
 
-        fn new_service_manager(self) -> ServiceManager {
+        async fn cleanup(&mut self) {
+            self.storage_test_harness.cleanup().await;
+        }
+
+        fn new_service_manager(&self) -> ServiceManager {
             self.new_service_manager_with_timesync(TimeSyncConfig::Skip)
         }
 
         fn new_service_manager_with_timesync(
-            self,
+            &self,
             time_sync_config: TimeSyncConfig,
         ) -> ServiceManager {
             let log = &self.log;
             let mgr = ServiceManager::new(
                 log,
-                self.ddmd_client,
+                self.ddmd_client.clone(),
                 make_bootstrap_networking_config(),
                 SledMode::Auto,
                 time_sync_config,
                 SidecarRevision::Physical("rev-test".to_string()),
                 vec![],
-                self.storage_handle,
-                self.zone_bundler,
+                self.storage_test_harness.handle().clone(),
+                self.zone_bundler.clone(),
             );
             self.test_config.override_paths(&mgr);
             mgr
@@ -4467,7 +4576,7 @@ mod test {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
         let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
@@ -4496,6 +4605,7 @@ mod test {
 
         drop_service_manager(mgr);
 
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4505,7 +4615,7 @@ mod test {
             "test_ensure_service_before_timesync",
         );
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
         let mgr =
@@ -4570,6 +4680,7 @@ mod test {
         .unwrap();
 
         drop_service_manager(mgr);
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4579,7 +4690,7 @@ mod test {
             "test_ensure_service_which_already_exists",
         );
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
         let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
@@ -4598,6 +4709,7 @@ mod test {
 
         drop_service_manager(mgr);
 
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4607,12 +4719,12 @@ mod test {
             "test_services_are_recreated_on_reboot",
         );
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
-        let mgr = helper.clone().new_service_manager();
+        let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let v2 = Generation::new().next();
@@ -4631,6 +4743,7 @@ mod test {
         let _expectations = expect_new_service(EXPECTED_ZONE_NAME_PREFIX);
         let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
@@ -4640,6 +4753,7 @@ mod test {
 
         drop_service_manager(mgr);
 
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4649,12 +4763,12 @@ mod test {
             "test_services_do_not_persist_without_config",
         );
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
-        let mgr = helper.clone().new_service_manager();
+        let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let v1 = Generation::new();
@@ -4687,6 +4801,7 @@ mod test {
 
         drop_service_manager(mgr);
 
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4696,7 +4811,7 @@ mod test {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_bad_generations");
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
         let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
@@ -4804,6 +4919,8 @@ mod test {
 
         drop_service_manager(mgr);
 
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4825,9 +4942,9 @@ mod test {
         .expect("failed to copy example old-format services ledger into place");
 
         // Now start the service manager.
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-        let mgr = helper.clone().new_service_manager();
+        let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         // Trigger the migration code.  (Yes, it's hokey that we create this
@@ -4868,6 +4985,7 @@ mod test {
         assert_eq!(found, expected_config);
 
         drop_service_manager(mgr);
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -4877,7 +4995,7 @@ mod test {
             "test_old_ledger_migration_bad",
         );
         let test_config = TestConfig::new().await;
-        let helper =
+        let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
         // Before we start things, stuff a broken ledger into place.  For this
@@ -4905,6 +5023,7 @@ mod test {
             format!("{:#}", error)
         );
 
+        helper.cleanup().await;
         logctx.cleanup_successful();
     }
 

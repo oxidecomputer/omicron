@@ -19,11 +19,11 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 
-/// For each crucible zone in `blueprint`, ensure that a corresponding dataset
-/// record exists in `datastore`
+/// For each crucible zone in `all_omicron_zones`, ensure that a corresponding
+/// dataset record exists in `datastore`
 ///
-/// Does not modify any existing dataset records. Returns the number of datasets
-/// inserted.
+/// Does not modify any existing dataset records. Returns the number of
+/// datasets inserted.
 pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -200,10 +200,9 @@ mod tests {
                     zpool_name.id(),
                     sled_id,
                     Uuid::new_v4(), // physical_disk_id
-                    (1 << 30).try_into().unwrap(), // total_size
                 );
                 datastore
-                    .zpool_upsert(zpool)
+                    .zpool_upsert(opctx, zpool)
                     .await
                     .expect("failed to upsert zpool");
             }
@@ -269,11 +268,10 @@ mod tests {
             let zpool = Zpool::new(
                 new_zpool_id,
                 sled_id,
-                Uuid::new_v4(),                // physical_disk_id
-                (1 << 30).try_into().unwrap(), // total_size
+                Uuid::new_v4(), // physical_disk_id
             );
             datastore
-                .zpool_upsert(zpool)
+                .zpool_upsert(opctx, zpool)
                 .await
                 .expect("failed to upsert zpool");
         }

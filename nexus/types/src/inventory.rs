@@ -360,10 +360,27 @@ pub struct PhysicalDisk {
 impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
     fn from(disk: sled_agent_client::types::InventoryDisk) -> PhysicalDisk {
         PhysicalDisk {
-            identity: disk.identity.into(),
+            identity: disk.identity,
             variant: disk.variant.into(),
             slot: disk.slot,
         }
+    }
+}
+
+/// A zpool reported by a sled agent.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Zpool {
+    pub time_collected: DateTime<Utc>,
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
+
+impl Zpool {
+    pub fn new(
+        time_collected: DateTime<Utc>,
+        pool: sled_agent_client::types::InventoryZpool,
+    ) -> Zpool {
+        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
     }
 }
 
@@ -385,6 +402,7 @@ pub struct SledAgent {
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
+    pub zpools: Vec<Zpool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

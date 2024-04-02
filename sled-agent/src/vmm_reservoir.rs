@@ -119,6 +119,20 @@ impl VmmReservoirManagerHandle {
         }
         rx.await.map_err(|_| Error::ReplySenderDropped)?
     }
+
+    /// TODO: We should be able run to tests in VMs that can use the real VmmReservoir
+    #[cfg(all(test, target_os = "illumos"))]
+    pub fn stub_for_test() -> Self {
+        let (tx, _) = flume::bounded(1);
+        let (size_updated_tx, _) = broadcast::channel(1);
+        let _manager_handle = Arc::new(thread::spawn(|| {}));
+        Self {
+            reservoir_size: Arc::new(AtomicU64::new(0)),
+            tx,
+            size_updated_tx,
+            _manager_handle,
+        }
+    }
 }
 
 /// Manage the VMM reservoir in a background thread

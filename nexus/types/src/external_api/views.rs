@@ -305,6 +305,82 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Ipv4Utilization {
+    /// The number of IPv4 addresses allocated from this pool
+    pub allocated: u32,
+    /// The total number of IPv4 addresses in the pool, i.e., the sum of the
+    /// lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit
+    /// integer because there are only 2^32 IPv4 addresses.
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Ipv6Utilization {
+    /// The number of IPv6 addresses allocated from this pool. A 128-bit integer
+    /// string to match the capacity field.
+    #[serde(with = "U128String")]
+    pub allocated: u128,
+
+    /// The total number of IPv6 addresses in the pool, i.e., the sum of the
+    /// lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128
+    /// addresses, so we represent this value in JSON as a numeric string with a
+    /// custom "uint128" format.
+    #[serde(with = "U128String")]
+    pub capacity: u128,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolUtilization {
+    /// Number of allocated and total available IPv4 addresses in pool
+    pub ipv4: Ipv4Utilization,
+    /// Number of allocated and total available IPv6 addresses in pool
+    pub ipv6: Ipv6Utilization,
+}
+
+// Custom struct for serializing/deserializing u128 as a string. The serde
+// docs will suggest using a module (or serialize_with and deserialize_with
+// functions), but as discussed in the comments on the UserData de/serializer,
+// schemars wants this to be a type, so it has to be a struct.
+struct U128String;
+impl U128String {
+    pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for U128String {
+    fn schema_name() -> String {
+        "String".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            format: Some("uint128".to_string()),
+            ..Default::default()
+        }
+        .into()
+    }
+
+    fn is_referenceable() -> bool {
+        false
+    }
+}
+
 /// An IP pool in the context of a silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloIpPool {
@@ -666,6 +742,11 @@ pub struct PhysicalDisk {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
 
+    /// The operator-defined policy for a physical disk.
+    pub policy: PhysicalDiskPolicy,
+    /// The current state Nexus believes the disk to be in.
+    pub state: PhysicalDiskState,
+
     /// The sled to which this disk is attached, if any.
     pub sled_id: Option<Uuid>,
 
@@ -674,6 +755,97 @@ pub struct PhysicalDisk {
     pub model: String,
 
     pub form_factor: PhysicalDiskKind,
+}
+
+/// The operator-defined policy of a physical disk.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum PhysicalDiskPolicy {
+    /// The operator has indicated that the disk is in-service.
+    InService,
+
+    /// The operator has indicated that the disk has been permanently removed
+    /// from service.
+    ///
+    /// This is a terminal state: once a particular disk ID is expunged, it
+    /// will never return to service. (The actual hardware may be reused, but
+    /// it will be treated as a brand-new disk.)
+    ///
+    /// An expunged disk is always non-provisionable.
+    Expunged,
+    // NOTE: if you add a new value here, be sure to add it to
+    // the `IntoEnumIterator` impl below!
+}
+
+// Can't automatically derive strum::EnumIter because that doesn't provide a
+// way to iterate over nested enums.
+impl IntoEnumIterator for PhysicalDiskPolicy {
+    type Iterator = std::array::IntoIter<Self, 2>;
+
+    fn iter() -> Self::Iterator {
+        [Self::InService, Self::Expunged].into_iter()
+    }
+}
+
+impl PhysicalDiskPolicy {
+    /// Creates a new `PhysicalDiskPolicy` that is in-service.
+    pub fn in_service() -> Self {
+        Self::InService
+    }
+
+    /// Returns true if the disk can be decommissioned in this state.
+    pub fn is_decommissionable(&self) -> bool {
+        // This should be kept in sync with decommissionable_states below.
+        match self {
+            Self::InService => false,
+            Self::Expunged => true,
+        }
+    }
+}
+
+impl fmt::Display for PhysicalDiskPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicalDiskPolicy::InService => write!(f, "in service"),
+            PhysicalDiskPolicy::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+/// The current state of the disk, as determined by Nexus.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskState {
+    /// The disk is currently active, and has resources allocated on it.
+    Active,
+
+    /// The disk has been permanently removed from service.
+    ///
+    /// This is a terminal state: once a particular disk ID is decommissioned,
+    /// it will never return to service. (The actual hardware may be reused,
+    /// but it will be treated as a brand-new disk.)
+    Decommissioned,
+}
+
+impl fmt::Display for PhysicalDiskState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicalDiskState::Active => write!(f, "active"),
+            PhysicalDiskState::Decommissioned => write!(f, "decommissioned"),
+        }
+    }
 }
 
 // SILO USERS

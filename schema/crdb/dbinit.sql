@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
 );
 
--- Add an index which allows pagination by {rack_id, sled_id} pairs. 
+-- Add an index which allows pagination by {rack_id, sled_id} pairs.
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_allocation_by_rack_and_sled ON omicron.public.sled_underlay_subnet_allocation (
     rack_id,
     sled_id
@@ -331,6 +331,40 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'u2'
 );
 
+-- The disposition for a particular physical disk.
+-- This is updated by the operator, either explicitly through an operator API,
+-- or implicitly when altering sled policy.
+CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_policy AS ENUM (
+    -- The disk is in service, and new resources can be provisioned onto it.
+    'in_service',
+    -- The disk has been, or will be, removed from the rack, and it should be
+    -- assumed that any resources currently on it are now permanently missing.
+    'expunged'
+);
+
+-- The actual state of a physical disk. This is updated exclusively by Nexus.
+--
+-- Nexus's goal is to match the physical disk's state with the
+-- operator-indicated policy. For example, if the policy is "expunged" and the
+-- state is "active", Nexus will assume that the physical disk is gone. Based
+-- on that, Nexus will reallocate resources currently on the expunged disk
+-- elsewhere, etc. Once the expunged disk no longer has any resources attached
+-- to it, Nexus will mark it as decommissioned.
+CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
+    -- The disk has resources of any kind allocated on it, or, is available for
+    -- new resources.
+    --
+    -- The disk can be in this state and have a different policy, e.g.
+    -- "expunged".
+    'active',
+
+    -- The disk no longer has resources allocated on it, now or in the future.
+    --
+    -- This is a terminal state. This state is only valid if the policy is
+    -- 'expunged'.
+    'decommissioned'
+);
+
 -- A physical disk which exists inside the rack.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
@@ -347,6 +381,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
 
     -- FK into the Sled table
     sled_id UUID NOT NULL,
+
+    disk_policy omicron.public.physical_disk_policy NOT NULL,
+    disk_state omicron.public.physical_disk_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -462,10 +499,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     ram_provisioned INT8 NOT NULL
 );
 
-/*
- * ZPools of Storage, attached to Sleds.
- * These are backed by a single physical disk.
- */
+-- ZPools of Storage, attached to Sleds.
+-- These are backed by a single physical disk.
+--
+-- For information about the provisioned zpool, reference the
+-- "omicron.public.inv_zpool" table, which returns information
+-- that has actually been returned from the underlying sled.
 CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -478,9 +517,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     sled_id UUID NOT NULL,
 
     /* FK into the Physical Disk table */
-    physical_disk_id UUID NOT NULL,
-
-    total_size INT NOT NULL
+    physical_disk_id UUID NOT NULL
 );
 
 /* Create an index on the physical disk id */
@@ -889,7 +926,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
  * A view of the amount of provisioned and allocated (set by quotas) resources
  * on a given silo.
  */
-CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization 
+CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization
 AS SELECT
     c.id AS silo_id,
     s.name AS silo_name,
@@ -902,7 +939,7 @@ AS SELECT
     s.discoverable as silo_discoverable
 FROM
     omicron.public.virtual_provisioning_collection AS c
-    RIGHT JOIN omicron.public.silo_quotas AS q 
+    RIGHT JOIN omicron.public.silo_quotas AS q
     ON c.id = q.silo_id
     INNER JOIN omicron.public.silo AS s
     ON c.id = s.id
@@ -1006,7 +1043,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
     time_deleted IS NULL;
 
 /*
- * A special view of an instance provided to operators for insights into what's running 
+ * A special view of an instance provided to operators for insights into what's running
  * on a sled.
  *
  * This view requires the VMM table, which doesn't exist yet, so create a
@@ -1155,9 +1192,9 @@ SELECT
     digest,
     block_size,
     size_bytes
-FROM 
+FROM
     omicron.public.image
-WHERE 
+WHERE
     project_id IS NOT NULL;
 
 CREATE VIEW IF NOT EXISTS omicron.public.silo_image AS
@@ -1176,9 +1213,9 @@ SELECT
     digest,
     block_size,
     size_bytes
-FROM 
+FROM
     omicron.public.image
-WHERE 
+WHERE
     project_id IS NULL;
 
 /* Index for silo images */
@@ -1284,6 +1321,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_producer_by_oximeter ON omicron.public.metric_producer (
     oximeter_id,
     id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_producer_by_time_modified ON omicron.public.metric_producer (
+    time_modified
 );
 
 /*
@@ -2986,6 +3027,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+
+    -- The control plane ID of the zpool
+    id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    total_size INT NOT NULL,
+
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+-- Allow looking up the most recent Zpool by ID
+CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3636,6 +3699,43 @@ CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stopped_notification
     PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
 );
 
+CREATE INDEX IF NOT EXISTS rack_initialized ON omicron.public.rack (initialized);
+
+-- table for tracking bootstore configuration changes over time
+-- this makes reconciliation easier and also gives us a visible history of changes
+CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
+    key TEXT NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (key, generation),
+    data JSONB NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name);
+
+CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
+AS
+SELECT
+ sp.switch_location,
+ sp.port_name,
+ bpc.addr,
+ bpc.hold_time,
+ bpc.idle_hold_time,
+ bpc.delay_open,
+ bpc.connect_retry,
+ bpc.keepalive,
+ bc.asn
+FROM omicron.public.switch_port sp
+JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
+ON sp.port_settings_id = bpc.port_settings_id
+JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
+
+CREATE INDEX IF NOT EXISTS switch_port_id_and_name
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+
+CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3670,7 +3770,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '43.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '49.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

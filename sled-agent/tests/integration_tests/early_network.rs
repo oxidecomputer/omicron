@@ -146,6 +146,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                     asn: 20000,
                     originate: vec!["192.168.0.0/24".parse().unwrap()],
                 }],
+                bfd: vec![],
             }),
         },
     };
