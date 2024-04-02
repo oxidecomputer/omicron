@@ -118,7 +118,17 @@ pub fn allocation_query(
       sum(dataset.size_used) AS size_used
     FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),")
 
-    // Identifies zpools with enough space for region allocation.
+    // Any zpool already have this volume's existing regions?
+    .sql("
+  existing_zpools AS (
+    SELECT
+      dataset.pool_id
+    FROM
+      dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+  ),")
+
+    // Identifies zpools with enough space for region allocation, that are not
+    // currently used by this Volume's existing regions.
     //
     // NOTE: 'distinct_sleds' changes the format of the underlying SQL query, as it uses
     // distinct bind parameters depending on the conditional branch.
@@ -146,6 +156,7 @@ pub fn allocation_query(
       AND sled.sled_state = 'active'
       AND physical_disk.disk_policy = 'in_service'
       AND physical_disk.disk_state = 'active'
+      AND NOT(zpool.id = ANY(SELECT existing_zpools.pool_id FROM existing_zpools))
     )"
     ).bind::<sql_types::BigInt, _>(size_delta as i64);
 
@@ -160,30 +171,6 @@ pub fn allocation_query(
     }
     .sql("),");
 
-    // Any zpool already have this volume's existing regions?
-    builder.sql("
-  existing_zpools AS (
-    SELECT
-      dataset.pool_id
-    FROM
-      dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
-  ),")
-
-    // Filter out candidate zpools if any of a volume's old regions are already
-    // allocated to it.
-    .sql("
-  candidate_zpools_filtered AS (
-   SELECT
-     candidate_zpools.pool_id
-   FROM
-     candidate_zpools
-   WHERE (
-     NOT(
-       candidate_zpools.pool_id = ANY(SELECT existing_zpools.pool_id FROM existing_zpools)
-     )
-   )
-  ),")
-
     // Find datasets which could be used for provisioning regions.
     //
     // We only consider datasets which are already allocated as "Crucible".
@@ -192,12 +179,12 @@ pub fn allocation_query(
     // usage as Crucible storage.
     //
     // We select only one dataset from each zpool.
-    .sql("
+    builder.sql("
   candidate_datasets AS (
     SELECT DISTINCT ON (dataset.pool_id)
       dataset.id,
       dataset.pool_id
-    FROM (dataset INNER JOIN candidate_zpools_filtered ON (dataset.pool_id = candidate_zpools_filtered.pool_id))
+    FROM (dataset INNER JOIN candidate_zpools ON (dataset.pool_id = candidate_zpools.pool_id))
     WHERE (
       ((dataset.time_deleted IS NULL) AND
       (dataset.size_used IS NOT NULL)) AND
@@ -294,7 +281,7 @@ pub fn allocation_query(
     .sql("
         CAST(IF(((
           (
-            (SELECT COUNT(*) FROM candidate_zpools_filtered LIMIT 1) +
+            (SELECT COUNT(*) FROM candidate_zpools LIMIT 1) +
             (SELECT COUNT(*) FROM existing_zpools LIMIT 1)
           )
         ) >= ").param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_ZPOOL_SPACE_SENTINEL, "') AS BOOL)) AND"))

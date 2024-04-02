@@ -26,6 +26,13 @@ WITH
       GROUP BY
         dataset.pool_id
     ),
+  existing_zpools
+    AS (
+      SELECT
+        dataset.pool_id
+      FROM
+        dataset INNER JOIN old_regions ON old_regions.dataset_id = dataset.id
+    ),
   candidate_zpools
     AS (
       SELECT
@@ -53,32 +60,16 @@ WITH
         AND sled.sled_state = 'active'
         AND physical_disk.disk_policy = 'in_service'
         AND physical_disk.disk_state = 'active'
+        AND NOT (zpool.id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
       ORDER BY
         zpool.sled_id, md5(CAST(zpool.id AS BYTES) || $3)
-    ),
-  existing_zpools
-    AS (
-      SELECT
-        dataset.pool_id
-      FROM
-        dataset INNER JOIN old_regions ON old_regions.dataset_id = dataset.id
-    ),
-  candidate_zpools_filtered
-    AS (
-      SELECT
-        candidate_zpools.pool_id
-      FROM
-        candidate_zpools
-      WHERE
-        NOT (candidate_zpools.pool_id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
     ),
   candidate_datasets
     AS (
       SELECT
         DISTINCT ON (dataset.pool_id) dataset.id, dataset.pool_id
       FROM
-        dataset
-        INNER JOIN candidate_zpools_filtered ON dataset.pool_id = candidate_zpools_filtered.pool_id
+        dataset INNER JOIN candidate_zpools ON dataset.pool_id = candidate_zpools.pool_id
       WHERE
         ((dataset.time_deleted IS NULL) AND (dataset.size_used IS NOT NULL))
         AND dataset.kind = 'crucible'
@@ -135,7 +126,7 @@ WITH
                   (
                     (
                       (
-                        (SELECT count(*) FROM candidate_zpools_filtered LIMIT 1)
+                        (SELECT count(*) FROM candidate_zpools LIMIT 1)
                         + (SELECT count(*) FROM existing_zpools LIMIT 1)
                       )
                     )
