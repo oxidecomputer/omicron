@@ -20,6 +20,9 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
@@ -27,9 +30,12 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneKind, TypedUuid};
 use reedline::{Reedline, Signal};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::BufRead;
+use std::net::IpAddr;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -49,6 +55,14 @@ struct ReconfiguratorSim {
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
+
+    /// external IPs allocated to services
+    ///
+    /// In the real system, external IPs have IDs, but those IDs only live in
+    /// CRDB - they're not part of the zone config sent from Reconfigurator to
+    /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
+    /// we need.
+    external_ips: RefCell<IndexMap<IpAddr, Uuid>>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -92,6 +106,49 @@ impl ReconfiguratorSim {
         let _ = entry.or_insert(blueprint);
         Ok(())
     }
+
+    fn planning_input(
+        &self,
+        parent_blueprint: &Blueprint,
+    ) -> anyhow::Result<PlanningInput> {
+        let policy = self.system.to_policy().context("generating policy")?;
+        let service_external_ips = parent_blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                let Ok(Some(ip)) = zone.zone_type.external_ip() else {
+                    return None;
+                };
+                let service_id =
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                let external_ip = ExternalIp {
+                    id: *self
+                        .external_ips
+                        .borrow_mut()
+                        .entry(ip)
+                        .or_insert_with(Uuid::new_v4),
+                    ip: ip.into(),
+                };
+                Some((service_id, external_ip))
+            })
+            .collect();
+        let service_nics = parent_blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                let nic = zone.zone_type.service_vnic()?;
+                let service_id =
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                let nic = ServiceNetworkInterface {
+                    id: nic.id,
+                    mac: nic.mac,
+                    ip: nic.ip.into(),
+                    slot: nic.slot,
+                    primary: nic.primary,
+                };
+                Some((service_id, nic))
+            })
+            .collect();
+        Ok(PlanningInput { policy, service_external_ips, service_nics })
+    }
 }
 
 /// interactive REPL for exploring the planner
@@ -115,6 +172,7 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
+        external_ips: RefCell::new(IndexMap::new()),
         internal_dns: BTreeMap::new(),
         external_dns: BTreeMap::new(),
         log,
@@ -655,9 +713,8 @@ fn cmd_blueprint_plan(
         .collections
         .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-    let policy = sim.system.to_policy().context("generating policy")?;
     let creator = "reconfigurator-sim";
-
+    let planning_input = sim.planning_input(parent_blueprint)?;
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
@@ -688,7 +745,7 @@ fn cmd_blueprint_plan(
         // matter, either.  We'll just pick the parent blueprint's.
         parent_blueprint.internal_dns_version,
         parent_blueprint.external_dns_version,
-        &policy,
+        &planning_input,
         creator,
         collection,
     )
@@ -709,13 +766,13 @@ fn cmd_blueprint_edit(
     let blueprint_id = args.blueprint_id;
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
-    let policy = sim.system.to_policy().context("assembling policy")?;
+    let planning_input = sim.planning_input(blueprint)?;
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
         &blueprint,
         blueprint.internal_dns_version,
         blueprint.external_dns_version,
-        &policy,
+        &planning_input,
         creator,
     )
     .context("creating blueprint builder")?;
