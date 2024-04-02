@@ -12,6 +12,7 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -2120,7 +2121,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
-    assert_eq!(allocated_regions.len(), 3);
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Call `disk_region_allocate` again
     let region: &nexus_db_model::Region = &allocated_regions[0].1;
@@ -2183,13 +2184,13 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
             },
             ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
-            3,
+            REGION_REDUNDANCY_THRESHOLD,
         )
         .await
         .unwrap();
 
     // There should be the same amount as we requested
-    assert_eq!(3, datasets_and_regions.len());
+    assert_eq!(REGION_REDUNDANCY_THRESHOLD, datasets_and_regions.len());
 
     // Bump up the number of required regions
     let datasets_and_regions = datastore
@@ -2201,13 +2202,13 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
             },
             ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
-            4,
+            REGION_REDUNDANCY_THRESHOLD + 1,
         )
         .await
         .unwrap();
 
     // There should be the same amount as we requested
-    assert_eq!(4, datasets_and_regions.len());
+    assert_eq!(REGION_REDUNDANCY_THRESHOLD + 1, datasets_and_regions.len());
 }
 
 // Test allocating a single region to replace a disk's region
@@ -2246,13 +2247,13 @@ async fn test_single_region_allocate_for_replace(
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
-    assert_eq!(allocated_regions.len(), 3);
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Allocate one more single 1 GB region to replace one of the disk's regions
     let region_to_replace: &nexus_db_model::Region = &allocated_regions[0].1;
 
     let one_more = allocated_regions.len() + 1;
-    assert_eq!(one_more, 4);
+    assert_eq!(one_more, REGION_REDUNDANCY_THRESHOLD + 1);
 
     let region_total_size: ByteCount = ByteCount::try_from(
         region_to_replace.block_size().to_bytes()
@@ -2295,7 +2296,7 @@ async fn test_single_region_allocate_for_replace(
         .map(|(dataset, _)| dataset.pool_id)
         .collect();
 
-    assert_eq!(pools_used.len(), 4);
+    assert_eq!(pools_used.len(), REGION_REDUNDANCY_THRESHOLD + 1);
 }
 
 // Confirm allocating a single region to replace a disk's region fails if
@@ -2331,13 +2332,13 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
-    assert_eq!(allocated_regions.len(), 3);
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Allocate one more single 1 GB region to replace one of the disk's regions
     let region_to_replace: &nexus_db_model::Region = &allocated_regions[0].1;
 
     let one_more = allocated_regions.len() + 1;
-    assert_eq!(one_more, 4);
+    assert_eq!(one_more, REGION_REDUNDANCY_THRESHOLD + 1);
 
     let region_total_size: ByteCount = ByteCount::try_from(
         region_to_replace.block_size().to_bytes()
@@ -2385,7 +2386,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
         .await
         .unwrap();
 
-    assert_eq!(datasets_and_regions.len(), 3);
+    assert_eq!(datasets_and_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

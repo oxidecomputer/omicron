@@ -117,7 +117,7 @@ pub use volume::CrucibleTargets;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
-pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
