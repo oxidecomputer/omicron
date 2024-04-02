@@ -182,7 +182,7 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every provisionable zpool on the sled should have a Crucible zone on it,
+            // Every provisionable zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
             for zpool_name in sled_info.provisionable_zpools() {
                 if self
