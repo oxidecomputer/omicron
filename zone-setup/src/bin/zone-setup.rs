@@ -11,22 +11,15 @@ use illumos_utils::route::{Gateway, Route};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
-use std::fs;
-use std::fs::OpenOptions;
+use std::fs::{read_to_string, write, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::Path;
 
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
-//pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
-//pub const INTERNAL_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.internal";
-//pub const BOUNDARY_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.boundary";
-
-// TODO: Removeme, only for testing locally
-pub const CHRONY_CONFIG_FILE: &str = "./smf/ntp/etc/inet/chrony.conf";
-pub const INTERNAL_NTP_CONFIG_TPL: &str =
-    "./smf/ntp/etc/inet/chrony.conf.internal";
-pub const BOUNDARY_NTP_CONFIG_TPL: &str =
-    "./smf/ntp/etc/inet/chrony.conf.boundary";
+pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
+pub const INTERNAL_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.internal";
+pub const BOUNDARY_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.boundary";
 
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
@@ -235,7 +228,7 @@ async fn ntp_smf_start(
     info!(&log, "Generating chrony configuration file"; "configuration file" => ?file, "configuration template" => ?template, "allowed IPs" => ?allow, "servers" => ?servers, "is boundary" => ?is_boundary);
 
     // Generate config file
-    let mut contents = fs::read_to_string(template).map_err(|err| {
+    let mut contents = read_to_string(template).map_err(|err| {
         CmdError::Failure(anyhow!(
             "Could not read chrony configuration template {}: {}",
             template,
@@ -261,16 +254,32 @@ async fn ntp_smf_start(
         contents
     };
 
-    let mut config_file =
-        OpenOptions::new().write(true).truncate(true).open(file).map_err(
-            |err| {
-                CmdError::Failure(anyhow!(
-                    "Could not create chrony configuration file {}: {}",
-                    file,
-                    err
-                ))
-            },
-        )?;
+    // We read the contents from the old configuration file if it existed
+    // so that we can verify if it changed.
+    let old_file = if Path::exists(Path::new(file)) {
+        Some(read_to_string(file).map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not read old chrony configuration file {}: {}",
+                file,
+                err
+            ))
+        })?)
+    } else {
+        None
+    };
+
+    let mut config_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(file)
+        .map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not create chrony configuration file {}: {}",
+                file,
+                err
+            ))
+        })?;
     config_file.write(new_config.as_bytes()).map_err(|err| {
         CmdError::Failure(anyhow!(
             "Could not write to chrony configuration file {}: {}",
@@ -279,7 +288,9 @@ async fn ntp_smf_start(
         ))
     })?;
 
-    // TODO: Check if file has changed
+    if old_file.clone().is_some_and(|f| f != new_config) {
+        info!(&log, "Chrony configuration file has changed"; "old configuration file" => ?old_file);
+    }
 
     // TODO: Update logadm
 
@@ -320,7 +331,7 @@ async fn common_nw_set_up(
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
-    fs::write(
+    write(
         HOSTS_FILE,
         format!(
             r#"
