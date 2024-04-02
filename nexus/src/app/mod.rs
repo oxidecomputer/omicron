@@ -6,7 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
-use crate::config;
+use crate::app::sagas::SagaRequest;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -15,6 +15,10 @@ use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
+use nexus_config::NexusConfig;
+use nexus_config::RegionAllocationStrategy;
+use nexus_config::Tunables;
+use nexus_config::UpdatesConfig;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -24,9 +28,9 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -35,8 +39,10 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 pub(crate) mod background;
+mod bfd;
 mod bgp;
 mod certificate;
+mod deployment;
 mod device_auth;
 mod disk;
 mod external_dns;
@@ -50,6 +56,7 @@ mod ip_pool;
 mod metrics;
 mod network_interface;
 mod oximeter;
+mod probe;
 mod project;
 mod quota;
 mod rack;
@@ -59,6 +66,7 @@ mod silo;
 mod sled;
 mod sled_instance;
 mod snapshot;
+mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -79,14 +87,17 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
-pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
+use nexus_db_model::AllSchemaVersions;
+pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
 //      The value here is arbitrary, but we need *a* limit for the instance
 //      create saga to have a bounded DAG. We might want to only enforce
 //      this during instance create (rather than live attach) in future.
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
+    nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
+        as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
@@ -96,6 +107,9 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
+
+/// This value is aribtrary
+pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -137,10 +151,11 @@ pub struct Nexus {
     timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
-    updates_config: Option<config::UpdatesConfig>,
+    #[allow(dead_code)]
+    updates_config: Option<UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
-    tunables: config::Tunables,
+    tunables: Tunables,
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
@@ -168,12 +183,6 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
-    /// Mapping of SwitchLocations to their respective Dendrite Clients
-    dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
-
-    /// Map switch location to maghemite admin clients.
-    mg_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
-
     /// Background tasks
     background_tasks: background::BackgroundTasks,
 
@@ -190,17 +199,20 @@ impl Nexus {
         resolver: internal_dns::resolver::Resolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
-        config: &config::Config,
+        config: &NexusConfig,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
+        let all_versions = config
+            .pkg
+            .schema
+            .as_ref()
+            .map(|s| AllSchemaVersions::load(&s.schema_dir))
+            .transpose()
+            .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(
-                &log,
-                Arc::clone(&pool),
-                config.pkg.schema.as_ref(),
-            )
-            .await?,
+            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
+                .await?,
         );
         db_datastore.register_producers(&producer_registry);
 
@@ -245,8 +257,10 @@ impl Nexus {
             dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(&log, config.address)
-                .map_err(|e| format!("mg admin client: {e}"))?;
+            let mg_client = mg_admin_client::Client::new(
+                &format!("http://{}", config.address),
+                log.clone(),
+            );
             mg_clients.insert(*location, Arc::new(mg_client));
         }
         if config.pkg.dendrite.is_empty() {
@@ -302,10 +316,15 @@ impl Nexus {
                         for (location, addr) in &mappings {
                             let port = MGD_PORT;
                             let mgd_client = mg_admin_client::Client::new(
-                                &log,
-                                std::net::SocketAddr::new((*addr).into(), port),
-                            )
-                            .map_err(|e| format!("mg admin client: {e}"))?;
+                                &format!(
+                                    "http://{}",
+                                    &std::net::SocketAddr::new(
+                                        (*addr).into(),
+                                        port,
+                                    )
+                                ),
+                                log.clone(),
+                            );
                             mg_clients.insert(*location, Arc::new(mgd_client));
                         }
                         break;
@@ -352,13 +371,16 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
+
+        let (saga_request, mut saga_request_recv) = SagaRequest::channel();
+
         let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
-            &dpd_clients,
             config.deployment.id,
             resolver.clone(),
+            saga_request,
         );
 
         let external_resolver = {
@@ -404,8 +426,6 @@ impl Nexus {
                 .deployment
                 .external_dns_servers
                 .clone(),
-            dpd_clients,
-            mg_clients,
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg
@@ -473,11 +493,34 @@ impl Nexus {
             }
         });
 
+        // Spawn a task to receive SagaRequests from RPWs, and execute them
+        {
+            let nexus = nexus.clone();
+            tokio::spawn(async move {
+                loop {
+                    match saga_request_recv.recv().await {
+                        None => {
+                            // If this channel is closed, then RPWs will not be
+                            // able to request that sagas be run. This will
+                            // likely only occur when Nexus itself is shutting
+                            // down, so emit an error and exit the task.
+                            error!(&nexus.log, "saga request channel closed!");
+                            break;
+                        }
+
+                        Some(saga_request) => {
+                            nexus.handle_saga_request(saga_request).await;
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(nexus)
     }
 
     /// Return the tunable configuration parameters, e.g. for use in tests.
-    pub fn tunables(&self) -> &config::Tunables {
+    pub fn tunables(&self) -> &Tunables {
         &self.tunables
     }
 
@@ -512,10 +555,6 @@ impl Nexus {
         }
 
         let mut rustls_cfg = rustls::ServerConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_safe_default_protocol_versions()
-            .unwrap()
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
@@ -523,6 +562,12 @@ impl Nexus {
             )));
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
+    }
+
+    // Called to trigger inventory collection.
+    pub(crate) fn activate_inventory_collection(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_inventory_collection);
     }
 
     // Called to hand off management of external servers to Nexus.
@@ -820,6 +865,80 @@ impl Nexus {
 
     pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
         self.internal_resolver.clone()
+    }
+
+    /// Reliable persistent workflows can request that sagas be executed by
+    /// sending a SagaRequest to a supplied channel. Execute those here.
+    pub(crate) async fn handle_saga_request(&self, saga_request: SagaRequest) {
+        match saga_request {
+            #[cfg(test)]
+            SagaRequest::TestOnly => {
+                unimplemented!();
+            }
+        }
+    }
+
+    pub(crate) async fn dpd_clients(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+        let mappings = self.switch_zone_address_mappings().await?;
+        let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
+            .iter()
+            .map(|(location, addr)| {
+                let port = DENDRITE_PORT;
+
+                let client_state = dpd_client::ClientState {
+                    tag: String::from("nexus"),
+                    log: self.log.new(o!(
+                        "component" => "DpdClient"
+                    )),
+                };
+
+                let dpd_client = dpd_client::Client::new(
+                    &format!("http://[{addr}]:{port}"),
+                    client_state,
+                );
+                (*location, dpd_client)
+            })
+            .collect();
+        Ok(clients)
+    }
+
+    pub(crate) async fn mg_clients(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+        let mappings = self.switch_zone_address_mappings().await?;
+        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
+            vec![];
+        for (location, addr) in &mappings {
+            let port = MGD_PORT;
+            let socketaddr =
+                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
+            let client = mg_admin_client::Client::new(
+                format!("http://{}", socketaddr).as_str(),
+                self.log.clone(),
+            );
+            clients.push((*location, client));
+        }
+        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+    }
+
+    async fn switch_zone_address_mappings(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+        let switch_zone_addresses = match self
+            .resolver()
+            .await
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+        {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                error!(self.log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                return Err(e.to_string());
+            }
+        };
+        Ok(map_switch_zone_addrs(&self.log, switch_zone_addresses).await)
     }
 }
 

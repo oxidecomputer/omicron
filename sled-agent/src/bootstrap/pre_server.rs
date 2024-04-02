@@ -18,11 +18,10 @@ use crate::long_running_tasks::{
     spawn_all_longrunning_tasks, LongRunningTaskHandles,
 };
 use crate::services::ServiceManager;
+use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::UnderlayAccess;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use ddm_admin_client::Client as DdmAdminClient;
 use futures::stream;
 use futures::StreamExt;
 use illumos_utils::addrobj::AddrObject;
@@ -34,9 +33,11 @@ use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
@@ -52,12 +53,20 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) service_manager: ServiceManager,
     pub(super) long_running_task_handles: LongRunningTaskHandles,
     pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
-    pub(super) underlay_available_tx: oneshot::Sender<UnderlayAccess>,
 }
 
 impl BootstrapAgentStartup {
     pub(super) async fn run(config: Config) -> Result<Self, StartError> {
         let base_log = build_logger(&config)?;
+
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        //
+        // We're going to start monitoring for hardware below, which could
+        // trigger launching the switch zone, and we need the contract reaper to
+        // exist before entering any zones.
+        illumos_utils::running_zone::ensure_contract_reaper(&base_log);
 
         let log = base_log.new(o!("component" => "BootstrapAgentStartup"));
 
@@ -115,7 +124,6 @@ impl BootstrapAgentStartup {
             long_running_task_handles,
             sled_agent_started_tx,
             service_manager_ready_tx,
-            underlay_available_tx,
         ) = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
@@ -127,12 +135,18 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
+        let time_sync = if let Some(true) = config.skip_timesync {
+            TimeSyncConfig::Skip
+        } else {
+            TimeSyncConfig::Normal
+        };
+
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_admin_localhost_client.clone(),
             startup_networking,
             sled_mode,
-            config.skip_timesync,
+            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.storage_manager.clone(),
@@ -155,7 +169,6 @@ impl BootstrapAgentStartup {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
-            underlay_available_tx,
         })
     }
 }
@@ -337,7 +350,7 @@ pub(crate) struct BootstrapNetworking {
 impl BootstrapNetworking {
     fn setup(config: &Config) -> Result<Self, StartError> {
         let link_for_mac = config.get_link().map_err(StartError::ConfigLink)?;
-        let global_zone_bootstrap_ip = underlay::BootstrapInterface::GlobalZone
+        let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 
@@ -374,7 +387,7 @@ impl BootstrapNetworking {
                 IpAddr::V6(addr) => addr,
             };
 
-        let switch_zone_bootstrap_ip = underlay::BootstrapInterface::SwitchZone
+        let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 

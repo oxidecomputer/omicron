@@ -103,6 +103,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Action::get_polar_class(),
         AnyActor::get_polar_class(),
         AuthenticatedActor::get_polar_class(),
+        BlueprintConfig::get_polar_class(),
         Database::get_polar_class(),
         DnsConfig::get_polar_class(),
         Fleet::get_polar_class(),
@@ -137,6 +138,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloImage::init(),
         // Fleet-level resources
         AddressLot::init(),
+        Blueprint::init(),
         LoopbackAddress::init(),
         Certificate::init(),
         ConsoleSession::init(),
@@ -152,12 +154,11 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         IdentityProvider::init(),
         SamlIdentityProvider::init(),
         Sled::init(),
+        TufRepo::init(),
+        TufArtifact::init(),
         Zpool::init(),
         Service::init(),
-        UpdateArtifact::init(),
         UserBuiltin::init(),
-        SystemUpdate::init(),
-        UpdateDeployment::init(),
     ];
 
     for init in generated_inits {

@@ -3,12 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DendriteAsic, DiskVariant, HardwareUpdate, SledMode,
-    UnparsedDisk,
+    DendriteAsic, DiskVariant, HardwareUpdate, SledMode, UnparsedDisk,
 };
 use camino::Utf8PathBuf;
+use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use omicron_common::disk::DiskIdentity;
+use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -25,7 +26,7 @@ mod gpt;
 mod partitions;
 mod sysconf;
 
-pub use partitions::ensure_partition_layout;
+pub use partitions::{ensure_partition_layout, NvmeFormattingError};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -525,7 +526,9 @@ fn poll_device_tree(
 
                         if inner.baseboard.is_none() {
                             let pc_baseboard = Baseboard::new_pc(
-                                Uuid::new_v4().simple().to_string(),
+                                gethostname().into_string().unwrap_or_else(
+                                    |_| Uuid::new_v4().simple().to_string(),
+                                ),
                                 root_node.clone(),
                             );
 

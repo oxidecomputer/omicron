@@ -11,14 +11,14 @@
 //   omicron#2184, omicron#2414.
 
 use anyhow::anyhow;
+use camino::Utf8PathBuf;
 use clap::Parser;
+use nexus_config::NexusConfig;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_nexus::run_openapi_external;
 use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
-use omicron_nexus::Config;
-use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[clap(name = "nexus", about = "See README.adoc for more information")]
@@ -41,7 +41,7 @@ struct Args {
     openapi_internal: bool,
 
     #[clap(name = "CONFIG_FILE_PATH", action)]
-    config_file_path: Option<PathBuf>,
+    config_file_path: Option<Utf8PathBuf>,
 }
 
 #[tokio::main]
@@ -70,7 +70,7 @@ async fn do_run() -> Result<(), CmdError> {
                 ));
             }
         };
-        let config = Config::from_file(config_path)
+        let config = NexusConfig::from_file(config_path)
             .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
         run_server(&config).await.map_err(|err| CmdError::Failure(anyhow!(err)))

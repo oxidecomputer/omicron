@@ -6,15 +6,6 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use omicron_common::api::external::SemverVersion;
-
-/// The version of the database schema this particular version of Nexus was
-/// built against.
-///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(23, 0, 1);
-
 table! {
     disk (id) {
         id -> Uuid,
@@ -236,6 +227,20 @@ table! {
 }
 
 table! {
+    bgp_peer_view (switch_location, port_name) {
+        switch_location -> Text,
+        port_name -> Text,
+        addr -> Inet,
+        asn -> Int8,
+        connect_retry -> Int8,
+        delay_open -> Int8,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        keepalive -> Int8,
+    }
+}
+
+table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -380,6 +385,7 @@ table! {
         instance_id -> Uuid,
         sled_id -> Uuid,
         propolis_ip -> Inet,
+        propolis_port -> Int4,
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
@@ -431,6 +437,7 @@ table! {
     silo_utilization(silo_id) {
         silo_id -> Uuid,
         silo_name -> Text,
+        silo_discoverable -> Bool,
         cpus_provisioned -> Int8,
         memory_provisioned -> Int8,
         storage_provisioned -> Int8,
@@ -545,6 +552,20 @@ table! {
     }
 }
 
+// View used for summarizing changes to ipv4_nat_entry
+table! {
+    ipv4_nat_changes (version) {
+        external_address -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+        sled_address -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        version -> Int8,
+        deleted -> Bool,
+    }
+}
+
 // This is the sequence used for the version number
 // in ipv4_nat_entry.
 table! {
@@ -574,6 +595,8 @@ table! {
         last_port -> Int4,
 
         project_id -> Nullable<Uuid>,
+        state -> crate::IpAttachStateEnum,
+        is_probe -> Bool,
     }
 }
 
@@ -713,6 +736,13 @@ table! {
 }
 
 table! {
+    instance_ssh_key (instance_id, ssh_key_id) {
+        instance_id -> Uuid,
+        ssh_key_id -> Uuid,
+    }
+}
+
+table! {
     oximeter (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -801,7 +831,9 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
-        provision_state -> crate::SledProvisionStateEnum,
+        sled_policy -> crate::sled_policy::SledPolicyEnum,
+        sled_state -> crate::SledStateEnum,
+        sled_agent_gen -> Int8,
     }
 }
 
@@ -868,6 +900,8 @@ table! {
         model -> Text,
 
         variant -> crate::PhysicalDiskKindEnum,
+        disk_policy -> crate::PhysicalDiskPolicyEnum,
+        disk_state -> crate::PhysicalDiskStateEnum,
         sled_id -> Uuid,
     }
 }
@@ -933,9 +967,12 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
-
-        total_size -> Int8,
     }
+}
+
+allow_tables_to_appear_in_same_query! {
+    zpool,
+    physical_disk
 }
 
 table! {
@@ -1171,72 +1208,45 @@ table! {
 }
 
 table! {
-    update_artifact (name, version, kind) {
-        name -> Text,
-        version -> Text,
-        kind -> crate::KnownArtifactKindEnum,
+    tuf_repo (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        sha256 -> Text,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
-        target_name -> Text,
-        target_sha256 -> Text,
-        target_length -> Int8,
-    }
-}
-
-table! {
-    system_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-    }
-}
-
-table! {
-    update_deployment (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
-    }
-}
-
-table! {
-    component_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-    }
-}
-
-table! {
-    updateable_component (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        device_id -> Text,
-        version -> Text,
         system_version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
+        file_name -> Text,
     }
 }
 
 table! {
-    system_update_component_update (system_update_id, component_update_id) {
-        system_update_id -> Uuid,
-        component_update_id -> Uuid,
+    tuf_artifact (name, version, kind) {
+        name -> Text,
+        version -> Text,
+        kind -> Text,
+        time_created -> Timestamptz,
+        sha256 -> Text,
+        artifact_size -> Int8,
     }
 }
+
+table! {
+    tuf_repo_artifact (tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind) {
+        tuf_repo_id -> Uuid,
+        tuf_artifact_name -> Text,
+        tuf_artifact_version -> Text,
+        tuf_artifact_kind -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    tuf_repo,
+    tuf_repo_artifact,
+    tuf_artifact
+);
+joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
+// Can't specify joinable for a composite primary key (tuf_repo_artifact ->
+// tuf_artifact).
 
 /* hardware inventory */
 
@@ -1357,6 +1367,30 @@ table! {
 }
 
 table! {
+    inv_physical_disk (inv_collection_id, sled_id, slot) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        slot -> Int8,
+
+        vendor -> Text,
+        model -> Text,
+        serial -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
+    }
+}
+
+table! {
+    inv_zpool (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        id -> Uuid,
+        sled_id -> Uuid,
+        total_size -> Int8,
+    }
+}
+
+table! {
     inv_sled_omicron_zones (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -1409,10 +1443,178 @@ table! {
     }
 }
 
+/* blueprints */
+
+table! {
+    blueprint (id) {
+        id -> Uuid,
+
+        parent_blueprint_id -> Nullable<Uuid>,
+
+        time_created -> Timestamptz,
+        creator -> Text,
+        comment -> Text,
+
+        internal_dns_version -> Int8,
+        external_dns_version -> Int8,
+    }
+}
+
+table! {
+    bp_target (version) {
+        version -> Int8,
+
+        blueprint_id -> Uuid,
+
+        enabled -> Bool,
+        time_made_target -> Timestamptz,
+    }
+}
+
+table! {
+    bp_sled_omicron_zones (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_zone (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Uuid,
+        underlay_address -> Inet,
+        zone_type -> crate::ZoneTypeEnum,
+
+        primary_service_ip -> Inet,
+        primary_service_port -> Int4,
+        second_service_ip -> Nullable<Inet>,
+        second_service_port -> Nullable<Int4>,
+        dataset_zpool_name -> Nullable<Text>,
+        bp_nic_id -> Nullable<Uuid>,
+        dns_gz_address -> Nullable<Inet>,
+        dns_gz_address_index -> Nullable<Int8>,
+        ntp_ntp_servers -> Nullable<Array<Text>>,
+        ntp_dns_servers -> Nullable<Array<Inet>>,
+        ntp_domain -> Nullable<Text>,
+        nexus_external_tls -> Nullable<Bool>,
+        nexus_external_dns_servers -> Nullable<Array<Inet>>,
+        snat_ip -> Nullable<Inet>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
+    }
+}
+
+table! {
+    bp_omicron_zone_nic (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        id -> Uuid,
+        name -> Text,
+        ip -> Inet,
+        mac -> Int8,
+        subnet -> Inet,
+        vni -> Int8,
+        is_primary -> Bool,
+        slot -> Int2,
+    }
+}
+
+table! {
+    bp_omicron_zones_not_in_service (blueprint_id, bp_omicron_zone_id) {
+        blueprint_id -> Uuid,
+        bp_omicron_zone_id -> Uuid,
+    }
+}
+
 table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
+    }
+}
+
+table! {
+    bootstore_config (key, generation) {
+        key -> Text,
+        generation -> Int8,
+        data -> Jsonb,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    bfd_session (remote, switch) {
+        id -> Uuid,
+        local -> Nullable<Inet>,
+        remote -> Inet,
+        detection_threshold -> Int8,
+        required_rx -> Int8,
+        switch -> Text,
+        mode -> crate::BfdModeEnum,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    probe (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
+        sled -> Uuid,
+    }
+}
+
+table! {
+    upstairs_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
+        time -> Timestamptz,
+
+        repair_id -> Uuid,
+        repair_type -> crate::UpstairsRepairTypeEnum,
+        upstairs_id -> Uuid,
+        session_id -> Uuid,
+
+        region_id -> Uuid,
+        target_ip -> Inet,
+        target_port -> Int4,
+
+        notification_type -> crate::UpstairsRepairNotificationTypeEnum,
+    }
+}
+
+table! {
+    upstairs_repair_progress (repair_id, time, current_item, total_items) {
+        repair_id -> Uuid,
+        time -> Timestamptz,
+        current_item -> Int8,
+        total_items -> Int8,
+    }
+}
+
+table! {
+    downstairs_client_stop_request_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStopRequestReasonEnum,
+    }
+}
+
+table! {
+    downstairs_client_stopped_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStoppedReasonEnum,
     }
 }
 
@@ -1427,13 +1629,11 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
-    system_update,
-    component_update,
-    system_update_component_update,
+    ip_pool_range,
+    ip_pool,
+    ip_pool_resource,
+    silo
 );
-joinable!(system_update_component_update -> component_update (component_update_id));
-
-allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 joinable!(ip_pool_resource -> ip_pool (ip_pool_id));
 
@@ -1448,6 +1648,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    bp_omicron_zone,
+    bp_target,
     dataset,
     disk,
     image,
@@ -1504,3 +1706,7 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 
 allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
+joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
+joinable!(instance_ssh_key -> instance (instance_id));

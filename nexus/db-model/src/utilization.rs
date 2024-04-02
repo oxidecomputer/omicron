@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
+    pub silo_discoverable: bool,
 
     pub cpus_allocated: i64,
     pub memory_allocated: ByteCount,
@@ -52,5 +53,42 @@ impl From<SiloUtilization> for views::Utilization {
                 storage: silo_utilization.storage_allocated.into(),
             },
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ipv4Utilization {
+    pub allocated: u32,
+    pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ipv6Utilization {
+    pub allocated: u128,
+    pub capacity: u128,
+}
+
+// Not really a DB model, just the result of a datastore function
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpPoolUtilization {
+    pub ipv4: Ipv4Utilization,
+    pub ipv6: Ipv6Utilization,
+}
+
+impl From<Ipv4Utilization> for views::Ipv4Utilization {
+    fn from(util: Ipv4Utilization) -> Self {
+        Self { allocated: util.allocated, capacity: util.capacity }
+    }
+}
+
+impl From<Ipv6Utilization> for views::Ipv6Utilization {
+    fn from(util: Ipv6Utilization) -> Self {
+        Self { allocated: util.allocated, capacity: util.capacity }
+    }
+}
+
+impl From<IpPoolUtilization> for views::IpPoolUtilization {
+    fn from(util: IpPoolUtilization) -> Self {
+        Self { ipv4: util.ipv4.into(), ipv6: util.ipv6.into() }
     }
 }

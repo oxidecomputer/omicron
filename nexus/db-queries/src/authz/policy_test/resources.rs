@@ -7,7 +7,10 @@
 use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
 use crate::authz;
+use crate::db::model::ArtifactId;
+use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::GenericUuid;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -64,6 +67,7 @@ pub async fn make_resources(
     // Global resources
     builder.new_resource(authz::DATABASE);
     builder.new_resource_with_users(authz::FLEET).await;
+    builder.new_resource(authz::BLUEPRINT_CONFIG);
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
@@ -98,10 +102,12 @@ pub async fn make_resources(
 
     make_services(&mut builder).await;
 
+    let physical_disk_id =
+        "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
-        ("vendor".to_string(), "serial".to_string(), "model".to_string()),
-        LookupType::ByCompositeId("vendor-serial-model".to_string()),
+        physical_disk_id,
+        LookupType::ById(physical_disk_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
@@ -118,20 +124,30 @@ pub async fn make_resources(
         LookupType::ByName(device_access_token),
     ));
 
-    let system_update_id =
-        "9c86d713-1bc2-4927-9892-ada3eb6f5f62".parse().unwrap();
-    builder.new_resource(authz::SystemUpdate::new(
+    let blueprint_id = "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
+    builder.new_resource(authz::Blueprint::new(
         authz::FLEET,
-        system_update_id,
-        LookupType::ById(system_update_id),
+        blueprint_id,
+        LookupType::ById(blueprint_id),
     ));
 
-    let update_deployment_id =
-        "c617a035-7c42-49ff-a36a-5dfeee382832".parse().unwrap();
-    builder.new_resource(authz::UpdateDeployment::new(
+    let tuf_repo_id = "3c52d72f-cbf7-4951-a62f-a4154e74da87".parse().unwrap();
+    builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
-        update_deployment_id,
-        LookupType::ById(update_deployment_id),
+        tuf_repo_id,
+        LookupType::ById(tuf_repo_id.into_untyped_uuid()),
+    ));
+
+    let artifact_id = ArtifactId {
+        name: "a".to_owned(),
+        version: SemverVersion("1.0.0".parse().unwrap()),
+        kind: "b".to_owned(),
+    };
+    let artifact_id_desc = artifact_id.to_string();
+    builder.new_resource(authz::TufArtifact::new(
+        authz::FLEET,
+        artifact_id,
+        LookupType::ByCompositeId(artifact_id_desc),
     ));
 
     let address_lot_id =
@@ -147,7 +163,7 @@ pub async fn make_resources(
     builder.new_resource(authz::LoopbackAddress::new(
         authz::FLEET,
         loopback_address_id,
-        LookupType::ById(loopback_address_id),
+        LookupType::ById(loopback_address_id.into_untyped_uuid()),
     ));
 
     builder.build()
@@ -367,7 +383,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
         authz::RoleBuiltin::get_polar_class(),
-        authz::UpdateArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
     ]
     .into_iter()

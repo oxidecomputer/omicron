@@ -1,11 +1,17 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::app::authz;
 use crate::external_api::params;
+use mg_admin_client::types::MessageHistoryRequest;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    BgpImportedRouteIpv4, BgpPeerStatus, CreateResult, DeleteResult, Ipv4Net,
-    ListResultVec, LookupResult, NameOrId,
+    self, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus, CreateResult,
+    DeleteResult, Ipv4Net, ListResultVec, LookupResult, NameOrId,
+    SwitchBgpHistory,
 };
 
 impl super::Nexus {
@@ -84,8 +90,12 @@ impl super::Nexus {
     ) -> ListResultVec<BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients {
-            let router_info = match client.inner.get_routers().await {
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let router_info = match client.get_routers().await {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
                     error!(
@@ -115,6 +125,45 @@ impl super::Nexus {
         Ok(result)
     }
 
+    pub async fn bgp_message_history(
+        &self,
+        opctx: &OpContext,
+        sel: &params::BgpRouteSelector,
+    ) -> ListResultVec<SwitchBgpHistory> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let mut result = Vec::new();
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let history = match client
+                .message_history(&MessageHistoryRequest { asn: sel.asn })
+                .await
+            {
+                Ok(result) => result.into_inner().by_peer.clone(),
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "failed to get bgp history from {switch}: {e}"
+                    );
+                    continue;
+                }
+            };
+
+            result.push(SwitchBgpHistory {
+                switch: *switch,
+                history: history
+                    .into_iter()
+                    .map(|(k, v)| (k, BgpMessageHistory::new(v)))
+                    .collect(),
+            });
+        }
+
+        Ok(result)
+    }
+
     pub async fn bgp_imported_routes_ipv4(
         &self,
         opctx: &OpContext,
@@ -122,9 +171,12 @@ impl super::Nexus {
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients {
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
             let imported: Vec<BgpImportedRouteIpv4> = match client
-                .inner
                 .get_imported4(&mg_admin_client::types::GetImported4Request {
                     asn: sel.asn,
                 })

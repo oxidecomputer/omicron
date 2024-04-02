@@ -235,12 +235,13 @@ mod test {
             },
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
-            hostname: String::from("inst"),
+            hostname: "inst".parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool_name: None,
+                pool: None,
             }],
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },

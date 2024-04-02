@@ -2,9 +2,10 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.27"
+#: target = "lab-2.0-opte-0.28"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
+#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_ntp_*/root/var/log/chrony/*.log*",
@@ -50,6 +51,7 @@ _exit_trap() {
 		standalone \
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	pfexec /opt/oxide/opte/bin/opteadm dump-v2b
 	z_swadm link ls
 	z_swadm addr list
 	z_swadm route list
@@ -143,7 +145,7 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
-mv out/omicron-nexus-single-sled.tar.gz out/omicron-nexus.tar.gz
+mv out/nexus-single-sled.tar.gz out/nexus.tar.gz
 mkdir tests
 for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
@@ -203,7 +205,7 @@ PXA_END="$EXTRA_IP_END"
 export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
 
 pfexec zpool create -f scratch c1t1d0 c2t1d0
-ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
+VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
@@ -212,7 +214,12 @@ ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 # real system, the certificate would come from the customer during initial rack
 # setup on the technician port.
 #
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+
+# Update the vdevs to point to where we've created them
+sed -E -i~ "s/(m2|u2)(.*\.vdev)/\/scratch\/\1\2/g" pkg/config.toml
+diff -u pkg/config.toml{~,} || true
+
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 
@@ -226,23 +233,21 @@ first = \"$SERVICE_IP_POOL_START\"
 		/^last/c\\
 last = \"$SERVICE_IP_POOL_END\"
 	}
-	/^\\[rack_network_config/,/^$/ {
-		/^infra_ip_first/c\\
+	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
-		/^infra_ip_last/c\\
+	/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
-	}
 	/^\\[\\[rack_network_config.ports/,/^\$/ {
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[\"$UPLINK_IP/32\"\\]
+addresses = \\[\"$UPLINK_IP/24\"\\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
 
-tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml
-rm -f pkg/config-rss.toml*
+tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+rm -f pkg/config-rss.toml* pkg/config.toml*
 
 #
 # By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
@@ -329,6 +334,18 @@ while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
 	retry=$((retry + 1))
 done
 echo "Waited for chrony: ${retry}s"
+
+# Wait for at least one nexus zone to become available
+retry=0
+until zoneadm list | grep nexus; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to start at least one nexus zone after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for nexus: ${retry}s"
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END

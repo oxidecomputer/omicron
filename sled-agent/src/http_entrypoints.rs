@@ -8,11 +8,11 @@ use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
-    CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
+    BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
+    InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
-    ZoneBundleId, ZoneBundleMetadata, Zpool,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
+    VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -40,6 +40,7 @@ use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
+use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -53,11 +54,15 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_put_external_ip)?;
+        api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
         api.register(zones_list)?;
+        api.register(omicron_physical_disks_get)?;
+        api.register(omicron_physical_disks_put)?;
         api.register(zone_bundle_list)?;
         api.register(zone_bundle_list_all)?;
         api.register(zone_bundle_create)?;
@@ -83,6 +88,7 @@ pub fn api() -> SledApiDescription {
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
         api.register(inventory)?;
+        api.register(bootstore_status)?;
 
         Ok(())
     }
@@ -337,6 +343,31 @@ async fn omicron_zones_get(
 
 #[endpoint {
     method = PUT,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<OmicronPhysicalDisksConfig>,
+) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.omicron_physical_disks_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
+}
+
+#[endpoint {
+    method = PUT,
     path = "/omicron-zones",
 }]
 async fn omicron_zones_put(
@@ -410,6 +441,7 @@ async fn instance_register(
             body_args.instance_runtime,
             body_args.vmm_runtime,
             body_args.propolis_addr,
+            body_args.metadata,
         )
         .await?,
     ))
@@ -465,6 +497,38 @@ async fn instance_put_migration_ids(
         )
         .await?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_put_external_ip(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_put_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_delete_external_ip(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_delete_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Disk requests (sled agent API)
@@ -803,8 +867,8 @@ async fn host_os_write_start(
 
     // Find our corresponding disk.
     let maybe_disk_path =
-        sa.storage().get_latest_resources().await.disks().values().find_map(
-            |(disk, _pool)| {
+        sa.storage().get_latest_disks().await.iter_managed().find_map(
+            |(_identity, disk)| {
                 // Synthetic disks panic if asked for their `slot()`, so filter
                 // them out first; additionally, filter out any non-M2 disks.
                 if disk.is_synthetic() || disk.variant() != DiskVariant::M2 {
@@ -936,5 +1000,25 @@ async fn inventory(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = request_context.context();
-    Ok(HttpResponseOk(sa.inventory()?))
+    Ok(HttpResponseOk(sa.inventory().await?))
+}
+
+/// Get the internal state of the local bootstore node
+#[endpoint {
+    method = GET,
+    path = "/bootstore/status",
+}]
+async fn bootstore_status(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
+    let sa = request_context.context();
+    let bootstore = sa.bootstore();
+    let status = bootstore
+        .get_status()
+        .await
+        .map_err(|e| {
+            HttpError::from(omicron_common::api::external::Error::from(e))
+        })?
+        .into();
+    Ok(HttpResponseOk(status))
 }

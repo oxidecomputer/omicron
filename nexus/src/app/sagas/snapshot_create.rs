@@ -99,7 +99,6 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::retry_until_known_result;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
@@ -109,6 +108,7 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_common::retry_until_known_result;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -1175,7 +1175,7 @@ async fn ssc_start_running_snapshot(
     );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-    info!(log, "starting running snapshot for {snapshot_id}");
+    info!(log, "starting running snapshot"; "snapshot_id" => %snapshot_id);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -1198,7 +1198,13 @@ async fn ssc_start_running_snapshot(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        info!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
+        info!(
+            log,
+            "contacting crucible agent to confirm region exists";
+            "dataset" => ?dataset,
+            "region" => ?region,
+            "url" => url,
+        );
 
         // Validate with the Crucible agent that the snapshot exists
         let crucible_region = retry_until_known_result(log, || async {
@@ -1208,7 +1214,11 @@ async fn ssc_start_running_snapshot(
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible region {:?}", crucible_region);
+        info!(
+            log,
+            "confirmed the region exists with crucible agent";
+            "crucible region" => ?crucible_region
+        );
 
         let crucible_snapshot = retry_until_known_result(log, || async {
             client
@@ -1222,7 +1232,11 @@ async fn ssc_start_running_snapshot(
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible snapshot {:?}", crucible_snapshot);
+        info!(
+            log,
+            "successfully accessed crucible snapshot";
+            "crucible snapshot" => ?crucible_snapshot
+        );
 
         // Start the snapshot running
         let crucible_running_snapshot =
@@ -1238,7 +1252,11 @@ async fn ssc_start_running_snapshot(
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible running snapshot {:?}", crucible_running_snapshot);
+        info!(
+            log,
+            "successfully started running region snapshot";
+            "crucible running snapshot" => ?crucible_running_snapshot
+        );
 
         // Map from the region to the snapshot
         let region_addr = format!(
@@ -1940,10 +1958,11 @@ mod test {
                 },
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: String::from("base_instance"),
+                hostname: "base-instance".parse().unwrap(),
                 user_data:
                     b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                         .to_vec(),
+                ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 disks: disks_to_attach,

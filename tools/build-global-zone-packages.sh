@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -eux
 
@@ -15,6 +15,7 @@ deps=(
     "$tarball_src_dir/mg-ddm-gz.tar"
     "$tarball_src_dir/propolis-server.tar.gz"
     "$tarball_src_dir/overlay.tar.gz"
+    "$tarball_src_dir/oxlog.tar"
 )
 for dep in "${deps[@]}"; do
     if [[ ! -e $dep ]]; then
@@ -47,6 +48,12 @@ pkg_dir="$tmp_gz/root/opt/oxide/mg-ddm"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
 tar -xvfz "$tarball_src_dir/mg-ddm-gz.tar"
+cd -
+# Extract the oxlog tarball for re-packaging into the layered GZ archive.
+pkg_dir="$tmp_gz/root/opt/oxide/oxlog"
+mkdir -p "$pkg_dir"
+cd "$pkg_dir"
+tar -xvfz "$tarball_src_dir/oxlog.tar"
 cd -
 
 # propolis should be bundled with this OS: Put the propolis-server zone image

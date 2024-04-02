@@ -9,8 +9,10 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
+use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::SlogInlineError;
 use std::fmt::Display;
 use uuid::Uuid;
 
@@ -25,7 +27,15 @@ use uuid::Uuid;
 /// General best practices for error design apply here.  Where possible, we want
 /// to reuse existing variants rather than inventing new ones to distinguish
 /// cases that no programmatic consumer needs to distinguish.
-#[derive(Clone, Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    thiserror::Error,
+    PartialEq,
+    Serialize,
+    SlogInlineError,
+)]
 pub enum Error {
     /// An object needed as part of this operation was not found.
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
@@ -70,6 +80,11 @@ pub enum Error {
 
     #[error("Conflict: {}", .message.display_internal())]
     Conflict { message: MessagePair },
+
+    /// A generic 404 response. If there is an applicable ResourceType, use
+    /// ObjectNotFound instead.
+    #[error("Not found: {}", .message.display_internal())]
+    NotFound { message: MessagePair },
 }
 
 /// Represents an error message which has an external component, along with
@@ -144,14 +159,19 @@ pub enum LookupType {
     ByName(String),
     /// a specific id was requested
     ById(Uuid),
-    /// a session token was requested
-    BySessionToken(String),
     /// a specific id was requested with some composite type
     /// (caller summarizes it)
     ByCompositeId(String),
+    /// object selected by criteria that would be confusing to call an ID
+    ByOther(String),
 }
 
 impl LookupType {
+    /// Constructs a `ById` lookup type from a typed or untyped UUID.
+    pub fn by_id<T: GenericUuid>(id: T) -> Self {
+        LookupType::ById(id.into_untyped_uuid())
+    }
+
     /// Returns an ObjectNotFound error appropriate for the case where this
     /// lookup failed
     pub fn into_not_found(self, type_name: ResourceType) -> Error {
@@ -193,6 +213,7 @@ impl Error {
             | Error::InsufficientCapacity { .. }
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
+            | Error::NotFound { .. }
             | Error::Conflict { .. } => false,
         }
     }
@@ -294,6 +315,15 @@ impl Error {
         Error::Conflict { message: MessagePair::new(message.into()) }
     }
 
+    /// Generates an [`Error::NotFound`] with a specific message.
+    ///
+    /// This is used in cases where a generic 404 is required. For cases where
+    /// there is a ResourceType, use a function that produces
+    /// [`Error::ObjectNotFound`] instead.
+    pub fn non_resourcetype_not_found(message: impl Into<String>) -> Error {
+        Error::NotFound { message: MessagePair::new(message.into()) }
+    }
+
     /// Given an [`Error`] with an internal message, return the same error with
     /// `context` prepended to it to provide more context
     ///
@@ -348,6 +378,9 @@ impl Error {
             Error::Conflict { message } => Error::Conflict {
                 message: message.with_internal_context(context),
             },
+            Error::NotFound { message } => Error::NotFound {
+                message: message.with_internal_context(context),
+            },
         }
     }
 }
@@ -359,23 +392,22 @@ impl From<Error> for HttpError {
     fn from(error: Error) -> HttpError {
         match error {
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
-                // TODO-cleanup is there a better way to express this?
-                let (lookup_field, lookup_value) = match lt {
-                    LookupType::ByName(name) => ("name", name),
-                    LookupType::ById(id) => ("id", id.to_string()),
-                    LookupType::ByCompositeId(label) => ("id", label),
-                    LookupType::BySessionToken(token) => {
-                        ("session token", token)
+                let message = match lt {
+                    LookupType::ByName(name) => {
+                        format!("{} with name \"{}\"", t, name)
                     }
+                    LookupType::ById(id) => {
+                        format!("{} with id \"{}\"", t, id)
+                    }
+                    LookupType::ByCompositeId(label) => {
+                        format!("{} with id \"{}\"", t, label)
+                    }
+                    LookupType::ByOther(msg) => msg,
                 };
-                let message = format!(
-                    "not found: {} with {} \"{}\"",
-                    t, lookup_field, lookup_value
-                );
                 HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
                     http::StatusCode::NOT_FOUND,
-                    message,
+                    format!("not found: {}", message),
                 )
             }
 
@@ -470,6 +502,17 @@ impl From<Error> for HttpError {
                     internal_message,
                 }
             }
+
+            Error::NotFound { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::NOT_FOUND,
+                    error_code: Some(String::from("Not Found")),
+                    external_message,
+                    internal_message,
+                }
+            }
         }
     }
 }
@@ -487,20 +530,20 @@ pub trait ClientError: std::fmt::Debug {
 impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
     fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
         match e {
-            // This error indicates that the inputs were not valid for this API
-            // call. It's reflective of either a client-side programming error.
-            progenitor::progenitor_client::Error::InvalidRequest(msg) => {
-                Error::internal_error(&format!("InvalidRequest: {}", msg))
+            // For most error variants, we delegate to the display impl for the
+            // Progenitor error type, but we pick apart an error response more
+            // carefully.
+            progenitor::progenitor_client::Error::InvalidRequest(_)
+            | progenitor::progenitor_client::Error::CommunicationError(_)
+            | progenitor::progenitor_client::Error::InvalidResponsePayload(
+                ..,
+            )
+            | progenitor::progenitor_client::Error::UnexpectedResponse(_)
+            | progenitor::progenitor_client::Error::InvalidUpgrade(_)
+            | progenitor::progenitor_client::Error::ResponseBodyError(_)
+            | progenitor::progenitor_client::Error::PreHookError(_) => {
+                Error::internal_error(&e.to_string())
             }
-
-            // This error indicates a problem with the request to the remote
-            // service that did not result in an HTTP response code, but rather
-            // pertained to local (i.e. client-side) encoding or network
-            // communication.
-            progenitor::progenitor_client::Error::CommunicationError(ee) => {
-                Error::internal_error(&format!("CommunicationError: {}", ee))
-            }
-
             // This error represents an expected error from the remote service.
             progenitor::progenitor_client::Error::ErrorResponse(rv) => {
                 let message = rv.message();
@@ -514,30 +557,6 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
                     }
                     _ => Error::internal_error(&message),
                 }
-            }
-
-            // This error indicates that the body returned by the client didn't
-            // match what was documented in the OpenAPI description for the
-            // service. This could only happen for us in the case of a severe
-            // logic/encoding bug in the remote service or due to a failure of
-            // our version constraints (i.e. that the call was to a newer
-            // service with an incompatible response).
-            progenitor::progenitor_client::Error::InvalidResponsePayload(
-                ee,
-            ) => Error::internal_error(&format!(
-                "InvalidResponsePayload: {}",
-                ee,
-            )),
-
-            // This error indicates that the client generated a response code
-            // that was not described in the OpenAPI description for the
-            // service; this could be a success or failure response, but either
-            // way it indicates a logic or version error as above.
-            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
-                Error::internal_error(&format!(
-                    "UnexpectedResponse: status code {}",
-                    r.status(),
-                ))
             }
         }
     }

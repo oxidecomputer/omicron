@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #
 # ci_download_maghemite_openapi: fetches the appropriate maghemite openapi spec.
@@ -15,10 +15,10 @@ TARGET_DIR="out"
 # Location where intermediate artifacts are downloaded / unpacked.
 DOWNLOAD_DIR="$TARGET_DIR/downloads"
 
-
-
 function main
 {
+    rm -rf $DOWNLOAD_DIR/root
+
 	if [[ $# != 0 ]]; then
 		echo "unexpected arguments" >&2
 		exit 2

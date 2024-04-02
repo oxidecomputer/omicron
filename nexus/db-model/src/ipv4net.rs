@@ -2,14 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::vpc_subnet::RequestAddressError;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::api::external;
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv4Addr;
@@ -18,6 +19,7 @@ use std::net::Ipv4Addr;
     Clone,
     Copy,
     Debug,
+    Eq,
     PartialEq,
     AsExpression,
     FromSqlRow,
@@ -32,18 +34,30 @@ NewtypeDeref! { () pub struct Ipv4Net(external::Ipv4Net); }
 
 impl Ipv4Net {
     /// Check if an address is a valid user-requestable address for this subnet
-    pub fn check_requestable_addr(&self, addr: Ipv4Addr) -> bool {
-        self.contains(addr)
-            && (
-                // First N addresses are reserved
-                self.iter()
-                    .take(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                    .all(|this| this != addr)
-            )
-            && (
-                // Last address in the subnet is reserved
-                addr != self.broadcast()
-            )
+    pub fn check_requestable_addr(
+        &self,
+        addr: Ipv4Addr,
+    ) -> Result<(), RequestAddressError> {
+        if !self.contains(addr) {
+            return Err(RequestAddressError::OutsideSubnet(
+                addr.into(),
+                self.0 .0.into(),
+            ));
+        }
+        // Only the first N addresses are reserved
+        if self
+            .iter()
+            .take(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .any(|this| this == addr)
+        {
+            return Err(RequestAddressError::Reserved);
+        }
+        // Last address in the subnet is reserved
+        if addr == self.broadcast() {
+            return Err(RequestAddressError::Broadcast);
+        }
+
+        Ok(())
     }
 }
 

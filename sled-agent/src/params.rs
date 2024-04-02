@@ -21,10 +21,11 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
 pub use sled_hardware::DendriteAsic;
+use sled_hardware_types::Baseboard;
 use sled_storage::dataset::DatasetKind;
 use sled_storage::dataset::DatasetName;
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::str::FromStr;
@@ -81,6 +82,23 @@ pub struct InstanceHardware {
     pub cloud_init_bytes: Option<String>,
 }
 
+/// Metadata used to track statistics about an instance.
+///
+// NOTE: The instance ID is not here, since it's already provided in other
+// pieces of the instance-related requests. It is pulled from there when
+// publishing metrics for the instance.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InstanceMetadata {
+    pub silo_id: Uuid,
+    pub project_id: Uuid,
+}
+
+impl From<InstanceMetadata> for propolis_client::types::InstanceMetadata {
+    fn from(md: InstanceMetadata) -> Self {
+        Self { silo_id: md.silo_id, project_id: md.project_id }
+    }
+}
+
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -102,6 +120,9 @@ pub struct InstanceEnsureBody {
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,
+
+    /// Metadata used to track instance statistics.
+    pub metadata: InstanceMetadata,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific
@@ -114,7 +135,7 @@ pub struct InstancePutStateBody {
 
 /// The response sent from a request to move an instance into a specific runtime
 /// state.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstancePutStateResponse {
     /// The current runtime state of the instance after handling the request to
     /// change its state. If the instance's state did not change, this field is
@@ -273,8 +294,10 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
-/// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-pub const OMICRON_ZONES_CONFIG_INITIAL_GENERATION: u32 = 1;
+pub type OmicronPhysicalDiskConfig =
+    sled_storage::disk::OmicronPhysicalDiskConfig;
+pub type OmicronPhysicalDisksConfig =
+    sled_storage::disk::OmicronPhysicalDisksConfig;
 
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
@@ -293,6 +316,11 @@ pub struct OmicronZonesConfig {
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
+}
+
+impl OmicronZonesConfig {
+    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
 }
 
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
@@ -376,6 +404,7 @@ impl OmicronZoneConfig {
                         name: nic.name.clone(),
                         ip: nic.ip,
                         mac: nic.mac,
+                        slot: nic.slot,
                     },
                 },
             },
@@ -396,6 +425,7 @@ impl OmicronZoneConfig {
                         name: nic.name.clone(),
                         ip: nic.ip,
                         mac: nic.mac,
+                        slot: nic.slot,
                     },
                 },
             },
@@ -439,6 +469,7 @@ impl OmicronZoneConfig {
                             name: nic.name.clone(),
                             ip: nic.ip,
                             mac: nic.mac,
+                            slot: nic.slot,
                         },
                     },
                 }
@@ -664,6 +695,27 @@ impl OmicronZoneType {
             *address,
         ))
     }
+
+    /// Does this zone require time synchronization before it is initialized?"
+    ///
+    /// This function is somewhat conservative - the set of services
+    /// that can be launched before timesync has completed is intentionally kept
+    /// small, since it would be easy to add a service that expects time to be
+    /// reasonably synchronized.
+    pub fn requires_timesync(&self) -> bool {
+        match self {
+            // These zones can be initialized and started before time has been
+            // synchronized. For the NTP zones, this should be self-evident --
+            // we need the NTP zone to actually perform time synchronization!
+            //
+            // The DNS zone is a bit of an exception here, since the NTP zone
+            // itself may rely on DNS lookups as a dependency.
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::InternalDns { .. } => false,
+            _ => true,
+        }
+    }
 }
 
 impl crate::smf_helper::Service for OmicronZoneType {
@@ -702,8 +754,8 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dns_servers,
                 domain,
                 ntp_servers,
-                snat_cfg: snat_cfg.into(),
-                nic: nic.into(),
+                snat_cfg,
+                nic: nic,
             },
             OmicronZoneType::Clickhouse { address, dataset } => {
                 Other::Clickhouse {
@@ -739,7 +791,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dataset: dataset.into(),
                 http_address: http_address.to_string(),
                 dns_address: dns_address.to_string(),
-                nic: nic.into(),
+                nic: nic,
             },
             OmicronZoneType::InternalDns {
                 dataset,
@@ -776,7 +828,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 external_ip,
                 external_tls,
                 internal_address: internal_address.to_string(),
-                nic: nic.into(),
+                nic: nic,
             },
             OmicronZoneType::Oximeter { address } => {
                 Other::Oximeter { address: address.to_string() }
@@ -818,10 +870,35 @@ pub struct CleanupContextUpdate {
     pub storage_limit: Option<u8>,
 }
 
+/// Used to dynamically update external IPs attached to an instance.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, JsonSchema, Serialize,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum InstanceExternalIpBody {
+    Ephemeral(IpAddr),
+    Floating(IpAddr),
+}
+
 // Our SledRole and Baseboard types do not have to be identical to the Nexus
 // ones, but they generally should be, and this avoids duplication.  If it
 // becomes easier to maintain a separate copy, we should do that.
 pub type SledRole = nexus_client::types::SledRole;
+
+/// Identifies information about disks which may be attached to Sleds.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryDisk {
+    pub identity: omicron_common::disk::DiskIdentity,
+    pub variant: sled_hardware::DiskVariant,
+    pub slot: i64,
+}
+
+/// Identifies information about zpools managed by the control plane
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryZpool {
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -833,4 +910,48 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub disks: Vec<InventoryDisk>,
+    pub zpools: Vec<InventoryZpool>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct EstablishedConnection {
+    baseboard: Baseboard,
+    addr: SocketAddrV6,
+}
+
+impl From<(Baseboard, SocketAddrV6)> for EstablishedConnection {
+    fn from(value: (Baseboard, SocketAddrV6)) -> Self {
+        EstablishedConnection { baseboard: value.0, addr: value.1 }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootstoreStatus {
+    pub fsm_ledger_generation: u64,
+    pub network_config_ledger_generation: Option<u64>,
+    pub fsm_state: String,
+    pub peers: BTreeSet<SocketAddrV6>,
+    pub established_connections: Vec<EstablishedConnection>,
+    pub accepted_connections: BTreeSet<SocketAddrV6>,
+    pub negotiating_connections: BTreeSet<SocketAddrV6>,
+}
+
+impl From<bootstore::schemes::v0::Status> for BootstoreStatus {
+    fn from(value: bootstore::schemes::v0::Status) -> Self {
+        BootstoreStatus {
+            fsm_ledger_generation: value.fsm_ledger_generation,
+            network_config_ledger_generation: value
+                .network_config_ledger_generation,
+            fsm_state: value.fsm_state.to_string(),
+            peers: value.peers,
+            established_connections: value
+                .connections
+                .into_iter()
+                .map(EstablishedConnection::from)
+                .collect(),
+            accepted_connections: value.accepted_connections,
+            negotiating_connections: value.negotiating_connections,
+        }
+    }
 }

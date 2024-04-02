@@ -10,6 +10,7 @@ extern crate diesel;
 extern crate newtype_derive;
 
 mod address_lot;
+mod bfd;
 mod bgp;
 mod block_size;
 mod bootstore;
@@ -25,6 +26,7 @@ mod digest;
 mod disk;
 mod disk_state;
 mod dns;
+mod downstairs;
 mod external_ip;
 mod generation;
 mod identity_provider;
@@ -44,16 +46,20 @@ mod network_interface;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;
+mod physical_disk_policy;
+mod physical_disk_state;
+mod probe;
 mod producer_endpoint;
 mod project;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
-mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod deployment;
 mod ipv4_nat_entry;
+mod omicron_zone_config;
 pub mod queries;
 mod quota;
 mod rack;
@@ -63,6 +69,7 @@ mod role_assignment;
 mod role_builtin;
 pub mod saga_types;
 pub mod schema;
+mod schema_versions;
 mod service;
 mod service_kind;
 mod silo;
@@ -71,15 +78,18 @@ mod silo_user;
 mod silo_user_password_hash;
 mod sled;
 mod sled_instance;
-mod sled_provision_state;
+mod sled_policy;
 mod sled_resource;
 mod sled_resource_kind;
+mod sled_state;
 mod sled_underlay_subnet_allocation;
 mod snapshot;
 mod ssh_key;
 mod switch;
+mod tuf_repo;
+mod typed_uuid;
 mod unsigned;
-mod update_artifact;
+mod upstairs_repair;
 mod user_builtin;
 mod utilization;
 mod virtual_provisioning_collection;
@@ -105,6 +115,7 @@ mod db {
 pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
+pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;
 pub use bootstore::*;
@@ -115,11 +126,13 @@ pub use console_session::*;
 pub use dataset::*;
 pub use dataset_kind::*;
 pub use db_metadata::*;
+pub use deployment::*;
 pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;
 pub use disk_state::*;
 pub use dns::*;
+pub use downstairs::*;
 pub use external_ip::*;
 pub use generation::*;
 pub use identity_provider::*;
@@ -139,6 +152,9 @@ pub use network_interface::*;
 pub use oximeter_info::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;
+pub use physical_disk_policy::*;
+pub use physical_disk_state::*;
+pub use probe::*;
 pub use producer_endpoint::*;
 pub use project::*;
 pub use quota::*;
@@ -147,6 +163,7 @@ pub use region::*;
 pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
+pub use schema_versions::*;
 pub use semver_version::*;
 pub use service::*;
 pub use service_kind::*;
@@ -156,17 +173,19 @@ pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use sled_instance::*;
-pub use sled_provision_state::*;
+pub use sled_policy::to_db_sled_policy; // Do not expose DbSledPolicy
 pub use sled_resource::*;
 pub use sled_resource_kind::*;
+pub use sled_state::*;
 pub use sled_underlay_subnet_allocation::*;
 pub use snapshot::*;
 pub use ssh_key::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
-pub use system_update::*;
-pub use update_artifact::*;
+pub use tuf_repo::*;
+pub use typed_uuid::to_db_typed_uuid;
+pub use upstairs_repair::*;
 pub use user_builtin::*;
 pub use utilization::*;
 pub use virtual_provisioning_collection::*;
@@ -407,10 +426,13 @@ impl DatabaseString for ProjectRole {
 
 #[cfg(test)]
 mod tests {
+    use crate::RequestAddressError;
+
     use super::VpcSubnet;
     use ipnetwork::Ipv4Network;
     use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IpNet;
     use omicron_common::api::external::Ipv4Net;
     use omicron_common::api::external::Ipv6Net;
     use std::net::IpAddr;
@@ -515,18 +537,37 @@ mod tests {
     #[test]
     fn test_ip_subnet_check_requestable_address() {
         let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.10".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.1.0".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("192.168.0.0".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.255".parse().unwrap()));
-        assert!(
-            !subnet.check_requestable_addr("192.168.255.255".parse().unwrap())
+        subnet.check_requestable_addr("192.168.0.10".parse().unwrap()).unwrap();
+        subnet.check_requestable_addr("192.168.1.0".parse().unwrap()).unwrap();
+        let addr = "192.178.0.10".parse().unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr(addr),
+            Err(RequestAddressError::OutsideSubnet(
+                addr.into(),
+                IpNet::from(subnet.0).into()
+            ))
+        );
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.0.0".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+
+        subnet
+            .check_requestable_addr("192.168.0.255".parse().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.255.255".parse().unwrap()),
+            Err(RequestAddressError::Broadcast)
         );
 
         let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
+        subnet.check_requestable_addr("fd00::a".parse().unwrap()).unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr("fd00::1".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+        subnet.check_requestable_addr("fd00::1:1".parse().unwrap()).unwrap();
     }
 
     /// Does some basic smoke checks on an impl of `DatabaseString`

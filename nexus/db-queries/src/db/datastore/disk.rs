@@ -206,7 +206,7 @@ impl DataStore {
 
         let (instance, disk) = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .or_else(|e| {
+        .or_else(|e: AttachError<Disk, _, _>| {
             match e {
                 AttachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -348,7 +348,7 @@ impl DataStore {
         )
         .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .or_else(|e| {
+        .or_else(|e: DetachError<Disk, _, _>| {
             match e {
                 DetachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -817,7 +817,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external;

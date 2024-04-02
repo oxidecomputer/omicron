@@ -8,9 +8,10 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use crate::params::{
-    DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
-    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    Inventory, OmicronZonesConfig, VpcFirewallRulesEnsureBody,
+    DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
+    InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, VpcFirewallRulesEnsureBody,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -30,6 +31,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchPorts;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_storage::resources::DisksManagementResult;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -45,6 +47,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
+        api.register(instance_put_external_ip)?;
+        api.register(instance_delete_external_ip)?;
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
@@ -57,6 +61,8 @@ pub fn api() -> SledApiDescription {
         api.register(read_network_bootstore_config)?;
         api.register(write_network_bootstore_config)?;
         api.register(inventory)?;
+        api.register(omicron_physical_disks_get)?;
+        api.register(omicron_physical_disks_put)?;
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
 
@@ -95,6 +101,7 @@ async fn instance_register(
             body_args.hardware,
             body_args.instance_runtime,
             body_args.vmm_runtime,
+            body_args.metadata,
         )
         .await?,
     ))
@@ -150,6 +157,38 @@ async fn instance_put_migration_ids(
         )
         .await?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_put_external_ip(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_put_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_delete_external_ip(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_delete_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {
@@ -371,6 +410,7 @@ async fn read_network_bootstore_config(
                 infra_ip_last: Ipv4Addr::UNSPECIFIED,
                 ports: Vec::new(),
                 bgp: Vec::new(),
+                bfd: Vec::new(),
             }),
         },
     };
@@ -399,8 +439,34 @@ async fn inventory(
     let sa = rqctx.context();
     Ok(HttpResponseOk(
         sa.inventory(rqctx.server.local_addr)
+            .await
             .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_put(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<OmicronPhysicalDisksConfig>,
+) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.omicron_physical_disks_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_get(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
 }
 
 #[endpoint {

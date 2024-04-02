@@ -669,13 +669,13 @@ fdb0:a840:2504:352::/64     fe80::aa40:25ff:fe05:c      UG      2     640 cxgbe0
 fd00:1122:3344:1::/64       fe80::aa40:25ff:fe05:c      UG      2    2401 cxgbe0
 fd00:1122:3344:1::/64       fe80::aa40:25ff:fe05:40c    UG      2      51 cxgbe1
 fdb0:a840:2504:352::/64     fe80::aa40:25ff:fe05:40c    UG      2   11090 cxgbe1
-fd00:99::/64                fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fdb2:ceeb:3ab7:8c9d::1/64   fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
 fdb0:a840:2504:1d1::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
 fdb0:a840:2504:393::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
 fdb0:a840:2504:191::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
 fdb0:a840:2504:353::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
 fd00:1122:3344:101::/64     fe80::aa40:25ff:fe05:c      UG      2  634578 cxgbe0
-fd00:99::/64                fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fd96:354:c1dc:606d::1/64    fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
 fd00:1122:3344:101::/64     fe80::aa40:25ff:fe05:40c    UG      2 14094545 cxgbe1
 fdb0:a840:2504:1d1::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
 fdb0:a840:2504:353::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
@@ -733,7 +733,11 @@ fd00:1122:3344:3::/64       fe80::aa40:25ff:fe05:c      UG      2    2437 cxgbe0
 
 Recall that cxgbe0 and cxgbe1 are connected to separate switches in the rack.  So we're seeing the prefixes for the other sleds in this deployment.  We have two routes to reach each sled: one through each switch.  The gateway is the link-local address _of each switch_ on the corresponding link.  One notable exception: the route for this same sled (`fd00:1122:3344:104::/64`) points to `underlay0`, the GZ's VNIC on the sled's underlay network.  In this way, traffic leaving the GZ (whether it originated in this GZ or arrived from one of the switches) is directed to the sled's underlay network etherstub and from there to the right zone VNIC.
 
-(Questions: Why does 107 only have one route?  What are the `fd00:99::` routes?)
+(Questions: Why does 107 only have one route?)
+
+The `fdb2:ceeb:3ab7:8c9d::1/64` and `fd96:354:c1dc:606d::1/64` routes are
+randomly generated boundary services tunnel endpoint addresses. See RFD 404 for
+more details.
 
 There are similar routes for other sleds' prefixes on the bootstrap network.
 

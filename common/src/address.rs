@@ -18,6 +18,18 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
+/// maximum possible value for a tcp or udp port
+pub const MAX_PORT: u16 = u16::MAX;
+
+/// minimum possible value for a tcp or udp port
+pub const MIN_PORT: u16 = u16::MIN;
+
+/// The amount of redundancy for Nexus services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new Nexus zones)
+pub const NEXUS_REDUNDANCY: usize = 3;
+
 /// The amount of redundancy for internal DNS servers.
 ///
 /// Must be less than or equal to MAX_DNS_REDUNDANCY.
@@ -32,14 +44,13 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_HTTP_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
-/// The port propolis-server listens on inside the propolis zone.
-pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
+pub const LLDP_PORT: u16 = 12230;
 pub const MGD_PORT: u16 = 4676;
 pub const DDMD_PORT: u16 = 8000;
 pub const MGS_PORT: u16 = 12225;
@@ -165,6 +176,18 @@ const GZ_ADDRESS_INDEX: usize = 2;
 /// The maximum number of addresses per sled reserved for RSS.
 pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 
+// The maximum number of addresses per sled reserved for control plane services.
+pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
+
+// Number of addresses reserved (by the Nexus deployment planner) for allocation
+// by the sled itself.  This is currently used for the first two addresses of
+// the sled subnet, which are used for the sled global zone and the switch zone,
+// if any.  Note that RSS does not honor this yet (in fact, per the above
+// RSS_RESERVED_ADDRESSES, it will _only_ choose from this range).  And
+// historically, systems did not have this reservation at all.  So it's not safe
+// to assume that addresses in this subnet are available.
+pub const SLED_RESERVED_ADDRESSES: u16 = 32;
+
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
 #[schemars(rename = "Ipv6Subnet")]
@@ -276,6 +299,19 @@ impl ReservedRackSubnet {
     }
 }
 
+/// Return the list of DNS servers for the rack, given any address in the AZ
+/// subnet
+pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
+    let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
+    let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
+    let dns_subnets =
+        &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
+    dns_subnets
+        .iter()
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
+        .collect()
+}
+
 const SLED_AGENT_ADDRESS_INDEX: usize = 1;
 const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
@@ -385,6 +421,14 @@ impl IpRange {
             IpRange::V6(ip6) => IpRangeIter::V6(ip6.iter()),
         }
     }
+
+    // Has to be u128 to accommodate IPv6
+    pub fn len(&self) -> u128 {
+        match self {
+            IpRange::V4(ip4) => u128::from(ip4.len()),
+            IpRange::V6(ip6) => ip6.len(),
+        }
+    }
 }
 
 impl From<IpAddr> for IpRange {
@@ -426,6 +470,18 @@ impl TryFrom<(Ipv6Addr, Ipv6Addr)> for IpRange {
     }
 }
 
+impl From<Ipv4Range> for IpRange {
+    fn from(value: Ipv4Range) -> Self {
+        Self::V4(value)
+    }
+}
+
+impl From<Ipv6Range> for IpRange {
+    fn from(value: Ipv6Range) -> Self {
+        Self::V6(value)
+    }
+}
+
 /// A non-decreasing IPv4 address range, inclusive of both ends.
 ///
 /// The first address must be less than or equal to the last address.
@@ -459,6 +515,12 @@ impl Ipv4Range {
 
     pub fn iter(&self) -> Ipv4RangeIter {
         Ipv4RangeIter { next: Some(self.first.into()), last: self.last.into() }
+    }
+
+    pub fn len(&self) -> u32 {
+        let start_num = u32::from(self.first);
+        let end_num = u32::from(self.last);
+        end_num - start_num + 1
     }
 }
 
@@ -515,6 +577,12 @@ impl Ipv6Range {
 
     pub fn iter(&self) -> Ipv6RangeIter {
         Ipv6RangeIter { next: Some(self.first.into()), last: self.last.into() }
+    }
+
+    pub fn len(&self) -> u128 {
+        let start_num = u128::from(self.first);
+        let end_num = u128::from(self.last);
+        end_num - start_num + 1
     }
 }
 
@@ -731,6 +799,19 @@ mod test {
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
             ]
         );
+    }
+
+    #[test]
+    fn test_ip_range_length() {
+        let lo = Ipv4Addr::new(10, 0, 0, 1);
+        let hi = Ipv4Addr::new(10, 0, 0, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        assert_eq!(range.len(), 3);
+
+        let lo = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+        let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        assert_eq!(range.len(), 2u128.pow(16) + 3);
     }
 
     #[test]

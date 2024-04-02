@@ -490,7 +490,7 @@ mod test {
                         &mut s,
                         "        zone {} type {}\n",
                         zone.id,
-                        zone.zone_type.label(),
+                        zone.zone_type.kind(),
                     )
                     .unwrap();
                 }
@@ -526,8 +526,13 @@ mod test {
         zone_id: Uuid,
     ) -> sim::Server {
         // Start a simulated sled agent.
-        let config =
-            sim::Config::for_testing(sled_id, sim::SimMode::Auto, None, None);
+        let config = sim::Config::for_testing(
+            sled_id,
+            sim::SimMode::Auto,
+            None,
+            None,
+            Some(vec![]),
+        );
         let agent = sim::Server::start(&config, &log, false).await.unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this

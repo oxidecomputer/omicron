@@ -26,10 +26,13 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::Zpool;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
+use typed_rng::UuidRng;
 use uuid::Uuid;
 
 /// Describes an operational error encountered during the collection process
@@ -85,6 +88,8 @@ pub struct CollectionBuilder {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
     sleds: BTreeMap<Uuid, SledAgent>,
     omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
+    // We just generate one UUID for each collection.
+    id_rng: UuidRng,
 }
 
 impl CollectionBuilder {
@@ -93,11 +98,14 @@ impl CollectionBuilder {
     /// `collector` is an arbitrary string describing the agent that collected
     /// this data.  It's generally a Nexus instance uuid but it can be anything.
     /// It's just for debugging.
-    pub fn new(collector: &str) -> Self {
+    pub fn new<S>(collector: S) -> Self
+    where
+        String: From<S>,
+    {
         CollectionBuilder {
             errors: vec![],
-            time_started: now(),
-            collector: collector.to_owned(),
+            time_started: now_db_precision(),
+            collector: String::from(collector),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),
@@ -107,6 +115,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
+            id_rng: UuidRng::from_entropy(),
         }
     }
 
@@ -119,10 +128,10 @@ impl CollectionBuilder {
         }
 
         Collection {
-            id: Uuid::new_v4(),
+            id: self.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
-            time_done: now(),
+            time_done: now_db_precision(),
             collector: self.collector,
             baseboards: self.baseboards,
             cabooses: self.cabooses,
@@ -134,6 +143,18 @@ impl CollectionBuilder {
             sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
         }
+    }
+
+    /// Within tests, set a seeded RNG for deterministic results.
+    ///
+    /// This will ensure that tests that use this builder will produce the same
+    /// results each time they are run.
+    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "collection-builder";
+        self.id_rng.set_seed(seed, SEED_EXTRA);
+        self
     }
 
     /// Record service processor state `sp_state` reported by MGS
@@ -178,7 +199,7 @@ impl CollectionBuilder {
 
         // Separate the SP state into the SP-specific state and the RoT state,
         // if any.
-        let now = now();
+        let now = now_db_precision();
         let _ = self.sps.entry(baseboard.clone()).or_insert_with(|| {
             ServiceProcessor {
                 time_collected: now,
@@ -279,7 +300,7 @@ impl CollectionBuilder {
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
             CabooseFound {
-                time_collected: now(),
+                time_collected: now_db_precision(),
                 source: source.to_owned(),
                 caboose: sw_caboose.clone(),
             },
@@ -348,7 +369,7 @@ impl CollectionBuilder {
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
             RotPageFound {
-                time_collected: now(),
+                time_collected: now_db_precision(),
                 source: source.to_owned(),
                 page: sw_rot_page.clone(),
             },
@@ -448,6 +469,7 @@ impl CollectionBuilder {
                 return Ok(());
             }
         };
+        let time_collected = now_db_precision();
         let sled = SledAgent {
             source: source.to_string(),
             sled_agent_address,
@@ -456,8 +478,14 @@ impl CollectionBuilder {
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
             reservoir_size: inventory.reservoir_size,
-            time_collected: now(),
+            time_collected,
             sled_id,
+            disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
+            zpools: inventory
+                .zpools
+                .into_iter()
+                .map(|z| Zpool::new(time_collected, z))
+                .collect(),
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
@@ -491,7 +519,7 @@ impl CollectionBuilder {
             self.omicron_zones.insert(
                 sled_id,
                 OmicronZonesFound {
-                    time_collected: now(),
+                    time_collected: now_db_precision(),
                     source: source.to_string(),
                     sled_id,
                     zones,
@@ -507,7 +535,7 @@ impl CollectionBuilder {
 /// This exists because the database doesn't store nanosecond-precision, so if
 /// we store nanosecond-precision timestamps, then DateTime conversion is lossy
 /// when round-tripping through the database.  That's rather inconvenient.
-fn now() -> DateTime<Utc> {
+pub fn now_db_precision() -> DateTime<Utc> {
     let ts = Utc::now();
     let nanosecs = ts.timestamp_subsec_nanos();
     let micros = ts.timestamp_subsec_micros();
@@ -517,7 +545,7 @@ fn now() -> DateTime<Utc> {
 
 #[cfg(test)]
 mod test {
-    use super::now;
+    use super::now_db_precision;
     use super::CollectionBuilder;
     use crate::examples::representative;
     use crate::examples::sp_state;
@@ -541,10 +569,10 @@ mod test {
     // Verify the contents of an empty collection.
     #[test]
     fn test_empty() {
-        let time_before = now();
+        let time_before = now_db_precision();
         let builder = CollectionBuilder::new("test_empty");
         let collection = builder.build();
-        let time_after = now();
+        let time_after = now_db_precision();
 
         assert!(collection.errors.is_empty());
         assert!(time_before <= collection.time_started);
@@ -577,7 +605,7 @@ mod test {
     // a useful quick check.
     #[test]
     fn test_basic() {
-        let time_before = now();
+        let time_before = now_db_precision();
         let Representative {
             builder,
             sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
@@ -587,7 +615,7 @@ mod test {
                 [sled_agent_id_basic, sled_agent_id_extra, sled_agent_id_pc, sled_agent_id_unknown],
         } = representative();
         let collection = builder.build();
-        let time_after = now();
+        let time_after = now_db_precision();
         println!("{:#?}", collection);
         assert!(time_before <= collection.time_started);
         assert!(collection.time_started <= collection.time_done);
@@ -907,6 +935,11 @@ mod test {
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
+        assert_eq!(sled1_agent.disks.len(), 4);
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
+        assert_eq!(sled1_agent.disks[0].identity.model, "box");
+        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+
         let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");

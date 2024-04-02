@@ -7,12 +7,11 @@ use crate::app::instance::{
     InstanceStateChangeError, InstanceStateChangeRequest,
 };
 use crate::app::sagas::{
-    declare_saga_actions, instance_common::allocate_sled_ipv6,
+    declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
 use crate::external_api::params;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::PROPOLIS_PORT;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{
@@ -181,7 +180,7 @@ async fn sim_allocate_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    allocate_sled_ipv6(
+    allocate_vmm_ipv6(
         &opctx,
         sagactx.user_data().datastore(),
         params.migrate_params.dst_sled_id,
@@ -424,8 +423,10 @@ async fn sim_instance_migrate(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
-    let src_vmm_addr =
-        SocketAddr::new(params.src_vmm.propolis_ip.ip(), PROPOLIS_PORT);
+    let src_vmm_addr = SocketAddr::new(
+        params.src_vmm.propolis_ip.ip(),
+        params.src_vmm.propolis_port.into(),
+    );
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
     let dst_vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
@@ -568,8 +569,9 @@ mod tests {
                 },
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(2),
-                hostname: String::from(INSTANCE_NAME),
+                hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),
+                ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],

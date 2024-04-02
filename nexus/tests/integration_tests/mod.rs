@@ -18,11 +18,11 @@ mod images;
 mod initialization;
 mod instances;
 mod ip_pools;
-mod loopback_address;
 mod metrics;
 mod oximeter;
 mod pantry;
 mod password_login;
+mod probe;
 mod projects;
 mod quotas;
 mod rack;
@@ -40,7 +40,6 @@ mod sp_updater;
 mod ssh_keys;
 mod subnet_allocation;
 mod switch_port;
-mod system_updates;
 mod unauthorized;
 mod unauthorized_coverage;
 mod updates;
@@ -51,7 +50,6 @@ mod vpc_firewall;
 mod vpc_routers;
 mod vpc_subnets;
 mod vpcs;
-mod zpools;
 
 // This module is used only for shared data, not test cases.
 mod endpoints;

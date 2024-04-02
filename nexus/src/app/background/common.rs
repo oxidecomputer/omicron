@@ -153,13 +153,10 @@ use tokio::time::MissedTickBehavior;
 ///
 /// See module-level documentation for details.
 pub trait BackgroundTask: Send + Sync {
-    fn activate<'a, 'b, 'c>(
+    fn activate<'a>(
         &'a mut self,
-        opctx: &'b OpContext,
-    ) -> BoxFuture<'c, serde_json::Value>
-    where
-        'a: 'c,
-        'b: 'c;
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value>;
 }
 
 /// Drives the execution of background tasks
@@ -411,7 +408,7 @@ impl TaskExec {
                 start_time,
                 start_instant,
                 reason,
-                iteration: iteration,
+                iteration,
             });
         });
 
@@ -470,6 +467,7 @@ mod test {
     use super::BackgroundTask;
     use super::Driver;
     use crate::app::background::common::ActivationReason;
+    use crate::app::sagas::SagaRequest;
     use assert_matches::assert_matches;
     use chrono::Utc;
     use futures::future::BoxFuture;
@@ -480,6 +478,7 @@ mod test {
     use std::time::Instant;
     use tokio::sync::mpsc;
     use tokio::sync::mpsc::error::TryRecvError;
+    use tokio::sync::mpsc::Sender;
     use tokio::sync::watch;
 
     type ControlPlaneTestContext =
@@ -499,14 +498,10 @@ mod test {
     }
 
     impl BackgroundTask for ReportingTask {
-        fn activate<'a, 'b, 'c>(
+        fn activate<'a>(
             &'a mut self,
-            _: &'b OpContext,
-        ) -> BoxFuture<'c, serde_json::Value>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
+            _: &'a OpContext,
+        ) -> BoxFuture<'a, serde_json::Value> {
             async {
                 let count = self.counter;
                 self.counter += 1;
@@ -684,14 +679,10 @@ mod test {
     }
 
     impl BackgroundTask for PausingTask {
-        fn activate<'a, 'b, 'c>(
+        fn activate<'a>(
             &'a mut self,
-            _: &'b OpContext,
-        ) -> BoxFuture<'c, serde_json::Value>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
+            _: &'a OpContext,
+        ) -> BoxFuture<'a, serde_json::Value> {
             async {
                 let count = self.counter;
                 self.counter += 1;
@@ -824,5 +815,83 @@ mod test {
         // legitimate periodic activation.  It's hard to choose a period for
         // such a task that would allow us to reliably distinguish between these
         // two without also spending a lot of wall-clock time on this test.
+    }
+
+    /// Simple BackgroundTask impl that sends a test-only SagaRequest
+    struct SagaRequestTask {
+        saga_request: Sender<SagaRequest>,
+    }
+
+    impl SagaRequestTask {
+        fn new(saga_request: Sender<SagaRequest>) -> SagaRequestTask {
+            SagaRequestTask { saga_request }
+        }
+    }
+
+    impl BackgroundTask for SagaRequestTask {
+        fn activate<'a>(
+            &'a mut self,
+            _: &'a OpContext,
+        ) -> BoxFuture<'a, serde_json::Value> {
+            async {
+                let _ = self.saga_request.send(SagaRequest::TestOnly).await;
+                serde_json::Value::Null
+            }
+            .boxed()
+        }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_request_flow(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let (saga_request, mut saga_request_recv) = SagaRequest::channel();
+        let t1 = SagaRequestTask::new(saga_request);
+
+        let mut driver = Driver::new();
+        let (_dep_tx1, dep_rx1) = watch::channel(0);
+
+        let h1 = driver.register(
+            "t1".to_string(),
+            "test saga request flow task".to_string(),
+            Duration::from_secs(300), // should not fire in this test
+            Box::new(t1),
+            opctx.child(std::collections::BTreeMap::new()),
+            vec![Box::new(dep_rx1.clone())],
+        );
+
+        assert!(matches!(
+            saga_request_recv.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty),
+        ));
+
+        driver.activate(&h1);
+
+        // wait 1 second for the saga request to arrive
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
+                assert!(false);
+            }
+
+            saga_request = saga_request_recv.recv() => {
+                match saga_request {
+                    None => {
+                        assert!(false);
+                    }
+
+                    Some(saga_request) => {
+                        assert!(matches!(
+                            saga_request,
+                            SagaRequest::TestOnly,
+                        ));
+                    }
+                }
+            }
+        }
     }
 }

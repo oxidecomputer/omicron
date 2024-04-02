@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Make me a Gimlet!
 #
@@ -84,7 +84,7 @@ in the SoftNPU zone later to add those entries."
 }
 
 ensure_run_as_root
-ensure_zpools
+ensure_vdevs
 
 if [[ "$SOFTNPU_MODE" == "zone" ]]; then
     ensure_simulated_links "$PHYSICAL_LINK"

@@ -9,26 +9,30 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkSetupError,
 };
-use crate::bootstrap::params::StartSledAgentRequest;
+use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
-use crate::instance_manager::{InstanceManager, ReservoirMode};
+use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
-use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
-use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
-    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
+use crate::nexus::{
+    NexusClientWithResolver, NexusNotifierHandle, NexusNotifierInput,
+    NexusNotifierTask,
 };
+use crate::params::{
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
+    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+};
+use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
-use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
+use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use ddm_admin_client::Client as DdmAdminClient;
 use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
@@ -56,17 +60,20 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_notify_ext, retry_policy_internal_service,
+    retry_notify, retry_policy_internal_service,
     retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use oximeter::types::ProducerRegistry;
-use sled_hardware::{underlay, Baseboard, HardwareManager};
+use sled_hardware::{underlay, HardwareManager};
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use illumos_utils::running_zone::ZoneBuilderFactory;
@@ -103,6 +110,9 @@ pub enum Error {
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
+
+    #[error("Failed to request firewall rules")]
+    FirewallRequest(#[source] nexus_client::Error<nexus_client::types::Error>),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -149,8 +159,13 @@ pub enum Error {
 
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
-        omicron_common::api::external::Error::InternalError {
-            internal_message: err.to_string(),
+        match err {
+            // Some errors can convert themselves into the external error
+            Error::Services(err) => err.into(),
+            Error::Storage(err) => err.into(),
+            _ => omicron_common::api::external::Error::InternalError {
+                internal_message: err.to_string(),
+            },
         }
     }
 }
@@ -159,7 +174,7 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            crate::sled_agent::Error::Instance(instance_manager_error) => {
+            Error::Instance(instance_manager_error) => {
                 match instance_manager_error {
                     crate::instance_manager::Error::Instance(
                         instance_error,
@@ -196,7 +211,7 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-            crate::sled_agent::Error::ZoneBundle(ref inner) => match inner {
+            Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
@@ -280,8 +295,8 @@ struct SledAgentInner {
     // Connection to Nexus.
     nexus_client: NexusClientWithResolver,
 
-    // A serialized request queue for operations interacting with Nexus.
-    nexus_request_queue: NexusRequestQueue,
+    // A mechanism for notifiying nexus about sled-agent updates
+    nexus_notifier: NexusNotifierHandle,
 
     // The rack network config provided at RSS time.
     rack_network_config: Option<RackNetworkConfig>,
@@ -297,6 +312,9 @@ struct SledAgentInner {
 
     // Handle to the traffic manager for writing OS updates to our boot disks.
     boot_disk_os_writer: BootDiskOsWriter,
+
+    // Component of Sled Agent responsible for managing instrumentation probes.
+    probes: ProbeManager,
 }
 
 impl SledAgentInner {
@@ -324,7 +342,6 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
-        underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -339,7 +356,7 @@ impl SledAgent {
 
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .boot_disk()
             .ok_or_else(|| Error::BootDiskNotFound)?;
@@ -365,11 +382,6 @@ impl SledAgent {
         info!(log, "Mounting backing filesystems");
         crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
 
-        // Ensure we have a thread that automatically reaps process contracts
-        // when they become empty. See the comments in
-        // illumos-utils/src/running_zone.rs for more detail.
-        illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
-
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
         // through to us?
@@ -393,21 +405,73 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics(&config.data_links)?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
+        // Start collecting metric data.
+        //
+        // First, we're creating a shareable type for managing the metrics
+        // themselves early on, so that we can pass it to other components of
+        // the sled agent that need it.
+        //
+        // Then we'll start tracking physical links and register as a producer
+        // with Nexus in the background.
+        let metrics_manager = MetricsManager::new(
+            request.body.id,
+            request.body.rack_id,
+            long_running_task_handles.hardware_manager.baseboard(),
+            log.new(o!("component" => "MetricsManager")),
+        )?;
+
+        // Start tracking the underlay physical links.
+        for nic in underlay::find_nics(&config.data_links)? {
+            let link_name = nic.interface();
+            if let Err(e) = metrics_manager
+                .track_physical_link(
+                    link_name,
+                    crate::metrics::LINK_SAMPLE_INTERVAL,
+                )
+                .await
+            {
+                error!(
+                    log,
+                    "failed to start tracking physical link metrics";
+                    "link_name" => link_name,
+                    "error" => ?e,
+                );
+            }
+        }
+
+        // Spawn a task in the background to register our metric producer with
+        // Nexus. This should not block progress here.
+        let endpoint = ProducerEndpoint {
+            id: request.body.id,
+            kind: ProducerKind::SledAgent,
+            address: sled_address.into(),
+            base_route: String::from("/metrics/collect"),
+            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
+        };
+        tokio::task::spawn(register_metric_producer_with_nexus(
+            log.clone(),
+            nexus_client.clone(),
+            endpoint,
+        ));
+
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
         );
 
-        // Inform the `StorageMonitor` that the underlay is available so that
-        // it can try to contact nexus.
-        underlay_available_tx
-            .send(UnderlayAccess {
-                nexus_client: nexus_client.clone(),
-                sled_id: request.body.id,
-            })
-            .map_err(|_| ())
-            .expect("Failed to send to StorageMonitor");
+        // Configure the VMM reservoir as either a percentage of DRAM or as an
+        // exact size in MiB.
+        let reservoir_mode = ReservoirMode::from_config(
+            config.vmm_reservoir_percentage,
+            config.vmm_reservoir_size_mb,
+        );
+
+        let vmm_reservoir_manager = VmmReservoirManager::spawn(
+            &log,
+            long_running_task_handles.hardware_manager.clone(),
+            reservoir_mode,
+        );
 
         let instances = InstanceManager::new(
             parent_log.clone(),
@@ -417,40 +481,8 @@ impl SledAgent {
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
             ZoneBuilderFactory::default(),
+            vmm_reservoir_manager.clone(),
         )?;
-
-        // Configure the VMM reservoir as either a percentage of DRAM or as an
-        // exact size in MiB.
-        let reservoir_mode = match (
-            config.vmm_reservoir_percentage,
-            config.vmm_reservoir_size_mb,
-        ) {
-            (None, None) => ReservoirMode::None,
-            (Some(p), None) => ReservoirMode::Percentage(p),
-            (None, Some(mb)) => ReservoirMode::Size(mb),
-            (Some(_), Some(_)) => panic!(
-                "only one of vmm_reservoir_percentage and \
-                vmm_reservoir_size_mb is allowed"
-            ),
-        };
-
-        match reservoir_mode {
-            ReservoirMode::None => warn!(log, "Not using VMM reservoir"),
-            ReservoirMode::Size(0) | ReservoirMode::Percentage(0) => {
-                warn!(log, "Not using VMM reservoir (size 0 bytes requested)")
-            }
-            _ => {
-                instances
-                    .set_reservoir_size(
-                        &long_running_task_handles.hardware_manager,
-                        reservoir_mode,
-                    )
-                    .map_err(|e| {
-                        error!(log, "Failed to setup VMM reservoir: {e}");
-                        e
-                    })?;
-            }
-        }
 
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
@@ -513,46 +545,30 @@ impl SledAgent {
             rack_network_config.clone(),
         )?;
 
-        let mut metrics_manager = MetricsManager::new(
-            request.body.id,
-            request.body.rack_id,
-            long_running_task_handles.hardware_manager.baseboard(),
-            log.new(o!("component" => "MetricsManager")),
-        )?;
-
-        // Start tracking the underlay physical links.
-        for nic in underlay::find_nics(&config.data_links)? {
-            let link_name = nic.interface();
-            if let Err(e) = metrics_manager
-                .track_physical_link(
-                    link_name,
-                    crate::metrics::LINK_SAMPLE_INTERVAL,
-                )
-                .await
-            {
-                error!(
-                    log,
-                    "failed to start tracking physical link metrics";
-                    "link_name" => link_name,
-                    "error" => ?e,
-                );
-            }
-        }
-
-        // Spawn a task in the background to register our metric producer with
-        // Nexus. This should not block progress here.
-        let endpoint = ProducerEndpoint {
-            id: request.body.id,
-            kind: ProducerKind::SledAgent,
-            address: sled_address.into(),
-            base_route: String::from("/metrics/collect"),
-            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
+        // Spawn a background task for managing notifications to nexus
+        // about this sled-agent.
+        let nexus_notifier_input = NexusNotifierInput {
+            sled_id: request.body.id,
+            sled_address: get_sled_address(request.body.subnet),
+            nexus_client: nexus_client.client().clone(),
+            hardware: long_running_task_handles.hardware_manager.clone(),
+            vmm_reservoir_manager: vmm_reservoir_manager.clone(),
         };
-        tokio::task::spawn(register_metric_producer_with_nexus(
-            log.clone(),
+        let (nexus_notifier_task, nexus_notifier_handle) =
+            NexusNotifierTask::new(nexus_notifier_input, &log);
+
+        tokio::spawn(async move {
+            nexus_notifier_task.run().await;
+        });
+
+        let probes = ProbeManager::new(
+            request.body.id,
             nexus_client.clone(),
-            endpoint,
-        ));
+            etherstub.clone(),
+            storage_manager.clone(),
+            port_manager.clone(),
+            log.new(o!("component" => "ProbeManager")),
+        );
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -561,19 +577,13 @@ impl SledAgent {
                 start_request: request,
                 storage: long_running_task_handles.storage_manager.clone(),
                 instances,
+                probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
                 updates,
                 port_manager,
                 services,
                 nexus_client,
-
-                // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
-                // Propagate usage of this request queue throughout the Sled
-                // Agent.
-                //
-                // Also, we could maybe de-dup some of the backoff code in the
-                // request queue?
-                nexus_request_queue: NexusRequestQueue::new(),
+                nexus_notifier: nexus_notifier_handle,
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
@@ -583,11 +593,13 @@ impl SledAgent {
             log: log.clone(),
         };
 
+        sled_agent.inner.probes.run().await;
+
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
         // actually running on a scrimlet, that's fine, the updated value will
         // be received by Nexus eventually.
-        sled_agent.notify_nexus_about_self(&log);
+        sled_agent.notify_nexus_about_self(&log).await;
 
         Ok(sled_agent)
     }
@@ -601,26 +613,35 @@ impl SledAgent {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                self.inner
-                    .services
-                    .load_services()
+                // Load as many services as we can, and don't exit immediately
+                // upon failure...
+                let load_services_result =
+                    self.inner.services.load_services().await.map_err(|err| {
+                        BackoffError::transient(Error::from(err))
+                    });
+
+                // ... and request firewall rule updates for as many services as
+                // we can. Note that we still make this request even if we only
+                // partially load some services.
+                let firewall_result = self
+                    .request_firewall_update()
                     .await
-                    .map_err(|err| BackoffError::transient(err))
+                    .map_err(|err| BackoffError::transient(err));
+
+                // Only complete if we have loaded all services and firewall
+                // rules successfully.
+                load_services_result.and(firewall_result)
             },
             |err, delay| {
                 warn!(
                     self.log,
                     "Failed to load services, will retry in {:?}", delay;
-                    "error" => %err,
+                    "error" => ?err,
                 );
             },
         )
         .await
         .unwrap(); // we retry forever, so this can't fail
-
-        // Now that we've initialized the sled services, notify nexus again
-        // at which point it'll plumb any necessary firewall rules back to us.
-        self.notify_nexus_about_self(&self.log);
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -641,94 +662,25 @@ impl SledAgent {
         &self.inner.start_request
     }
 
-    // Sends a request to Nexus informing it that the current sled exists.
-    pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
+    /// Requests firewall rules from Nexus.
+    ///
+    /// Does not retry upon failure.
+    async fn request_firewall_update(&self) -> Result<(), Error> {
         let sled_id = self.inner.id;
-        let nexus_client = self.inner.nexus_client.clone();
-        let sled_address = self.inner.sled_address();
-        let is_scrimlet = self.inner.hardware.is_scrimlet();
-        let baseboard = self.inner.hardware.baseboard().convert();
-        let usable_hardware_threads =
-            self.inner.hardware.online_processor_count();
-        let usable_physical_ram =
-            self.inner.hardware.usable_physical_ram_bytes();
-        let reservoir_size = self.inner.instances.reservoir_size();
 
-        let log = log.clone();
-        let fut = async move {
-            // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped
-            // exponential backoff.
-            //
-            // TODO-robustness if this returns a 400 error, we probably want to
-            // return a permanent error from the `notify_nexus` closure.
-            let notify_nexus = || async {
-                info!(
-                    log,
-                    "contacting server nexus, registering sled";
-                    "id" => ?sled_id,
-                    "baseboard" => ?baseboard,
-                );
-                let role = if is_scrimlet {
-                    nexus_client::types::SledRole::Scrimlet
-                } else {
-                    nexus_client::types::SledRole::Gimlet
-                };
-
-                nexus_client
-                    .client()
-                    .sled_agent_put(
-                        &sled_id,
-                        &nexus_client::types::SledAgentStartupInfo {
-                            sa_address: sled_address.to_string(),
-                            role,
-                            baseboard: baseboard.clone(),
-                            usable_hardware_threads,
-                            usable_physical_ram: nexus_client::types::ByteCount(
-                                usable_physical_ram,
-                            ),
-                            reservoir_size: nexus_client::types::ByteCount(
-                                reservoir_size.to_bytes(),
-                            ),
-                        },
-                    )
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))
-            };
-            // This notification is often invoked before Nexus has started
-            // running, so avoid flagging any errors as concerning until some
-            // time has passed.
-            let log_notification_failure = |err, call_count, total_duration| {
-                if call_count == 0 {
-                    info!(
-                        log,
-                        "failed to notify nexus about sled agent";
-                        "error" => %err,
-                    );
-                } else if total_duration > std::time::Duration::from_secs(30) {
-                    warn!(
-                        log,
-                        "failed to notify nexus about sled agent";
-                        "error" => %err,
-                        "total duration" => ?total_duration,
-                    );
-                }
-            };
-            retry_notify_ext(
-                retry_policy_internal_service_aggressive(),
-                notify_nexus,
-                log_notification_failure,
-            )
-            .await
-            .expect("Expected an infinite retry loop contacting Nexus");
-        };
         self.inner
-            .nexus_request_queue
-            .sender()
-            .send(Box::pin(fut))
-            .unwrap_or_else(|err| {
-                panic!("Failed to send future to request queue: {err}");
-            });
+            .nexus_client
+            .client()
+            .sled_firewall_rules_request(&sled_id)
+            .await
+            .map_err(|err| Error::FirewallRequest(err))?;
+        Ok(())
+    }
+
+    /// Trigger a request to Nexus informing it that the current sled exists,
+    /// with information about the existing set of hardware.
+    pub(crate) async fn notify_nexus_about_self(&self, log: &Logger) {
+        self.inner.nexus_notifier.notify_nexus_about_self(log).await;
     }
 
     /// List all zone bundles on the system, for any zones live or dead.
@@ -839,6 +791,28 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
+    /// Requests the set of physical disks currently managed by the Sled Agent.
+    ///
+    /// This should be contrasted by the set of disks in the inventory, which
+    /// may contain a slightly different set, if certain disks are not expected
+    /// to be in-use by the broader control plane.
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, Error> {
+        Ok(self.storage().omicron_physical_disks_list().await?)
+    }
+
+    /// Ensures that the specific set of Omicron Physical Disks are running
+    /// on this sled, and that no other disks are being used by the control
+    /// plane (with the exception of M.2s, which are always automatically
+    /// in-use).
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, Error> {
+        Ok(self.storage().omicron_physical_disks_ensure(config).await?)
+    }
+
     /// List the Omicron zone configuration that's currently running
     pub async fn omicron_zones_list(
         &self,
@@ -872,7 +846,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_omicron_zones_persistent(requested_zones)
+            .ensure_all_omicron_zones_persistent(requested_zones, None)
             .await?;
         Ok(())
     }
@@ -886,7 +860,7 @@ impl SledAgent {
     pub async fn zpools_get(&self) -> Vec<Zpool> {
         self.inner
             .storage
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .get_all_zpools()
             .into_iter()
@@ -909,6 +883,7 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
@@ -917,6 +892,7 @@ impl SledAgent {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
@@ -927,6 +903,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                metadata,
             )
             .await
             .map_err(|e| Error::Instance(e))
@@ -975,6 +952,37 @@ impl SledAgent {
         self.inner
             .instances
             .put_migration_ids(instance_id, old_runtime, migration_ids)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that an instance's OPTE/port state includes the
+    /// specified external IP address.
+    ///
+    /// This method will return an error when trying to register an ephemeral IP which
+    /// does not match the current ephemeral IP.
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .add_external_ip(instance_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that an instance's OPTE/port state does not include the
+    /// specified external IP address in either its ephemeral or floating IP set.
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .delete_external_ip(instance_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1090,7 +1098,7 @@ impl SledAgent {
     ///
     /// This is basically a GET version of the information we push to Nexus on
     /// startup.
-    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
+    pub(crate) async fn inventory(&self) -> Result<Inventory, InventoryError> {
         let sled_id = self.inner.id;
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
@@ -1106,6 +1114,38 @@ impl SledAgent {
             crate::params::SledRole::Gimlet
         };
 
+        let mut disks = vec![];
+        let mut zpools = vec![];
+        let all_disks = self.storage().get_latest_disks().await;
+        for (identity, variant, slot) in all_disks.iter_all() {
+            disks.push(crate::params::InventoryDisk {
+                identity: identity.clone(),
+                variant,
+                slot,
+            });
+        }
+        for zpool in all_disks.all_u2_zpools() {
+            let info =
+                match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
+                {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Failed to access zpool info";
+                            "zpool" => %zpool,
+                            "err" => %err
+                        );
+                        continue;
+                    }
+                };
+
+            zpools.push(crate::params::InventoryZpool {
+                id: zpool.id(),
+                total_size: ByteCount::try_from(info.size())?,
+            });
+        }
+
         Ok(Inventory {
             sled_id,
             sled_agent_address,
@@ -1114,6 +1154,8 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            disks,
+            zpools,
         })
     }
 }
@@ -1154,9 +1196,9 @@ pub enum AddSledError {
         err: bootstrap_agent_client::Error,
     },
     #[error("Failed to connect to DDM")]
-    DdmAdminClient(#[source] ddm_admin_client::DdmError),
-    #[error("Failed to learn bootstrap ip for {0}")]
-    NotFound(Baseboard),
+    DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
+    #[error("Failed to learn bootstrap ip for {0:?}")]
+    NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}: {err}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
@@ -1167,15 +1209,13 @@ pub enum AddSledError {
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
-    sled_id: Baseboard,
+    sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
     // Get all known bootstrap addresses via DDM
     let ddm_admin_client = DdmAdminClient::localhost(&log)?;
     let addrs = ddm_admin_client
-        .derive_bootstrap_addrs_from_prefixes(&[
-            underlay::BootstrapInterface::GlobalZone,
-        ])
+        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
         .await?;
 
     // Create a set of futures to concurrently map the baseboard to bootstrap ip
@@ -1195,16 +1235,20 @@ pub async fn sled_add(
         })
         .collect::<FuturesUnordered<_>>();
 
-    // Execute the futures until we find our matching sled or done searching
+    // Execute the futures until we find our matching sled or are done searching
     let mut target_ip = None;
+    let mut found_baseboard = None;
     while let Some((ip, result)) = addrs_to_sleds.next().await {
         match result {
             Ok(baseboard) => {
                 // Convert from progenitor type back to `sled-hardware`
                 // type.
-                let found = baseboard.into_inner().into();
-                if sled_id == found {
+                let found: Baseboard = baseboard.into_inner().into();
+                if sled_id.serial_number == found.identifier()
+                    && sled_id.part_number == found.model()
+                {
                     target_ip = Some(ip);
+                    found_baseboard = Some(found);
                     break;
                 }
             }
@@ -1227,10 +1271,14 @@ pub async fn sled_add(
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
+    // Safe to unwrap, because we would have bailed when checking target_ip
+    // above otherwise. baseboard and target_ip are set together.
+    let baseboard = found_baseboard.unwrap();
+
     client.start_sled_agent(&request).await.map_err(|err| {
-        AddSledError::BootstrapTcpClient { sled_id: sled_id.clone(), err }
+        AddSledError::BootstrapTcpClient { sled_id: baseboard.clone(), err }
     })?;
 
-    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %sled_id);
+    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
     Ok(())
 }

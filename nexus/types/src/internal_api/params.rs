@@ -4,10 +4,13 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UserId;
+use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
@@ -35,18 +38,9 @@ pub enum SledRole {
     Scrimlet,
 }
 
-// TODO: We need a unified representation of these hardware identifiers
-/// Describes properties that should uniquely identify Oxide manufactured hardware
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub serial_number: String,
-    pub part_number: String,
-    pub revision: i64,
-}
-
-/// Sent by a sled agent on startup to Nexus to request further instruction
+/// Sent by a sled agent to Nexus to inform about resources
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
-pub struct SledAgentStartupInfo {
+pub struct SledAgentInfo {
     /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
 
@@ -66,6 +60,15 @@ pub struct SledAgentStartupInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
+
+    /// The generation number of this request from sled-agent
+    pub generation: Generation,
+
+    /// Whether the sled-agent has been decommissioned by nexus
+    ///
+    /// This flag is only set to true by nexus. Setting it on an upsert from
+    /// sled-agent has no effect.
+    pub decommissioned: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -79,6 +82,8 @@ pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
+    pub id: Uuid,
+
     pub vendor: String,
     pub serial: String,
     pub model: String,
@@ -87,34 +92,14 @@ pub struct PhysicalDiskPutRequest {
     pub sled_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskPutResponse {}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskDeleteRequest {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
-
-    pub sled_id: Uuid,
-}
-
-/// Sent by a sled agent on startup to Nexus to request further instruction
+/// Identifies information about a Zpool that should be part of the control
+/// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    /// Total size of the pool.
-    pub size: ByteCount,
-
-    // Information to identify the disk to which this zpool belongs
-    pub disk_vendor: String,
-    pub disk_serial: String,
-    pub disk_model: String,
-    // TODO: We could include any other data from `ZpoolInfo` we want,
-    // such as "allocated/free" space and pool health?
+    pub id: Uuid,
+    pub sled_id: Uuid,
+    pub physical_disk_id: Uuid,
 }
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
 #[derive(
@@ -163,6 +148,7 @@ pub struct ServiceNic {
     pub name: Name,
     pub ip: IpAddr,
     pub mac: MacAddr,
+    pub slot: u8,
 }
 
 /// Describes the purpose of the service.
@@ -245,8 +231,17 @@ impl std::fmt::Debug for Certificate {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
+    /// Blueprint describing services initialized by RSS.
+    pub blueprint: Blueprint,
     /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
+
+    /// "Managed" physical disks owned by the control plane
+    pub physical_disks: Vec<PhysicalDiskPutRequest>,
+
+    /// Zpools created within the physical disks created by the control plane.
+    pub zpools: Vec<ZpoolPutRequest>,
+
     /// Datasets on the rack which have been provisioned by RSS.
     pub datasets: Vec<DatasetCreateRequest>,
     /// Ranges of the service IP pool which may be used for internal services,
@@ -263,7 +258,7 @@ pub struct RackInitializationRequest {
     /// The external qsfp ports per sidecar
     pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: RackNetworkConfig,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;

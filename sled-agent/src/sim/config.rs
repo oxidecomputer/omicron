@@ -9,7 +9,7 @@ use camino::Utf8Path;
 use dropshot::ConfigDropshot;
 use serde::Deserialize;
 use serde::Serialize;
-pub use sled_hardware::Baseboard;
+pub use sled_hardware_types::Baseboard;
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
@@ -84,6 +84,7 @@ impl Config {
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         update_directory: Option<&Utf8Path>,
+        zpools: Option<Vec<ConfigZpool>>,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
@@ -94,6 +95,10 @@ impl Config {
         // updates, make up a path that doesn't exist.
         let update_directory =
             update_directory.unwrap_or_else(|| "/nonexistent".into());
+        let zpools = zpools.unwrap_or_else(|| {
+            // By default, create 10 "virtual" U.2s, with 1 TB of storage.
+            vec![ConfigZpool { size: 1 << 40 }; 10]
+        });
         Config {
             id,
             sim_mode,
@@ -104,7 +109,7 @@ impl Config {
                 ..Default::default()
             },
             storage: ConfigStorage {
-                zpools: vec![],
+                zpools,
                 ip: IpAddr::from(Ipv6Addr::LOCALHOST),
             },
             updates: ConfigUpdates {

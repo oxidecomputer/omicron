@@ -9,16 +9,17 @@
 
 mod error;
 pub mod http_pagination;
-use dropshot::HttpError;
-pub use error::*;
-
 pub use crate::api::internal::shared::SwitchLocation;
+use crate::update::ArtifactHash;
+use crate::update::ArtifactId;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
+pub use error::*;
 use futures::stream::BoxStream;
 use parse_display::Display;
 use parse_display::FromStr;
@@ -29,6 +30,7 @@ use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -648,16 +650,28 @@ impl From<ByteCount> for i64 {
 pub struct Generation(u64);
 
 impl Generation {
-    pub fn new() -> Generation {
+    pub const fn new() -> Generation {
         Generation(1)
     }
 
-    pub fn next(&self) -> Generation {
+    pub const fn from_u32(value: u32) -> Generation {
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `u32` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::from(value)`.
+        Generation(value as u64)
+    }
+
+    pub const fn next(&self) -> Generation {
         // It should technically be an operational error if this wraps or even
         // exceeds the value allowed by an i64.  But it seems unlikely enough to
         // happen in practice that we can probably feel safe with this.
         let next_gen = self.0 + 1;
-        assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `i64::MAX` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::try_from(i64::MAX).unwrap()`.
+        assert!(next_gen <= i64::MAX as u64);
         Generation(next_gen)
     }
 }
@@ -677,6 +691,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<Generation> for u64 {
+    fn from(g: Generation) -> Self {
+        g.0
+    }
+}
+
 impl From<u32> for Generation {
     fn from(value: u32) -> Self {
         Generation(u64::from(value))
@@ -689,8 +709,121 @@ impl TryFrom<i64> for Generation {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(Generation(
             u64::try_from(value)
-                .map_err(|_| anyhow!("generation number too large"))?,
+                .map_err(|_| anyhow!("negative generation number"))?,
         ))
+    }
+}
+
+impl TryFrom<u64> for Generation {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        i64::try_from(value)
+            .map_err(|_| anyhow!("generation number too large"))?;
+        Ok(Generation(value))
+    }
+}
+
+/// An RFC-1035-compliant hostname.
+#[derive(
+    Clone, Debug, Deserialize, Display, Eq, PartialEq, SerializeDisplay,
+)]
+#[display("{0}")]
+#[serde(try_from = "String", into = "String")]
+pub struct Hostname(String);
+
+impl Hostname {
+    /// Return the hostname as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+// Regular expression for hostnames.
+//
+// Each name is a dot-separated sequence of labels. Each label is supposed to
+// be an "LDH": letter, dash, or hyphen. Hostnames can consist of one label, or
+// many, separated by a `.`. While _domain_ names are allowed to end in a `.`,
+// making them fully-qualified, hostnames are not.
+//
+// Note that labels are allowed to contain a hyphen, but may not start or end
+// with one. See RFC 952, "Lexical grammar" section.
+//
+// Note that we need to use a regex engine capable of lookbehind to support
+// this, since we need to check that labels don't end with a `-`.
+const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
+
+// Labels need to be encoded on the wire, and prefixed with a signel length
+// octet. They also need to end with a length octet of 0 when encoded. So the
+// longest name is a single label of 253 characters, which will be encoded as
+// `\xfd<the label>\x00`.
+const HOSTNAME_MAX_LEN: u32 = 253;
+
+impl FromStr for Hostname {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        anyhow::ensure!(
+            s.len() <= HOSTNAME_MAX_LEN as usize,
+            "Max hostname length is {HOSTNAME_MAX_LEN}"
+        );
+        let re = regress::Regex::new(HOSTNAME_REGEX).unwrap();
+        if re.find(s).is_some() {
+            Ok(Hostname(s.to_string()))
+        } else {
+            anyhow::bail!("Hostnames must comply with RFC 1035")
+        }
+    }
+}
+
+impl TryFrom<&str> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<String> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
+    }
+}
+
+// Custom implementation of JsonSchema for Hostname to ensure RFC-1035-style
+// validation
+impl JsonSchema for Hostname {
+    fn schema_name() -> String {
+        "Hostname".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An RFC-1035-compliant hostname".to_string()),
+                description: Some(
+                    "A hostname identifies a host on a network, and \
+                    is usually a dot-delimited sequence of labels, \
+                    where each label contains only letters, digits, \
+                    or the hyphen. See RFCs 1035 and 952 for more details."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(HOSTNAME_MAX_LEN),
+                min_length: Some(1),
+                pattern: Some(HOSTNAME_REGEX.to_string()),
+            })),
+            ..Default::default()
+        })
     }
 }
 
@@ -717,6 +850,7 @@ pub enum ResourceType {
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
+    Blueprint,
     Fleet,
     Silo,
     SiloUser,
@@ -747,6 +881,7 @@ pub enum ResourceType {
     ServiceNetworkInterface,
     Sled,
     SledInstance,
+    SledLedger,
     Switch,
     SagaDbg,
     Snapshot,
@@ -759,18 +894,16 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateArtifact,
+    TufRepo,
+    TufArtifact,
     SwitchPort,
-    SystemUpdate,
-    ComponentUpdate,
-    SystemUpdateComponentUpdate,
-    UpdateDeployment,
-    UpdateableComponent,
     UserBuiltin,
     Zpool,
     Vmm,
     Ipv4NatEntry,
     FloatingIp,
+    Probe,
+    ProbeNetworkInterface,
 }
 
 // IDENTITY METADATA
@@ -940,7 +1073,7 @@ pub struct Instance {
     /// memory allocated for this Instance
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the Instance.
-    pub hostname: String, // TODO-cleanup different type?
+    pub hostname: String,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
@@ -1919,7 +2052,7 @@ impl MacAddr {
     /// Iterate the MAC addresses in the system address range
     /// (used as an allocator in contexts where collisions are not expected and
     /// determinism is useful, like in the test suite)
-    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> + Send {
         ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
             .map(Self::from_i64)
     }
@@ -2586,6 +2719,21 @@ pub enum BgpPeerState {
     Established,
 }
 
+impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
+    fn from(s: mg_admin_client::types::FsmStateKind) -> BgpPeerState {
+        use mg_admin_client::types::FsmStateKind;
+        match s {
+            FsmStateKind::Idle => BgpPeerState::Idle,
+            FsmStateKind::Connect => BgpPeerState::Connect,
+            FsmStateKind::Active => BgpPeerState::Active,
+            FsmStateKind::OpenSent => BgpPeerState::OpenSent,
+            FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
+            FsmStateKind::Established => BgpPeerState::Established,
+        }
+    }
+}
+
 /// The current status of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpPeerStatus {
@@ -2608,6 +2756,56 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
+/// Opaque object representing BGP message history for a given BGP peer. The
+/// contents of this object are not yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
+
+impl BgpMessageHistory {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
+        Self(arg)
+    }
+}
+
+impl JsonSchema for BgpMessageHistory {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "BgpMessageHistory".to_owned()
+    }
+}
+
+/// BGP message history for a particular switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SwitchBgpHistory {
+    /// Switch this message history is associated with.
+    pub switch: SwitchLocation,
+
+    /// Message history indexed by peer address.
+    pub history: HashMap<String, BgpMessageHistory>,
+}
+
+/// BGP message history for rack switches.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AggregateBgpMessageHistory {
+    /// BGP history organized by switch.
+    switch_histories: Vec<SwitchBgpHistory>,
+}
+
+impl AggregateBgpMessageHistory {
+    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
+        Self { switch_histories }
+    }
+}
+
 /// A route imported from a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpImportedRouteIpv4 {
@@ -2622,6 +2820,129 @@ pub struct BgpImportedRouteIpv4 {
 
     /// Switch the route is imported into.
     pub switch: SwitchLocation,
+}
+
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
+}
+
+/// A description of an uploaded TUF repository.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoDescription {
+    // Information about the repository.
+    pub repo: TufRepoMeta,
+
+    // Information about the artifacts present in the repository.
+    pub artifacts: Vec<TufArtifactMeta>,
+}
+
+impl TufRepoDescription {
+    /// Sorts the artifacts so that descriptions can be compared.
+    pub fn sort_artifacts(&mut self) {
+        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+}
+
+/// Metadata about a TUF repository.
+///
+/// Found within a [`TufRepoDescription`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoMeta {
+    /// The hash of the repository.
+    ///
+    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
+    /// individual artifacts within the repository. However, we use it here for
+    /// convenience.
+    pub hash: ArtifactHash,
+
+    /// The version of the targets role.
+    pub targets_role_version: u64,
+
+    /// The time until which the repo is valid.
+    pub valid_until: DateTime<Utc>,
+
+    /// The system version in artifacts.json.
+    pub system_version: SemverVersion,
+
+    /// The file name of the repository.
+    ///
+    /// This is purely used for debugging and may not always be correct (e.g.
+    /// with wicket, we read the file contents from stdin so we don't know the
+    /// correct file name).
+    pub file_name: String,
+}
+
+/// Metadata about an individual TUF artifact.
+///
+/// Found within a [`TufRepoDescription`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufArtifactMeta {
+    /// The artifact ID.
+    pub id: ArtifactId,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
+
+    /// The size of the artifact in bytes.
+    pub size: u64,
+}
+
+/// Data about a successful TUF repo import into Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoInsertResponse {
+    /// The repository as present in the database.
+    pub recorded: TufRepoDescription,
+
+    /// Whether this repository already existed or is new.
+    pub status: TufRepoInsertStatus,
+}
+
+/// Status of a TUF repo import.
+///
+/// Part of [`TufRepoInsertResponse`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoInsertStatus {
+    /// The repository already existed in the database.
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database.
+    Inserted,
+}
+
+/// Data about a successful TUF repo get from Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoGetResponse {
+    /// The description of the repository.
+    pub description: TufRepoDescription,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
+)]
+pub struct Probe {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub sled: Uuid,
 }
 
 #[cfg(test)]
@@ -2643,6 +2964,7 @@ mod test {
         VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::str::FromStr;
@@ -3252,7 +3574,7 @@ mod test {
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
 
-        let net_str = "fd00:99::1/64";
+        let net_str = "fd00:47::1/64";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
 
@@ -3365,5 +3687,25 @@ mod test {
         assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
         let conv = mac.to_i64();
         assert_eq!(original, conv);
+    }
+
+    #[test]
+    fn test_hostname_from_str() {
+        assert!(Hostname::from_str("name").is_ok());
+        assert!(Hostname::from_str("a.good.name").is_ok());
+        assert!(Hostname::from_str("another.very-good.name").is_ok());
+        assert!(Hostname::from_str("0name").is_ok());
+        assert!(Hostname::from_str("name0").is_ok());
+        assert!(Hostname::from_str("0name0").is_ok());
+
+        assert!(Hostname::from_str("").is_err());
+        assert!(Hostname::from_str("no_no").is_err());
+        assert!(Hostname::from_str("no.fqdns.").is_err());
+        assert!(Hostname::from_str("empty..label").is_err());
+        assert!(Hostname::from_str("-hypen.cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.-cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.cannot.end-").is_err());
+        assert!(Hostname::from_str("hyphen-cannot-end-").is_err());
+        assert!(Hostname::from_str(&"too-long".repeat(100)).is_err());
     }
 }

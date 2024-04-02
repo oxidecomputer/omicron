@@ -5,7 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-argon2 = { version = "0.5.2", features = ["alloc", "password-hash", "rand", "std"] }
+argon2 = { version = "0.5.3", features = ["alloc", "password-hash", "rand", "std"] }
 rand.workspace = true
 thiserror.workspace = true
 schemars.workspace = true

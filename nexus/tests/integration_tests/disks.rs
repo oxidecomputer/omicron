@@ -11,7 +11,7 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
@@ -967,9 +967,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
@@ -1073,7 +1073,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1137,7 +1137,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1194,7 +1194,7 @@ async fn test_disk_virtual_provisioning_collection(
         disk_size
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1232,7 +1232,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1682,9 +1682,9 @@ async fn test_multiple_disks_multiple_zpools(
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
@@ -1747,6 +1747,7 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
             params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
         )],
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
 }

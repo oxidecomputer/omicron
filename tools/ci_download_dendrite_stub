@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #
 # ci_download_dendrite_stub: fetches the appropriate Dendrite binary tarball

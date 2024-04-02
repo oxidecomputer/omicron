@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 use uuid::Uuid;
@@ -46,7 +46,7 @@ const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.json";
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
     pub rack_id: Uuid,
-    pub sleds: HashMap<SocketAddrV6, StartSledAgentRequest>,
+    pub sleds: BTreeMap<SocketAddrV6, StartSledAgentRequest>,
 
     // Store the provided RSS configuration as part of the sled plan; if it
     // changes after reboot, we need to know.
@@ -59,7 +59,7 @@ impl Plan {
         storage: &StorageHandle,
     ) -> Result<Option<Self>, PlanError> {
         let paths: Vec<Utf8PathBuf> = storage
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -81,7 +81,7 @@ impl Plan {
         log: &Logger,
         config: &Config,
         storage_manager: &StorageHandle,
-        bootstrap_addrs: HashSet<Ipv6Addr>,
+        bootstrap_addrs: BTreeSet<Ipv6Addr>,
         use_trust_quorum: bool,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
@@ -117,7 +117,7 @@ impl Plan {
 
         info!(log, "Serializing plan");
 
-        let mut sleds = std::collections::HashMap::new();
+        let mut sleds = BTreeMap::new();
         for (addr, allocation) in allocations {
             sleds.insert(addr, allocation);
         }
@@ -126,7 +126,7 @@ impl Plan {
 
         // Once we've constructed a plan, write it down to durable storage.
         let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -151,5 +151,25 @@ mod tests {
             "../schema/rss-sled-plan.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
+    }
+
+    #[test]
+    fn test_read_known_rss_sled_plans() {
+        let known_rss_sled_plans = &["madrid-rss-sled-plan.json"];
+
+        let path = Utf8PathBuf::from("tests/old-rss-sled-plans");
+        let out_path = Utf8PathBuf::from("tests/output/new-rss-sled-plans");
+        for sled_plan_basename in known_rss_sled_plans {
+            println!("checking {:?}", sled_plan_basename);
+            let contents =
+                std::fs::read_to_string(path.join(sled_plan_basename))
+                    .expect("failed to read file");
+            let parsed: Plan =
+                serde_json::from_str(&contents).expect("failed to parse file");
+            expectorate::assert_contents(
+                out_path.join(sled_plan_basename),
+                &serde_json::to_string_pretty(&parsed).unwrap(),
+            );
+        }
     }
 }

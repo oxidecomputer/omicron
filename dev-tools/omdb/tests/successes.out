@@ -58,18 +58,27 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<REDACTED>"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+assembling reconfigurator state ... done
+wrote <REDACTED>
+=============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 SERVICE        INSTANCE_ID                          ADDR                     SLED_SERIAL  
 CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
+Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-039be560 
 Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 ---------------------------------------------
 stderr:
@@ -80,16 +89,18 @@ EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+sled: sim-039be560 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
+
+  SERVICE INSTANCE_ID                          ADDR        
+  Mgd     REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT 
+
 sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
 
   SERVICE        INSTANCE_ID                          ADDR                     
   CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
   ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
   InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
   Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT 
-  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
   Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
 
 ---------------------------------------------
@@ -102,6 +113,7 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 SERIAL       IP          ROLE     ID                                   
+sim-039be560 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
 sim-b6d65341 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
 ---------------------------------------------
 stderr:
@@ -131,8 +143,8 @@ SPs FOUND THROUGH IGNITION
 SERVICE PROCESSOR STATES
 
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
-    Sled   0    FAKE_SIM_GIMLET  SimGimlet00 0   0000000000000000 A2  slot A     
-    Sled   1    FAKE_SIM_GIMLET  SimGimlet01 0   0000000000000000 A2  slot A     
+    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A2  slot A     
+    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A2  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
@@ -217,6 +229,19 @@ EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+task: "bfd_manager"
+    Manages bidirectional fowarding detection (BFD) configuration on rack
+    switches
+
+
+task: "blueprint_executor"
+    Executes the target blueprint
+
+
+task: "blueprint_loader"
+    Loads the current target blueprint from the DB
+
+
 task: "dns_config_external"
     watches external DNS data stored in CockroachDB
 
@@ -238,11 +263,11 @@ task: "dns_propagation_internal"
 
 
 task: "dns_servers_external"
-    watches list of external DNS servers stored in CockroachDB
+    watches list of external DNS servers stored in internal DNS
 
 
 task: "dns_servers_internal"
-    watches list of internal DNS servers stored in CockroachDB
+    watches list of internal DNS servers stored in internal DNS
 
 
 task: "external_endpoints"
@@ -255,6 +280,10 @@ task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
 
+task: "metrics_producer_gc"
+    unregisters Oximeter metrics producers that have not renewed their lease
+
+
 task: "nat_v4_garbage_collector"
     prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table based on a
     predetermined retention policy
@@ -262,6 +291,18 @@ task: "nat_v4_garbage_collector"
 
 task: "phantom_disks"
     detects and un-deletes phantom disks
+
+
+task: "region_replacement"
+    detects if a region requires replacing and begins the process
+
+
+task: "service_zone_nat_tracker"
+    ensures service zone nat records are recorded in NAT RPW table
+
+
+task: "switch_port_config_manager"
+    manages switch port settings for rack switches
 
 
 ---------------------------------------------
@@ -292,7 +333,7 @@ task: "dns_servers_internal"
 task: "dns_propagation_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 5, triggered by a dependent task completing
+  last completed activation: iter 4, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
@@ -320,7 +361,7 @@ task: "dns_servers_external"
 task: "dns_propagation_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 5, triggered by a dependent task completing
+  last completed activation: iter 4, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
@@ -333,7 +374,28 @@ task: "nat_v4_garbage_collector"
   currently executing: no
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_loader"
+  configured period: every 1m 40s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "blueprint_loader" (don't know how to interpret details: Object {"status": String("no target blueprint")})
+
+task: "blueprint_executor"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "bfd_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "external_endpoints"
   configured period: every 1m
@@ -361,6 +423,13 @@ task: "inventory_collection"
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
 
+task: "metrics_producer_gc"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: metric producer gc disabled (omicron#5284)
+
 task: "phantom_disks"
   configured period: every 30s
   currently executing: no
@@ -368,6 +437,28 @@ task: "phantom_disks"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
+
+task: "region_replacement"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacements started ok: 0
+    number of region replacement start errors: 0
+
+task: "service_zone_nat_tracker"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: inventory collection is None
+
+task: "switch_port_config_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
 stderr:

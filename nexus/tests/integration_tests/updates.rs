@@ -7,72 +7,49 @@
 // - test that an unknown artifact returns 404, not 500
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
-use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use anyhow::{ensure, Context, Result};
+use camino::Utf8Path;
+use camino_tempfile::{Builder, Utf8TempDir, Utf8TempPath};
+use clap::Parser;
 use dropshot::test_util::LogContext;
-use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpServerStarter, Path,
-    RequestContext,
-};
-use http::{Method, Response, StatusCode};
-use hyper::Body;
+use http::{Method, StatusCode};
+use nexus_config::UpdatesConfig;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
+use omicron_common::api::external::{
+    SemverVersion, TufRepoGetResponse, TufRepoInsertResponse,
+    TufRepoInsertStatus,
+};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use omicron_common::nexus_config::UpdatesConfig;
-use omicron_common::update::{Artifact, ArtifactKind, ArtifactsDocument};
 use omicron_sled_agent::sim;
-use ring::pkcs8::Document;
-use ring::rand::{SecureRandom, SystemRandom};
-use ring::signature::Ed25519KeyPair;
-use schemars::JsonSchema;
+use pretty_assertions::assert_eq;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::fmt::{self, Debug};
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::Write;
-use std::num::NonZeroU64;
-use std::path::PathBuf;
-use tempfile::{NamedTempFile, TempDir};
-use tough::editor::signed::{PathExists, SignedRole};
-use tough::editor::RepositoryEditor;
-use tough::key_source::KeySource;
-use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
-use tough::sign::Sign;
+use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
-const UPDATE_COMPONENT: &'static str = "omicron-test-component";
+const FAKE_MANIFEST_PATH: &'static str = "../tufaceous/manifests/fake.toml";
 
-#[tokio::test]
-async fn test_update_end_to_end() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_update_uninitialized() -> Result<()> {
     let mut config = load_test_config();
-    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
+    let logctx = LogContext::new("test_update_uninitialized", &config.pkg.log);
 
-    // build the TUF repo
-    let rng = SystemRandom::new();
-    let tuf_repo = new_tuf_repo(&rng).await;
-    slog::info!(
-        logctx.log,
-        "TUF repo created at {}",
-        tuf_repo.path().display()
-    );
+    // Build a fake TUF repo
+    let temp_dir = Utf8TempDir::new()?;
+    let archive_path = temp_dir.path().join("archive.zip");
 
-    // serve it over HTTP
-    let dropshot_config = Default::default();
-    let mut api = ApiDescription::new();
-    api.register(static_content).unwrap();
-    let context = FileServerContext { base: tuf_repo.path().to_owned() };
-    let server =
-        HttpServerStarter::new(&dropshot_config, api, context, &logctx.log)
-            .unwrap()
-            .start();
-    let local_addr = server.local_addr();
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        FAKE_MANIFEST_PATH,
+        archive_path.as_str(),
+    ])
+    .context("error parsing args")?;
 
-    // stand up the test environment
-    config.pkg.updates = Some(UpdatesConfig {
-        trusted_root: tuf_repo.path().join("metadata").join("1.root.json"),
-        default_base_url: format!("http://{}/", local_addr),
-    });
+    args.exec(&logctx.log).await.context("error executing assemble command")?;
+
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_update_end_to_end",
         &mut config,
@@ -82,212 +59,304 @@ async fn test_update_end_to_end() {
     .await;
     let client = &cptestctx.external_client;
 
-    // call /v1/system/update/refresh on nexus
-    // - download and verify the repo
-    // - return 204 Non Content
-    // - tells sled agent to do the thing
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/v1/system/update/refresh")
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    // Attempt to upload the repository to Nexus. This should fail with a 500
+    // error because the updates system is not configured.
+    {
+        make_upload_request(
+            client,
+            &archive_path,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )
+        .execute()
+        .await
+        .context("repository upload should have failed with 500 error")?;
+    }
 
-    let artifact_path = cptestctx.sled_agent_storage.path();
-    let component_path = artifact_path.join(UPDATE_COMPONENT);
-    // check sled agent did the thing
-    assert_eq!(tokio::fs::read(component_path).await.unwrap(), TARGET_CONTENTS);
+    // Attempt to fetch a repository description from Nexus. This should also
+    // fail with a 500 error.
+    {
+        make_get_request(
+            client,
+            "1.0.0".parse().unwrap(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )
+        .execute()
+        .await
+        .context("repository fetch should have failed with 500 error")?;
+    }
 
-    server.close().await.expect("failed to shut down dropshot server");
     cptestctx.teardown().await;
     logctx.cleanup_successful();
+
+    Ok(())
 }
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_update_end_to_end() -> Result<()> {
+    let mut config = load_test_config();
+    config.pkg.updates = Some(UpdatesConfig {
+        // XXX: This is currently not used by the update system, but
+        // trusted_root will become meaningful in the future.
+        trusted_root: "does-not-exist.json".into(),
+    });
+    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
 
-struct FileServerContext {
-    base: PathBuf,
-}
+    // Build a fake TUF repo
+    let temp_dir = Utf8TempDir::new()?;
+    let archive_path = temp_dir.path().join("archive.zip");
 
-#[derive(Deserialize, JsonSchema)]
-struct AllPath {
-    path: Vec<String>,
-}
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        FAKE_MANIFEST_PATH,
+        archive_path.as_str(),
+    ])
+    .context("error parsing args")?;
 
-#[endpoint(method = GET, path = "/{path:.*}", unpublished = true)]
-async fn static_content(
-    rqctx: RequestContext<FileServerContext>,
-    path: Path<AllPath>,
-) -> Result<Response<Body>, HttpError> {
-    // NOTE: this is a particularly brief and bad implementation of this to keep the test shorter.
-    // see https://github.com/oxidecomputer/dropshot/blob/main/dropshot/examples/file_server.rs for
-    // something more robust!
-    let mut fs_path = rqctx.context().base.clone();
-    for component in path.into_inner().path {
-        fs_path.push(component);
-    }
-    let body = tokio::fs::read(fs_path).await.map_err(|e| {
-        // tough 0.15+ depend on ENOENT being translated into 404.
-        if e.kind() == std::io::ErrorKind::NotFound {
-            HttpError::for_not_found(None, e.to_string())
-        } else {
-            HttpError::for_bad_request(None, e.to_string())
-        }
-    })?;
-    Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
-}
+    args.exec(&logctx.log).await.context("error executing assemble command")?;
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
-
-const TARGET_CONTENTS: &[u8] = b"hello world".as_slice();
-
-async fn new_tuf_repo(rng: &(dyn SecureRandom + Sync)) -> TempDir {
-    let version =
-        NonZeroU64::new(Utc::now().timestamp().try_into().unwrap()).unwrap();
-    let expires = Utc::now() + Duration::minutes(5);
-
-    // create the key
-    let key_data = Ed25519KeyPair::generate_pkcs8(rng).unwrap();
-    let key = Ed25519KeyPair::from_pkcs8(key_data.as_ref()).unwrap();
-    let tuf_key = key.tuf_key();
-    let key_id = tuf_key.key_id().unwrap();
-
-    // create the root role
-    let mut root = Root {
-        spec_version: "1.0.0".to_string(),
-        consistent_snapshot: true,
-        version: NonZeroU64::new(1).unwrap(),
-        expires,
-        keys: HashMap::new(),
-        roles: HashMap::new(),
-        _extra: HashMap::new(),
-    };
-    root.keys.insert(key_id.clone(), tuf_key);
-    for role in [
-        RoleType::Root,
-        RoleType::Snapshot,
-        RoleType::Targets,
-        RoleType::Timestamp,
-    ] {
-        root.roles.insert(
-            role,
-            RoleKeys {
-                keyids: vec![key_id.clone()],
-                threshold: NonZeroU64::new(1).unwrap(),
-                _extra: HashMap::new(),
-            },
-        );
-    }
-
-    let signing_keys =
-        vec![Box::new(KeyKeySource(key_data)) as Box<dyn KeySource + 'static>];
-
-    // self-sign the root role
-    let signed_root = SignedRole::new(
-        root.clone(),
-        &KeyHolder::Root(root),
-        &signing_keys,
-        rng,
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_update_end_to_end",
+        &mut config,
+        sim::SimMode::Explicit,
+        None,
     )
-    .await
-    .unwrap();
+    .await;
+    let client = &cptestctx.external_client;
 
-    // TODO(iliana): there's no way to create a `RepositoryEditor` without having the root.json on
-    // disk. this is really unergonomic. write and upstream a fix
-    let mut root_tmp = NamedTempFile::new().unwrap();
-    root_tmp.as_file_mut().write_all(signed_root.buffer()).unwrap();
-    let mut editor = RepositoryEditor::new(&root_tmp).await.unwrap();
-    root_tmp.close().unwrap();
+    // Upload the repository to Nexus.
+    let mut initial_description = {
+        let response =
+            make_upload_request(client, &archive_path, StatusCode::OK)
+                .execute()
+                .await
+                .context("error uploading repository")?;
 
-    editor
-        .targets_version(version)
-        .unwrap()
-        .targets_expires(expires)
-        .unwrap()
-        .snapshot_version(version)
-        .snapshot_expires(expires)
-        .timestamp_version(version)
-        .timestamp_expires(expires);
-    let (targets_dir, target_names) = generate_targets();
-    for target in target_names {
-        editor.add_target_path(targets_dir.path().join(target)).await.unwrap();
-    }
+        let response =
+            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
+                .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoInsertStatus::Inserted);
+        response.recorded
+    };
 
-    let signed_repo = editor.sign(&signing_keys).await.unwrap();
+    // Upload the repository to Nexus again. This should return a 200 with an
+    // `AlreadyExists` status.
+    let mut reupload_description = {
+        let response =
+            make_upload_request(client, &archive_path, StatusCode::OK)
+                .execute()
+                .await
+                .context("error uploading repository a second time")?;
 
-    let repo = TempDir::new().unwrap();
-    signed_repo.write(repo.path().join("metadata")).await.unwrap();
-    signed_repo
-        .copy_targets(
-            targets_dir,
-            repo.path().join("targets"),
-            PathExists::Fail,
+        let response =
+            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
+                .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoInsertStatus::AlreadyExists);
+        response.recorded
+    };
+
+    initial_description.sort_artifacts();
+    reupload_description.sort_artifacts();
+
+    assert_eq!(
+        initial_description, reupload_description,
+        "initial description matches reupload"
+    );
+
+    // Now get the repository that was just uploaded.
+    let mut get_description = {
+        let response = make_get_request(
+            client,
+            "1.0.0".parse().unwrap(), // this is the system version of the fake manifest
+            StatusCode::OK,
         )
+        .execute()
         .await
-        .unwrap();
+        .context("error fetching repository")?;
 
-    repo
-}
-
-// Returns a temporary directory of targets and the list of filenames in it.
-fn generate_targets() -> (TempDir, Vec<&'static str>) {
-    let dir = TempDir::new().unwrap();
-
-    // The update artifact. This will someday be a tarball of some variety.
-    std::fs::write(
-        dir.path().join(format!("{UPDATE_COMPONENT}-1")),
-        TARGET_CONTENTS,
-    )
-    .unwrap();
-
-    // artifacts.json, which describes all available artifacts.
-    let artifacts = ArtifactsDocument {
-        system_version: "1.0.0".parse().unwrap(),
-        artifacts: vec![Artifact {
-            name: UPDATE_COMPONENT.into(),
-            version: "0.0.0".parse().unwrap(),
-            kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
-            target: format!("{UPDATE_COMPONENT}-1"),
-        }],
+        let response =
+            serde_json::from_slice::<TufRepoGetResponse>(&response.body)
+                .context("error deserializing response body")?;
+        response.description
     };
-    let f = File::create(dir.path().join("artifacts.json")).unwrap();
-    serde_json::to_writer_pretty(f, &artifacts).unwrap();
 
-    (dir, vec!["omicron-test-component-1", "artifacts.json"])
-}
+    get_description.sort_artifacts();
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+    assert_eq!(
+        initial_description, get_description,
+        "initial description matches fetched description"
+    );
 
-// Wrapper struct so that we can use an in-memory key as a key source.
-// TODO(iliana): this should just be in tough with a lot less hacks
-struct KeyKeySource(Document);
+    // TODO: attempt to download extracted artifacts.
 
-impl Debug for KeyKeySource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("KeyKeySource").finish()
-    }
-}
-
-#[async_trait]
-impl KeySource for KeyKeySource {
-    async fn as_sign(
-        &self,
-    ) -> Result<Box<dyn Sign>, Box<dyn std::error::Error + Send + Sync + 'static>>
+    // Upload a new repository with the same system version but a different
+    // version for one of the components. This will produce a different hash,
+    // which should return an error.
     {
-        // this is a really ugly hack, because tough doesn't `impl Sign for &'a T where T: Sign`.
-        // awslabs/tough#446
-        Ok(Box::new(Ed25519KeyPair::from_pkcs8(self.0.as_ref()).unwrap()))
+        let tweaks = &[ManifestTweak::ArtifactVersion {
+            kind: KnownArtifactKind::GimletSp,
+            version: "2.0.0".parse().unwrap(),
+        }];
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+
+        let response = make_upload_request(
+            client,
+            &archive_path,
+            StatusCode::CONFLICT,
+        )
+        .execute()
+        .await
+        .context(
+            "error uploading repository with different artifact version \
+             but same system version",
+        )?;
+        assert_error_message_contains(
+            &response.body,
+            "Uploaded repository with system version 1.0.0 has SHA256 hash",
+        )?;
     }
 
-    async fn write(
-        &self,
-        _value: &str,
-        _key_id_hex: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-        unimplemented!();
+    // Upload a new repository with a different system version and different
+    // contents (but same version) for an artifact.
+    {
+        let tweaks = &[
+            ManifestTweak::SystemVersion("2.0.0".parse().unwrap()),
+            ManifestTweak::ArtifactContents {
+                kind: KnownArtifactKind::ControlPlane,
+                size_delta: 1024,
+            },
+        ];
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+
+        let response =
+            make_upload_request(client, &archive_path, StatusCode::CONFLICT)
+                .execute()
+                .await
+                .context(
+                    "error uploading repository with artifact \
+                     containing different hash for same version",
+                )?;
+        assert_error_message_contains(
+            &response.body,
+            "Uploaded artifacts don't match existing artifacts with same IDs:",
+        )?;
     }
+
+    // Upload a new repository with a different system version but no other
+    // changes. This should be accepted.
+    {
+        let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+
+        let response =
+            make_upload_request(client, &archive_path, StatusCode::OK)
+                .execute()
+                .await
+                .context("error uploading repository with different system version (should succeed)")?;
+
+        let response =
+            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
+                .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoInsertStatus::Inserted);
+    }
+
+    cptestctx.teardown().await;
+    logctx.cleanup_successful();
+
+    Ok(())
+}
+
+async fn make_tweaked_archive(
+    log: &slog::Logger,
+    temp_dir: &Utf8TempDir,
+    tweaks: &[ManifestTweak],
+) -> anyhow::Result<Utf8TempPath> {
+    let manifest = DeserializedManifest::tweaked_fake(tweaks);
+    let manifest_path = temp_dir.path().join("fake2.toml");
+    let mut manifest_file =
+        File::create(&manifest_path).context("error creating manifest file")?;
+    let manifest_to_toml = manifest.to_toml()?;
+    manifest_file.write_all(manifest_to_toml.as_bytes())?;
+
+    let archive_path = Builder::new()
+        .prefix("archive")
+        .suffix(".zip")
+        .tempfile_in(temp_dir.path())
+        .context("error creating temp file for tweaked archive")?
+        .into_temp_path();
+
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        manifest_path.as_str(),
+        archive_path.as_str(),
+    ])
+    .context("error parsing args")?;
+
+    args.exec(log).await.context("error executing assemble command")?;
+
+    Ok(archive_path)
+}
+
+fn make_upload_request<'a>(
+    client: &'a dropshot::test_util::ClientTestContext,
+    archive_path: &'a Utf8Path,
+    expected_status: StatusCode,
+) -> NexusRequest<'a> {
+    let file_name =
+        archive_path.file_name().expect("archive_path must have a file name");
+    let request = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            &format!("/v1/system/update/repository?file_name={}", file_name),
+        )
+        .body_file(Some(archive_path))
+        .expect_status(Some(expected_status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser);
+    request
+}
+
+fn make_get_request(
+    client: &dropshot::test_util::ClientTestContext,
+    system_version: SemverVersion,
+    expected_status: StatusCode,
+) -> NexusRequest<'_> {
+    let request = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::GET,
+            &format!("/v1/system/update/repository/{system_version}"),
+        )
+        .expect_status(Some(expected_status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser);
+    request
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorBody {
+    message: String,
+}
+
+// XXX: maybe replace this with a more detailed error code
+fn assert_error_message_contains(
+    body: &[u8],
+    needle: &str,
+) -> anyhow::Result<()> {
+    let body: ErrorBody =
+        serde_json::from_slice(body).context("body is not valid JSON")?;
+    ensure!(
+        body.message.contains(needle),
+        "expected body to contain {:?}, but it was {:?}",
+        needle,
+        body
+    );
+    Ok(())
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=

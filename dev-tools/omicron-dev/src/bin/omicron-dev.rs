@@ -9,7 +9,9 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use clap::Args;
 use clap::Parser;
+use dropshot::test_util::LogContext;
 use futures::stream::StreamExt;
+use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -270,22 +272,32 @@ struct ChRunArgs {
 }
 
 async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
+    let logctx = LogContext::new(
+        "omicron-dev",
+        &dropshot::ConfigLogging::StderrTerminal {
+            level: dropshot::ConfigLoggingLevel::Info,
+        },
+    );
     if args.replicated {
-        start_replicated_cluster().await?;
+        start_replicated_cluster(&logctx).await?;
     } else {
-        start_single_node(args.port).await?;
+        start_single_node(&logctx, args.port).await?;
     }
     Ok(())
 }
 
-async fn start_single_node(port: u16) -> Result<(), anyhow::Error> {
+async fn start_single_node(
+    logctx: &LogContext,
+    port: u16,
+) -> Result<(), anyhow::Error> {
     // Start a stream listening for SIGINT
     let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
     let mut signal_stream = signals.fuse();
 
     // Start the database server process, possibly on a specific port
     let mut db_instance =
-        dev::clickhouse::ClickHouseInstance::new_single_node(port).await?;
+        dev::clickhouse::ClickHouseInstance::new_single_node(logctx, port)
+            .await?;
     println!(
         "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")
@@ -331,7 +343,9 @@ async fn start_single_node(port: u16) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
+async fn start_replicated_cluster(
+    logctx: &LogContext,
+) -> Result<(), anyhow::Error> {
     // Start a stream listening for SIGINT
     let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
     let mut signal_stream = signals.fuse();
@@ -345,9 +359,12 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
         .as_path()
         .join("../../oximeter/db/src/configs/keeper_config.xml");
 
-    let mut cluster =
-        dev::clickhouse::ClickHouseCluster::new(replica_config, keeper_config)
-            .await?;
+    let mut cluster = dev::clickhouse::ClickHouseCluster::new(
+        logctx,
+        replica_config,
+        keeper_config,
+    )
+    .await?;
     println!(
         "omicron-dev: running ClickHouse cluster with configuration files:\n \
         replicas: {}\n keepers: {}",
@@ -457,7 +474,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
 
     // Read configuration.
     let config_str = include_str!("../../../../nexus/examples/config.toml");
-    let mut config: omicron_common::nexus_config::Config =
+    let mut config: NexusConfig =
         toml::from_str(config_str).context("parsing example config")?;
     config.pkg.log = dropshot::ConfigLogging::File {
         // See LogContext::new(),
@@ -526,10 +543,12 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.silo_name,
         cptestctx.external_dns_zone_name,
     );
-    println!(
-        "omicron-dev: management gateway:    http://{}",
-        cptestctx.gateway.client.bind_address,
-    );
+    for (location, gateway) in &cptestctx.gateway {
+        println!(
+            "omicron-dev: management gateway:    http://{} ({})",
+            gateway.client.bind_address, location,
+        );
+    }
     println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
     println!(
         "omicron-dev: privileged user name:  {}",

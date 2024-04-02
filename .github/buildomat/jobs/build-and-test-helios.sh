@@ -5,7 +5,8 @@
 #: target = "helios-2.0"
 #: rust_toolchain = "1.72.1"
 #: output_rules = [
-#:	"/var/tmp/omicron_tmp/*",
+#:	"%/work/*",
+#:	"%/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]

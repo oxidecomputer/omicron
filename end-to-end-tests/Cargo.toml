@@ -15,9 +15,9 @@ omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 oxide-client.workspace = true
 rand.workspace = true
-reqwest.workspace = true
-russh = "0.40.2"
-russh-keys = "0.40.1"
+reqwest = { workspace = true, features = ["cookies"] }
+russh = "0.42.0"
+russh-keys = "0.42.0"
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -25,3 +25,12 @@ toml.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+ispf.workspace = true
+internet-checksum.workspace = true
+humantime.workspace = true
+socket2.workspace = true
+colored.workspace = true
+anstyle.workspace = true
+clap.workspace = true
+dhcproto = "0.11"
+macaddr.workspace = true

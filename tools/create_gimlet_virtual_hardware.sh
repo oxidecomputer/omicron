@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Make me a Gimlet!
 #
@@ -29,4 +29,4 @@ if [[ -f "$MARKER" ]]; then
 fi
 
 ensure_run_as_root
-ensure_zpools
+ensure_vdevs

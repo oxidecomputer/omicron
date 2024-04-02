@@ -38,7 +38,10 @@ fn main() -> Result<()> {
         PackageSource::Prebuilt { commit, .. } => {
             // Report a relatively verbose error if we haven't downloaded the
             // requisite openapi spec.
-            let local_path = format!("../../out/downloads/dpd-{commit}.json");
+            let local_path =
+                env::var("DPD_OPENAPI_PATH").unwrap_or_else(|_| {
+                    format!("../../out/downloads/dpd-{commit}.json")
+                });
             if !Path::new(&local_path).exists() {
                 bail!("{local_path} doesn't exist; rerun `tools/ci_download_dendrite_openapi` (after updating `tools/dendrite_openapi_version` if the dendrite commit in package-manifest.toml has changed)");
             }

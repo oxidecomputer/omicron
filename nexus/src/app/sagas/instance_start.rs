@@ -7,7 +7,7 @@
 use std::net::Ipv6Addr;
 
 use super::{
-    instance_common::allocate_sled_ipv6, NexusActionContext, NexusSaga,
+    instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
 use crate::app::instance::InstanceStateChangeError;
@@ -159,7 +159,7 @@ async fn sis_alloc_propolis_ip(
         &params.serialized_authn,
     );
     let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    allocate_sled_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
+    allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
 }
 
 async fn sis_create_vmm_record(
@@ -405,34 +405,11 @@ async fn sis_dpd_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Querying boundary switches also requires fleet access and the use of the
-    // instance allocator context.
-    let boundary_switches = osagactx
+    osagactx
         .nexus()
-        .boundary_switches(&osagactx.nexus().opctx_alloc)
+        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
         .await
         .map_err(ActionError::action_failed)?;
-
-    for switch in boundary_switches {
-        let dpd_client =
-            osagactx.nexus().dpd_clients.get(&switch).ok_or_else(|| {
-                ActionError::action_failed(Error::internal_error(&format!(
-                    "unable to find client for switch {switch}"
-                )))
-            })?;
-
-        osagactx
-            .nexus()
-            .instance_ensure_dpd_config(
-                &opctx,
-                instance_id,
-                &sled.address(),
-                None,
-                dpd_client,
-            )
-            .await
-            .map_err(ActionError::action_failed)?;
-    }
 
     Ok(())
 }
@@ -770,8 +747,9 @@ mod test {
                 },
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(2),
-                hostname: String::from(INSTANCE_NAME),
+                hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),
+                ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],

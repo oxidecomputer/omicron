@@ -11,7 +11,13 @@ use camino::Utf8Path;
 use cargo_metadata::Metadata;
 use cargo_toml::{Dependency, Manifest};
 use clap::{Parser, Subcommand};
+use fs_err as fs;
 use std::{collections::BTreeMap, process::Command};
+
+#[cfg(target_os = "illumos")]
+mod illumos;
+#[cfg(target_os = "illumos")]
+use illumos::cmd_verify_libraries;
 
 #[derive(Parser)]
 #[command(name = "cargo xtask", about = "Workspace-related developer tools")]
@@ -26,26 +32,45 @@ enum Cmds {
     /// workspace
     CheckWorkspaceDeps,
     /// Run configured clippy checks
-    Clippy,
+    Clippy(ClippyArgs),
+    /// Verify we are not leaking library bindings outside of intended
+    /// crates
+    VerifyLibraries,
+}
+
+#[derive(Parser)]
+struct ClippyArgs {
+    /// Automatically apply lint suggestions.
+    #[clap(long)]
+    fix: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
-        Cmds::Clippy => cmd_clippy(),
+        Cmds::Clippy(args) => cmd_clippy(args),
         Cmds::CheckWorkspaceDeps => cmd_check_workspace_deps(),
+        Cmds::VerifyLibraries => cmd_verify_libraries(),
     }
 }
 
-fn cmd_clippy() -> Result<()> {
+fn cmd_clippy(args: ClippyArgs) -> Result<()> {
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
     let mut command = Command::new(&cargo);
+    command.arg("clippy");
+
+    if args.fix {
+        command.arg("--fix");
+    }
+
     command
-        .arg("clippy")
         // Make sure we check everything.
         .arg("--all-targets")
         .arg("--")
+        // For a list of lints, see
+        // https://rust-lang.github.io/rust-clippy/master.
+        //
         // We disallow warnings by default.
         .arg("--deny")
         .arg("warnings")
@@ -53,7 +78,19 @@ fn cmd_clippy() -> Result<()> {
         // override belongs in src/lib.rs, and it is there, but that doesn't
         // reliably work due to rust-lang/rust-clippy#6610.
         .arg("--allow")
-        .arg("clippy::style");
+        .arg("clippy::style")
+        // But continue to warn on anything in the "disallowed_" namespace.
+        // (These will be turned into errors by `--deny warnings` above.)
+        .arg("--warn")
+        .arg("clippy::disallowed_macros")
+        .arg("--warn")
+        .arg("clippy::disallowed_methods")
+        .arg("--warn")
+        .arg("clippy::disallowed_names")
+        .arg("--warn")
+        .arg("clippy::disallowed_script_idents")
+        .arg("--warn")
+        .arg("clippy::disallowed_types");
 
     eprintln!(
         "running: {:?} {}",
@@ -186,9 +223,13 @@ fn cmd_check_workspace_deps() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_os = "illumos"))]
+fn cmd_verify_libraries() -> Result<()> {
+    unimplemented!("Library verification is only available on illumos!")
+}
+
 fn read_cargo_toml(path: &Utf8Path) -> Result<Manifest> {
-    let bytes =
-        std::fs::read(path).with_context(|| format!("read {:?}", path))?;
+    let bytes = fs::read(path)?;
     Manifest::from_slice(&bytes).with_context(|| format!("parse {:?}", path))
 }
 

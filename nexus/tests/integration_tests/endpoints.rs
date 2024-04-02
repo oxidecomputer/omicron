@@ -15,6 +15,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
@@ -22,6 +23,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -32,7 +34,6 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use once_cell::sync::Lazy;
@@ -46,19 +47,19 @@ pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID));
-pub static HARDWARE_SLED_PROVISION_STATE_URL: Lazy<String> = Lazy::new(|| {
-    format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID)
+pub static HARDWARE_SLED_PROVISION_POLICY_URL: Lazy<String> = Lazy::new(|| {
+    format!("/v1/system/hardware/sleds/{}/provision-policy", SLED_AGENT_UUID)
 });
-pub static DEMO_SLED_PROVISION_STATE: Lazy<params::SledProvisionStateParams> =
-    Lazy::new(|| {
-        params::SledProvisionStateParams {
-            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
-        }
+pub static DEMO_SLED_PROVISION_POLICY: Lazy<params::SledProvisionPolicyParams> =
+    Lazy::new(|| params::SledProvisionPolicyParams {
+        state: SledProvisionPolicy::NonProvisionable,
     });
 
 pub static HARDWARE_SWITCH_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/switches/{}", SWITCH_UUID));
-pub const HARDWARE_DISK_URL: &'static str = "/v1/system/hardware/disks";
+pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
+pub static HARDWARE_DISK_URL: Lazy<String> =
+    Lazy::new(|| format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID));
 pub static HARDWARE_SLED_DISK_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/system/hardware/sleds/{}/disks", SLED_AGENT_UUID)
 });
@@ -80,6 +81,8 @@ pub static DEMO_SILO_NAME: Lazy<Name> =
     Lazy::new(|| "demo-silo".parse().unwrap());
 pub static DEMO_SILO_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/silos/{}", *DEMO_SILO_NAME));
+pub static DEMO_SILO_IP_POOLS_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/ip-pools", *DEMO_SILO_URL));
 pub static DEMO_SILO_POLICY_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME));
 pub static DEMO_SILO_QUOTAS_URL: Lazy<String> =
@@ -388,6 +391,18 @@ pub static DEMO_INSTANCE_DISKS_DETACH_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
+pub static DEMO_INSTANCE_EPHEMERAL_IP_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/instances/{}/external-ips/ephemeral?{}",
+        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_INSTANCE_SSH_KEYS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/instances/{}/ssh-public-keys?{}",
+        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
 pub static DEMO_INSTANCE_NICS_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/network-interfaces?project={}&instance={}",
@@ -408,11 +423,12 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
-        hostname: String::from("demo-instance"),
+        hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: Some(Vec::new()),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(DEMO_IP_POOL_NAME.clone()),
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
         start: true,
@@ -563,6 +579,33 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-routes-ipv4?asn=47";
+pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
+    "/v1/system/networking/bgp-message-history?asn=47";
+
+pub const DEMO_BFD_STATUS_URL: &'static str =
+    "/v1/system/networking/bfd-status";
+
+pub const DEMO_BFD_ENABLE_URL: &'static str =
+    "/v1/system/networking/bfd-enable";
+
+pub const DEMO_BFD_DISABLE_URL: &'static str =
+    "/v1/system/networking/bfd-disable";
+
+pub static DEMO_BFD_ENABLE: Lazy<params::BfdSessionEnable> =
+    Lazy::new(|| params::BfdSessionEnable {
+        local: None,
+        remote: "10.0.0.1".parse().unwrap(),
+        detection_threshold: 3,
+        required_rx: 1000000,
+        switch: "switch0".parse().unwrap(),
+        mode: omicron_common::api::external::BfdMode::MultiHop,
+    });
+
+pub static DEMO_BFD_DISABLE: Lazy<params::BfdSessionDisable> =
+    Lazy::new(|| params::BfdSessionDisable {
+        remote: "10.0.0.1".parse().unwrap(),
+        switch: "switch0".parse().unwrap(),
+    });
 
 // Project Images
 pub static DEMO_IMAGE_NAME: Lazy<Name> =
@@ -618,6 +661,8 @@ pub static DEMO_IP_POOL_PROJ_URL: Lazy<String> = Lazy::new(|| {
 });
 pub static DEMO_IP_POOL_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME));
+pub static DEMO_IP_POOL_UTILIZATION_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
     Lazy::new(|| params::IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
@@ -627,8 +672,8 @@ pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
     });
 pub static DEMO_IP_POOL_SILOS_URL: Lazy<String> =
     Lazy::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));
-pub static DEMO_IP_POOL_SILOS_BODY: Lazy<params::IpPoolSiloLink> =
-    Lazy::new(|| params::IpPoolSiloLink {
+pub static DEMO_IP_POOL_SILOS_BODY: Lazy<params::IpPoolLinkSilo> =
+    Lazy::new(|| params::IpPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
         is_default: true, // necessary for demo instance create to go through
     });
@@ -700,13 +745,6 @@ pub static DEMO_SSHKEY_CREATE: Lazy<params::SshKeyCreate> =
 pub static DEMO_SPECIFIC_SSHKEY_URL: Lazy<String> =
     Lazy::new(|| format!("{}/{}", DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME));
 
-// System update
-
-pub static DEMO_SYSTEM_UPDATE_PARAMS: Lazy<params::SystemUpdatePath> =
-    Lazy::new(|| params::SystemUpdatePath {
-        version: SemverVersion::new(1, 0, 0),
-    });
-
 // Project Floating IPs
 pub static DEMO_FLOAT_IP_NAME: Lazy<Name> =
     Lazy::new(|| "float-ip".parse().unwrap());
@@ -718,16 +756,44 @@ pub static DEMO_FLOAT_IP_URL: Lazy<String> = Lazy::new(|| {
     )
 });
 
+pub static DEMO_FLOATING_IP_ATTACH_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/floating-ips/{}/attach?{}",
+        *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_FLOATING_IP_DETACH_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/floating-ips/{}/detach?{}",
+        *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+
 pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
     Lazy::new(|| params::FloatingIpCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+        ip: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
         pool: None,
     });
 
+pub static DEMO_FLOAT_IP_UPDATE: Lazy<params::FloatingIpUpdate> =
+    Lazy::new(|| params::FloatingIpUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated Floating IP")),
+        },
+    });
+
+pub static DEMO_FLOAT_IP_ATTACH: Lazy<params::FloatingIpAttach> =
+    Lazy::new(|| params::FloatingIpAttach {
+        kind: params::FloatingIpParentKind::Instance,
+        parent: DEMO_FLOAT_IP_NAME.clone().into(),
+    });
+pub static DEMO_EPHEMERAL_IP_ATTACH: Lazy<params::EphemeralIpCreate> =
+    Lazy::new(|| params::EphemeralIpCreate { pool: None });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =
     "/v1/system/identity-providers?silo=demo-silo";
@@ -781,6 +847,17 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
         Utc::now(),
     )
 });
+
+pub static TIMESERIES_LIST_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/timeseries/schema"));
+
+pub static TIMESERIES_QUERY_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/timeseries/query"));
+
+pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
+    Lazy::new(|| params::TimeseriesQuery {
+        query: String::from("get http_service:request_latency_histogram"),
+    });
 
 // Users
 pub static DEMO_USER_CREATE: Lazy<params::UserCreate> =
@@ -1045,10 +1122,20 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             ],
         },
 
+        // IP pool utilization
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_UTILIZATION_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         // IP Pool endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
@@ -1058,7 +1145,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool ranges endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
@@ -1068,7 +1155,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool ranges/add endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -1080,7 +1167,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool ranges/delete endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -1108,6 +1195,14 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_SILO_IP_POOLS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
         VerifyEndpoint {
@@ -1757,6 +1852,25 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_EPHEMERAL_IP_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_EPHEMERAL_IP_ATTACH).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_SSH_KEYS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get]
+        },
+
         /* IAM */
 
         VerifyEndpoint {
@@ -1832,11 +1946,11 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            url: &HARDWARE_SLED_PROVISION_POLICY_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Put(
-                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+                serde_json::to_value(&*DEMO_SLED_PROVISION_POLICY).unwrap()
             )],
         },
 
@@ -1856,11 +1970,19 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_DISK_URL,
+            url: &HARDWARE_DISKS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
+
+        VerifyEndpoint {
+            url: &HARDWARE_DISK_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
 
         VerifyEndpoint {
             url: &HARDWARE_SLED_DISK_URL,
@@ -1872,81 +1994,22 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         /* Updates */
 
         VerifyEndpoint {
-            url: "/v1/system/update/refresh",
+            url: "/v1/system/update/repository?file_name=demo-repo.zip",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
+            allowed_methods: vec![AllowedMethod::Put(
+                // In reality this is the contents of a zip file.
+                serde_json::Value::Null,
             )],
         },
 
         VerifyEndpoint {
-            url: "/v1/system/update/version",
+            url: "/v1/system/update/repository/1.0.0",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/components",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        // TODO: make system update endpoints work instead of expecting 404
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates/1.0.0",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates/1.0.0/components",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/start",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::to_value(&*DEMO_SYSTEM_UPDATE_PARAMS).unwrap()
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/stop",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/deployments",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/deployments/120bbb6f-660a-440c-8cb7-199be202ddff",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
+            // The update system is disabled, which causes a 500 error even for
+            // privileged users. That is captured by GetUnimplemented.
+            allowed_methods: vec![AllowedMethod::GetUnimplemented],
         },
 
         /* Metrics */
@@ -1968,6 +2031,26 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &TIMESERIES_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &TIMESERIES_QUERY_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap()
+                ),
             ],
         },
 
@@ -2208,6 +2291,46 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             ],
         },
 
+        VerifyEndpoint {
+            url: &DEMO_BGP_MESSAGE_HISTORY_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BFD_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BFD_ENABLE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BFD_ENABLE).unwrap()
+                )
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BFD_DISABLE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BFD_DISABLE).unwrap()
+                )
+            ],
+        },
+
         // Floating IPs
         VerifyEndpoint {
             url: &DEMO_PROJECT_URL_FIPS,
@@ -2227,7 +2350,32 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_UPDATE).unwrap()
+                  ),
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOATING_IP_ATTACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_ATTACH).unwrap(),
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOATING_IP_DETACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&()).unwrap(),
+                ),
             ],
         },
     ]

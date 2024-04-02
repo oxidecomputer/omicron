@@ -22,12 +22,28 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
+        // It's kind of unfortunate to pull in such a complex and unstable type
+        // as "blueprint" this way, but we have really useful functionality
+        // (e.g., diff'ing) that's implemented on our local type.
+        Blueprint = nexus_types::deployment::Blueprint,
+        Generation = omicron_common::api::external::Generation,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
+        TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
+        TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
+        TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
+    },
+    patch = {
+        SledAgentInfo = { derives = [PartialEq, Eq] },
+        ByteCount = { derives = [PartialEq, Eq] },
+        Baseboard = { derives = [PartialEq, Eq] }
     }
 );
 
@@ -91,7 +107,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     ) -> Self {
         Self {
             dst_propolis_id: s.dst_propolis_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             migration_id: s.migration_id,
             propolis_id: s.propolis_id,
             time_updated: s.time_updated,
@@ -103,11 +119,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
-        Self {
-            gen: s.gen.into(),
-            state: s.state.into(),
-            time_updated: s.time_updated,
-        }
+        Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
     }
 }
 
@@ -145,19 +157,13 @@ impl From<omicron_common::api::external::InstanceState>
     }
 }
 
-impl From<omicron_common::api::external::Generation> for types::Generation {
-    fn from(s: omicron_common::api::external::Generation) -> Self {
-        Self(i64::from(&s) as u64)
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     for types::DiskRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -238,32 +244,6 @@ impl From<omicron_common::api::external::SemverVersion>
         s.to_string().parse().expect(
             "semver should generate output that matches validation regex",
         )
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
-    for types::KnownArtifactKind
-{
-    fn from(
-        s: omicron_common::api::internal::nexus::KnownArtifactKind,
-    ) -> Self {
-        use omicron_common::api::internal::nexus::KnownArtifactKind;
-
-        match s {
-            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
-            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
-            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
-            KnownArtifactKind::Trampoline => {
-                types::KnownArtifactKind::Trampoline
-            }
-            KnownArtifactKind::ControlPlane => {
-                types::KnownArtifactKind::ControlPlane
-            }
-            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
-            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
-            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
-            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
-        }
     }
 }
 
@@ -400,5 +380,37 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
                 types::ExternalPortDiscovery::Static(new)
             },
         }
+    }
+}
+
+impl From<types::ProducerKind>
+    for omicron_common::api::internal::nexus::ProducerKind
+{
+    fn from(kind: types::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus::ProducerKind;
+        match kind {
+            types::ProducerKind::SledAgent => ProducerKind::SledAgent,
+            types::ProducerKind::Instance => ProducerKind::Instance,
+            types::ProducerKind::Service => ProducerKind::Service,
+        }
+    }
+}
+
+impl TryFrom<types::ProducerEndpoint>
+    for omicron_common::api::internal::nexus::ProducerEndpoint
+{
+    type Error = String;
+
+    fn try_from(ep: types::ProducerEndpoint) -> Result<Self, String> {
+        let Ok(address) = ep.address.parse() else {
+            return Err(format!("Invalid IP address: {}", ep.address));
+        };
+        Ok(Self {
+            id: ep.id,
+            kind: ep.kind.into(),
+            address,
+            base_route: ep.base_route,
+            interval: ep.interval.into(),
+        })
     }
 }

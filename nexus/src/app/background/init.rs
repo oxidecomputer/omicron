@@ -4,23 +4,31 @@
 
 //! Background task initialization
 
+use super::bfd;
+use super::blueprint_execution;
+use super::blueprint_load;
 use super::common;
 use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
 use super::inventory_collection;
+use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::region_replacement;
+use super::sync_service_zone_nat::ServiceZoneNatTracker;
+use super::sync_switch_configuration::SwitchPortSettingsManager;
+use crate::app::oximeter::PRODUCER_LEASE_DURATION;
+use crate::app::sagas::SagaRequest;
+use nexus_config::BackgroundTaskConfig;
+use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::BackgroundTaskConfig;
-use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 /// Describes ongoing background tasks and provides interfaces for working with
@@ -42,6 +50,9 @@ pub struct BackgroundTasks {
     /// task handle for the external DNS servers background task
     pub task_external_dns_servers: common::TaskHandle,
 
+    /// task handle for pruning metrics producers with expired leases
+    pub task_metrics_producer_gc: common::TaskHandle,
+
     /// task handle for the task that keeps track of external endpoints
     pub task_external_endpoints: common::TaskHandle,
     /// external endpoints read by the background task
@@ -51,22 +62,42 @@ pub struct BackgroundTasks {
     /// task handle for the ipv4 nat entry garbage collector
     pub nat_cleanup: common::TaskHandle,
 
+    /// task handle for the switch bfd manager
+    pub bfd_manager: common::TaskHandle,
+
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
+
+    /// task handle for blueprint target loader
+    pub task_blueprint_loader: common::TaskHandle,
+
+    /// task handle for blueprint execution background task
+    pub task_blueprint_executor: common::TaskHandle,
+
+    /// task handle for the service zone nat tracker
+    pub task_service_zone_nat_tracker: common::TaskHandle,
+
+    /// task handle for the switch port settings manager
+    pub task_switch_port_settings_manager: common::TaskHandle,
+
+    /// task handle for the task that detects if regions need replacement and
+    /// begins the process
+    pub task_region_replacement: common::TaskHandle,
 }
 
 impl BackgroundTasks {
     /// Kick off all background tasks
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
-        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
+        saga_request: Sender<SagaRequest>,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -75,6 +106,7 @@ impl BackgroundTasks {
             opctx,
             datastore.clone(),
             DnsGroup::Internal,
+            resolver.clone(),
             &config.dns_internal,
         );
         let (task_external_dns_config, task_external_dns_servers) = init_dns(
@@ -82,8 +114,27 @@ impl BackgroundTasks {
             opctx,
             datastore.clone(),
             DnsGroup::External,
+            resolver.clone(),
             &config.dns_external,
         );
+
+        let task_metrics_producer_gc = {
+            let gc = metrics_producer_gc::MetricProducerGc::new(
+                datastore.clone(),
+                PRODUCER_LEASE_DURATION,
+            );
+            driver.register(
+                String::from("metrics_producer_gc"),
+                String::from(
+                    "unregisters Oximeter metrics producers that have not \
+                    renewed their lease",
+                ),
+                config.metrics_producer_gc.period_secs,
+                Box::new(gc),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
 
         // Background task: External endpoints list watcher
         let (task_external_endpoints, external_endpoints) = {
@@ -116,18 +167,88 @@ impl BackgroundTasks {
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    dpd_clients.values().map(|client| client.clone()).collect(),
+                    resolver.clone()
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
             )
         };
 
+        let bfd_manager = {
+            driver.register(
+                "bfd_manager".to_string(),
+                String::from(
+                    "Manages bidirectional fowarding detection (BFD) \
+                    configuration on rack switches",
+                ),
+                config.bfd_manager.period_secs,
+                Box::new(bfd::BfdManager::new(
+                    datastore.clone(),
+                    resolver.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        // Background task: phantom disk detection
+        let task_phantom_disks = {
+            let detector =
+                phantom_disks::PhantomDiskDetector::new(datastore.clone());
+
+            let task = driver.register(
+                String::from("phantom_disks"),
+                String::from("detects and un-deletes phantom disks"),
+                config.phantom_disks.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
+        // Background task: blueprint loader
+        let blueprint_loader =
+            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
+        let rx_blueprint = blueprint_loader.watcher();
+        let task_blueprint_loader = driver.register(
+            String::from("blueprint_loader"),
+            String::from("Loads the current target blueprint from the DB"),
+            config.blueprints.period_secs_load,
+            Box::new(blueprint_loader),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        // Background task: blueprint executor
+        let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
+            datastore.clone(),
+            rx_blueprint.clone(),
+            nexus_id.to_string(),
+        );
+        let rx_blueprint_exec = blueprint_executor.watcher();
+        let task_blueprint_executor = driver.register(
+            String::from("blueprint_executor"),
+            String::from("Executes the target blueprint"),
+            config.blueprints.period_secs_execute,
+            Box::new(blueprint_executor),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(rx_blueprint)],
+        );
+
         // Background task: inventory collector
+        //
+        // This currently depends on the "output" of the blueprint executor in
+        // order to automatically trigger inventory collection whenever the
+        // blueprint executor runs.  In the limit, this could become a problem
+        // because the blueprint executor might also depend indirectly on the
+        // inventory collector.  In that case, we may need to do something more
+        // complicated.  But for now, this works.
         let task_inventory_collection = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
-                resolver,
+                resolver.clone(),
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
                 config.inventory.disable,
@@ -141,20 +262,54 @@ impl BackgroundTasks {
                 config.inventory.period_secs,
                 Box::new(collector),
                 opctx.child(BTreeMap::new()),
-                vec![],
+                vec![Box::new(rx_blueprint_exec)],
             );
 
             task
         };
 
-        // Background task: phantom disk detection
-        let task_phantom_disks = {
-            let detector = phantom_disks::PhantomDiskDetector::new(datastore);
+        let task_service_zone_nat_tracker = {
+            driver.register(
+                "service_zone_nat_tracker".to_string(),
+                String::from(
+                    "ensures service zone nat records are recorded in NAT RPW table",
+                ),
+                config.sync_service_zone_nat.period_secs,
+                Box::new(ServiceZoneNatTracker::new(
+                    datastore.clone(),
+                    resolver.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        let task_switch_port_settings_manager = {
+            driver.register(
+                "switch_port_config_manager".to_string(),
+                String::from("manages switch port settings for rack switches"),
+                config.switch_port_settings_manager.period_secs,
+                Box::new(SwitchPortSettingsManager::new(
+                    datastore.clone(),
+                    resolver.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        // Background task: detect if a region needs replacement and begin the
+        // process
+        let task_region_replacement = {
+            let detector = region_replacement::RegionReplacementDetector::new(
+                datastore,
+                saga_request.clone(),
+            );
 
             let task = driver.register(
-                String::from("phantom_disks"),
-                String::from("detects and un-deletes phantom disks"),
-                config.phantom_disks.period_secs,
+                String::from("region_replacement"),
+                String::from("detects if a region requires replacing and begins the process"),
+                config.region_replacement.period_secs,
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -169,11 +324,18 @@ impl BackgroundTasks {
             task_internal_dns_servers,
             task_external_dns_config,
             task_external_dns_servers,
+            task_metrics_producer_gc,
             task_external_endpoints,
             external_endpoints,
             nat_cleanup,
+            bfd_manager,
             task_inventory_collection,
             task_phantom_disks,
+            task_blueprint_loader,
+            task_blueprint_executor,
+            task_service_zone_nat_tracker,
+            task_switch_port_settings_manager,
+            task_region_replacement,
         }
     }
 
@@ -187,6 +349,7 @@ fn init_dns(
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     dns_group: DnsGroup,
+    resolver: internal_dns::resolver::Resolver,
     config: &DnsTasksConfig,
 ) -> (common::TaskHandle, common::TaskHandle) {
     let dns_group_name = dns_group.to_string();
@@ -207,13 +370,13 @@ fn init_dns(
     );
 
     // Background task: DNS server list watcher
-    let dns_servers = dns_servers::DnsServersWatcher::new(datastore, dns_group);
+    let dns_servers = dns_servers::DnsServersWatcher::new(dns_group, resolver);
     let dns_servers_watcher = dns_servers.watcher();
     let task_name_servers = format!("dns_servers_{}", dns_group);
     let task_servers = driver.register(
         task_name_servers.clone(),
         format!(
-            "watches list of {} DNS servers stored in CockroachDB",
+            "watches list of {} DNS servers stored in internal DNS",
             dns_group,
         ),
         config.period_secs_servers,
@@ -247,22 +410,17 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::HandlerTaskMode;
     use nexus_db_model::DnsGroup;
-    use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
-    use nexus_types::internal_api::params::ServiceKind;
-    use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
-    use std::num::NonZeroU32;
     use std::time::Duration;
     use tempfile::TempDir;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -309,12 +467,23 @@ pub mod test {
             .expect("failed to get initial DNS server config");
         assert_eq!(config.generation, 1);
 
-        // We'll need the id of the internal DNS zone.
-        let internal_dns_zone_id =
-            read_internal_dns_zone_id(&opctx, datastore).await;
+        let internal_dns_srv_name =
+            internal_dns::ServiceName::InternalDns.dns_name();
+
+        let initial_srv_record = {
+            let zone =
+                config.zones.get(0).expect("DNS config must have a zone");
+            let Some(record) = zone.records.get(&internal_dns_srv_name) else {
+                panic!("zone must have a record for {internal_dns_srv_name}")
+            };
+            match record.get(0) {
+                Some(dns_service_client::types::DnsRecord::Srv(srv)) => srv,
+                record => panic!("expected a SRV record for {internal_dns_srv_name}, found {record:?}"),
+            }
+        };
 
         // Now spin up another DNS server, add it to the list of servers, and
-        // make sure that DNS gets propagated to it.  Note that we shouldn't
+        // make sure that DNS gets propagated to it. Note that we shouldn't
         // have to explicitly activate the background task because inserting a
         // new service ought to do that for us.
         let log = &cptestctx.logctx.log;
@@ -353,29 +522,76 @@ pub mod test {
             SocketAddr::V4(_) => panic!("expected v6 address"),
             SocketAddr::V6(a) => a,
         };
+
+        // In order to test that DNS gets propagated to a newly-added server, we
+        // first need to update the source of truth about DNS (the database).
+        // Then we need to wait for that to get propagated (by this same
+        // mechanism) to the existing DNS servers.  Only then would we expect
+        // the mechanism to see the new DNS server and then propagate
+        // configuration to it.
+        let update = {
+            use nexus_params::{DnsRecord, Srv};
+
+            let target = "my-great-dns-server.host";
+
+            let mut update = test_dns_update_builder();
+            update.remove_name(internal_dns_srv_name.clone()).unwrap();
+            update
+                .add_name(
+                    internal_dns_srv_name,
+                    vec![
+                        DnsRecord::Srv(Srv {
+                            prio: 0,
+                            weight: 0,
+                            port: new_dns_addr.port(),
+                            target: format!(
+                                "{target}.control-plane.oxide.internal"
+                            ),
+                        }),
+                        DnsRecord::Srv(initial_srv_record.clone()),
+                    ],
+                )
+                .unwrap();
+            update
+                .add_name(
+                    target.to_string(),
+                    vec![DnsRecord::Aaaa(*new_dns_addr.ip())],
+                )
+                .unwrap();
+            update
+        };
+        write_dns_update(&opctx, datastore, update).await;
+        info!(&cptestctx.logctx.log, "updated new dns records");
+
+        // Activate the internal DNS propagation pipeline.
         nexus
-            .upsert_service(
-                &opctx,
-                Uuid::new_v4(),
-                cptestctx.sled_agent.sled_agent.id,
-                Some(Uuid::new_v4()),
-                new_dns_addr,
-                ServiceKind::InternalDns.into(),
-            )
-            .await
-            .unwrap();
+            .background_tasks
+            .activate(&nexus.background_tasks.task_internal_dns_config);
+
+        wait_propagate_dns(
+            &cptestctx.logctx.log,
+            "initial",
+            initial_dns_dropshot_server.local_addr(),
+            2,
+        )
+        .await;
+
+        // Discover the new internal DNS server from internal DNS.
+        nexus
+            .background_tasks
+            .activate(&nexus.background_tasks.task_internal_dns_servers);
 
         wait_propagate_dns(
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            1,
+            2,
         )
         .await;
 
-        // Now, write version 2 of the internal DNS configuration with one
+        // Now, write version 3 of the internal DNS configuration with one
         // additional record.
-        write_test_dns_generation(datastore, internal_dns_zone_id).await;
+        write_test_dns_generation(&opctx, datastore).await;
 
         // Activate the internal DNS propagation pipeline.
         nexus
@@ -387,7 +603,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            2,
+            3,
         )
         .await;
 
@@ -395,7 +611,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            2,
+            3,
         )
         .await;
     }
@@ -408,15 +624,16 @@ pub mod test {
         generation: u64,
     ) {
         println!(
-            "waiting for propagation of generation {} to {} DNS server ({})",
-            generation, label, addr
+            "waiting for propagation of generation {generation} to {label} \
+            DNS server ({addr})",
         );
 
         let client = dns_service_client::Client::new(
             &format!("http://{}", addr),
             log.clone(),
         );
-        poll::wait_for_condition(
+        let poll_max = Duration::from_secs(30);
+        let result = poll::wait_for_condition(
             || async {
                 match client.dns_config_get().await {
                     Err(error) => {
@@ -434,87 +651,51 @@ pub mod test {
                 }
             },
             &Duration::from_millis(50),
-            &Duration::from_secs(30),
+            &poll_max,
         )
-        .await
-        .expect("DNS config not propagated in expected time");
-    }
-
-    pub(crate) async fn write_test_dns_generation(
-        datastore: &DataStore,
-        internal_dns_zone_id: Uuid,
-    ) {
-        {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let _: Result<(), _> = datastore
-                .transaction_retry_wrapper("write_test_dns_generation")
-                .transaction(&conn, |conn| async move {
-                    {
-                        use nexus_db_queries::db::model::DnsVersion;
-                        use nexus_db_queries::db::schema::dns_version::dsl;
-
-                        diesel::insert_into(dsl::dns_version)
-                            .values(DnsVersion {
-                                dns_group: DnsGroup::Internal,
-                                version: Generation(2u32.try_into().unwrap()),
-                                time_created: chrono::Utc::now(),
-                                creator: String::from("test suite"),
-                                comment: String::from("test suite"),
-                            })
-                            .execute_async(&conn)
-                            .await
-                            .unwrap();
-                    }
-
-                    {
-                        use nexus_db_queries::db::model::DnsName;
-                        use nexus_db_queries::db::schema::dns_name::dsl;
-
-                        diesel::insert_into(dsl::dns_name)
-                            .values(
-                                DnsName::new(
-                                    internal_dns_zone_id,
-                                    String::from("we-got-beets"),
-                                    Generation(2u32.try_into().unwrap()),
-                                    None,
-                                    vec![nexus_params::DnsRecord::Aaaa(
-                                        "fe80::3".parse().unwrap(),
-                                    )],
-                                )
-                                .unwrap(),
-                            )
-                            .execute_async(&conn)
-                            .await
-                            .unwrap();
-                    }
-
-                    Ok(())
-                })
-                .await;
+        .await;
+        if let Err(err) = result {
+            panic!(
+                "DNS generation {generation} not propagated to \
+                {label} DNS server ({addr}) within {poll_max:?}: {err}"
+            );
+        } else {
+            println!(
+                "DNS generation {generation} propagated to {label} \
+                DNS server ({addr}) successfully."
+            );
         }
     }
 
-    pub(crate) async fn read_internal_dns_zone_id(
+    pub(crate) async fn write_dns_update(
         opctx: &OpContext,
         datastore: &DataStore,
-    ) -> Uuid {
-        let dns_zones = datastore
-            .dns_zones_list(
-                &opctx,
-                DnsGroup::Internal,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(2).unwrap(),
-                },
+        update: DnsVersionUpdateBuilder,
+    ) {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        info!(opctx.log, "writing DNS update...");
+        datastore.dns_update_incremental(opctx, &conn, update).await.unwrap();
+    }
+
+    pub(crate) async fn write_test_dns_generation(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) {
+        let mut update = test_dns_update_builder();
+        update
+            .add_name(
+                "we-got-beets".to_string(),
+                vec![nexus_params::DnsRecord::Aaaa("fe80::3".parse().unwrap())],
             )
-            .await
             .unwrap();
-        assert_eq!(
-            dns_zones.len(),
-            1,
-            "expected exactly one internal DNS zone"
-        );
-        dns_zones[0].id
+        write_dns_update(opctx, datastore, update).await
+    }
+
+    fn test_dns_update_builder() -> DnsVersionUpdateBuilder {
+        DnsVersionUpdateBuilder::new(
+            DnsGroup::Internal,
+            "test suite DNS update".to_string(),
+            "test suite".to_string(),
+        )
     }
 }

@@ -4,13 +4,15 @@
 
 //! Tools for managing ClickHouse during development
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use camino::{Utf8Path, Utf8PathBuf};
-use camino_tempfile::Utf8TempDir;
+use camino_tempfile::{Builder, Utf8TempDir};
+use dropshot::test_util::{log_prefix_for_test, LogContext};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use thiserror::Error;
 use tokio::{
@@ -26,6 +28,19 @@ const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 // Timeout used when starting a ClickHouse keeper subprocess.
 const CLICKHOUSE_KEEPER_TIMEOUT: Duration = Duration::from_secs(30);
+
+// The string to look for in a keeper log file that indicates that the server
+// is ready.
+const KEEPER_READY: &'static str = "Server initialized, waiting for quorum";
+
+// The string to look for in a clickhouse log file that indicates that the
+// server is ready.
+const CLICKHOUSE_READY: &'static str =
+    "<Information> Application: Ready for connections";
+
+// The string to look for in a clickhouse log file when trying to determine the
+// port number on which it is listening.
+const CLICKHOUSE_PORT: &'static str = "Application: Listening for http://[::1]";
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
@@ -63,8 +78,11 @@ pub enum ClickHouseError {
 
 impl ClickHouseInstance {
     /// Start a new single node ClickHouse server on the given IPv6 port.
-    pub async fn new_single_node(port: u16) -> Result<Self, anyhow::Error> {
-        let data_dir = ClickHouseDataDir::new()?;
+    pub async fn new_single_node(
+        logctx: &LogContext,
+        port: u16,
+    ) -> Result<Self, anyhow::Error> {
+        let data_dir = ClickHouseDataDir::new(logctx)?;
         let args = vec![
             "server".to_string(),
             "--log-file".to_string(),
@@ -115,6 +133,7 @@ impl ClickHouseInstance {
 
     /// Start a new replicated ClickHouse server on the given IPv6 port.
     pub async fn new_replicated(
+        logctx: &LogContext,
         port: u16,
         tcp_port: u16,
         interserver_port: u16,
@@ -122,7 +141,7 @@ impl ClickHouseInstance {
         r_number: String,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
-        let data_dir = ClickHouseDataDir::new()?;
+        let data_dir = ClickHouseDataDir::new(logctx)?;
         let args = vec![
             "server".to_string(),
             "--config-file".to_string(),
@@ -151,9 +170,11 @@ impl ClickHouseInstance {
             .env("CH_REPLICA_NUMBER", r_number)
             .env("CH_REPLICA_HOST_01", "::1")
             .env("CH_REPLICA_HOST_02", "::1")
-            // ClickHouse servers have a small quirk, where when setting the keeper hosts as IPv6 localhost
-            // addresses in the replica configuration file, they must be wrapped in square brackets
-            // Otherwise, when running any query, a "Service not found" error appears.
+            // ClickHouse servers have a small quirk, where when setting the
+            // keeper hosts as IPv6 localhost addresses in the replica
+            // configuration file, they must be wrapped in square brackets
+            // Otherwise, when running any query, a "Service not found" error
+            // appears.
             .env("CH_KEEPER_HOST_01", "[::1]")
             .env("CH_KEEPER_HOST_02", "[::1]")
             .env("CH_KEEPER_HOST_03", "[::1]")
@@ -165,7 +186,12 @@ impl ClickHouseInstance {
         let data_path = data_dir.root_path().to_path_buf();
         let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
-        let result = wait_for_ready(data_dir.log_path()).await;
+        let result = wait_for_ready(
+            data_dir.log_path(),
+            CLICKHOUSE_TIMEOUT,
+            CLICKHOUSE_READY,
+        )
+        .await;
         match result {
             Ok(()) => Ok(Self {
                 data_dir: Some(data_dir),
@@ -181,17 +207,18 @@ impl ClickHouseInstance {
 
     /// Start a new ClickHouse keeper on the given IPv6 port.
     pub async fn new_keeper(
+        logctx: &LogContext,
         port: u16,
         k_id: u16,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
-        // We assume that only 3 keepers will be run, and the ID of the keeper can only
-        // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
-        // other keepers as part of the function's parameters.
+        // We assume that only 3 keepers will be run, and the ID of the keeper
+        // can only be one of "1", "2" or "3". This is to avoid having to pass
+        // the IDs of the other keepers as part of the function's parameters.
         if ![1, 2, 3].contains(&k_id) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
-        let data_dir = ClickHouseDataDir::new()?;
+        let data_dir = ClickHouseDataDir::new(logctx)?;
 
         let args = vec![
             "keeper".to_string(),
@@ -233,7 +260,12 @@ impl ClickHouseInstance {
         let data_path = data_dir.root_path().to_path_buf();
         let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
-        let result = wait_for_ready(data_dir.keeper_log_path()).await;
+        let result = wait_for_ready(
+            data_dir.keeper_log_path(),
+            CLICKHOUSE_KEEPER_TIMEOUT,
+            KEEPER_READY,
+        )
+        .await;
         match result {
             Ok(()) => Ok(Self {
                 data_dir: Some(data_dir),
@@ -262,7 +294,7 @@ impl ClickHouseInstance {
             child.wait().await.context("waiting for child")?;
         }
         if let Some(dir) = self.data_dir.take() {
-            dir.close()?;
+            dir.close_clean()?;
         }
         Ok(())
     }
@@ -294,10 +326,12 @@ struct ClickHouseDataDir {
 }
 
 impl ClickHouseDataDir {
-    fn new() -> Result<Self, anyhow::Error> {
-        // Keepers do not allow a dot in the beginning of the directory, so we must
-        // use a prefix.
-        let dir = Utf8TempDir::with_prefix("clickhouse-")
+    fn new(logctx: &LogContext) -> Result<Self, anyhow::Error> {
+        let (parent_dir, prefix) = log_prefix_for_test(logctx.test_name());
+
+        let dir = Builder::new()
+            .prefix(&format!("{prefix}-clickhouse-"))
+            .tempdir_in(parent_dir)
             .context("failed to create tempdir for ClickHouse data")?;
 
         let ret = Self { dir };
@@ -375,8 +409,82 @@ impl ClickHouseDataDir {
         self.dir.path().join("snapshots/")
     }
 
-    fn close(self) -> Result<(), anyhow::Error> {
+    fn close_clean(self) -> Result<(), anyhow::Error> {
         self.dir.close().context("failed to delete ClickHouse data dir")
+    }
+
+    /// Closes this data directory during a test failure, or other unclean
+    /// shutdown.
+    ///
+    /// Removes all files except those in any of the log directories.
+    fn close_unclean(self) -> Result<(), anyhow::Error> {
+        let keep_prefixes = vec![
+            self.log_path(),
+            self.err_log_path(),
+            self.keeper_log_path(),
+            self.keeper_err_log_path(),
+            self.keeper_log_storage_path(),
+        ];
+        // Persist this temporary directory since we're going to be doing the
+        // cleanup ourselves.
+        let dir = self.dir.into_path();
+
+        let mut error_paths = BTreeMap::new();
+        // contents_first = true ensures that we delete inner files before
+        // outer directories.
+        for entry in walkdir::WalkDir::new(&dir).contents_first(true) {
+            match entry {
+                Ok(entry) => {
+                    // If it matches any of the prefixes, skip it.
+                    if keep_prefixes
+                        .iter()
+                        .any(|prefix| entry.path().starts_with(prefix))
+                    {
+                        continue;
+                    }
+                    if entry.file_type().is_dir() {
+                        if let Err(error) = std::fs::remove_dir(entry.path()) {
+                            // Ignore ENOTEMPTY errors because they're likely
+                            // generated from parents of files we've kept, or
+                            // were unable to delete for other reasons.
+                            if error.raw_os_error() != Some(libc::ENOTEMPTY) {
+                                error_paths.insert(
+                                    entry.path().to_owned(),
+                                    anyhow!(error),
+                                );
+                            }
+                        }
+                    } else {
+                        if let Err(error) = std::fs::remove_file(entry.path()) {
+                            error_paths.insert(
+                                entry.path().to_owned(),
+                                anyhow!(error),
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    if let Some(path) = error.path() {
+                        error_paths.insert(path.to_owned(), anyhow!(error));
+                    }
+                }
+            }
+        }
+
+        // Are there any error paths?
+        if !error_paths.is_empty() {
+            let error_paths = error_paths
+                .into_iter()
+                .map(|(path, error)| format!("- {}: {}", path.display(), error))
+                .collect::<Vec<_>>();
+            let error_paths = error_paths.join("\n");
+            return Err(anyhow!(
+                "failed to clean up ClickHouse data dir:\n{}",
+                error_paths
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -392,7 +500,9 @@ impl Drop for ClickHouseInstance {
                 let _ = child.start_kill();
             }
             if let Some(dir) = self.data_dir.take() {
-                let _ = dir.close();
+                if let Err(e) = dir.close_unclean() {
+                    eprintln!("{}", e);
+                }
             }
         }
     }
@@ -412,18 +522,20 @@ pub struct ClickHouseCluster {
 
 impl ClickHouseCluster {
     pub async fn new(
+        logctx: &LogContext,
         replica_config: PathBuf,
         keeper_config: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         // Start all Keeper coordinator nodes
         let keeper_amount = 3;
         let mut keepers =
-            Self::new_keeper_set(keeper_amount, &keeper_config).await?;
+            Self::new_keeper_set(logctx, keeper_amount, &keeper_config).await?;
 
         // Start all replica nodes
         let replica_amount = 2;
         let mut replicas =
-            Self::new_replica_set(replica_amount, &replica_config).await?;
+            Self::new_replica_set(logctx, replica_amount, &replica_config)
+                .await?;
 
         let r1 = replicas.swap_remove(0);
         let r2 = replicas.swap_remove(0);
@@ -443,6 +555,7 @@ impl ClickHouseCluster {
     }
 
     pub async fn new_keeper_set(
+        logctx: &LogContext,
         keeper_amount: u16,
         config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
@@ -453,6 +566,7 @@ impl ClickHouseCluster {
             let k_id = i;
 
             let k = ClickHouseInstance::new_keeper(
+                logctx,
                 k_port,
                 k_id,
                 config_path.clone(),
@@ -468,6 +582,7 @@ impl ClickHouseCluster {
     }
 
     pub async fn new_replica_set(
+        logctx: &LogContext,
         replica_amount: u16,
         config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
@@ -480,6 +595,7 @@ impl ClickHouseCluster {
             let r_name = format!("oximeter_cluster node {}", i);
             let r_number = format!("0{}", i);
             let r = ClickHouseInstance::new_replicated(
+                logctx,
                 r_port,
                 r_tcp_port,
                 r_interserver_port,
@@ -550,8 +666,9 @@ pub async fn wait_for_port(
     Ok(p)
 }
 
-// Parse the ClickHouse log file at the given path, looking for a line reporting the port number of
-// the HTTP server. This is only used if the port is chosen by the OS, not the caller.
+// Parse the ClickHouse log file at the given path, looking for a line
+// reporting the port number of the HTTP server. This is only used if the port
+// is chosen by the OS, not the caller.
 async fn discover_local_listening_port(
     path: &Utf8Path,
     timeout: Duration,
@@ -564,23 +681,21 @@ async fn discover_local_listening_port(
 
 // Parse the clickhouse log for a port number.
 //
-// NOTE: This function loops forever until the expected line is found. It should be run under a
-// timeout, or some other mechanism for cancelling it.
+// NOTE: This function loops forever until the expected line is found. It
+// should be run under a timeout, or some other mechanism for cancelling it.
 async fn find_clickhouse_port_in_log(
     path: &Utf8Path,
 ) -> Result<u16, ClickHouseError> {
     let mut reader = BufReader::new(File::open(path).await?);
-    const NEEDLE: &str =
-        "<Information> Application: Listening for http://[::1]";
     let mut lines = reader.lines();
     loop {
         let line = lines.next_line().await?;
         match line {
             Some(line) => {
-                if let Some(needle_start) = line.find(NEEDLE) {
+                if let Some(needle_start) = line.find(CLICKHOUSE_PORT) {
                     // Our needle ends with `http://[::1]`; we'll split on the
                     // colon we expect to follow it to find the port.
-                    let address_start = needle_start + NEEDLE.len();
+                    let address_start = needle_start + CLICKHOUSE_PORT.len();
                     return line[address_start..]
                         .trim()
                         .split(':')
@@ -606,11 +721,12 @@ async fn find_clickhouse_port_in_log(
 // Wait for the ClickHouse log file to report it is ready to receive connections
 pub async fn wait_for_ready(
     log_path: Utf8PathBuf,
+    timeout: Duration,
+    needle: &str,
 ) -> Result<(), anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
-            let result =
-                discover_ready(&log_path, CLICKHOUSE_KEEPER_TIMEOUT).await;
+            let result = discover_ready(&log_path, timeout, needle).await;
             match result {
                 Ok(ready) => Ok(ready),
                 Err(e) => {
@@ -630,40 +746,41 @@ pub async fn wait_for_ready(
             }
         },
         &Duration::from_millis(500),
-        &CLICKHOUSE_KEEPER_TIMEOUT,
+        &timeout,
     )
     .await
     .context("waiting to discover if ClickHouse is ready for connections")?;
     Ok(p)
 }
 
-// Parse the ClickHouse log file at the given path, looking for a line reporting that the server
-// is ready for connections.
+// Parse the ClickHouse log file at the given path, looking for a line
+// reporting that the server is ready for connections.
 async fn discover_ready(
     path: &Utf8Path,
     timeout: Duration,
+    needle: &str,
 ) -> Result<(), ClickHouseError> {
     let timeout = Instant::now() + timeout;
-    tokio::time::timeout_at(timeout, clickhouse_ready_from_log(path))
+    tokio::time::timeout_at(timeout, clickhouse_ready_from_log(path, needle))
         .await
         .map_err(|_| ClickHouseError::Timeout)?
 }
 
 // Parse the clickhouse log to know if the server is ready for connections.
 //
-// NOTE: This function loops forever until the expected line is found. It should be run under a
-// timeout, or some other mechanism for cancelling it.
+// NOTE: This function loops forever until the expected line is found. It
+// should be run under a timeout, or some other mechanism for cancelling it.
 async fn clickhouse_ready_from_log(
     path: &Utf8Path,
+    needle: &str,
 ) -> Result<(), ClickHouseError> {
     let mut reader = BufReader::new(File::open(path).await?);
-    const READY: &str = "<Information> Application: Ready for connections";
     let mut lines = reader.lines();
     loop {
         let line = lines.next_line().await?;
         match line {
             Some(line) => {
-                if let Some(_) = line.find(READY) {
+                if let Some(_) = line.find(needle) {
                     return Ok(());
                 }
             }
@@ -684,7 +801,7 @@ async fn clickhouse_ready_from_log(
 mod tests {
     use super::{
         discover_local_listening_port, discover_ready, ClickHouseError,
-        CLICKHOUSE_TIMEOUT,
+        CLICKHOUSE_PORT, CLICKHOUSE_READY, CLICKHOUSE_TIMEOUT,
     };
     use camino_tempfile::NamedUtf8TempFile;
     use std::process::Stdio;
@@ -733,14 +850,16 @@ mod tests {
         writeln!(file, "A garbage line").unwrap();
         writeln!(
             file,
-            "2023.07.31 20:12:38.936192 [ 82373 ] <Information> Application: Ready for connections.",
+            "2023.07.31 20:12:38.936192 [ 82373 ] <Information> {}",
+            CLICKHOUSE_READY,
         )
         .unwrap();
         writeln!(file, "Another garbage line").unwrap();
         file.flush().unwrap();
 
         assert!(matches!(
-            discover_ready(file.path(), CLICKHOUSE_TIMEOUT).await,
+            discover_ready(file.path(), CLICKHOUSE_TIMEOUT, CLICKHOUSE_READY)
+                .await,
             Ok(())
         ));
     }
@@ -758,17 +877,23 @@ mod tests {
         writeln!(file, "Another garbage line").unwrap();
         file.flush().unwrap();
         assert!(matches!(
-            discover_ready(file.path(), Duration::from_secs(1)).await,
+            discover_ready(
+                file.path(),
+                Duration::from_secs(1),
+                CLICKHOUSE_READY
+            )
+            .await,
             Err(ClickHouseError::Timeout {})
         ));
     }
 
     // A regression test for #131.
     //
-    // The function `discover_local_listening_port` initially read from the log file until EOF, but
-    // there's no guarantee that ClickHouse has written the port we're searching for before the
-    // reader consumes the whole file. This test confirms that the file is read until the line is
-    // found, ignoring EOF, at least until the timeout is hit.
+    // The function `discover_local_listening_port` initially read from the log
+    // file until EOF, but there's no guarantee that ClickHouse has written the
+    // port we're searching for before the reader consumes the whole file. This
+    // test confirms that the file is read until the line is found, ignoring
+    // EOF, at least until the timeout is hit.
     #[tokio::test]
     async fn test_discover_local_listening_port_slow_write() {
         // In this case the writer is slightly "slower" than the reader.
@@ -789,9 +914,11 @@ mod tests {
         assert!(read_log_file(reader_timeout, writer_interval).await.is_err());
     }
 
-    // Implementation of the above tests, simulating simultaneous reading/writing of the log file
+    // Implementation of the above tests, simulating simultaneous
+    // reading/writing of the log file
     //
-    // This uses Tokio's test utilities to manage time, rather than relying on timeouts.
+    // This uses Tokio's test utilities to manage time, rather than relying on
+    // timeouts.
     async fn read_log_file(
         reader_timeout: Duration,
         writer_interval: Duration,
@@ -813,12 +940,14 @@ mod tests {
 
         // Start a task that slowly writes lines to the log file.
         //
-        // NOTE: This looks overly complicated, and it is. We have to wrap this in a mutex because
-        // both this function, and the writer task we're spawning, need access to the file. They
-        // may complete in any order, and so it's not possible to give one of them ownership over
-        // the `NamedTempFile`. If the owning task completes, that may delete the file before the
-        // other task accesses it. So we need interior mutability (because one of the references is
-        // mutable for writing), and _this_ scope must own it.
+        // NOTE: This looks overly complicated, and it is. We have to wrap this
+        // in a mutex because both this function, and the writer task we're
+        // spawning, need access to the file. They may complete in any order,
+        // and so it's not possible to give one of them ownership over the
+        // `NamedTempFile`. If the owning task completes, that may delete the
+        // file before the other task accesses it. So we need interior
+        // mutability (because one of the references is mutable for writing),
+        // and _this_ scope must own it.
         let file = Arc::new(Mutex::new(NamedUtf8TempFile::new()?));
         let path = file.lock().await.path().to_path_buf();
         let writer_file = file.clone();
@@ -836,13 +965,13 @@ mod tests {
             // (https://github.com/oxidecomputer/omicron/issues/3580).
             write_and_wait(
                 &mut file,
-                "<Information> Application: List".to_string(),
+                (&CLICKHOUSE_PORT[..30]).to_string(),
                 writer_interval,
             )
             .await;
             write_and_wait(
                 &mut file,
-                format!("ening for http://[::1]:{}\n", EXPECTED_PORT),
+                format!("{}:{}\n", &CLICKHOUSE_PORT[30..], EXPECTED_PORT),
                 writer_interval,
             )
             .await;
@@ -859,8 +988,9 @@ mod tests {
 
         // "Run" the test.
         //
-        // Note that the futures for the reader/writer tasks must be pinned to the stack, so that
-        // they may be polled on multiple passes through the select loop without consuming them.
+        // Note that the futures for the reader/writer tasks must be pinned to
+        // the stack, so that they may be polled on multiple passes through the
+        // select loop without consuming them.
         tokio::pin!(writer_task);
         tokio::pin!(reader_task);
         let mut poll_writer = true;

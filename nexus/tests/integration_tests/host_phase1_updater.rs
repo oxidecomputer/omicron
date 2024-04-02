@@ -6,7 +6,7 @@
 //! MGS to SP.
 
 use gateway_client::types::SpType;
-use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
+use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
 use omicron_nexus::app::test_interfaces::{
     HostPhase1Updater, MgsClients, UpdateProgress,
@@ -403,6 +403,7 @@ async fn test_host_phase1_updater_delivers_progress() {
     let target_host_slot = 0;
     let update_id = Uuid::new_v4();
     let phase1_data = make_fake_host_phase1_image();
+    let target_sp = &mgstestctx.simrack.gimlets[sp_slot as usize];
 
     let host_phase1_updater = HostPhase1Updater::new(
         sp_type,
@@ -413,18 +414,10 @@ async fn test_host_phase1_updater_delivers_progress() {
         &mgstestctx.logctx.log,
     );
 
-    let phase1_data_len = phase1_data.len() as u32;
-
     // Subscribe to update progress, and check that there is no status yet; we
     // haven't started the update.
     let mut progress = host_phase1_updater.progress_watcher();
     assert_eq!(*progress.borrow_and_update(), None);
-
-    // Install a semaphore on the requests our target SP will receive so we can
-    // inspect progress messages without racing.
-    let target_sp = &mgstestctx.simrack.gimlets[sp_slot as usize];
-    let sp_accept_sema = target_sp.install_udp_accept_semaphore().await;
-    let mut sp_responses = target_sp.responses_sent_count().unwrap();
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
@@ -432,137 +425,46 @@ async fn test_host_phase1_updater_delivers_progress() {
         host_phase1_updater.update(&mut mgs_clients).await
     });
 
-    // Allow the SP to respond to 2 messages: the message to activate the target
-    // flash slot and the "prepare update" messages that triggers the start of an
-    // update, then ensure we see the "started" progress.
-    sp_accept_sema.send(2).unwrap();
-    progress.changed().await.unwrap();
-    assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Started));
-
-    // Ensure our simulated SP is in the state we expect: it's prepared for an
-    // update but has not yet received any data.
-    assert_eq!(
-        target_sp.current_update_status().await,
-        UpdateStatus::InProgress(UpdateInProgressStatus {
-            id: update_id.into(),
-            bytes_received: 0,
-            total_size: phase1_data_len,
-        })
-    );
-
-    // Record the number of responses the SP has sent; we'll use
-    // `sp_responses.changed()` in the loop below, and want to mark whatever
-    // value this watch channel currently has as seen.
-    sp_responses.borrow_and_update();
-
-    // At this point, there are two clients racing each other to talk to our
-    // simulated SP:
-    //
-    // 1. MGS is trying to deliver the update
-    // 2. `host_phase1_updater` is trying to poll (via MGS) for update status
-    //
-    // and we want to ensure that we see any relevant progress reports from
-    // `host_phase1_updater`. We'll let one MGS -> SP message through at a time
-    // (waiting until our SP has responded by waiting for a change to
-    // `sp_responses`) then check its update state: if it changed, the packet we
-    // let through was data from MGS; otherwise, it was a status request from
-    // `host_phase1_updater`.
-    //
-    // This loop will continue until either:
-    //
-    // 1. We see an `UpdateStatus::InProgress` message indicating 100% delivery,
-    //    at which point we break out of the loop
-    // 2. We time out waiting for the previous step (by timing out for either
-    //    the SP to process a request or `host_phase1_updater` to realize
-    //    there's been progress), at which point we panic and fail this test.
-    let mut prev_bytes_received = 0;
-    let mut expect_progress_change = false;
-    loop {
-        // Allow the SP to accept and respond to a single UDP packet.
-        sp_accept_sema.send(1).unwrap();
-
-        // Wait until the SP has sent a response, with a safety rail that we
-        // haven't screwed up our untangle-the-race logic: if we don't see the
-        // SP process any new messages after several seconds, our test is
-        // broken, so fail.
-        tokio::time::timeout(Duration::from_secs(10), sp_responses.changed())
-            .await
-            .expect("timeout waiting for SP response count to change")
-            .expect("sp response count sender dropped");
-
-        // Inspec the SP's in-memory update state; we expect only `InProgress`
-        // or `Complete`, and in either case we note whether we expect to see
-        // status changes from `host_phase1_updater`.
-        match target_sp.current_update_status().await {
-            UpdateStatus::InProgress(sp_progress) => {
-                if sp_progress.bytes_received > prev_bytes_received {
-                    prev_bytes_received = sp_progress.bytes_received;
-                    expect_progress_change = true;
-                    continue;
+    // Loop until we see `UpdateProgress::Complete`, ensuring that any
+    // intermediate progress messages we see are in order.
+    let mut saw_started = false;
+    let mut prev_progress = 0.0;
+    let log = mgstestctx.logctx.log.clone();
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        tokio::spawn(async move {
+            loop {
+                progress.changed().await.unwrap();
+                let status = progress
+                    .borrow_and_update()
+                    .clone()
+                    .expect("progress changed but still None");
+                debug!(log, "saw new progress status"; "status" => ?status);
+                match status {
+                    UpdateProgress::Started => {
+                        assert!(!saw_started, "saw Started multiple times");
+                        saw_started = true;
+                    }
+                    UpdateProgress::InProgress { progress: Some(value) } => {
+                        // even if we didn't see the explicit `Started` message,
+                        // getting `InProgress` means we're past that point.
+                        saw_started = true;
+                        assert!(
+                            value >= prev_progress,
+                            "new progress {value} \
+                             less than previous progress {prev_progress}"
+                        );
+                        prev_progress = value;
+                    }
+                    UpdateProgress::Complete => break,
+                    _ => panic!("unexpected progress status {status:?}"),
                 }
             }
-            UpdateStatus::Complete(_) => {
-                if prev_bytes_received < phase1_data_len {
-                    break;
-                }
-            }
-            status @ (UpdateStatus::None
-            | UpdateStatus::Preparing(_)
-            | UpdateStatus::SpUpdateAuxFlashChckScan { .. }
-            | UpdateStatus::Aborted(_)
-            | UpdateStatus::Failed { .. }
-            | UpdateStatus::RotError { .. }) => {
-                panic!("unexpected status {status:?}");
-            }
-        }
-
-        // If we get here, the most recent packet did _not_ change the SP's
-        // internal update state, so it was a status request from
-        // `host_phase1_updater`. If we expect the updater to see new progress,
-        // wait for that change here.
-        if expect_progress_change {
-            // Safety rail that we haven't screwed up our untangle-the-race
-            // logic: if we don't see a new progress after several seconds, our
-            // test is broken, so fail.
-            tokio::time::timeout(Duration::from_secs(10), progress.changed())
-                .await
-                .expect("progress timeout")
-                .expect("progress watch sender dropped");
-            let status = progress.borrow_and_update().clone().unwrap();
-            expect_progress_change = false;
-
-            assert!(
-                matches!(status, UpdateProgress::InProgress { .. }),
-                "unexpected progress status {status:?}"
-            );
-        }
-    }
-
-    // We know the SP has received a complete update, but `HostPhase1Updater`
-    // may still need to request status to realize that; release the socket
-    // semaphore so the SP can respond.
-    sp_accept_sema.send(usize::MAX).unwrap();
-
-    // Unlike the SP and RoT cases, there are no MGS/SP steps in between the
-    // update completing and `HostPhase1Updater` sending
-    // `UpdateProgress::Complete`. Therefore, it's a race whether we'll see
-    // some number of `InProgress` status before `Complete`, but we should
-    // quickly move to `Complete`.
-    loop {
-        tokio::time::timeout(Duration::from_secs(10), progress.changed())
-            .await
-            .expect("progress timeout")
-            .expect("progress watch sender dropped");
-        let status = progress.borrow_and_update().clone().unwrap();
-        match status {
-            UpdateProgress::Complete => break,
-            UpdateProgress::InProgress { .. } => continue,
-            _ => panic!("unexpected progress status {status:?}"),
-        }
-    }
-
-    // drop our progress receiver so `do_update_task` can complete
-    mem::drop(progress);
+        }),
+    )
+    .await
+    .expect("timeout waiting for update completion")
+    .expect("task panic");
 
     do_update_task.await.expect("update task panicked").expect("update failed");
 

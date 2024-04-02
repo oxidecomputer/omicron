@@ -17,25 +17,23 @@ use steno::ActionContext;
 use steno::ActionError;
 use steno::SagaType;
 use thiserror::Error;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
 pub mod image_delete;
-mod instance_common;
+pub(crate) mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
+pub mod instance_ip_attach;
+pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
-pub mod loopback_address_create;
-pub mod loopback_address_delete;
 pub mod project_create;
 pub mod snapshot_create;
 pub mod snapshot_delete;
-pub mod switch_port_settings_apply;
-pub mod switch_port_settings_clear;
-pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -130,24 +128,16 @@ fn make_action_registry() -> ActionRegistry {
     <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
         &mut registry,
     );
+    <instance_ip_attach::SagaInstanceIpAttach as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_ip_detach::SagaInstanceIpDetach as NexusSaga>::register_actions(
+        &mut registry,
+    );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
         &mut registry,
     );
     <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <loopback_address_create::SagaLoopbackAddressCreate
-        as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <loopback_address_delete::SagaLoopbackAddressDelete
-        as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_apply::SagaSwitchPortSettingsApply as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_clear::SagaSwitchPortSettingsClear as NexusSaga>::register_actions(
         &mut registry,
     );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
@@ -312,91 +302,27 @@ macro_rules! declare_saga_actions {
     };
 }
 
-use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
-
 pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
 
-use futures::Future;
+/// Reliable persistent workflows can request that sagas be run as part of their
+/// activation by sending a SagaRequest through a supplied channel to Nexus.
+pub enum SagaRequest {
+    #[cfg(test)]
+    TestOnly,
+}
 
-/// Retry a progenitor client operation until a known result is returned.
-///
-/// Saga execution relies on the outcome of an external call being known: since
-/// they are idempotent, reissue the external call until a known result comes
-/// back. Retry if a communication error is seen, or if another retryable error
-/// is seen.
-///
-/// Note that retrying is only valid if the call itself is idempotent.
-pub(crate) async fn retry_until_known_result<F, T, E, Fut>(
-    log: &slog::Logger,
-    mut f: F,
-) -> Result<T, progenitor_client::Error<E>>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
-    E: std::fmt::Debug,
-{
-    use omicron_common::backoff;
+impl SagaRequest {
+    pub fn channel() -> (mpsc::Sender<SagaRequest>, mpsc::Receiver<SagaRequest>)
+    {
+        // Limit the maximum number of saga requests that background tasks can
+        // queue for Nexus to run.
+        //
+        // Note this value was chosen arbitrarily!
+        const MAX_QUEUED_SAGA_REQUESTS: usize = 128;
 
-    backoff::retry_notify(
-        backoff::retry_policy_internal_service(),
-        move || {
-            let fut = f();
-            async move {
-                match fut.await {
-                    Err(progenitor_client::Error::CommunicationError(e)) => {
-                        warn!(
-                            log,
-                            "saw transient communication error {}, retrying...",
-                            e,
-                        );
-
-                        Err(backoff::BackoffError::transient(
-                            progenitor_client::Error::CommunicationError(e),
-                        ))
-                    }
-
-                    Err(progenitor_client::Error::ErrorResponse(
-                        response_value,
-                    )) => {
-                        match response_value.status() {
-                            // Retry on 503 or 429
-                            http::StatusCode::SERVICE_UNAVAILABLE
-                            | http::StatusCode::TOO_MANY_REQUESTS => {
-                                Err(backoff::BackoffError::transient(
-                                    progenitor_client::Error::ErrorResponse(
-                                        response_value,
-                                    ),
-                                ))
-                            }
-
-                            // Anything else is a permanent error
-                            _ => Err(backoff::BackoffError::Permanent(
-                                progenitor_client::Error::ErrorResponse(
-                                    response_value,
-                                ),
-                            )),
-                        }
-                    }
-
-                    Err(e) => {
-                        warn!(log, "saw permanent error {}, aborting", e,);
-
-                        Err(backoff::BackoffError::Permanent(e))
-                    }
-
-                    Ok(v) => Ok(v),
-                }
-            }
-        },
-        |error: progenitor_client::Error<_>, delay| {
-            warn!(
-                log,
-                "failed external call ({:?}), will retry in {:?}", error, delay,
-            );
-        },
-    )
-    .await
+        mpsc::channel(MAX_QUEUED_SAGA_REQUESTS)
+    }
 }

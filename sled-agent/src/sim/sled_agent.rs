@@ -12,21 +12,20 @@ use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::HttpServer;
+use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
-use nexus_client::types::PhysicalDiskKind;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -36,15 +35,18 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::disk::DiskIdentity;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
@@ -69,9 +71,12 @@ pub struct SledAgent {
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+    /// lists of external IPs assigned to instances
+    pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub log: Logger,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -153,7 +158,6 @@ impl SledAgent {
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                Arc::clone(&nexus_client),
                 config.storage.ip,
                 storage_log,
             )),
@@ -162,6 +166,7 @@ impl SledAgent {
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
+            external_ips: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
@@ -169,6 +174,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            log,
         })
     }
 
@@ -236,6 +242,7 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -283,12 +290,13 @@ impl SledAgent {
             if !self.instances.contains_key(&instance_id).await {
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id,
-                    name: hardware.properties.hostname.clone(),
+                    name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
                     image_id: Uuid::default(),
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
+                    metadata: metadata.into(),
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -395,7 +403,28 @@ impl SledAgent {
                     ));
                 }
                 InstanceStateRequested::Running => {
-                    propolis_client::types::InstanceStateRequested::Run
+                    let instances = self.instances.clone();
+                    let log = self.log.new(
+                        o!("component" => "SledAgent-insure_instance_state"),
+                    );
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        match instances
+                            .sim_ensure(&instance_id, current, Some(state))
+                            .await
+                        {
+                            Ok(state) => {
+                                let instance_state: nexus_client::types::SledInstanceState = state.into();
+                                info!(log, "sim_ensure success"; "instance_state" => #?instance_state);
+                            }
+                            Err(instance_put_error) => {
+                                error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
+                            }
+                        }
+                    });
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
                 }
                 InstanceStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
@@ -493,19 +522,26 @@ impl SledAgent {
     /// Adds a Physical Disk to the simulated sled agent.
     pub async fn create_external_physical_disk(
         &self,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: Uuid,
+        identity: DiskIdentity,
     ) {
-        let variant = PhysicalDiskKind::U2;
+        let variant = sled_hardware::DiskVariant::U2;
         self.storage
             .lock()
             .await
-            .insert_physical_disk(vendor, serial, model, variant)
+            .insert_physical_disk(id, identity, variant)
             .await;
     }
 
-    pub async fn get_zpools(&self) -> Vec<Uuid> {
+    pub async fn get_all_physical_disks(
+        &self,
+    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+        self.storage.lock().await.get_all_physical_disks()
+    }
+
+    pub async fn get_zpools(
+        &self,
+    ) -> Vec<nexus_client::types::ZpoolPutRequest> {
         self.storage.lock().await.get_all_zpools()
     }
 
@@ -520,15 +556,13 @@ impl SledAgent {
     pub async fn create_zpool(
         &self,
         id: Uuid,
-        vendor: String,
-        serial: String,
-        model: String,
+        physical_disk_id: Uuid,
         size: u64,
     ) {
         self.storage
             .lock()
             .await
-            .insert_zpool(id, vendor, serial, model, size)
+            .insert_zpool(id, physical_disk_id, size)
             .await;
     }
 
@@ -627,15 +661,68 @@ impl SledAgent {
         Ok(())
     }
 
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+
+        // High-level behaviour: this should always succeed UNLESS
+        // trying to add a double ephemeral.
+        if let InstanceExternalIpBody::Ephemeral(curr_ip) = &body_args {
+            if my_eips.iter().any(|v| {
+                if let InstanceExternalIpBody::Ephemeral(other_ip) = v {
+                    curr_ip != other_ip
+                } else {
+                    false
+                }
+            }) {
+                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
+            }
+        }
+
+        my_eips.insert(*body_args);
+
+        Ok(())
+    }
+
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+
+        my_eips.remove(&body_args);
+
+        Ok(())
+    }
+
     /// Used for integration tests that require a component to talk to a
-    /// mocked propolis-server API.
-    // TODO: fix schemas so propolis-server's port isn't hardcoded in nexus
-    // such that we can run more than one of these.
-    // (this is only needed by test_instance_serial at present)
+    /// mocked propolis-server API. Returns the socket on which the dropshot
+    /// service is listening, which *must* be patched into Nexus with
+    /// `nexus_db_queries::db::datastore::vmm_overwrite_addr_for_test` after
+    /// the instance creation saga if functionality touching propolis-server
+    /// is to be tested (e.g. serial console connection).
     pub async fn start_local_mock_propolis_server(
         &self,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<SocketAddr, Error> {
         let mut mock_lock = self.mock_propolis.lock().await;
         if mock_lock.is_some() {
             return Err(Error::ObjectAlreadyExists {
@@ -644,7 +731,7 @@ impl SledAgent {
             });
         }
         let propolis_bind_address =
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), PROPOLIS_PORT);
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: propolis_bind_address,
             ..Default::default()
@@ -665,25 +752,28 @@ impl SledAgent {
             Error::unavail(&format!("initializing propolis-server: {}", error))
         })?
         .start();
-        let client = propolis_client::Client::new(&format!(
-            "http://{}",
-            srv.local_addr()
-        ));
+        let addr = srv.local_addr();
+        let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
-        Ok(())
+        Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        let storage = self.storage.lock().await;
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Gimlet,
+            sled_role: SledRole::Scrimlet,
             baseboard: self.config.hardware.baseboard.clone(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
@@ -694,7 +784,39 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
+            disks: storage
+                .physical_disks()
+                .values()
+                .map(|info| crate::params::InventoryDisk {
+                    identity: info.identity.clone(),
+                    variant: info.variant,
+                    slot: info.slot,
+                })
+                .collect(),
+            zpools: storage
+                .zpools()
+                .iter()
+                .map(|(id, zpool)| {
+                    Ok(crate::params::InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::try_from(zpool.total_size())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
+    }
+
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_list().await
+    }
+
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_ensure(config).await
     }
 
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {

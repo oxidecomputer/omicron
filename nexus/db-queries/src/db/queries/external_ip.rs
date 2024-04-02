@@ -26,9 +26,41 @@ use diesel::Column;
 use diesel::Expression;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
+use nexus_db_model::InstanceState as DbInstanceState;
+use nexus_db_model::IpAttachState;
+use nexus_db_model::IpAttachStateEnum;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
+use omicron_common::api::external::InstanceState as ApiInstanceState;
 use uuid::Uuid;
+
+// Broadly, we want users to be able to attach/detach at will
+// once an instance is created and functional.
+pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] = [
+    DbInstanceState(ApiInstanceState::Stopped),
+    DbInstanceState(ApiInstanceState::Running),
+    DbInstanceState(ApiInstanceState::Creating),
+];
+pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
+    DbInstanceState(ApiInstanceState::Stopped),
+    DbInstanceState(ApiInstanceState::Running),
+];
+// If we're in a state which will naturally resolve to either
+// stopped/running, we want users to know that the request can be
+// retried safely via Error::unavail.
+// TODO: We currently stop if there's a migration or other state change.
+//       There may be a good case for RPWing
+//       external_ip_state -> { NAT RPW, sled-agent } in future.
+pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
+    DbInstanceState(ApiInstanceState::Starting),
+    DbInstanceState(ApiInstanceState::Stopping),
+    DbInstanceState(ApiInstanceState::Creating),
+    DbInstanceState(ApiInstanceState::Rebooting),
+    DbInstanceState(ApiInstanceState::Migrating),
+];
+
+/// The maximum number of disks that can be attached to an instance.
+pub const MAX_EXTERNAL_IPS_PER_INSTANCE: u32 = 32;
 
 type FromClause<T> =
     diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
@@ -99,7 +131,9 @@ const MAX_PORT: u16 = u16::MAX;
 ///         candidate_ip AS ip,
 ///         CAST(candidate_first_port AS INT4) AS first_port,
 ///         CAST(candidate_last_port AS INT4) AS last_port,
-///         <project_id> AS project_id
+///         <project_id> AS project_id,
+///         <is_probe> AS is_probe,
+///         <state> AS state
 ///     FROM
 ///         SELECT * FROM (
 ///             -- Select all IP addresses by pool and range.
@@ -378,6 +412,20 @@ impl NextExternalIp {
         out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.project_id())?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
+        out.push_sql(", ");
+
+        // Initial state, mainly needed by Ephemeral/Floating IPs.
+        out.push_bind_param::<IpAttachStateEnum, IpAttachState>(
+            self.ip.state(),
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::state::NAME)?;
+        out.push_sql(", ");
+
+        // is_probe flag
+        out.push_bind_param::<sql_types::Bool, bool>(self.ip.is_probe())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::is_probe::NAME)?;
 
         out.push_sql(" FROM (");
         self.push_address_sequence_subquery(out.reborrow())?;
@@ -822,10 +870,12 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 
 #[cfg(test)]
 mod tests {
+    use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::datastore::SERVICE_IP_POOL_NAME;
     use crate::db::identity::Resource;
+    use crate::db::lookup::LookupPath;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
@@ -833,9 +883,13 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
+    use nexus_db_model::ByteCount;
+    use nexus_db_model::Instance;
+    use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
@@ -859,7 +913,8 @@ mod tests {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
             let cfg = crate::db::Config { url: db.pg_config().clone() };
             let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
             let db_datastore = Arc::new(
@@ -878,7 +933,7 @@ mod tests {
             name: &str,
             range: IpRange,
             is_default: bool,
-        ) {
+        ) -> authz::IpPool {
             let pool = IpPool::new(&IdentityMetadataCreateParams {
                 name: String::from(name).parse().unwrap(),
                 description: format!("ip pool {}", name),
@@ -902,6 +957,13 @@ mod tests {
                 .expect("Failed to associate IP pool with silo");
 
             self.initialize_ip_pool(name, range).await;
+
+            LookupPath::new(&self.opctx, &self.db_datastore)
+                .ip_pool_id(pool.id())
+                .lookup_for(authz::Action::Read)
+                .await
+                .unwrap()
+                .0
         }
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
@@ -935,6 +997,38 @@ mod tests {
             )
             .await
             .expect("Failed to create IP Pool range");
+        }
+
+        async fn create_instance(&self, name: &str) -> Uuid {
+            let instance_id = Uuid::new_v4();
+            let project_id = Uuid::new_v4();
+            let instance = Instance::new(instance_id, project_id, &InstanceCreate {
+                identity: IdentityMetadataCreateParams { name: String::from(name).parse().unwrap(), description: format!("instance {}", name) },
+                ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+                memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
+                hostname: "test".parse().unwrap(),
+                ssh_public_keys: None,
+                user_data: vec![],
+                network_interfaces: Default::default(),
+                external_ips: vec![],
+                disks: vec![],
+                start: false,
+            });
+
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
+
+            use crate::db::schema::instance::dsl as instance_dsl;
+            diesel::insert_into(instance_dsl::instance)
+                .values(instance.clone())
+                .execute_async(&*conn)
+                .await
+                .expect("Failed to create Instance");
+
+            instance_id
         }
 
         async fn default_pool_id(&self) -> Uuid {
@@ -1021,7 +1115,7 @@ mod tests {
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("for-eph").await;
         let ephemeral_ip = context
             .db_datastore
             .allocate_instance_ephemeral_ip(
@@ -1029,16 +1123,18 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                true,
             )
             .await
-            .expect("Failed to allocate Ephemeral IP when there is space");
+            .expect("Failed to allocate Ephemeral IP when there is space")
+            .0;
         assert_eq!(ephemeral_ip.ip.ip(), range.last_address());
         assert_eq!(ephemeral_ip.first_port.0, 0);
         assert_eq!(ephemeral_ip.last_port.0, super::MAX_PORT);
 
         // At this point, we should be able to allocate neither a new Ephemeral
         // nor any SNAT IPs.
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("for-snat").await;
         let res = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1069,6 +1165,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                true,
             )
             .await;
         assert!(
@@ -1203,7 +1300,7 @@ mod tests {
         .unwrap();
         context.create_ip_pool("default", range, true).await;
 
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("all-the-ports").await;
         let id = Uuid::new_v4();
         let pool_name = None;
 
@@ -1214,9 +1311,11 @@ mod tests {
                 id,
                 instance_id,
                 pool_name,
+                true,
             )
             .await
-            .expect("Failed to allocate instance ephemeral IP address");
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
         assert_eq!(ip.kind, IpKind::Ephemeral);
         assert_eq!(ip.ip.ip(), range.first_address());
         assert_eq!(ip.first_port.0, 0);
@@ -1240,10 +1339,22 @@ mod tests {
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let service1_id = Uuid::new_v4();
+
+        // Check that `service_lookup_external_ips` returns an empty vector for
+        // a service with no external IPs.
+        assert_eq!(
+            context
+                .db_datastore
+                .external_ip_list_service(&context.opctx, service1_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            Vec::new(),
+        );
+
         let id1 = Uuid::new_v4();
         let ip1 = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id1,
                 &Name("service1-ip".parse().unwrap()),
@@ -1258,13 +1369,21 @@ mod tests {
         assert_eq!(ip1.first_port.0, 0);
         assert_eq!(ip1.last_port.0, u16::MAX);
         assert_eq!(ip1.parent_id, Some(service1_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .external_ip_list_service(&context.opctx, service1_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip1],
+        );
 
         // Allocate an SNat IP
         let service2_id = Uuid::new_v4();
         let id2 = Uuid::new_v4();
         let ip2 = context
             .db_datastore
-            .allocate_service_snat_ip(&context.opctx, id2, service2_id)
+            .external_ip_allocate_service_snat(&context.opctx, id2, service2_id)
             .await
             .expect("Failed to allocate service IP address");
         assert!(ip2.is_service);
@@ -1273,13 +1392,21 @@ mod tests {
         assert_eq!(ip2.first_port.0, 0);
         assert_eq!(ip2.last_port.0, 16383);
         assert_eq!(ip2.parent_id, Some(service2_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .external_ip_list_service(&context.opctx, service2_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip2],
+        );
 
         // Allocate the next IP address
         let service3_id = Uuid::new_v4();
         let id3 = Uuid::new_v4();
         let ip3 = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id3,
                 &Name("service3-ip".parse().unwrap()),
@@ -1294,13 +1421,21 @@ mod tests {
         assert_eq!(ip3.first_port.0, 0);
         assert_eq!(ip3.last_port.0, u16::MAX);
         assert_eq!(ip3.parent_id, Some(service3_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .external_ip_list_service(&context.opctx, service3_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip3],
+        );
 
         // Once we're out of IP addresses, test that we see the right error.
         let service3_id = Uuid::new_v4();
         let id3 = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id3,
                 &Name("service3-ip".parse().unwrap()),
@@ -1322,7 +1457,7 @@ mod tests {
         let id4 = Uuid::new_v4();
         let ip4 = context
             .db_datastore
-            .allocate_service_snat_ip(&context.opctx, id4, service4_id)
+            .external_ip_allocate_service_snat(&context.opctx, id4, service4_id)
             .await
             .expect("Failed to allocate service IP address");
         assert!(ip4.is_service);
@@ -1331,6 +1466,14 @@ mod tests {
         assert_eq!(ip4.first_port.0, 16384);
         assert_eq!(ip4.last_port.0, 32767);
         assert_eq!(ip4.parent_id, Some(service4_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .external_ip_list_service(&context.opctx, service4_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip4],
+        );
 
         context.success().await;
     }
@@ -1355,7 +1498,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1374,7 +1517,7 @@ mod tests {
         // Try allocating the same service IP again.
         let ip_again = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1392,7 +1535,7 @@ mod tests {
         // different UUID.
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 Uuid::new_v4(),
                 &Name("service-ip".parse().unwrap()),
@@ -1411,7 +1554,7 @@ mod tests {
         // different input address.
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1430,7 +1573,7 @@ mod tests {
         // different port range.
         let err = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 id,
                 service_id,
@@ -1449,7 +1592,7 @@ mod tests {
         let snat_id = Uuid::new_v4();
         let snat_ip = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 snat_id,
                 snat_service_id,
@@ -1468,7 +1611,7 @@ mod tests {
         // Try allocating the same service IP again.
         let snat_ip_again = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 snat_id,
                 snat_service_id,
@@ -1487,7 +1630,7 @@ mod tests {
         // different port range.
         let err = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 snat_id,
                 snat_service_id,
@@ -1522,7 +1665,7 @@ mod tests {
         let id = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1560,7 +1703,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1577,7 +1720,7 @@ mod tests {
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1617,7 +1760,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1634,7 +1777,7 @@ mod tests {
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1729,13 +1872,12 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range, false).await;
+        let p1 = context.create_ip_pool("p1", second_range, false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("test").await;
         let id = Uuid::new_v4();
-        let pool_name = Some(Name("p1".parse().unwrap()));
 
         let ip = context
             .db_datastore
@@ -1743,10 +1885,12 @@ mod tests {
                 &context.opctx,
                 id,
                 instance_id,
-                pool_name,
+                Some(p1),
+                true,
             )
             .await
-            .expect("Failed to allocate instance ephemeral IP address");
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
         assert_eq!(ip.kind, IpKind::Ephemeral);
         assert_eq!(ip.ip.ip(), second_range.first_address());
         assert_eq!(ip.first_port.0, 0);
@@ -1772,24 +1916,26 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range, false).await;
+        let p1 = context.create_ip_pool("p1", second_range, false).await;
 
         // Allocate all available addresses in the second pool.
-        let instance_id = Uuid::new_v4();
-        let pool_name = Some(Name("p1".parse().unwrap()));
         let first_octet = first_address.octets()[3];
         let last_octet = last_address.octets()[3];
         for octet in first_octet..=last_octet {
+            let instance_id =
+                context.create_instance(&format!("o{octet}")).await;
             let ip = context
                 .db_datastore
                 .allocate_instance_ephemeral_ip(
                     &context.opctx,
                     Uuid::new_v4(),
                     instance_id,
-                    pool_name.clone(),
+                    Some(p1.clone()),
+                    true,
                 )
                 .await
-                .expect("Failed to allocate instance ephemeral IP address");
+                .expect("Failed to allocate instance ephemeral IP address")
+                .0;
             println!("{ip:#?}");
             if let IpAddr::V4(addr) = ip.ip.ip() {
                 assert_eq!(addr.octets()[3], octet);
@@ -1799,13 +1945,15 @@ mod tests {
         }
 
         // Allocating another address should _fail_, and not use the first pool.
+        let instance_id = context.create_instance("final").await;
         context
             .db_datastore
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                pool_name,
+                Some(p1),
+                true,
             )
             .await
             .expect_err("Should not use IP addresses from a different pool");

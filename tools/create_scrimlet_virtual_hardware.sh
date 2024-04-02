@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Make me a Scrimlet!
 #
@@ -60,6 +60,6 @@ function ensure_softnpu_zone {
 }
 
 ensure_run_as_root
-ensure_zpools
+ensure_vdevs
 ensure_uplink_vnic "$PHYSICAL_LINK"
 ensure_softnpu_zone

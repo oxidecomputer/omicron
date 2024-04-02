@@ -11,7 +11,6 @@ use dpd_client::types::PortFec as DpdPortFec;
 use dpd_client::types::PortId;
 use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
-use dpd_client::types::RouteSettingsV4;
 use dpd_client::Client as DpdClient;
 use dpd_client::ClientState as DpdClientState;
 use either::Either;
@@ -22,7 +21,6 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::api::internal::shared::PortConfigV1;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::OMICRON_DPD_TAG;
 use schemars::JsonSchema;
@@ -49,6 +47,7 @@ use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use update_engine::StepSpec;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 const DNS_PORT: u16 = 53;
 
@@ -68,7 +67,7 @@ const IPADM: &str = "/usr/sbin/ipadm";
 const ROUTE: &str = "/usr/sbin/route";
 
 pub(super) async fn run_local_uplink_preflight_check(
-    network_config: RackNetworkConfig,
+    network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
     our_switch_location: SwitchLocation,
@@ -161,8 +160,11 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
             |_cx| async {
                 // Check that the port name is valid and that it has no links
                 // configured already.
-                let port_id = PortId::from_str(&uplink.port)
-                    .map_err(UplinkPreflightTerminalError::InvalidPortName)?;
+                let port_id = PortId::from_str(&uplink.port).map_err(|_| {
+                    UplinkPreflightTerminalError::InvalidPortName(
+                        uplink.port.clone(),
+                    )
+                })?;
                 let links = dpd_client
                     .link_list(&port_id)
                     .await
@@ -720,11 +722,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .port_settings_apply(
                         &port_id,
                         Some(OMICRON_DPD_TAG),
-                        &PortSettings {
-                            links: HashMap::new(),
-                            v4_routes: HashMap::new(),
-                            v6_routes: HashMap::new(),
-                        },
+                        &PortSettings { links: HashMap::new() },
                     )
                     .await
                     .map_err(|err| {
@@ -762,11 +760,7 @@ fn build_port_settings(
         OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
-    let mut port_settings = PortSettings {
-        links: HashMap::new(),
-        v4_routes: HashMap::new(),
-        v6_routes: HashMap::new(),
-    };
+    let mut port_settings = PortSettings { links: HashMap::new() };
 
     let addrs = uplink.addresses.iter().map(|a| a.ip()).collect();
 
@@ -785,13 +779,10 @@ fn build_port_settings(
     );
 
     for r in &uplink.routes {
-        if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
+        if let (IpNetwork::V4(_dst), IpAddr::V4(_nexthop)) =
             (r.destination, r.nexthop)
         {
-            port_settings.v4_routes.insert(
-                dst.to_string(),
-                vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
-            );
+            // TODO: do we need to create config for mgd?
         }
     }
 
@@ -892,7 +883,7 @@ type DpdError = dpd_client::Error<dpd_client::types::Error>;
 #[derive(Debug, Error)]
 pub(crate) enum UplinkPreflightTerminalError {
     #[error("invalid port name: {0}")]
-    InvalidPortName(&'static str),
+    InvalidPortName(String),
     #[error("failed to connect to dpd to check for current configuration")]
     GetCurrentConfig(#[source] DpdError),
     #[error("uplink already configured - is rack already initialized?")]

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -eu
 
@@ -119,8 +119,6 @@ function install_packages {
     if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
       exit "$rc"
     fi
-
-    pfexec svcadm enable chrony
 
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Linux" ]]; then

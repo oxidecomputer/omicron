@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     make_filler_text, ArtifactSource, CompositeControlPlaneArchiveBuilder,
-    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
+    CompositeEntry, CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
+    MtimeSource,
 };
 
 static FAKE_MANIFEST_TOML: &str =
@@ -114,29 +115,33 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mut builder =
-                            CompositeHostArchiveBuilder::new(Vec::new())?;
-                        phase_1.with_data(
+                        let mtime_source =
+                            if phase_1.is_fake() && phase_2.is_fake() {
+                                // Ensure stability of fake artifacts.
+                                MtimeSource::Zero
+                            } else {
+                                MtimeSource::Now
+                            };
+
+                        let mut builder = CompositeHostArchiveBuilder::new(
+                            Vec::new(),
+                            mtime_source,
+                        )?;
+                        phase_1.with_entry(
                             FakeDataAttributes::new(
                                 "fake-phase-1",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_phase_1(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_phase_1(entry),
                         )?;
-                        phase_2.with_data(
+                        phase_2.with_entry(
                             FakeDataAttributes::new(
                                 "fake-phase-2",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_phase_2(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_phase_2(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
@@ -155,29 +160,33 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mut builder =
-                            CompositeRotArchiveBuilder::new(Vec::new())?;
-                        archive_a.with_data(
+                        let mtime_source =
+                            if archive_a.is_fake() && archive_b.is_fake() {
+                                // Ensure stability of fake artifacts.
+                                MtimeSource::Zero
+                            } else {
+                                MtimeSource::Now
+                            };
+
+                        let mut builder = CompositeRotArchiveBuilder::new(
+                            Vec::new(),
+                            mtime_source,
+                        )?;
+                        archive_a.with_entry(
                             FakeDataAttributes::new(
                                 "fake-rot-archive-a",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_archive_a(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_archive_a(entry),
                         )?;
-                        archive_b.with_data(
+                        archive_b.with_entry(
                             FakeDataAttributes::new(
                                 "fake-rot-archive-b",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_archive_b(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_archive_b(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
@@ -190,17 +199,24 @@ impl ArtifactManifest {
                              used with artifact kind {kind:?}"
                         );
 
+                        // Ensure stability of fake artifacts.
+                        let mtime_source = if zones.iter().all(|z| z.is_fake())
+                        {
+                            MtimeSource::Zero
+                        } else {
+                            MtimeSource::Now
+                        };
+
                         let data = Vec::new();
                         let mut builder =
-                            CompositeControlPlaneArchiveBuilder::new(data)?;
+                            CompositeControlPlaneArchiveBuilder::new(
+                                data,
+                                mtime_source,
+                            )?;
 
                         for zone in zones {
-                            zone.with_name_and_data(|name, data| {
-                                builder.append_zone(
-                                    name,
-                                    data.len(),
-                                    data.as_slice(),
-                                )
+                            zone.with_name_and_entry(|name, entry| {
+                                builder.append_zone(name, entry)
                             })?;
                         }
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -327,9 +343,65 @@ impl DeserializedManifest {
             .context("error deserializing manifest")
     }
 
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string(self).context("error serializing manifest to TOML")
+    }
+
+    /// For fake manifests, applies a set of changes to them.
+    ///
+    /// Intended for testing.
+    pub fn apply_tweaks(&mut self, tweaks: &[ManifestTweak]) -> Result<()> {
+        for tweak in tweaks {
+            match tweak {
+                ManifestTweak::SystemVersion(version) => {
+                    self.system_version = version.clone();
+                }
+                ManifestTweak::ArtifactVersion { kind, version } => {
+                    let entries =
+                        self.artifacts.get_mut(kind).with_context(|| {
+                            format!(
+                                "manifest does not have artifact kind \
+                                 {kind}",
+                            )
+                        })?;
+                    for entry in entries {
+                        entry.version = version.clone();
+                    }
+                }
+                ManifestTweak::ArtifactContents { kind, size_delta } => {
+                    let entries =
+                        self.artifacts.get_mut(kind).with_context(|| {
+                            format!(
+                                "manifest does not have artifact kind \
+                                 {kind}",
+                            )
+                        })?;
+
+                    for entry in entries {
+                        entry.source.apply_size_delta(*size_delta)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the fake manifest.
     pub fn fake() -> Self {
         Self::from_str(FAKE_MANIFEST_TOML).unwrap()
+    }
+
+    /// Returns a version of the fake manifest with a set of changes applied.
+    ///
+    /// This is primarily intended for testing.
+    pub fn tweaked_fake(tweaks: &[ManifestTweak]) -> Self {
+        let mut manifest = Self::fake();
+        manifest
+            .apply_tweaks(tweaks)
+            .expect("builtin fake manifest should accept all tweaks");
+
+        manifest
     }
 }
 
@@ -364,6 +436,39 @@ pub enum DeserializedArtifactSource {
     },
 }
 
+impl DeserializedArtifactSource {
+    fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
+        match self {
+            DeserializedArtifactSource::File { .. } => {
+                bail!("cannot apply size delta to `file` source")
+            }
+            DeserializedArtifactSource::Fake { size } => {
+                *size = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeHost { phase_1, phase_2 } => {
+                phase_1.apply_size_delta(size_delta)?;
+                phase_2.apply_size_delta(size_delta)?;
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeRot {
+                archive_a,
+                archive_b,
+            } => {
+                archive_a.apply_size_delta(size_delta)?;
+                archive_b.apply_size_delta(size_delta)?;
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeControlPlane { zones } => {
+                for zone in zones {
+                    zone.apply_size_delta(size_delta)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeserializedFileArtifactSource {
@@ -377,20 +482,40 @@ pub enum DeserializedFileArtifactSource {
 }
 
 impl DeserializedFileArtifactSource {
-    fn with_data<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
+    fn is_fake(&self) -> bool {
+        matches!(self, DeserializedFileArtifactSource::Fake { .. })
+    }
+
+    fn with_entry<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
     where
-        F: FnOnce(Vec<u8>) -> Result<T>,
+        F: FnOnce(CompositeEntry<'_>) -> Result<T>,
     {
-        let data = match self {
+        let (data, mtime_source) = match self {
             DeserializedFileArtifactSource::File { path } => {
-                std::fs::read(path)
-                    .with_context(|| format!("failed to read {path}"))?
+                let data = std::fs::read(path)
+                    .with_context(|| format!("failed to read {path}"))?;
+                // For now, always use the current time as the source. (Maybe
+                // change this to use the mtime on disk in the future?)
+                (data, MtimeSource::Now)
             }
             DeserializedFileArtifactSource::Fake { size } => {
-                fake_attr.make_data(*size as usize)
+                (fake_attr.make_data(*size as usize), MtimeSource::Zero)
             }
         };
-        f(data)
+        let entry = CompositeEntry { data: &data, mtime_source };
+        f(entry)
+    }
+
+    fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
+        match self {
+            DeserializedFileArtifactSource::File { .. } => {
+                bail!("cannot apply size delta to `file` source")
+            }
+            DeserializedFileArtifactSource::Fake { size } => {
+                *size = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -408,26 +533,57 @@ pub enum DeserializedControlPlaneZoneSource {
 }
 
 impl DeserializedControlPlaneZoneSource {
-    fn with_name_and_data<F, T>(&self, f: F) -> Result<T>
+    fn is_fake(&self) -> bool {
+        matches!(self, DeserializedControlPlaneZoneSource::Fake { .. })
+    }
+
+    fn with_name_and_entry<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&str, Vec<u8>) -> Result<T>,
+        F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,
     {
-        let (name, data) = match self {
+        let (name, data, mtime_source) = match self {
             DeserializedControlPlaneZoneSource::File { path } => {
                 let data = std::fs::read(path)
                     .with_context(|| format!("failed to read {path}"))?;
                 let name = path.file_name().with_context(|| {
                     format!("zone path missing file name: {path}")
                 })?;
-                (name, data)
+                // For now, always use the current time as the source. (Maybe
+                // change this to use the mtime on disk in the future?)
+                (name, data, MtimeSource::Now)
             }
             DeserializedControlPlaneZoneSource::Fake { name, size } => {
                 let data = make_filler_text(*size as usize);
-                (name.as_str(), data)
+                (name.as_str(), data, MtimeSource::Zero)
             }
         };
-        f(name, data)
+        let entry = CompositeEntry { data: &data, mtime_source };
+        f(name, entry)
     }
+
+    fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
+        match self {
+            DeserializedControlPlaneZoneSource::File { .. } => {
+                bail!("cannot apply size delta to `file` source")
+            }
+            DeserializedControlPlaneZoneSource::Fake { size, .. } => {
+                (*size) = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+        }
+    }
+}
+/// A change to apply to a manifest.
+#[derive(Clone, Debug)]
+pub enum ManifestTweak {
+    /// Update the system version.
+    SystemVersion(SemverVersion),
+
+    /// Update the versions for this artifact.
+    ArtifactVersion { kind: KnownArtifactKind, version: SemverVersion },
+
+    /// Update the contents of this artifact (only support changing the size).
+    ArtifactContents { kind: KnownArtifactKind, size_delta: i64 },
 }
 
 fn deserialize_byte_size<'de, D>(deserializer: D) -> Result<u64, D::Error>
