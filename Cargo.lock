@@ -6302,6 +6302,7 @@ dependencies = [
  "chrono",
  "clap 4.5.1",
  "omicron-workspace-hack",
+ "sigpipe",
  "uuid 1.7.0",
 ]
 
@@ -8674,6 +8675,15 @@ checksum = "5e1788eed21689f9cf370582dfc467ef36ed9c707f073528ddafa8d83e3b8500"
 dependencies = [
  "digest",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "sigpipe"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5584bfb3e0d348139d8210285e39f6d2f8a1902ac06de343e06357d1d763d8e6"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
