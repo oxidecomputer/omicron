@@ -1490,7 +1490,7 @@ mod test {
                 .unwrap();
 
             let result = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,

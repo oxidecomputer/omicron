@@ -2099,9 +2099,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Create four 10 GiB zpools, each with one dataset.
     let mut disk_test = DiskTest::new(&cptestctx).await;
-    disk_test
-        .add_zpool_with_dataset(&cptestctx, DiskTest::DEFAULT_ZPOOL_SIZE_GIB)
-        .await;
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -2168,9 +2166,7 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
 
     // Create four 10 GiB zpools, each with one dataset.
     let mut disk_test = DiskTest::new(&cptestctx).await;
-    disk_test
-        .add_zpool_with_dataset(&cptestctx, DiskTest::DEFAULT_ZPOOL_SIZE_GIB)
-        .await;
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -2229,9 +2225,7 @@ async fn test_single_region_allocate_for_replace(
 
     // One more zpool and dataset is required to meet `region_allocate`'s
     // redundancy requirement.
-    disk_test
-        .add_zpool_with_dataset(&cptestctx, DiskTest::DEFAULT_ZPOOL_SIZE_GIB)
-        .await;
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
