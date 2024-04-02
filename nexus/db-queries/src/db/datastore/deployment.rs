@@ -486,6 +486,11 @@ impl DataStore {
             }
         }
 
+        // Sort all zones to match what blueprint builders do.
+        for (_, zones_config) in blueprint_zones.iter_mut() {
+            zones_config.sort();
+        }
+
         bail_unless!(
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
@@ -1177,6 +1182,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::external_api::views::SledPolicy;
@@ -1185,15 +1191,20 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use std::mem;
     use std::net::Ipv6Addr;
 
-    static EMPTY_POLICY: Policy = Policy {
-        sleds: BTreeMap::new(),
-        service_ip_pool_ranges: Vec::new(),
-        target_nexus_zone_count: 0,
+    static EMPTY_PLANNING_INPUT: PlanningInput = PlanningInput {
+        policy: Policy {
+            sleds: BTreeMap::new(),
+            service_ip_pool_ranges: Vec::new(),
+            target_nexus_zone_count: 0,
+        },
+        service_external_ips: BTreeMap::new(),
+        service_nics: BTreeMap::new(),
     };
 
     // This is a not-super-future-maintainer-friendly helper to check that all
@@ -1277,7 +1288,7 @@ mod tests {
         }
     }
 
-    fn representative() -> (Collection, Policy, Blueprint) {
+    fn representative() -> (Collection, PlanningInput, Blueprint) {
         // We'll start with a representative collection...
         let mut collection =
             nexus_inventory::examples::representative().builder.build();
@@ -1301,16 +1312,21 @@ mod tests {
         }
 
         let policy = policy_from_collection(&collection);
+        let planning_input = PlanningInput {
+            policy,
+            service_external_ips: BTreeMap::new(),
+            service_nics: BTreeMap::new(),
+        };
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &planning_input.policy,
             "test",
         )
         .unwrap();
 
-        (collection, policy, blueprint)
+        (collection, planning_input, blueprint)
     }
 
     async fn blueprint_list_all_ids(
@@ -1340,7 +1356,7 @@ mod tests {
             &collection,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT.policy,
             "test",
         )
         .unwrap();
@@ -1396,7 +1412,7 @@ mod tests {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a cohesive representative collection/policy/blueprint
-        let (collection, mut policy, blueprint1) = representative();
+        let (collection, mut planning_input, blueprint1) = representative();
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
@@ -1415,7 +1431,10 @@ mod tests {
         );
 
         // Check the number of blueprint elements against our collection.
-        assert_eq!(blueprint1.blueprint_zones.len(), policy.sleds.len());
+        assert_eq!(
+            blueprint1.blueprint_zones.len(),
+            planning_input.policy.sleds.len()
+        );
         assert_eq!(
             blueprint1.blueprint_zones.len(),
             collection.omicron_zones.len()
@@ -1457,8 +1476,12 @@ mod tests {
 
         // Add a new sled to `policy`.
         let new_sled_id = Uuid::new_v4();
-        policy.sleds.insert(new_sled_id, fake_sled_resources(None));
-        let new_sled_zpools = &policy.sleds.get(&new_sled_id).unwrap().zpools;
+        planning_input
+            .policy
+            .sleds
+            .insert(new_sled_id, fake_sled_resources(None));
+        let new_sled_zpools =
+            &planning_input.policy.sleds.get(&new_sled_id).unwrap().zpools;
 
         // Create a builder for a child blueprint.  While we're at it, use a
         // different DNS version to test that that works.
@@ -1469,7 +1492,7 @@ mod tests {
             &blueprint1,
             new_internal_dns_version,
             new_external_dns_version,
-            &policy,
+            &planning_input,
             "test",
         )
         .expect("failed to create builder");
@@ -1515,7 +1538,10 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read).display());
+        let diff = blueprint_read
+            .diff_since_blueprint(&blueprint2)
+            .expect("failed to diff blueprints");
+        println!("diff: {}", diff.display());
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
         assert_eq!(blueprint2.external_dns_version, new_external_dns_version);
@@ -1612,7 +1638,7 @@ mod tests {
             &collection,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT.policy,
             "test1",
         )
         .unwrap();
@@ -1621,7 +1647,7 @@ mod tests {
             &blueprint1,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT,
             "test2",
         )
         .expect("failed to create builder")
@@ -1631,7 +1657,7 @@ mod tests {
             &blueprint1,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT,
             "test3",
         )
         .expect("failed to create builder")
@@ -1729,7 +1755,7 @@ mod tests {
             &blueprint3,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT,
             "test3",
         )
         .expect("failed to create builder")
@@ -1769,7 +1795,7 @@ mod tests {
             &collection,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT.policy,
             "test1",
         )
         .unwrap();
@@ -1778,7 +1804,7 @@ mod tests {
             &blueprint1,
             Generation::new(),
             Generation::new(),
-            &EMPTY_POLICY,
+            &EMPTY_PLANNING_INPUT,
             "test2",
         )
         .expect("failed to create builder")

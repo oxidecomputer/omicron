@@ -276,7 +276,7 @@ pub fn representative() -> Representative {
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "macrohard".to_string(),
                 model: "box".to_string(),
                 serial: "XXIV".to_string(),
@@ -286,7 +286,7 @@ pub fn representative() -> Representative {
         },
         // ... and a couple different vendors for our U.2s
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0001".to_string(),
@@ -295,7 +295,7 @@ pub fn representative() -> Representative {
             slot: 1,
         },
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0002".to_string(),
@@ -304,7 +304,7 @@ pub fn representative() -> Representative {
             slot: 2,
         },
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "tony".to_string(),
                 model: "craystation".to_string(),
                 serial: "5".to_string(),

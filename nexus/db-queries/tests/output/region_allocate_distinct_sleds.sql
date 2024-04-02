@@ -34,6 +34,7 @@ WITH
         old_zpool_usage
         INNER JOIN (zpool INNER JOIN sled ON zpool.sled_id = sled.id) ON
             zpool.id = old_zpool_usage.pool_id
+        INNER JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
       WHERE
         (old_zpool_usage.size_used + $2)
         <= (
@@ -50,6 +51,8 @@ WITH
           )
         AND sled.sled_policy = 'in_service'
         AND sled.sled_state = 'active'
+        AND physical_disk.disk_policy = 'in_service'
+        AND physical_disk.disk_state = 'active'
       ORDER BY
         zpool.sled_id, md5(CAST(zpool.id AS BYTES) || $3)
     ),

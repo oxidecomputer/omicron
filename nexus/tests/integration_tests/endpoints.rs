@@ -15,6 +15,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
@@ -56,7 +57,9 @@ pub static DEMO_SLED_PROVISION_POLICY: Lazy<params::SledProvisionPolicyParams> =
 
 pub static HARDWARE_SWITCH_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/switches/{}", SWITCH_UUID));
-pub const HARDWARE_DISK_URL: &'static str = "/v1/system/hardware/disks";
+pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
+pub static HARDWARE_DISK_URL: Lazy<String> =
+    Lazy::new(|| format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID));
 pub static HARDWARE_SLED_DISK_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/system/hardware/sleds/{}/disks", SLED_AGENT_UUID)
 });
@@ -844,6 +847,17 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
         Utc::now(),
     )
 });
+
+pub static TIMESERIES_LIST_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/timeseries/schema"));
+
+pub static TIMESERIES_QUERY_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/timeseries/query"));
+
+pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
+    Lazy::new(|| params::TimeseriesQuery {
+        query: String::from("get http_service:request_latency_histogram"),
+    });
 
 // Users
 pub static DEMO_USER_CREATE: Lazy<params::UserCreate> =
@@ -1956,11 +1970,19 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_DISK_URL,
+            url: &HARDWARE_DISKS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
+
+        VerifyEndpoint {
+            url: &HARDWARE_DISK_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
 
         VerifyEndpoint {
             url: &HARDWARE_SLED_DISK_URL,
@@ -2009,6 +2031,26 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &TIMESERIES_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &TIMESERIES_QUERY_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap()
+                ),
             ],
         },
 

@@ -2300,7 +2300,7 @@ mod tests {
                 .service_create_network_interface_raw(&context.opctx, interface)
                 .await
                 .expect("Failed to insert interface");
-            assert_eq!(inserted_interface.slot, i16::from(slot));
+            assert_eq!(*inserted_interface.slot, slot);
         }
 
         context.success().await;
@@ -2413,7 +2413,7 @@ mod tests {
             .service_create_network_interface_raw(&context.opctx, interface)
             .await
             .expect("Failed to insert interface");
-        assert_eq!(inserted_interface.slot, 0);
+        assert_eq!(*inserted_interface.slot, 0);
 
         // Inserting an interface with the same slot on the same service should
         let new_interface = IncompleteNetworkInterface::new_service(
@@ -2776,8 +2776,7 @@ mod tests {
                 )
                 .await
                 .expect("Should be able to insert up to 8 interfaces");
-            let actual_slot = usize::try_from(inserted_interface.slot)
-                .expect("Bad slot index");
+            let actual_slot = usize::from(*inserted_interface.slot);
             assert_eq!(
                 slot, actual_slot,
                 "Failed to allocate next available interface slot"

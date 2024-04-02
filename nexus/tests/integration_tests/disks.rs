@@ -970,9 +970,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
@@ -1685,9 +1685,9 @@ async fn test_multiple_disks_multiple_zpools(
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
