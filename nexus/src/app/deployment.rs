@@ -144,9 +144,8 @@ impl super::Nexus {
                 .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
                 .await?
         };
-        let external_ip_rows = datastore
-            .external_ip_list_service_all_batched(opctx)
-            .await?;
+        let external_ip_rows =
+            datastore.external_ip_list_service_all_batched(opctx).await?;
         let service_nic_rows = datastore
             .service_network_interfaces_all_list_batched(opctx)
             .await?;
@@ -159,7 +158,8 @@ impl super::Nexus {
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             log: &opctx.log,
-        }.build()?;
+        }
+        .build()?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to

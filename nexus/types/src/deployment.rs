@@ -41,6 +41,7 @@ pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;
 pub use planning_input::Policy;
 pub use planning_input::ServiceNetworkInterface;
+pub use planning_input::SledDetails;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
 

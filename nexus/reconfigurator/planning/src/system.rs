@@ -12,6 +12,7 @@ use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledResources;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -294,14 +295,17 @@ impl SystemDescription {
         let mut builder = PlanningInputBuilder::new(policy);
 
         for sled in self.sleds.values() {
-            let sled_resources = SledResources {
+            let sled_details = SledDetails {
+                policy: sled.policy,
                 state: SledState::Active,
-                zpools: sled.zpools.iter().cloned().collect(),
-                subnet: sled.sled_subnet,
+                resources: SledResources {
+                    zpools: sled.zpools.iter().cloned().collect(),
+                    subnet: sled.sled_subnet,
+                },
             };
             // TODO-cleanup use `TypedUuid` everywhere
             let sled_id = TypedUuid::from_untyped_uuid(sled.sled_id);
-            builder.add_sled(sled_id, sled.policy, sled_resources)?;
+            builder.add_sled(sled_id, sled_details)?;
         }
 
         Ok(builder)

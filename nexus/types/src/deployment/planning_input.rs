@@ -26,9 +26,6 @@ use uuid::Uuid;
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    /// current sled state
-    pub state: SledState,
-
     /// zpools on this sled
     ///
     /// (used to allocate storage for control plane zones with persistent
@@ -142,9 +139,13 @@ pub struct PlanningInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SledDetails {
-    policy: SledPolicy,
-    resources: SledResources,
+pub struct SledDetails {
+    /// current sled policy
+    pub policy: SledPolicy,
+    /// current sled state
+    pub state: SledState,
+    /// current resources allocated to this sled
+    pub resources: SledResources,
 }
 
 impl PlanningInput {
@@ -156,7 +157,7 @@ impl PlanningInput {
         &self.policy.service_ip_pool_ranges
     }
 
-    fn apply_sled_filter(
+    pub fn all_sleds(
         &self,
         filter: SledFilter,
     ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledDetails)> + '_ {
@@ -164,10 +165,7 @@ impl PlanningInput {
             SledFilter::All => Some((sled_id, details)),
             SledFilter::EligibleForDiscretionaryServices => {
                 if details.policy.is_provisionable()
-                    && details
-                        .resources
-                        .state
-                        .is_eligible_for_discretionary_services()
+                    && details.state.is_eligible_for_discretionary_services()
                 {
                     Some((sled_id, details))
                 } else {
@@ -176,7 +174,15 @@ impl PlanningInput {
             }
             SledFilter::InService => {
                 if details.policy.is_in_service() {
-                    Some((sled_id, details))
+                    // Check for illegal states; we shouldn't be able to have a
+                    // policy+state combo where the policy says the sled is in
+                    // service but the state is decommissioned, for example, but
+                    // the two separate types let us represent that, so we'll
+                    // guard against it here.
+                    match details.state {
+                        SledState::Active => Some((sled_id, details)),
+                        SledState::Decommissioned => None,
+                    }
                 } else {
                     None
                 }
@@ -188,24 +194,14 @@ impl PlanningInput {
         &self,
         filter: SledFilter,
     ) -> impl Iterator<Item = TypedUuid<SledKind>> + '_ {
-        self.apply_sled_filter(filter).map(|(sled_id, _)| sled_id)
-    }
-
-    pub fn all_sleds(
-        &self,
-        filter: SledFilter,
-    ) -> impl Iterator<Item = (TypedUuid<SledKind>, SledPolicy, &SledResources)> + '_
-    {
-        self.apply_sled_filter(filter).map(|(sled_id, details)| {
-            (sled_id, details.policy, &details.resources)
-        })
+        self.all_sleds(filter).map(|(sled_id, _)| sled_id)
     }
 
     pub fn all_sled_resources(
         &self,
         filter: SledFilter,
     ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledResources)> + '_ {
-        self.apply_sled_filter(filter)
+        self.all_sleds(filter)
             .map(|(sled_id, details)| (sled_id, &details.resources))
     }
 
@@ -221,6 +217,19 @@ impl PlanningInput {
         sled_id: &TypedUuid<SledKind>,
     ) -> Option<&SledResources> {
         self.sleds.get(sled_id).map(|details| &details.resources)
+    }
+
+    // Convert this `PlanningInput` back into a [`PlanningInputBuilder`]
+    //
+    // This is primarily useful for tests that want to mutate an existing
+    // `PlanningInput`.
+    pub fn into_builder(self) -> PlanningInputBuilder {
+        PlanningInputBuilder {
+            policy: self.policy,
+            sleds: self.sleds,
+            omicron_zone_external_ips: self.omicron_zone_external_ips,
+            omicron_zone_nics: self.omicron_zone_nics,
+        }
     }
 }
 
@@ -251,6 +260,18 @@ pub struct PlanningInputBuilder {
 }
 
 impl PlanningInputBuilder {
+    pub const fn empty_input() -> PlanningInput {
+        PlanningInput {
+            policy: Policy {
+                service_ip_pool_ranges: Vec::new(),
+                target_nexus_zone_count: 0,
+            },
+            sleds: BTreeMap::new(),
+            omicron_zone_external_ips: BTreeMap::new(),
+            omicron_zone_nics: BTreeMap::new(),
+        }
+    }
+
     pub fn new(policy: Policy) -> Self {
         Self {
             policy,
@@ -263,12 +284,11 @@ impl PlanningInputBuilder {
     pub fn add_sled(
         &mut self,
         sled_id: TypedUuid<SledKind>,
-        policy: SledPolicy,
-        resources: SledResources,
+        details: SledDetails,
     ) -> Result<(), PlanningInputBuildError> {
         match self.sleds.entry(sled_id) {
             Entry::Vacant(slot) => {
-                slot.insert(SledDetails { policy, resources });
+                slot.insert(details);
                 Ok(())
             }
             Entry::Occupied(_) => {
@@ -313,6 +333,20 @@ impl PlanningInputBuilder {
                 })
             }
         }
+    }
+
+    pub fn policy_mut(&mut self) -> &mut Policy {
+        &mut self.policy
+    }
+
+    pub fn sleds(&mut self) -> &BTreeMap<TypedUuid<SledKind>, SledDetails> {
+        &self.sleds
+    }
+
+    pub fn sleds_mut(
+        &mut self,
+    ) -> &mut BTreeMap<TypedUuid<SledKind>, SledDetails> {
+        &mut self.sleds
     }
 
     pub fn build(self) -> PlanningInput {

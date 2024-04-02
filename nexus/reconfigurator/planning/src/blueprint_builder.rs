@@ -374,9 +374,14 @@ impl<'a> BlueprintBuilder<'a> {
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
+        //
+        // TODO-correctness Is `SledFilter::All` incorrect here? If I use
+        // `SledFilter::InService` it fails existing unit tests; this probably
+        // needs to be refined with omicron#5211 so we don't just drop expunged
+        // sleds on the floor (which happens with `SledFilter::InService`).
         let blueprint_zones = self
             .zones
-            .into_zones_map(self.input.all_sled_ids(SledFilter::InService));
+            .into_zones_map(self.input.all_sled_ids(SledFilter::All));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -905,7 +910,7 @@ pub mod test {
                 &collection,
                 Generation::new(),
                 Generation::new(),
-                &input.policy,
+                input.all_sled_ids(SledFilter::All),
                 "the_test",
                 TEST_NAME,
             )
@@ -976,7 +981,11 @@ pub mod test {
         // The example blueprint should have internal NTP zones on all the
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
-        for (sled_id, sled_resources) in &example.input.policy.sleds {
+        for (sled_id, sled_resources) in
+            example.input.all_sled_resources(SledFilter::All)
+        {
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = sled_id.as_untyped_uuid();
             builder.sled_ensure_zone_ntp(*sled_id).unwrap();
             for pool_name in &sled_resources.zpools {
                 builder
@@ -1000,12 +1009,7 @@ pub mod test {
         let new_sled_id = example.sled_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let policy = example.system.to_policy().unwrap();
-        let input = PlanningInput {
-            policy,
-            service_external_ips: example.input.service_external_ips,
-            service_nics: example.input.service_nics,
-        };
+        let input = example.system.to_planning_input_builder().unwrap().build();
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
@@ -1016,7 +1020,10 @@ pub mod test {
         )
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        let new_sled_resources = input.policy.sleds.get(&new_sled_id).unwrap();
+        // TODO-cleanup use `TypedUuid` everywhere
+        let new_sled_resources = input
+            .sled_resources(&TypedUuid::from_untyped_uuid(new_sled_id))
+            .unwrap();
         for pool_name in &new_sled_resources.zpools {
             builder
                 .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
@@ -1111,7 +1118,7 @@ pub mod test {
             &collection,
             internal_dns_version,
             external_dns_version,
-            &input.policy,
+            input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
         )
@@ -1180,7 +1187,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &input.policy,
+            input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
         )
@@ -1229,7 +1236,6 @@ pub mod test {
             // Replace the policy's external service IP pool ranges with ranges
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
-            let mut input = input.clone();
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones() {
                 if let Some(ip) = z
@@ -1241,7 +1247,11 @@ pub mod test {
                 }
             }
             assert!(!used_ip_ranges.is_empty());
-            input.policy.service_ip_pool_ranges = used_ip_ranges;
+            let input = {
+                let mut builder = input.into_builder();
+                builder.policy_mut().service_ip_pool_ranges = used_ip_ranges;
+                builder.build()
+            };
 
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
@@ -1311,7 +1321,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &input.policy,
+            input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
         )
@@ -1371,7 +1381,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &input.policy,
+            input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
         )
@@ -1431,7 +1441,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &input.policy,
+            input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
         )

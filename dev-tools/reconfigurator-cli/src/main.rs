@@ -1136,7 +1136,7 @@ fn cmd_load(
         .to_planning_input_builder()
         .context("generating planning input")?
         .build();
-    for (sled_id, sled_policy, sled_resources) in
+    for (sled_id, sled_details) in
         loaded.planning_input.all_sleds(SledFilter::All)
     {
         if current_planning_input.sled_resources(&sled_id).is_some() {
@@ -1180,8 +1180,8 @@ fn cmd_load(
 
         let result = sim.system.sled_full(
             *sled_id.as_untyped_uuid(),
-            sled_policy,
-            sled_resources.clone(),
+            sled_details.policy,
+            sled_details.resources.clone(),
             inventory_sp,
             inventory_sled_agent,
         );

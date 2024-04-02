@@ -19,6 +19,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::deployment::ZpoolName;
@@ -92,20 +93,18 @@ impl PlanningInputFromDb<'_> {
             let zpools = zpools_by_sled_id
                 .remove(&sled_id)
                 .unwrap_or_else(BTreeSet::new);
-            let sled_info = SledResources {
+            let sled_details = SledDetails {
+                policy: sled_row.policy(),
                 state: sled_row.state().into(),
-                subnet,
-                zpools,
+                resources: SledResources { subnet, zpools },
             };
             // TODO-cleanup use `TypedUuid` everywhere
             let sled_id = TypedUuid::from_untyped_uuid(sled_id);
-            builder.add_sled(sled_id, sled_row.policy(), sled_info).map_err(
-                |e| {
-                    Error::internal_error(&format!(
+            builder.add_sled(sled_id, sled_details).map_err(|e| {
+                Error::internal_error(&format!(
                     "unexpectedly failed to add sled to planning input: {e}"
                 ))
-                },
-            )?;
+            })?;
         }
 
         for external_ip_row in

@@ -65,11 +65,8 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
      internal_ntp   57b96d5c-b71e-43e4-8869-7d514003d00d   in service    fd00:1122:3344:104::21         
      nexus          b4947d31-f70e-4ee0-8817-0ca6cea9b16b   in service    fd00:1122:3344:104::22         
 +    nexus          2ec75441-3d7d-4b4b-9614-af03de5a3666   in service    fd00:1122:3344:104::2d  added  
-+    nexus          3ca5292f-8a59-4475-bb72-0f43714d0fff   in service    fd00:1122:3344:104::31  added  
 +    nexus          508abd03-cbfe-4654-9a6d-7f15a1ad32e5   in service    fd00:1122:3344:104::2e  added  
 +    nexus          59950bc8-1497-44dd-8cbf-b6502ba921b2   in service    fd00:1122:3344:104::2f  added  
-+    nexus          99f6d544-8599-4e2b-a55a-82d9e0034662   in service    fd00:1122:3344:104::30  added  
-+    nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:104::32  added  
                                                                                                         
 *  sled affab35f-600a-4109-8ea0-34a067a4e0bc: zones at generation: 2 -> 3                               
      crucible       0dfbf374-9ef9-430f-b06d-f271bf7f84c4   in service    fd00:1122:3344:101::27         
@@ -84,11 +81,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
      crucible       d47f4996-fac0-4657-bcea-01b1fee6404d   in service    fd00:1122:3344:101::2b         
      internal_ntp   f1a7b9a7-fc6a-4b23-b829-045ff33117ff   in service    fd00:1122:3344:101::21         
      nexus          15c103f0-ac63-423b-ba5d-1b5fcd563ba3   in service    fd00:1122:3344:101::22         
-+    nexus          6f86d5cb-17d7-424b-9d4c-39f670532cbe   in service    fd00:1122:3344:101::2e  added  
-+    nexus          87c299eb-470e-4b6d-b8c7-6759694e66b6   in service    fd00:1122:3344:101::30  added  
-+    nexus          c72b7930-0580-4f00-93b9-8cba2c8d344e   in service    fd00:1122:3344:101::2d  added  
-+    nexus          d0095508-bdb8-4faf-b091-964276a20b15   in service    fd00:1122:3344:101::31  added  
-+    nexus          ff422442-4b31-4ade-a11a-9e5a25f0404c   in service    fd00:1122:3344:101::2f  added  
++    nexus          3ca5292f-8a59-4475-bb72-0f43714d0fff   in service    fd00:1122:3344:101::2e  added  
++    nexus          99f6d544-8599-4e2b-a55a-82d9e0034662   in service    fd00:1122:3344:101::2d  added  
++    nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:101::2f  added  
 
   METADATA:
     internal DNS version:  1 (unchanged)
