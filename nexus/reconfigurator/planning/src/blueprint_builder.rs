@@ -41,6 +41,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -56,6 +57,8 @@ use uuid::Uuid;
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("sled {sled_id} not found")]
+    SledNotFound { sled_id: Uuid },
     #[error("sled {sled_id}: ran out of available addresses for sled")]
     OutOfAddresses { sled_id: Uuid },
     #[error("no Nexus zones exist in parent blueprint")]
@@ -472,6 +475,44 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Ensure::Added)
     }
 
+    pub fn sled_ensure_zones_not_using_expunged_disks(
+        &mut self,
+        sled_id: Uuid,
+    ) -> Result<Ensure, Error> {
+        let resources = self
+            .input
+            .policy
+            .sleds
+            .get(&sled_id)
+            .ok_or_else(|| Error::SledNotFound { sled_id })?;
+
+        for zone in self.zones.current_sled_zones(sled_id) {
+            // TODO(https://github.com/oxidecomputer/omicron/pull/5050):
+            // (see also https://github.com/oxidecomputer/omicron/issues/5048)
+            //
+            // Once Nexus is responsible for zone filesystem allocation,
+            // it should also have enough knowledge to know about transient
+            // zone filesystems on expunged disks. Those zones should also be
+            // removed.
+
+            let durable_storage_zpool = match zone.config.zone_type.zpool() {
+                Some(pool) => pool,
+                None => continue,
+            };
+
+            if !resources.zpool_is_provisionable(durable_storage_zpool) {
+                // TODO(https://github.com/oxidecomputer/omicron/pull/5211):
+                // Actually remove this zone.
+                warn!(
+                    self.log,
+                    "Should remove zone, but this is not yet implemented"
+                );
+            }
+        }
+
+        return Ok(Ensure::NotNeeded);
+    }
+
     pub fn sled_ensure_zone_crucible(
         &mut self,
         sled_id: Uuid,
@@ -491,7 +532,7 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         let sled_info = self.sled_resources(sled_id)?;
-        if !sled_info.zpools.contains(&pool_name) {
+        if !sled_info.zpools.contains_key(&pool_name) {
             return Err(Error::Planner(anyhow!(
                 "adding crucible zone for sled {:?}: \
                 attempted to use unknown zpool {:?}",
@@ -973,7 +1014,7 @@ pub mod test {
         // all these zones exist, we should see no change.
         for (sled_id, sled_resources) in &example.input.policy.sleds {
             builder.sled_ensure_zone_ntp(*sled_id).unwrap();
-            for pool_name in &sled_resources.zpools {
+            for pool_name in sled_resources.provisionable_zpools() {
                 builder
                     .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
                     .unwrap();
@@ -1012,7 +1053,7 @@ pub mod test {
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         let new_sled_resources = input.policy.sleds.get(&new_sled_id).unwrap();
-        for pool_name in &new_sled_resources.zpools {
+        for pool_name in new_sled_resources.provisionable_zpools() {
             builder
                 .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
                 .unwrap();
@@ -1075,7 +1116,10 @@ pub mod test {
                 }
             })
             .collect::<BTreeSet<_>>();
-        assert_eq!(crucible_pool_names, new_sled_resources.zpools);
+        assert_eq!(
+            crucible_pool_names,
+            new_sled_resources.zpools.keys().cloned().collect()
+        );
 
         logctx.cleanup_successful();
     }

@@ -110,6 +110,24 @@ impl<'a> Planner<'a> {
                 SledState::Active => {}
             }
 
+            // Remove any zones which rely on expunged disks.
+            if self
+                .blueprint
+                .sled_ensure_zones_not_using_expunged_disks(*sled_id)?
+                == Ensure::Added
+            {
+                info!(
+                    &self.log,
+                    "found sled with expunged disks (will remove the zones using them)";
+                    "sled_id" => %sled_id
+                );
+                self.blueprint.comment(&format!(
+                    "sled {}: remove expunged disks",
+                    sled_id
+                ));
+                continue;
+            }
+
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
@@ -164,9 +182,9 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone on it,
             let mut ncrucibles_added = 0;
-            for zpool_name in &sled_info.zpools {
+            for zpool_name in sled_info.provisionable_zpools() {
                 if self
                     .blueprint
                     .sled_ensure_zone_crucible(*sled_id, zpool_name.clone())?

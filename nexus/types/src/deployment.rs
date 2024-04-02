@@ -12,6 +12,9 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
+use crate::external_api::views::PhysicalDiskKind;
+use crate::external_api::views::PhysicalDiskPolicy;
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
@@ -35,7 +38,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::ZoneKind;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
@@ -72,6 +74,17 @@ pub struct Policy {
     pub target_nexus_zone_count: usize,
 }
 
+/// Describes a limited set of information about a physical disk.
+///
+/// See also: nexus-db-model's "PhysicalDisk".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhysicalDiskInfo {
+    pub id: Uuid,
+    pub variant: PhysicalDiskKind,
+    pub policy: PhysicalDiskPolicy,
+    pub state: PhysicalDiskState,
+}
+
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
@@ -81,11 +94,15 @@ pub struct SledResources {
     /// current sled state
     pub state: SledState,
 
-    /// zpools on this sled
+    /// zpools on this sled, and the disk info associated with them.
+    ///
+    /// Note that this also includes zpools on the sled which may not
+    /// be in-service -- see [Self::provisionable_zpools] for accessing
+    /// zpools which can be used for allocations.
     ///
     /// (used to allocate storage for control plane zones with persistent
     /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
+    pub zpools: BTreeMap<ZpoolName, PhysicalDiskInfo>,
 
     /// the IPv6 subnet of this sled on the underlay network
     ///
@@ -95,6 +112,29 @@ pub struct SledResources {
 }
 
 impl SledResources {
+    /// Returns if the zpool is provisionable (known, in-service, and active).
+    pub fn zpool_is_provisionable(&self, zpool: &ZpoolName) -> bool {
+        let Some(disk) = self.zpools.get(zpool) else { return false };
+        match (disk.policy, disk.state) {
+            (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns all in-service, active zpools
+    pub fn provisionable_zpools(
+        &self,
+    ) -> impl Iterator<Item = &ZpoolName> + '_ {
+        self.zpools.iter().filter_map(|(zpool, disk)| {
+            match (disk.policy, disk.state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    Some(zpool)
+                }
+                _ => None,
+            }
+        })
+    }
+
     /// Returns true if the sled can have services provisioned on it that
     /// aren't required to be on every sled.
     ///

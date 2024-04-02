@@ -79,6 +79,17 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
     }
 }
 
+impl From<&PhysicalDisk> for nexus_types::deployment::PhysicalDiskInfo {
+    fn from(disk: &PhysicalDisk) -> Self {
+        Self {
+            id: disk.id(),
+            variant: disk.variant.into(),
+            policy: disk.disk_policy.into(),
+            state: disk.disk_state.into(),
+        }
+    }
+}
+
 impl DatastoreCollectionConfig<super::Zpool> for PhysicalDisk {
     type CollectionId = Uuid;
     type GenerationNumberColumn = physical_disk::dsl::rcgen;

@@ -108,7 +108,7 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
-            for pool_name in &sled_resources.zpools {
+            for pool_name in sled_resources.provisionable_zpools() {
                 let _ = builder
                     .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
                     .unwrap();

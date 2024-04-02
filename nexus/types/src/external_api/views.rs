@@ -24,7 +24,7 @@ use std::net::IpAddr;
 use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
-use super::params::PhysicalDiskKind;
+pub use super::params::PhysicalDiskKind;
 
 // SILOS
 

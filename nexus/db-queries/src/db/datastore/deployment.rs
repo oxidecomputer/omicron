@@ -1182,9 +1182,13 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::PhysicalDiskInfo;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
+    use nexus_types::external_api::views::PhysicalDiskKind;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
@@ -1251,7 +1255,15 @@ mod tests {
         let zpools = (0..4)
             .map(|_| {
                 let name = ZpoolName::new_external(Uuid::new_v4()).to_string();
-                name.parse().unwrap()
+                (
+                    name.parse().unwrap(),
+                    PhysicalDiskInfo {
+                        id: Uuid::new_v4(),
+                        variant: PhysicalDiskKind::U2,
+                        policy: PhysicalDiskPolicy::InService,
+                        state: PhysicalDiskState::Active,
+                    },
+                )
             })
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
@@ -1480,8 +1492,12 @@ mod tests {
             .policy
             .sleds
             .insert(new_sled_id, fake_sled_resources(None));
-        let new_sled_zpools =
-            &planning_input.policy.sleds.get(&new_sled_id).unwrap().zpools;
+        let new_sled_zpools = planning_input
+            .policy
+            .sleds
+            .get(&new_sled_id)
+            .unwrap()
+            .provisionable_zpools();
 
         // Create a builder for a child blueprint.  While we're at it, use a
         // different DNS version to test that that works.
@@ -1502,6 +1518,8 @@ mod tests {
             builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
             Ensure::Added
         );
+
+        let mut new_sled_zpools_len = 0;
         for zpool_name in new_sled_zpools {
             assert_eq!(
                 builder
@@ -1509,8 +1527,9 @@ mod tests {
                     .unwrap(),
                 Ensure::Added
             );
+            new_sled_zpools_len += 1;
         }
-        let num_new_sled_zones = 1 + new_sled_zpools.len();
+        let num_new_sled_zones = 1 + new_sled_zpools_len;
 
         let blueprint2 = builder.build();
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);

@@ -223,6 +223,25 @@ impl types::OmicronZoneType {
             | types::OmicronZoneType::Oximeter { .. } => None,
         }
     }
+
+    /// Returns the zpool being used by this zone, if any.
+    pub fn zpool(&self) -> Option<&types::ZpoolName> {
+        match self {
+            types::OmicronZoneType::Clickhouse { dataset, .. }
+            | types::OmicronZoneType::ClickhouseKeeper { dataset, .. }
+            | types::OmicronZoneType::CockroachDb { dataset, .. }
+            | types::OmicronZoneType::Crucible { dataset, .. }
+            | types::OmicronZoneType::ExternalDns { dataset, .. }
+            | types::OmicronZoneType::InternalDns { dataset, .. } => {
+                Some(&dataset.pool_name)
+            }
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Nexus { .. }
+            | types::OmicronZoneType::Oximeter { .. }
+            | types::OmicronZoneType::CruciblePantry { .. } => None,
+        }
+    }
 }
 
 impl omicron_common::api::external::ClientError for types::Error {

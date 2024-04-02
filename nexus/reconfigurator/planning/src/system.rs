@@ -10,8 +10,12 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::PhysicalDiskInfo;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
+use nexus_types::external_api::views::PhysicalDiskKind;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::external_api::views::SledState;
@@ -28,6 +32,7 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
@@ -283,7 +288,7 @@ impl SystemDescription {
                 let sled_resources = SledResources {
                     policy: sled.policy,
                     state: SledState::Active,
-                    zpools: sled.zpools.iter().cloned().collect(),
+                    zpools: sled.zpools.clone(),
                     subnet: sled.sled_subnet,
                 };
                 (sled.sled_id, sled_resources)
@@ -398,7 +403,7 @@ struct Sled {
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
-    zpools: Vec<ZpoolName>,
+    zpools: BTreeMap<ZpoolName, PhysicalDiskInfo>,
     policy: SledPolicy,
 }
 
@@ -418,7 +423,16 @@ impl Sled {
         let serial = format!("serial{}", unique);
         let revision = 0;
         let zpools = (0..nzpools)
-            .map(|_| format!("oxp_{}", Uuid::new_v4()).parse().unwrap())
+            .map(|_| {
+                let zpool = format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
+                let disk = PhysicalDiskInfo {
+                    id: Uuid::new_v4(),
+                    variant: PhysicalDiskKind::U2,
+                    policy: PhysicalDiskPolicy::InService,
+                    state: PhysicalDiskState::Active,
+                };
+                (zpool, disk)
+            })
             .collect();
         let inventory_sp = match hardware {
             SledHardware::Empty => None,

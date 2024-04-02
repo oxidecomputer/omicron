@@ -509,12 +509,16 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
+    use nexus_types::deployment::PhysicalDiskInfo;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::PhysicalDiskKind;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
@@ -615,11 +619,16 @@ mod test {
                 let sled_resources = SledResources {
                     policy: SledPolicy::provisionable(),
                     state: SledState::Active,
-                    zpools: BTreeSet::from([ZpoolName::from_str(&format!(
-                        "oxp_{}",
-                        Uuid::new_v4()
-                    ))
-                    .unwrap()]),
+                    zpools: BTreeMap::from([(
+                        ZpoolName::from_str(&format!("oxp_{}", Uuid::new_v4()))
+                            .unwrap(),
+                        PhysicalDiskInfo {
+                            id: Uuid::new_v4(),
+                            variant: PhysicalDiskKind::U2,
+                            policy: PhysicalDiskPolicy::InService,
+                            state: PhysicalDiskState::Active,
+                        },
+                    )]),
                     subnet: Ipv6Subnet::new(subnet.network()),
                 };
                 (*sled_id, sled_resources)
@@ -1193,10 +1202,8 @@ mod test {
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
         let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
-        let zpool_rows = datastore
-            .zpool_list_all_external_batched_in_service(&opctx)
-            .await
-            .unwrap();
+        let zpool_rows =
+            datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(&opctx).await.unwrap();

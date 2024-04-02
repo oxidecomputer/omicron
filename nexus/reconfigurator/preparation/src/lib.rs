@@ -16,6 +16,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::PhysicalDiskInfo;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
@@ -38,20 +39,20 @@ use std::str::FromStr;
 /// generate a blueprint
 pub fn policy_from_db(
     sled_rows: &[nexus_db_model::Sled],
-    zpool_rows: &[nexus_db_model::Zpool],
+    zpool_rows: &[(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
     ip_pool_range_rows: &[nexus_db_model::IpPoolRange],
     target_nexus_zone_count: usize,
 ) -> Result<Policy, Error> {
     let mut zpools_by_sled_id = {
         let mut zpools = BTreeMap::new();
-        for z in zpool_rows {
+        for (zpool, disk) in zpool_rows {
             let sled_zpool_names =
-                zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
+                zpools.entry(zpool.sled_id).or_insert_with(BTreeMap::new);
             // It's unfortunate that Nexus knows how Sled Agent
             // constructs zpool names, but there's not currently an
             // alternative.
             let zpool_name_generated =
-                illumos_utils::zpool::ZpoolName::new_external(z.id())
+                illumos_utils::zpool::ZpoolName::new_external(zpool.id())
                     .to_string();
             let zpool_name = ZpoolName::from_str(&zpool_name_generated)
                 .map_err(|e| {
@@ -61,7 +62,7 @@ pub fn policy_from_db(
                         zpool_name_generated, e
                     ))
                 })?;
-            sled_zpool_names.insert(zpool_name);
+            sled_zpool_names.insert(zpool_name, PhysicalDiskInfo::from(disk));
         }
         zpools
     };
@@ -73,7 +74,7 @@ pub fn policy_from_db(
             let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
             let zpools = zpools_by_sled_id
                 .remove(&sled_id)
-                .unwrap_or_else(BTreeSet::new);
+                .unwrap_or_else(BTreeMap::new);
             let sled_info = SledResources {
                 policy: sled_row.policy(),
                 state: sled_row.state().into(),
@@ -103,7 +104,7 @@ pub async fn reconfigurator_state_load(
         .await
         .context("listing sleds")?;
     let zpool_rows = datastore
-        .zpool_list_all_external_batched_in_service(opctx)
+        .zpool_list_all_external_batched(opctx)
         .await
         .context("listing zpools")?;
     let ip_pool_range_rows = {
