@@ -23,16 +23,16 @@ REDACTED_UUID_REDACTED_UUID_REDACTED 10      fd00:1122:3344:101::/64
 sled REDACTED_UUID_REDACTED_UUID_REDACTED
 subnet fd00:1122:3344:101::/64
 zpools (10):
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
-    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
+    (ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED"), PhysicalDiskInfo { id: REDACTED_UUID_REDACTED_UUID_REDACTED, variant: U2, policy: InService, state: Active })
 
 
 > sled-add REDACTED_UUID_REDACTED_UUID_REDACTED
