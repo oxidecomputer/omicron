@@ -68,6 +68,7 @@ pub fn ensure_partition_layout(
     _paths: &DiskPaths,
     _variant: DiskVariant,
     _identity: &DiskIdentity,
+    _zpool_id: Option<uuid::Uuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }

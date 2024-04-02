@@ -32,8 +32,23 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
+    pub async fn zpool_upsert(
+        &self,
+        opctx: &OpContext,
+        zpool: Zpool,
+    ) -> CreateResult<Zpool> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::zpool_upsert_on_connection(&conn, opctx, zpool).await
+    }
+
     /// Stores a new zpool in the database.
-    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+    pub async fn zpool_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        opctx: &OpContext,
+        zpool: Zpool,
+    ) -> CreateResult<Zpool> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         use db::schema::zpool::dsl;
 
         let sled_id = zpool.sled_id;
@@ -48,9 +63,7 @@ impl DataStore {
                     dsl::sled_id.eq(excluded(dsl::sled_id)),
                 )),
         )
-        .insert_and_get_result_async(
-            &*self.pool_connection_unauthorized().await?,
-        )
+        .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {

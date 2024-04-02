@@ -750,7 +750,7 @@ impl InstanceTicket {
         InstanceTicket { id, terminate_tx: Some(terminate_tx) }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     pub(crate) fn new_without_manager_for_test(id: Uuid) -> Self {
         Self { id, terminate_tx: None }
     }

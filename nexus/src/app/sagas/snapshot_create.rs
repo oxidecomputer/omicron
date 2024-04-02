@@ -1210,7 +1210,7 @@ async fn ssc_start_running_snapshot(
     );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-    info!(log, "starting running snapshot for {snapshot_id}");
+    info!(log, "starting running snapshot"; "snapshot_id" => %snapshot_id);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -1233,7 +1233,13 @@ async fn ssc_start_running_snapshot(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        info!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
+        info!(
+            log,
+            "contacting crucible agent to confirm region exists";
+            "dataset" => ?dataset,
+            "region" => ?region,
+            "url" => url,
+        );
 
         // Validate with the Crucible agent that the snapshot exists
         let crucible_region = retry_until_known_result(log, || async {
@@ -1243,7 +1249,11 @@ async fn ssc_start_running_snapshot(
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible region {:?}", crucible_region);
+        info!(
+            log,
+            "confirmed the region exists with crucible agent";
+            "crucible region" => ?crucible_region
+        );
 
         let crucible_snapshot = retry_until_known_result(log, || async {
             client
@@ -1257,7 +1267,11 @@ async fn ssc_start_running_snapshot(
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible snapshot {:?}", crucible_snapshot);
+        info!(
+            log,
+            "successfully accessed crucible snapshot";
+            "crucible snapshot" => ?crucible_snapshot
+        );
 
         // Start the snapshot running
         let crucible_running_snapshot =
@@ -1273,7 +1287,11 @@ async fn ssc_start_running_snapshot(
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible running snapshot {:?}", crucible_running_snapshot);
+        info!(
+            log,
+            "successfully started running region snapshot";
+            "crucible running snapshot" => ?crucible_running_snapshot
+        );
 
         // Map from the region to the snapshot
         let region_addr = format!(

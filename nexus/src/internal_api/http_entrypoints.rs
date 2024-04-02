@@ -6,11 +6,7 @@
 
 use crate::ServerContext;
 
-use super::params::{
-    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
-    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentInfo,
-    ZpoolPutRequest, ZpoolPutResponse,
-};
+use super::params::{OximeterInfo, RackInitializationRequest};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
@@ -34,6 +30,7 @@ use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
+use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -75,14 +72,12 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(sled_firewall_rules_request)?;
         api.register(switch_put)?;
         api.register(rack_initialization_complete)?;
-        api.register(physical_disk_put)?;
-        api.register(physical_disk_delete)?;
-        api.register(zpool_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_volume_remove_read_only_parent)?;
         api.register(cpapi_disk_remove_read_only_parent)?;
         api.register(cpapi_producers_post)?;
+        api.register(cpapi_assigned_producers_list)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
@@ -109,6 +104,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_target_set_enabled)?;
         api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
+        api.register(blueprint_import)?;
 
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
@@ -256,77 +252,6 @@ async fn switch_put(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Report that a physical disk for the specified sled has come online.
-#[endpoint {
-     method = PUT,
-     path = "/physical-disk",
- }]
-async fn physical_disk_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    body: TypedBody<PhysicalDiskPutRequest>,
-) -> Result<HttpResponseOk<PhysicalDiskPutResponse>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let disk = body.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.upsert_physical_disk(&opctx, disk).await?;
-        Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Report that a physical disk for the specified sled has gone offline.
-#[endpoint {
-     method = DELETE,
-     path = "/physical-disk",
- }]
-async fn physical_disk_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    body: TypedBody<PhysicalDiskDeleteRequest>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let disk = body.into_inner();
-
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.delete_physical_disk(&opctx, disk).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Zpool requests (internal API)
-#[derive(Deserialize, JsonSchema)]
-struct ZpoolPathParam {
-    sled_id: Uuid,
-    zpool_id: Uuid,
-}
-
-/// Report that a pool for a specified sled has come online.
-#[endpoint {
-     method = PUT,
-     path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
- }]
-async fn zpool_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ZpoolPathParam>,
-    pool_info: TypedBody<ZpoolPutRequest>,
-) -> Result<HttpResponseOk<ZpoolPutResponse>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pi = pool_info.into_inner();
-
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.upsert_zpool(&opctx, path.zpool_id, path.sled_id, pi).await?;
-        Ok(HttpResponseOk(ZpoolPutResponse {}))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Path parameters for Instance requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
@@ -454,11 +379,59 @@ async fn cpapi_producers_post(
     producer_info: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let nexus = &context.nexus;
-    let producer_info = producer_info.into_inner();
     let handler = async {
-        nexus.assign_producer(producer_info).await?;
+        let nexus = &context.nexus;
+        let producer_info = producer_info.into_inner();
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        nexus.assign_producer(&opctx, producer_info).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    context
+        .internal_latencies
+        .instrument_dropshot_handler(&request_context, handler)
+        .await
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    serde::Serialize,
+)]
+pub struct CollectorIdPathParams {
+    /// The ID of the oximeter collector.
+    pub collector_id: Uuid,
+}
+
+/// List all metric producers assigned to an oximeter collector.
+#[endpoint {
+     method = GET,
+     path = "/metrics/collectors/{collector_id}/producers",
+ }]
+async fn cpapi_assigned_producers_list(
+    request_context: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CollectorIdPathParams>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
+    let context = request_context.context();
+    let handler = async {
+        let nexus = &context.nexus;
+        let collector_id = path_params.into_inner().collector_id;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&request_context, &query)?;
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        let producers = nexus
+            .list_assigned_producers(&opctx, collector_id, &pagparams)
+            .await?;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            producers,
+            &|_, producer: &ProducerEndpoint| producer.id,
+        )?))
     };
     context
         .internal_latencies
@@ -476,10 +449,12 @@ async fn cpapi_collectors_post(
     oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let nexus = &context.nexus;
-    let oximeter_info = oximeter_info.into_inner();
     let handler = async {
-        nexus.upsert_oximeter_collector(&oximeter_info).await?;
+        let nexus = &context.nexus;
+        let oximeter_info = oximeter_info.into_inner();
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        nexus.upsert_oximeter_collector(&opctx, &oximeter_info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     context
@@ -1026,6 +1001,28 @@ async fn blueprint_regenerate(
         let nexus = &apictx.nexus;
         let result = nexus.blueprint_create_regenerate(&opctx).await?;
         Ok(HttpResponseOk(result))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Imports a client-provided blueprint
+///
+/// This is intended for development and support, not end users or operators.
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/import",
+}]
+async fn blueprint_import(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    blueprint: TypedBody<Blueprint>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let blueprint = blueprint.into_inner();
+        nexus.blueprint_import(&opctx, blueprint).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

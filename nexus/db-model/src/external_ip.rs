@@ -130,6 +130,12 @@ pub struct ExternalIp {
     pub is_probe: bool,
 }
 
+impl From<ExternalIp> for nexus_types::deployment::ExternalIp {
+    fn from(ext_ip: ExternalIp) -> Self {
+        Self { id: ext_ip.id, ip: ext_ip.ip }
+    }
+}
+
 /// A view type constructed from `ExternalIp` used to represent Floating IP
 /// objects in user-facing APIs.
 ///
