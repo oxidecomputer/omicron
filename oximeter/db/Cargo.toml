@@ -7,7 +7,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-async-recursion = "1.0.5"
+async-recursion = "1.1.0"
 async-trait.workspace = true
 bcs.workspace = true
 camino.workspace = true
