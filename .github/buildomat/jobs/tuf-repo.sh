@@ -23,6 +23,11 @@
 #:
 #: [[publish]]
 #: series = "rot-all"
+#: name = "manifest.toml"
+#: from_output = "/work/manifest.toml"
+#:
+#: [[publish]]
+#: series = "rot-all"
 #: name = "repo.zip"
 #: from_output = "/work/repo-rot-all.zip"
 #:
