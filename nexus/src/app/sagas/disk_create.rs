@@ -259,7 +259,7 @@ async fn sdc_alloc_regions(
 
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(
+        .disk_region_allocate(
             &opctx,
             volume_id,
             &params.create_params.disk_source,

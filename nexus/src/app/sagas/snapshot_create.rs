@@ -336,7 +336,7 @@ async fn ssc_alloc_regions(
 
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(
+        .disk_region_allocate(
             &opctx,
             destination_volume_id,
             &params::DiskSource::Blank {
