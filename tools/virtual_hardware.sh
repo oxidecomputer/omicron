@@ -49,11 +49,9 @@ function try_destroy_zpools {
     for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
         readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
         for ZPOOL in "${ZPOOLS[@]}"; do
-            VDEV_FILE="${VDEV_DIR:-/var/tmp}/$VDEV"
             zfs destroy -r "$ZPOOL" && \
                     (zfs unmount "$ZPOOL" || true) && \
                     zpool destroy "$ZPOOL" && \
-                    rm -f "$VDEV_FILE" || \
                     warn "Failed to remove ZFS pool and vdev: $ZPOOL"
 
             success "Verified ZFS pool and vdev $ZPOOL does not exist"
