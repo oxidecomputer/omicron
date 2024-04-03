@@ -624,7 +624,7 @@ fn cmd_sled_show(
     let sled_id = args.sled_id;
     let sled_resources = planning_input
         .sled_resources(&sled_id)
-        .ok_or_else(|| anyhow!("no sled with id {:?}", sled_id))?;
+        .ok_or_else(|| anyhow!("no sled with id {sled_id}"))?;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
