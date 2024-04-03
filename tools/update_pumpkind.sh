@@ -8,23 +8,19 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
     echo
-    echo "  -b COMMIT   Ask to update Propolis to HEAD on the named branch."
-    echo "  -c COMMIT   Ask to update Propolis to a specific commit."
+    echo "  -b COMMIT   Ask to update pumpkind to HEAD on the named branch."
+    echo "  -c COMMIT   Ask to update pumpkind to a specific commit."
     echo "              If this is unset, Github is queried."
     echo "  -n          Dry-run"
     exit 1
 }
 
 PACKAGES=(
-  "propolis-server"
+  "pumpkind"
+  "pumpkind-gz"
 )
 
-CRATES=(
-  "propolis-client"
-  "propolis-server"
-)
-
-REPO="oxidecomputer/propolis"
+REPO="oxidecomputer/pumpkind"
 
 . "$SOURCE_DIR/update_helpers.sh"
 
@@ -53,7 +49,6 @@ function main {
     fi
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
-    do_update_crates "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${CRATES[@]}"
 }
 
 main "$@"

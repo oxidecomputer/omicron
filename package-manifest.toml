@@ -582,6 +582,26 @@ source.sha256 = "15a9068fdd4521a77f7d32c80d1e6d3a6a4ad15accab77641ed8f14175ae0db
 output.type = "zone"
 output.intermediate_only = true
 
+[package.pumpkind]
+service_name = "pumpkind"
+source.type = "prebuilt"
+source.repo = "pumpkind"
+source.commit = "b648f61cb1cc23ec3c850349a5db49c980580ead"
+source.sha256 = "d20d877ca42eb6207a870802e7cec8a9c7143348c22ed9271646b3d6bfcc2b85"
+output.type = "zone"
+output.intermediate_only = true
+only_for_targets.image = "standard"
+only_for_targets.switch = "asic"
+
+[package.pumpkind-gz]
+service_name = "pumpkind-gz"
+source.type = "prebuilt"
+source.repo = "pumpkind"
+source.commit = "b648f61cb1cc23ec3c850349a5db49c980580ead"
+source.sha256 = "83b29f0694c1750296d3c52698ca284980efd779bd1ef635b014931e5083d630"
+output.type = "tarball"
+only_for_targets.image = "standard"
+
 [package.dendrite-stub]
 service_name = "dendrite"
 only_for_targets.switch = "stub"
@@ -678,6 +698,7 @@ source.packages = [
   "omicron-gateway-asic.tar.gz",
   "dendrite-asic.tar.gz",
   "lldp.tar.gz",
+  "pumpkind.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
