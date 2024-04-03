@@ -114,6 +114,7 @@ pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
+pub use volume::VolumeCheckoutReason;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
