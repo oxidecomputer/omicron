@@ -485,7 +485,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2
 dependencies = [
  "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -495,7 +495,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04a
 dependencies = [
  "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -504,7 +504,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -513,7 +513,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
 dependencies = [
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -1971,7 +1971,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -2434,17 +2434,6 @@ dependencies = [
  "byteorder",
  "chrono",
  "log",
-]
-
-[[package]]
-name = "fd-lock"
-version = "3.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef033ed5e9bad94e55838ca0ca906db0e043f517adda0c8b79c7a8c66c93c1b5"
-dependencies = [
- "cfg-if",
- "rustix",
- "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4598,7 +4587,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "tokio",
  "uuid 1.7.0",
@@ -4678,7 +4667,7 @@ dependencies = [
  "slog-error-chain",
  "static_assertions",
  "steno",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "swrite",
  "term",
@@ -4721,7 +4710,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "tokio",
  "typed-rng",
@@ -4949,7 +4938,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "steno",
- "strum 0.26.1",
+ "strum",
  "tabled",
  "thiserror",
  "uuid 1.7.0",
@@ -5276,7 +5265,7 @@ dependencies = [
  "serde_with",
  "slog",
  "slog-error-chain",
- "strum 0.26.1",
+ "strum",
  "test-strategy",
  "thiserror",
  "tokio",
@@ -5493,7 +5482,7 @@ dependencies = [
  "slog-term",
  "sp-sim",
  "steno",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "tempfile",
  "term",
@@ -5555,7 +5544,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "tabled",
  "textwrap 0.16.1",
@@ -5590,7 +5579,7 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "smf",
- "strum 0.26.1",
+ "strum",
  "swrite",
  "tar",
  "thiserror",
@@ -5702,7 +5691,7 @@ dependencies = [
  "slog-term",
  "smf",
  "static_assertions",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "tar",
  "tempfile",
@@ -6133,7 +6122,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "trybuild",
  "uuid 1.7.0",
@@ -6186,7 +6175,7 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "thiserror",
  "tokio",
@@ -6232,7 +6221,7 @@ dependencies = [
  "slog-term",
  "sqlformat",
  "sqlparser",
- "strum 0.26.1",
+ "strum",
  "tabled",
  "tempfile",
  "thiserror",
@@ -7090,7 +7079,7 @@ dependencies = [
  "serde_arrays",
  "serde_json",
  "slog",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "tokio",
  "usdt 0.5.0",
@@ -7420,7 +7409,7 @@ dependencies = [
  "lru",
  "paste",
  "stability",
- "strum 0.26.1",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -7547,19 +7536,19 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413a9fa6a5d8c937d3ae1e975bfb6a918bb0b6cdfae6a10416218c837a31b8fc"
+checksum = "65ebc241ed0ccea0bbbd775a55a76f0dd9971ef084589dea938751a03ffedc14"
 dependencies = [
  "chrono",
  "crossterm",
- "fd-lock 3.0.13",
+ "fd-lock",
  "itertools 0.12.1",
  "nu-ansi-term",
  "serde",
  "strip-ansi-escapes",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros 0.26.1",
  "thiserror",
  "unicode-segmentation",
  "unicode-width",
@@ -8142,7 +8131,7 @@ dependencies = [
  "bitflags 2.4.2",
  "cfg-if",
  "clipboard-win",
- "fd-lock 4.0.2",
+ "fd-lock",
  "home",
  "libc",
  "log",
@@ -9324,12 +9313,6 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "strum"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 
 [[package]]
 name = "strum"
