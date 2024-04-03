@@ -103,7 +103,7 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.52", features = ["extra
 time = { version = "0.3.34", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.36.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-tokio-stream = { version = "0.1.14", features = ["net"] }
+tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.10", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.9", features = ["serde"] }
@@ -210,7 +210,7 @@ time = { version = "0.3.34", features = ["formatting", "local-offset", "macros",
 time-macros = { version = "0.2.17", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.36.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-tokio-stream = { version = "0.1.14", features = ["net"] }
+tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.10", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.9", features = ["serde"] }
