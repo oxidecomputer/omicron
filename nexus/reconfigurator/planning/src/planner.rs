@@ -14,7 +14,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -44,8 +43,6 @@ impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
         parent_blueprint: &'a Blueprint,
-        internal_dns_version: Generation,
-        external_dns_version: Generation,
         input: &'a PlanningInput,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
@@ -55,8 +52,6 @@ impl<'a> Planner<'a> {
         let blueprint = BlueprintBuilder::new_based_on(
             &log,
             parent_blueprint,
-            internal_dns_version,
-            external_dns_version,
             input,
             creator,
         )?;
@@ -390,8 +385,6 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            internal_dns_version,
-            external_dns_version,
             &example.input,
             "no-op?",
             &example.collection,
@@ -418,8 +411,6 @@ mod test {
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint2,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: add NTP?",
             &example.collection,
@@ -460,8 +451,6 @@ mod test {
         let blueprint4 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: add nothing more",
             &example.collection,
@@ -502,8 +491,6 @@ mod test {
         let blueprint5 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: add Crucible zones?",
             &collection,
@@ -544,8 +531,6 @@ mod test {
         let blueprint6 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint5,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: no-op?",
             &collection,
@@ -636,8 +621,6 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test_blueprint2",
             &collection,
@@ -713,8 +696,6 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test_blueprint2",
             &collection,
@@ -842,8 +823,6 @@ mod test {
         let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test_blueprint2",
             &collection,

@@ -1197,8 +1197,16 @@ mod test {
                 sled_rows: &sled_rows,
                 zpool_rows: &zpool_rows,
                 ip_pool_range_rows: &ip_pool_range_rows,
-                // These are not used because we're not actually going through the
-                // planner.
+                internal_dns_version: Generation::from(
+                    u32::try_from(dns_initial_internal.generation).unwrap(),
+                )
+                .into(),
+                external_dns_version: Generation::from(
+                    u32::try_from(dns_latest_external.generation).unwrap(),
+                )
+                .into(),
+                // These are not used because we're not actually going through
+                // the planner.
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
@@ -1219,12 +1227,6 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
-            Generation::from(
-                u32::try_from(dns_initial_internal.generation).unwrap(),
-            ),
-            Generation::from(
-                u32::try_from(dns_latest_external.generation).unwrap(),
-            ),
             &planning_input,
             "test suite",
         )

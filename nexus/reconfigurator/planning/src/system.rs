@@ -30,6 +30,7 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeSet;
@@ -69,6 +70,8 @@ pub struct SystemDescription {
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
+    internal_dns_version: Generation,
+    external_dns_version: Generation,
 }
 
 impl SystemDescription {
@@ -128,6 +131,8 @@ impl SystemDescription {
             available_scrimlet_slots,
             target_nexus_zone_count,
             service_ip_pool_ranges,
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
         }
     }
 
@@ -292,7 +297,11 @@ impl SystemDescription {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
         };
-        let mut builder = PlanningInputBuilder::new(policy);
+        let mut builder = PlanningInputBuilder::new(
+            policy,
+            self.internal_dns_version,
+            self.external_dns_version,
+        );
 
         for sled in self.sleds.values() {
             let sled_details = SledDetails {

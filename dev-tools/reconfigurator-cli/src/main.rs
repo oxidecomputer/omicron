@@ -118,6 +118,36 @@ impl ReconfiguratorSim {
             .to_planning_input_builder()
             .context("generating planning input builder")?;
 
+        // The internal and external DNS numbers that go here are supposed to be
+        // the _current_ internal and external DNS generations at the point
+        // when planning happened.  This is racy (these generations can change
+        // immediately after they're fetched from the database) but correctness
+        // only requires that the values here be *no newer* than the real
+        // values so it's okay if the real values get changed.
+        //
+        // The problem is we have no real system here to fetch these values
+        // from.  What should the value be?
+        //
+        // - If we assume that the parent blueprint here was successfully
+        //   executed immediately before generating this plan, then the values
+        //   here should come from the generation number produced by executing
+        //   the parent blueprint.
+        //
+        // - If the parent blueprint was never executed, or execution is still
+        //   in progress, or if other blueprints have been executed in the
+        //   meantime that changed DNS, then the values here could be different
+        //   (older if the blueprint was never executed or is currently
+        //   executing and newer if other blueprints have changed DNS in the
+        //   meantime).
+        //
+        // But in this CLI, there's no execution at all.  As a result, there's
+        // no way to really choose between these -- and it doesn't really
+        // matter, either.  We'll just pick the parent blueprint's.
+        *builder.internal_dns_version_mut() =
+            parent_blueprint.internal_dns_version;
+        *builder.external_dns_version_mut() =
+            parent_blueprint.external_dns_version;
+
         for (_, zone) in parent_blueprint.all_omicron_zones() {
             let zone_id =
                 TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
@@ -732,33 +762,6 @@ fn cmd_blueprint_plan(
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
-        // The internal and external DNS numbers that go here are supposed to be
-        // the _current_ internal and external DNS generations at the point
-        // when planning happened.  This is racy (these generations can change
-        // immediately after they're fetched from the database) but correctness
-        // only requires that the values here be *no newer* than the real
-        // values so it's okay if the real values get changed.
-        //
-        // The problem is we have no real system here to fetch these values
-        // from.  What should the value be?
-        //
-        // - If we assume that the parent blueprint here was successfully
-        //   executed immediately before generating this plan, then the values
-        //   here should come from the generation number produced by executing
-        //   the parent blueprint.
-        //
-        // - If the parent blueprint was never executed, or execution is still
-        //   in progress, or if other blueprints have been executed in the
-        //   meantime that changed DNS, then the values here could be different
-        //   (older if the blueprint was never executed or is currently
-        //   executing and newer if other blueprints have changed DNS in the
-        //   meantime).
-        //
-        // But in this CLI, there's no execution at all.  As a result, there's
-        // no way to really choose between these -- and it doesn't really
-        // matter, either.  We'll just pick the parent blueprint's.
-        parent_blueprint.internal_dns_version,
-        parent_blueprint.external_dns_version,
         &planning_input,
         creator,
         collection,
@@ -783,9 +786,7 @@ fn cmd_blueprint_edit(
     let planning_input = sim.planning_input(blueprint)?;
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
-        &blueprint,
-        blueprint.internal_dns_version,
-        blueprint.external_dns_version,
+        blueprint,
         &planning_input,
         creator,
     )

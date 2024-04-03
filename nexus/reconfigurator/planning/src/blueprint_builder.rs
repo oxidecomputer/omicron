@@ -114,8 +114,6 @@ pub struct BlueprintBuilder<'a> {
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
-    internal_dns_version: Generation,
-    external_dns_version: Generation,
 
     // These fields are used to allocate resources from sleds.
     input: &'a PlanningInput,
@@ -241,8 +239,6 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         log: &Logger,
         parent_blueprint: &'a Blueprint,
-        internal_dns_version: Generation,
-        external_dns_version: Generation,
         input: &'a PlanningInput,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -356,8 +352,6 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
-            internal_dns_version,
-            external_dns_version,
             input,
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZonesBuilder::new(parent_blueprint),
@@ -385,8 +379,8 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
             parent_blueprint_id: Some(self.parent_blueprint.id),
-            internal_dns_version: self.internal_dns_version,
-            external_dns_version: self.external_dns_version,
+            internal_dns_version: self.input.internal_dns_version(),
+            external_dns_version: self.input.external_dns_version(),
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
@@ -938,8 +932,6 @@ pub mod test {
         let builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint_initial,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test_basic",
         )
@@ -970,8 +962,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             blueprint1,
-            Generation::new(),
-            Generation::new(),
             &example.input,
             "test_basic",
         )
@@ -1012,8 +1002,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test_basic",
         )
@@ -1126,8 +1114,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test",
         )
@@ -1184,8 +1170,8 @@ pub mod test {
 
         let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
-            Generation::new(),
-            Generation::new(),
+            internal_dns_version,
+            external_dns_version,
             input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
@@ -1198,8 +1184,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                internal_dns_version,
-                external_dns_version,
                 &input,
                 "test",
             )
@@ -1218,8 +1202,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                internal_dns_version,
-                external_dns_version,
                 &input,
                 "test",
             )
@@ -1255,8 +1237,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                internal_dns_version,
-                external_dns_version,
                 &input,
                 "test",
             )
@@ -1329,8 +1309,6 @@ pub mod test {
         match BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test",
         ) {
@@ -1389,8 +1367,6 @@ pub mod test {
         match BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test",
         ) {
@@ -1449,8 +1425,6 @@ pub mod test {
         match BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test",
         ) {

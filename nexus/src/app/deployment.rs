@@ -22,7 +22,6 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -35,8 +34,6 @@ struct PlanningContext {
     planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
-    internal_dns_version: Generation,
-    external_dns_version: Generation,
 }
 
 impl super::Nexus {
@@ -150,6 +147,21 @@ impl super::Nexus {
             .service_network_interfaces_all_list_batched(opctx)
             .await?;
 
+        let internal_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::Internal)
+            .await
+            .internal_context(
+                "fetching internal DNS version for blueprint planning",
+            )?
+            .version;
+        let external_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::External)
+            .await
+            .internal_context(
+                "fetching external DNS version for blueprint planning",
+            )?
+            .version;
+
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
@@ -158,6 +170,8 @@ impl super::Nexus {
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             log: &opctx.log,
+            internal_dns_version,
+            external_dns_version,
         }
         .build()?;
 
@@ -179,29 +193,7 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        // Fetch the current DNS versions.  This could be made part of
-        // inventory, but it's enough of a one-off that there's no particular
-        // advantage to doing that work now.
-        let internal_dns_version = datastore
-            .dns_group_latest_version(opctx, DnsGroup::Internal)
-            .await
-            .internal_context(
-                "fetching internal DNS version for blueprint planning",
-            )?;
-        let external_dns_version = datastore
-            .dns_group_latest_version(opctx, DnsGroup::External)
-            .await
-            .internal_context(
-                "fetching external DNS version for blueprint planning",
-            )?;
-
-        Ok(PlanningContext {
-            planning_input,
-            creator,
-            inventory,
-            internal_dns_version: *internal_dns_version.version,
-            external_dns_version: *external_dns_version.version,
-        })
+        Ok(PlanningContext { planning_input, creator, inventory })
     }
 
     async fn blueprint_add(
@@ -224,8 +216,8 @@ impl super::Nexus {
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
-            planning_context.internal_dns_version,
-            planning_context.external_dns_version,
+            planning_context.planning_input.internal_dns_version(),
+            planning_context.planning_input.external_dns_version(),
             planning_context.planning_input.all_sled_ids(SledFilter::All),
             &planning_context.creator,
         )
@@ -260,8 +252,6 @@ impl super::Nexus {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
-            planning_context.internal_dns_version,
-            planning_context.external_dns_version,
             &planning_context.planning_input,
             &planning_context.creator,
             &inventory,

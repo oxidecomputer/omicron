@@ -50,6 +50,8 @@ pub struct PlanningInputFromDb<'a> {
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_nexus_zone_count: usize,
+    pub internal_dns_version: nexus_db_model::Generation,
+    pub external_dns_version: nexus_db_model::Generation,
     pub log: &'a Logger,
 }
 
@@ -57,11 +59,15 @@ impl PlanningInputFromDb<'_> {
     pub fn build(&self) -> Result<PlanningInput, Error> {
         let service_ip_pool_ranges =
             self.ip_pool_range_rows.iter().map(IpRange::from).collect();
-
-        let mut builder = PlanningInputBuilder::new(Policy {
+        let policy = Policy {
             service_ip_pool_ranges,
             target_nexus_zone_count: self.target_nexus_zone_count,
-        });
+        };
+        let mut builder = PlanningInputBuilder::new(
+            policy,
+            self.internal_dns_version.into(),
+            self.external_dns_version.into(),
+        );
 
         let mut zpools_by_sled_id = {
             let mut zpools = BTreeMap::new();
@@ -174,6 +180,16 @@ pub async fn reconfigurator_state_load(
         .service_network_interfaces_all_list_batched(opctx)
         .await
         .context("fetching service NICs")?;
+    let internal_dns_version = datastore
+        .dns_group_latest_version(opctx, DnsGroup::Internal)
+        .await
+        .context("fetching internal DNS version")?
+        .version;
+    let external_dns_version = datastore
+        .dns_group_latest_version(opctx, DnsGroup::External)
+        .await
+        .context("fetching external DNS version")?
+        .version;
 
     let planning_input = PlanningInputFromDb {
         sled_rows: &sled_rows,
@@ -183,6 +199,8 @@ pub async fn reconfigurator_state_load(
         external_ip_rows: &external_ip_rows,
         service_nic_rows: &service_nic_rows,
         log: &opctx.log,
+        internal_dns_version,
+        external_dns_version,
     }
     .build()
     .context("assembling planning_input")?;

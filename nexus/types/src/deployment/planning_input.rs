@@ -12,6 +12,7 @@ use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::SledKind;
@@ -127,6 +128,12 @@ pub struct PlanningInput {
     /// fleet-wide policy
     policy: Policy,
 
+    /// current internal DNS version
+    internal_dns_version: Generation,
+
+    /// current external DNS version
+    external_dns_version: Generation,
+
     /// per-sled policy and resources
     sleds: BTreeMap<TypedUuid<SledKind>, SledDetails>,
 
@@ -149,6 +156,14 @@ pub struct SledDetails {
 }
 
 impl PlanningInput {
+    pub fn internal_dns_version(&self) -> Generation {
+        self.internal_dns_version
+    }
+
+    pub fn external_dns_version(&self) -> Generation {
+        self.external_dns_version
+    }
+
     pub fn target_nexus_zone_count(&self) -> usize {
         self.policy.target_nexus_zone_count
     }
@@ -226,6 +241,8 @@ impl PlanningInput {
     pub fn into_builder(self) -> PlanningInputBuilder {
         PlanningInputBuilder {
             policy: self.policy,
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             sleds: self.sleds,
             omicron_zone_external_ips: self.omicron_zone_external_ips,
             omicron_zone_nics: self.omicron_zone_nics,
@@ -253,6 +270,8 @@ pub enum PlanningInputBuildError {
 #[derive(Clone, Debug)]
 pub struct PlanningInputBuilder {
     policy: Policy,
+    internal_dns_version: Generation,
+    external_dns_version: Generation,
     sleds: BTreeMap<TypedUuid<SledKind>, SledDetails>,
     omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
     omicron_zone_nics:
@@ -266,15 +285,23 @@ impl PlanningInputBuilder {
                 service_ip_pool_ranges: Vec::new(),
                 target_nexus_zone_count: 0,
             },
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
             sleds: BTreeMap::new(),
             omicron_zone_external_ips: BTreeMap::new(),
             omicron_zone_nics: BTreeMap::new(),
         }
     }
 
-    pub fn new(policy: Policy) -> Self {
+    pub fn new(
+        policy: Policy,
+        internal_dns_version: Generation,
+        external_dns_version: Generation,
+    ) -> Self {
         Self {
             policy,
+            internal_dns_version,
+            external_dns_version,
             sleds: BTreeMap::new(),
             omicron_zone_external_ips: BTreeMap::new(),
             omicron_zone_nics: BTreeMap::new(),
@@ -349,9 +376,19 @@ impl PlanningInputBuilder {
         &mut self.sleds
     }
 
+    pub fn internal_dns_version_mut(&mut self) -> &mut Generation {
+        &mut self.internal_dns_version
+    }
+
+    pub fn external_dns_version_mut(&mut self) -> &mut Generation {
+        &mut self.external_dns_version
+    }
+
     pub fn build(self) -> PlanningInput {
         PlanningInput {
             policy: self.policy,
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             sleds: self.sleds,
             omicron_zone_external_ips: self.omicron_zone_external_ips,
             omicron_zone_nics: self.omicron_zone_nics,

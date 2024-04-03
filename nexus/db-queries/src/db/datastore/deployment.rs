@@ -1297,7 +1297,11 @@ mod tests {
 
         let policy = policy_from_collection(&collection);
         let planning_input = {
-            let mut builder = PlanningInputBuilder::new(policy);
+            let mut builder = PlanningInputBuilder::new(
+                policy,
+                Generation::new(),
+                Generation::new(),
+            );
             for (sled_id, agent) in &collection.sled_agents {
                 // TODO-cleanup use `TypedUuid` everywhere
                 let sled_id = TypedUuid::from_untyped_uuid(*sled_id);
@@ -1469,11 +1473,18 @@ mod tests {
 
         // Add a new sled.
         let new_sled_id = TypedUuid::new_v4();
+
+        // While we're at it, use a different DNS version to test that that
+        // works.
+        let new_internal_dns_version = blueprint1.internal_dns_version.next();
+        let new_external_dns_version = new_internal_dns_version.next();
         let planning_input = {
             let mut builder = planning_input.into_builder();
             builder
                 .add_sled(new_sled_id, fake_sled_details(None))
                 .expect("failed to add sled");
+            *builder.internal_dns_version_mut() = new_internal_dns_version;
+            *builder.external_dns_version_mut() = new_external_dns_version;
             builder.build()
         };
         let new_sled_zpools =
@@ -1481,15 +1492,10 @@ mod tests {
         // TODO-cleanup use `TypedUuid` everywhere
         let new_sled_id = *new_sled_id.as_untyped_uuid();
 
-        // Create a builder for a child blueprint.  While we're at it, use a
-        // different DNS version to test that that works.
-        let new_internal_dns_version = blueprint1.internal_dns_version.next();
-        let new_external_dns_version = new_internal_dns_version.next();
+        // Create a builder for a child blueprint.
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            new_internal_dns_version,
-            new_external_dns_version,
             &planning_input,
             "test",
         )
@@ -1643,8 +1649,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &EMPTY_PLANNING_INPUT,
             "test2",
         )
@@ -1653,8 +1657,6 @@ mod tests {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &EMPTY_PLANNING_INPUT,
             "test3",
         )
@@ -1751,8 +1753,6 @@ mod tests {
         let blueprint4 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            Generation::new(),
-            Generation::new(),
             &EMPTY_PLANNING_INPUT,
             "test3",
         )
@@ -1800,8 +1800,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &EMPTY_PLANNING_INPUT,
             "test2",
         )

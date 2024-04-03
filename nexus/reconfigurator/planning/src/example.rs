@@ -89,8 +89,6 @@ impl ExampleSystem {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &initial_blueprint,
-            Generation::new(),
-            Generation::new(),
             &base_input,
             "test suite",
         )
