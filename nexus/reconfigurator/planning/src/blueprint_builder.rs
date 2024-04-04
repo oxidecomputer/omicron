@@ -367,12 +367,8 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
-        // Collect the Omicron zones config for each in-service sled.
-        //
-        // TODO-correctness Is `SledFilter::All` incorrect here? If I use
-        // `SledFilter::InService` it fails existing unit tests; this probably
-        // needs to be refined with omicron#5211 so we don't just drop expunged
-        // sleds on the floor (which happens with `SledFilter::InService`).
+        // Collect the Omicron zones config for all sleds, including sleds that
+        // are no longer in service and need expungement work.
         let blueprint_zones =
             self.zones.into_zones_map(self.input.all_sled_ids(SledFilter::All));
         Blueprint {
