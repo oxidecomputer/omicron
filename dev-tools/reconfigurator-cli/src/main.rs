@@ -143,10 +143,8 @@ impl ReconfiguratorSim {
         // But in this CLI, there's no execution at all.  As a result, there's
         // no way to really choose between these -- and it doesn't really
         // matter, either.  We'll just pick the parent blueprint's.
-        *builder.internal_dns_version_mut() =
-            parent_blueprint.internal_dns_version;
-        *builder.external_dns_version_mut() =
-            parent_blueprint.external_dns_version;
+        builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
+        builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
         for (_, zone) in parent_blueprint.all_omicron_zones() {
             let zone_id =

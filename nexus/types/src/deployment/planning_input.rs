@@ -376,12 +376,12 @@ impl PlanningInputBuilder {
         &mut self.sleds
     }
 
-    pub fn internal_dns_version_mut(&mut self) -> &mut Generation {
-        &mut self.internal_dns_version
+    pub fn set_internal_dns_version(&mut self, new_version: Generation) {
+        self.internal_dns_version = new_version;
     }
 
-    pub fn external_dns_version_mut(&mut self) -> &mut Generation {
-        &mut self.external_dns_version
+    pub fn set_external_dns_version(&mut self, new_version: Generation) {
+        self.external_dns_version = new_version;
     }
 
     pub fn build(self) -> PlanningInput {

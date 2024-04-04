@@ -1483,8 +1483,8 @@ mod tests {
             builder
                 .add_sled(new_sled_id, fake_sled_details(None))
                 .expect("failed to add sled");
-            *builder.internal_dns_version_mut() = new_internal_dns_version;
-            *builder.external_dns_version_mut() = new_external_dns_version;
+            builder.set_internal_dns_version(new_internal_dns_version);
+            builder.set_external_dns_version(new_external_dns_version);
             builder.build()
         };
         let new_sled_zpools =
