@@ -660,11 +660,6 @@ branch = "oxide/omicron"
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
 
-# Pulls in https://github.com/njaremko/samael/pull/41
-[patch.crates-io.samael]
-git = "https://github.com/oxidecomputer/samael"
-branch = "oxide/omicron"
-
 # Several crates such as crucible and propolis have have a Git dependency on
 # this repo. Omicron itself depends on these crates, which can lead to two
 # copies of these crates in the dependency graph. (As a Git dependency, and as
