@@ -21,6 +21,8 @@ use diesel::sql_types;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::convert::TryFrom;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::io::Write;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -76,7 +78,7 @@ impl From<&SecId> for Uuid {
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd, Eq,
 )]
 #[diesel(sql_type = sql_types::Uuid)]
 pub struct SagaId(pub steno::SagaId);
@@ -104,13 +106,19 @@ where
     }
 }
 
+impl Hash for SagaId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0 .0.hash(state);
+    }
+}
+
 /// Newtype wrapper around [`steno::SagaNodeId`] which implements
 /// Diesel traits.
 ///
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct SagaNodeId(pub steno::SagaNodeId);

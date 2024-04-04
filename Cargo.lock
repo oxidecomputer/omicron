@@ -5492,6 +5492,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter-client",
+ "petgraph",
  "pq-sys",
  "ratatui",
  "reedline",
