@@ -12,8 +12,6 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledPolicy;
-use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
@@ -22,20 +20,12 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
-use ipnetwork::IpNetwork;
-use newtype_uuid::TypedUuid;
-use omicron_common::address::IpRange;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::OmicronZoneKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::ZoneKind;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
@@ -43,109 +33,17 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Fleet-wide deployment policy
-///
-/// The **policy** represents the deployment controls that people (operators and
-/// support engineers) can modify directly under normal operation.  In the
-/// limit, this would include things like: which sleds are supposed to be part
-/// of the system, how many CockroachDB nodes should be part of the cluster,
-/// what system version the system should be running, etc.  It would _not_
-/// include things like which services should be running on which sleds or which
-/// host OS version should be on each sled because that's up to the control
-/// plane to decide.  (To be clear, the intent is that for extenuating
-/// circumstances, people could exercise control over such things, but that
-/// would not be part of normal operation.)
-///
-/// The current policy is pretty limited.  It's aimed primarily at supporting
-/// the add/remove sled use case.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Policy {
-    /// set of sleds that are supposed to be part of the control plane, along
-    /// with information about resources available to the planner
-    pub sleds: BTreeMap<Uuid, SledResources>,
+mod planning_input;
 
-    /// ranges specified by the IP pool for externally-visible control plane
-    /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub service_ip_pool_ranges: Vec<IpRange>,
-
-    /// desired total number of deployed Nexus zones
-    pub target_nexus_zone_count: usize,
-}
-
-/// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SledResources {
-    /// current sled policy
-    pub policy: SledPolicy,
-
-    /// current sled state
-    pub state: SledState,
-
-    /// zpools on this sled
-    ///
-    /// (used to allocate storage for control plane zones with persistent
-    /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
-
-    /// the IPv6 subnet of this sled on the underlay network
-    ///
-    /// (implicitly specifies the whole range of addresses that the planner can
-    /// use for control plane components)
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
-}
-
-impl SledResources {
-    /// Returns true if the sled can have services provisioned on it that
-    /// aren't required to be on every sled.
-    ///
-    /// For example, NTP must exist on every sled, but Nexus does not have to.
-    pub fn is_eligible_for_discretionary_services(&self) -> bool {
-        self.policy.is_provisionable()
-            && self.state.is_eligible_for_discretionary_services()
-    }
-}
-
-/// Policy and database inputs to the Reconfigurator planner
-///
-/// The primary inputs to the planner are the parent (either a parent blueprint
-/// or an inventory collection) and this structure. This type holds the
-/// fleet-wide policy as well as any additional information fetched from CRDB
-/// that the planner needs to make decisions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanningInput {
-    /// fleet-wide policy
-    pub policy: Policy,
-
-    /// external IPs allocated to services
-    pub service_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
-
-    /// vNICs allocated to services
-    pub service_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
-}
-
-/// External IP allocated to a service
-///
-/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
-/// necessary for blueprint planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExternalIp {
-    pub id: Uuid,
-    pub ip: IpNetwork,
-}
-
-/// Network interface allocated to a service
-///
-/// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
-/// the fields necessary for blueprint planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceNetworkInterface {
-    pub id: Uuid,
-    pub mac: MacAddr,
-    pub ip: IpNetwork,
-    pub slot: u8,
-    pub primary: bool,
-}
+pub use planning_input::ExternalIp;
+pub use planning_input::PlanningInput;
+pub use planning_input::PlanningInputBuildError;
+pub use planning_input::PlanningInputBuilder;
+pub use planning_input::Policy;
+pub use planning_input::ServiceNetworkInterface;
+pub use planning_input::SledDetails;
+pub use planning_input::SledFilter;
+pub use planning_input::SledResources;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -1054,7 +952,7 @@ impl DiffZoneCommon {
 /// backwards-compatibility guarantees.**
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
-    pub policy: Policy,
+    pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,

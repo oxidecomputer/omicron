@@ -9,6 +9,7 @@
 
 use expectorate::assert_contents;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::redact_variable;
@@ -136,8 +137,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
                 InlineErrorChain::new(&error),
             )
         });
-    assert!(parsed.policy.sleds.len() > 0);
-    assert!(parsed.collections.len() > 0);
+    // Did we find at least one sled in the planning input, and at least one
+    // collection?
+    assert!(parsed
+        .planning_input
+        .all_sled_ids(SledFilter::All)
+        .next()
+        .is_some());
+    assert!(!parsed.collections.is_empty());
 
     gwtestctx.teardown().await;
 }
