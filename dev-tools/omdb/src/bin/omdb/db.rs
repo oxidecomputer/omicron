@@ -3248,7 +3248,7 @@ struct LongStringFormatter {
 }
 
 impl LongStringFormatter {
-    fn maybe_truncatel'a>(&self, s: &'a str) -> Cow<'a, str> {
+    fn maybe_truncate<'a>(&self, s: &'a str) -> Cow<'a, str> {
         use unicode_width::UnicodeWidthChar;
 
         // pick an arbitrary width at which we'll truncate, knowing that these
