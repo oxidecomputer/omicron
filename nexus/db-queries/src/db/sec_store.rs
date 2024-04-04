@@ -7,6 +7,7 @@
 use crate::db::{self, model::Generation};
 use anyhow::Context;
 use async_trait::async_trait;
+use dropshot::HttpError;
 use futures::TryFutureExt;
 use omicron_common::backoff;
 use slog::Logger;
@@ -69,25 +70,51 @@ impl steno::SecStore for CockroachDbSecStore {
             // This is an internal service query to CockroachDB.
             backoff::retry_policy_internal_service(),
             || {
-                // XXX: do we need to filter the kinds of errors we retry on?
-                // Are there particular database errors which are unrecoverable
-                // and where we should just panic.
+                // An interesting question is how to handle errors.
+                //
+                // In general, there are some kinds of database errors that are
+                // temporary/server errors (e.g. network failures), and some
+                // that are permanent/client errors (e.g. conflict during
+                // insertion). The permanent ones would require operator
+                // intervention to fix.
+                //
+                // However, there is no way to bubble up errors here, and for
+                // good reason: it is inherent to the nature of sagas that
+                // progress is durably recorded. So within *this* code there is
+                // no option but to retry forever. (Below, however, we do mark
+                // errors that likely require operator intervention.)
+                //
+                // At a higher level, callers should plan for the fact that
+                // record_event could potentially loop forever. See the note in
+                // `nexus/src/app/saga.rs`'s `execute_saga` for more details.
                 self.datastore
                     .saga_create_event(&our_event)
                     .map_err(backoff::BackoffError::transient)
             },
             move |error, call_count, total_duration| {
-                if call_count == 0 {
-                    info!(
+                let http_error = HttpError::from(error.clone());
+                if http_error.status_code.is_client_error() {
+                    error!(
                         &log,
-                        "failed to record saga event, retrying";
-                        "error" => ?error,
+                        "client error while recording saga event (likely \
+                         requires operator intervention), retrying anyway";
+                        "error" => &error,
+                        "call_count" => call_count,
+                        "total_duration" => ?total_duration,
                     );
                 } else if total_duration > Duration::from_secs(20) {
                     warn!(
                         &log,
-                        "failed to record saga event, retrying";
-                        "error" => ?error,
+                        "server error while recording saga event, retrying";
+                        "error" => &error,
+                        "call_count" => call_count,
+                        "total_duration" => ?total_duration,
+                    );
+                } else {
+                    info!(
+                        &log,
+                        "server error while recording saga event, retrying";
+                        "error" => &error,
                         "call_count" => call_count,
                         "total_duration" => ?total_duration,
                     );

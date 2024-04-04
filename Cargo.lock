@@ -275,9 +275,9 @@ dependencies = [
 
 [[package]]
 name = "async-recursion"
-version = "1.0.5"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd55a5ba1179988837d24ab4c7cc8ed6efdeff578ede0416b4225a5fca35bd0"
+checksum = "30c5ef0ede93efbf733c1a727f3b6b5a1060bbedd5600183e66f6e4be4af0ec5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -308,9 +308,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.77"
+version = "0.1.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c980ee35e870bd1a4d2c8294d4c04d0499e67bca1e4b5cefcc693c2fa00caea9"
+checksum = "a507401cad91ec6a857ed5513a2073c82a9b9048762b885bb98655b306964681"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -436,15 +436,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
-name = "basic-toml"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2db21524cad41c5591204d22d75e1970a2d1f71060214ca931dc7d5afe2c14e5"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bb8"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -485,7 +476,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2
 dependencies = [
  "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -495,7 +486,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04a
 dependencies = [
  "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -504,7 +495,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -513,7 +504,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
 dependencies = [
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -873,7 +864,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "922d6ea3081d68b9e3e09557204bff47f9b5406a4a304dc917e187f8cafd582b"
 dependencies = [
  "serde",
- "toml 0.8.10",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -1843,9 +1834,9 @@ checksum = "a7993efb860416547839c115490d4951c6d0f8ec04a3594d9dd99d50ed7ec170"
 
 [[package]]
 name = "diesel"
-version = "2.1.4"
+version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62c6fcf842f17f8c78ecf7c81d75c5ce84436b41ee07e03f490fbb5f5a8731d8"
+checksum = "03fc05c17098f21b89bc7d98fe1dd3cce2c11c2ad8e145f2a44fe08ed28eb559"
 dependencies = [
  "bitflags 2.4.2",
  "byteorder",
@@ -1971,7 +1962,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
- "strum 0.26.1",
+ "strum",
 ]
 
 [[package]]
@@ -2017,7 +2008,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -2099,7 +2090,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.8.10",
+ "toml 0.8.12",
  "uuid 1.7.0",
 ]
 
@@ -2121,7 +2112,7 @@ dependencies = [
  "hostname",
  "http 0.2.12",
  "hyper 0.14.28",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "multer",
  "openapiv3",
  "paste",
@@ -2142,7 +2133,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.10",
+ "toml 0.8.12",
  "usdt 0.3.5",
  "uuid 1.7.0",
  "version_check",
@@ -2323,7 +2314,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.5",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "trust-dns-resolver",
  "uuid 1.7.0",
 ]
@@ -2434,17 +2425,6 @@ dependencies = [
  "byteorder",
  "chrono",
  "log",
-]
-
-[[package]]
-name = "fd-lock"
-version = "3.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef033ed5e9bad94e55838ca0ca906db0e043f517adda0c8b79c7a8c66c93c1b5"
-dependencies = [
- "cfg-if",
- "rustix",
- "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2955,7 +2935,7 @@ dependencies = [
  "debug-ignore",
  "fixedbitset",
  "guppy-workspace-hack",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "itertools 0.12.1",
  "nested",
  "once_cell",
@@ -2987,7 +2967,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.12",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "slab",
  "tokio",
  "tokio-util",
@@ -3569,7 +3549,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "uuid 1.7.0",
  "whoami",
  "zone 0.3.0",
@@ -3599,9 +3579,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.2.5"
+version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b0b929d511467233429c45a44ac1dcaa21ba0f5ba11e4879e6ed28ddb4f9df4"
+checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.3",
@@ -4558,7 +4538,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "tokio-postgres",
- "toml 0.8.10",
+ "toml 0.8.12",
  "uuid 1.7.0",
 ]
 
@@ -4598,7 +4578,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "tokio",
  "uuid 1.7.0",
@@ -4678,7 +4658,7 @@ dependencies = [
  "slog-error-chain",
  "static_assertions",
  "steno",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "swrite",
  "term",
@@ -4721,7 +4701,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "tokio",
  "typed-rng",
@@ -4824,7 +4804,7 @@ dependencies = [
  "chrono",
  "expectorate",
  "gateway-client",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "internal-dns",
  "ipnet",
  "ipnetwork",
@@ -4949,7 +4929,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "steno",
- "strum 0.26.1",
+ "strum",
  "tabled",
  "thiserror",
  "uuid 1.7.0",
@@ -5276,7 +5256,7 @@ dependencies = [
  "serde_with",
  "slog",
  "slog-error-chain",
- "strum 0.26.1",
+ "strum",
  "test-strategy",
  "thiserror",
  "tokio",
@@ -5304,7 +5284,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "uuid 1.7.0",
 ]
 
@@ -5339,7 +5319,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.10",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -5381,7 +5361,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.20.1",
- "toml 0.8.10",
+ "toml 0.8.12",
  "uuid 1.7.0",
 ]
 
@@ -5493,7 +5473,7 @@ dependencies = [
  "slog-term",
  "sp-sim",
  "steno",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "tempfile",
  "term",
@@ -5555,7 +5535,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "tabled",
  "textwrap 0.16.1",
@@ -5590,12 +5570,12 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "smf",
- "strum 0.26.1",
+ "strum",
  "swrite",
  "tar",
  "thiserror",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "walkdir",
 ]
 
@@ -5702,7 +5682,7 @@ dependencies = [
  "slog-term",
  "smf",
  "static_assertions",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "tar",
  "tempfile",
@@ -5711,7 +5691,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.10",
+ "toml 0.8.12",
  "usdt 0.5.0",
  "uuid 1.7.0",
  "zeroize",
@@ -5813,7 +5793,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper 0.14.28",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
@@ -5937,7 +5917,7 @@ version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
 dependencies = [
  "heck 0.4.1",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -5949,7 +5929,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "serde",
  "serde_json",
 ]
@@ -6133,7 +6113,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "trybuild",
  "uuid 1.7.0",
@@ -6186,11 +6166,11 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "strum 0.26.1",
+ "strum",
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "uuid 1.7.0",
 ]
 
@@ -6211,7 +6191,7 @@ dependencies = [
  "expectorate",
  "futures",
  "highway",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "itertools 0.12.1",
  "num",
  "omicron-common",
@@ -6232,7 +6212,7 @@ dependencies = [
  "slog-term",
  "sqlformat",
  "sqlparser",
- "strum 0.26.1",
+ "strum",
  "tabled",
  "tempfile",
  "thiserror",
@@ -6630,7 +6610,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "serde",
  "serde_derive",
 ]
@@ -6944,9 +6924,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a41cf62165e97c7f814d2221421dbb9afcbcdb0a88068e5ea206e19951c2cbb5"
+checksum = "8d3928fb5db768cb86f891ff014f0144589297e3c6a1aba6ed7cecfdace270c7"
 dependencies = [
  "proc-macro2",
  "syn 2.0.52",
@@ -7037,7 +7017,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http 0.2.12",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -7090,7 +7070,7 @@ dependencies = [
  "serde_arrays",
  "serde_json",
  "slog",
- "strum 0.26.1",
+ "strum",
  "thiserror",
  "tokio",
  "usdt 0.5.0",
@@ -7420,16 +7400,16 @@ dependencies = [
  "lru",
  "paste",
  "stability",
- "strum 0.26.1",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]
 
 [[package]]
 name = "rayon"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4963ed1bc86e4f3ee217022bd855b297cef07fb9eac5dfa1f788b220b49b3bd"
+checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
 dependencies = [
  "either",
  "rayon-core",
@@ -7479,7 +7459,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "humantime",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "nexus-client",
  "nexus-db-queries",
  "nexus-reconfigurator-execution",
@@ -7547,19 +7527,19 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413a9fa6a5d8c937d3ae1e975bfb6a918bb0b6cdfae6a10416218c837a31b8fc"
+checksum = "65ebc241ed0ccea0bbbd775a55a76f0dd9971ef084589dea938751a03ffedc14"
 dependencies = [
  "chrono",
  "crossterm",
- "fd-lock 3.0.13",
+ "fd-lock",
  "itertools 0.12.1",
  "nu-ansi-term",
  "serde",
  "strip-ansi-escapes",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros 0.26.1",
  "thiserror",
  "unicode-segmentation",
  "unicode-width",
@@ -7587,9 +7567,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.3"
+version = "1.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62dbe01f0b06f9d8dc7d49e05a0785f153b00b2c227856282f671e0318c9b15"
+checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -7628,9 +7608,9 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
 name = "regress"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d06f9a1f7cd8473611ba1a480cf35f9c5cffc2954336ba90a982fdb7e7d7f51e"
+checksum = "0eae2a1ebfecc58aff952ef8ccd364329abe627762f5bf09ff42eb9d98522479"
 dependencies = [
  "hashbrown 0.14.3",
  "memchr",
@@ -8142,7 +8122,7 @@ dependencies = [
  "bitflags 2.4.2",
  "cfg-if",
  "clipboard-win",
- "fd-lock 4.0.2",
+ "fd-lock",
  "home",
  "libc",
  "log",
@@ -8448,9 +8428,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.114"
+version = "1.0.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5f09b1bd632ef549eaa9f60a1f8de742bdbc698e6cee2095fc84dde5f549ae0"
+checksum = "12dc5c46daa8e9fdf4f5e71b6cf9a53f2487da0e86e55808e2d35539666497dd"
 dependencies = [
  "itoa",
  "ryu",
@@ -8541,7 +8521,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "serde",
  "serde_derive",
  "serde_json",
@@ -8567,7 +8547,7 @@ version = "0.9.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a49e178e4452f45cb61d0cd8cebc1b0fafd3e41929e996cef79aa3aca91f574"
 dependencies = [
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "itoa",
  "ryu",
  "serde",
@@ -9073,7 +9053,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -9324,12 +9304,6 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "strum"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 
 [[package]]
 name = "strum"
@@ -9913,9 +9887,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "397c988d37662c7dda6d2208364a706264bf3d6138b11d436cbac0ad38832842"
+checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -9983,9 +9957,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.10"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a9aad4a3066010876e8dcf5a8a06e70a558751117a145c6ce2b82c2e2054290"
+checksum = "e9dd1545e8208b4a5af1aa9bbd0b4cf7e9ea08fabc5d0a5c67fcaafa17433aa3"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -10008,7 +9982,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -10021,7 +9995,7 @@ version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
 dependencies = [
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -10236,17 +10210,17 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 
 [[package]]
 name = "trybuild"
-version = "1.0.89"
+version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a9d3ba662913483d6722303f619e75ea10b7855b0f8e0d72799cf8621bb488f"
+checksum = "8ad7eb6319ebadebca3dacf1f85a93bc54b73dd81b9036795f73de7ddfe27d5a"
 dependencies = [
- "basic-toml",
  "glob",
  "once_cell",
  "serde",
  "serde_derive",
  "serde_json",
  "termcolor",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -10306,7 +10280,7 @@ dependencies = [
  "slog",
  "tar",
  "tokio",
- "toml 0.8.10",
+ "toml 0.8.12",
  "tough",
  "url",
  "zip",
@@ -10569,7 +10543,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "indicatif",
  "libsw",
  "linear-map",
@@ -11012,7 +10986,7 @@ dependencies = [
  "crossterm",
  "futures",
  "humantime",
- "indexmap 2.2.5",
+ "indexmap 2.2.6",
  "indicatif",
  "itertools 0.12.1",
  "omicron-common",
@@ -11036,7 +11010,7 @@ dependencies = [
  "textwrap 0.16.1",
  "tokio",
  "tokio-util",
- "toml 0.8.10",
+ "toml 0.8.12",
  "toml_edit 0.22.9",
  "tui-tree-widget",
  "unicode-width",
@@ -11144,7 +11118,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.10",
+ "toml 0.8.12",
  "tough",
  "trust-dns-resolver",
  "tufaceous",
@@ -11424,7 +11398,7 @@ dependencies = [
  "fs-err",
  "serde",
  "swrite",
- "toml 0.8.10",
+ "toml 0.8.12",
 ]
 
 [[package]]
