@@ -188,7 +188,10 @@ pub fn redact_variable(input: &str) -> String {
 }
 
 /// Redact text from a string, allowing for extra redactions to be specified.
-pub fn redact_extra(input: &str, extra_redactions: &ExtraRedactions) -> String {
+pub fn redact_extra(
+    input: &str,
+    extra_redactions: &ExtraRedactions<'_>,
+) -> String {
     // Perform extra redactions at the beginning, not the end. This is because
     // some of the built-in redactions in redact_variable might match a
     // substring of something that should be handled by extra_redactions (e.g.
@@ -214,22 +217,55 @@ impl<'a> ExtraRedactions<'a> {
         Self { redactions: Vec::new() }
     }
 
-    pub fn add(&mut self, name: &str, text_to_redact: &'a str) -> &mut Self {
-        // Use the name first because the text to redact may be shorter than
-        // "REDACTED_<NAME>".
-        let gen = name.to_uppercase() + "_REDACTED_";
-        // We try and match the length here so that tabular output looks the
-        // same.
+    pub fn fixed_length(
+        &mut self,
+        name: &str,
+        text_to_redact: &'a str,
+    ) -> &mut Self {
+        // The overall plan is to generate a string of the form
+        // ---<REDACTED_NAME>---, depending on the length of the text to
+        // redact.
         //
+        // * Always include the < > signs for clarity, and either shorten the
+        //   text or add dashes to compensate for the length.
+
+        let base = format!("REDACTED_{}", name.to_uppercase());
+
         // Use the same number of chars as the number of bytes in
         // text_to_redact. We're almost entirely in ASCII-land so they're the
-        // same, and getting the length right is nice but doesn't hugely matter
-        // for correctness.
-        let replacement =
-            gen.chars().cycle().take(text_to_redact.len()).collect::<String>();
+        // same, and getting the length right is nice but doesn't matter for
+        // correctness.
+        //
+        // A technically more correct impl would use unicode-width, but ehhh.
+        let text_len = text_to_redact.len();
+        let text_len_minus_2 = text_len.saturating_sub(2);
+
+        let replacement = if text_len_minus_2 <= base.len() {
+            // Shorten the base string to fit the text.
+            format!("<{:.width$}>", base, width = text_len_minus_2)
+        } else {
+            // Add dashes on both sides to make up the difference.
+            let dash_len = text_len_minus_2 - base.len();
+            format!(
+                "{}<{base}>{}",
+                ".".repeat(dash_len / 2),
+                ".".repeat(dash_len - dash_len / 2)
+            )
+        };
 
         self.redactions.push((text_to_redact, replacement));
+        self
+    }
 
+    pub fn variable_length(
+        &mut self,
+        name: &str,
+        text_to_redact: &'a str,
+    ) -> &mut Self {
+        let gen = format!("<{}_REDACTED>", name.to_uppercase());
+        let replacement = gen.to_string();
+
+        self.redactions.push((text_to_redact, replacement));
         self
     }
 }
@@ -240,15 +276,21 @@ mod tests {
 
     #[test]
     fn test_redact_extra() {
-        // Ens
-        let input = "time: 123ms, path: /var/tmp/tmp.456ms123s";
+        let input = "time: 123ms, path: /var/tmp/tmp.456ms123s, \
+            path2: /short, \
+            path3: /variable-length/path";
         let actual = redact_extra(
             input,
-            &ExtraRedactions::new().add("tmp_path", "/var/tmp/tmp.456ms123s"),
+            &ExtraRedactions::new()
+                .fixed_length("tp", "/var/tmp/tmp.456ms123s")
+                .fixed_length("short_redact", "/short")
+                .variable_length("variable", "/variable-length/path"),
         );
         assert_eq!(
             actual,
-            "time: <REDACTED DURATION>ms, path: TMP_PATH_REDACTED_TMP_"
+            "time: <REDACTED DURATION>ms, path: ....<REDACTED_TP>....., \
+             path2: <REDA>, \
+             path3: <VARIABLE_REDACTED>"
         );
     }
 }

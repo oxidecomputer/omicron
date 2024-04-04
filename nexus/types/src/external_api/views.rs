@@ -604,6 +604,17 @@ impl SledPolicy {
         ]
     }
 
+    /// Returns true if the sled is in-service.
+    ///
+    /// Note that a sled being in service does not mean it's provisionable; most
+    /// consumers probably want `is_provisionable` instead.
+    pub fn is_in_service(&self) -> bool {
+        match self {
+            Self::InService { .. } => true,
+            Self::Expunged => false,
+        }
+    }
+
     /// Returns true if the sled can have services provisioned on it.
     pub fn is_provisionable(&self) -> bool {
         match self {

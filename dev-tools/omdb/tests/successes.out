@@ -58,7 +58,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
-EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "TMP_PATH_REDACTED_TMP_PATH_REDACTED_TMP"]
+EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -67,7 +67,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
-wrote TMP_PATH_REDACTED_TMP_PATH_REDACTED_TMP
+wrote <TMP_PATH_REDACTED>
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
 termination: Exited(0)
@@ -469,16 +469,16 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 T ENA ID                                   PARENT TIME_CREATED             
-* no  BLUEPRINT_ID_REDACTED_BLUEPRINT_ID_R <none> <REDACTED     TIMESTAMP> 
+* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED     TIMESTAMP> 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "BLUEPRINT_ID_REDACTED_BLUEPRINT_ID_R"]
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "......<REDACTED_BLUEPRINT_ID>......."]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-blueprint  BLUEPRINT_ID_REDACTED_BLUEPRINT_ID_R
+blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   -----------------------------------------------------------------------------------------

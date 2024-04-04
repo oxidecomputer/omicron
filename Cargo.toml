@@ -362,7 +362,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.1.1"
 rustyline = "13.0.0"
-samael = { version = "0.0.14", features = ["xmlsec"] }
+samael = { version = "0.0.15", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.22", features = ["std", "serde"] }
@@ -372,7 +372,7 @@ serde_json = "1.0.115"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
-serde_with = "3.6.1"
+serde_with = "3.7.0"
 sha2 = "0.10.8"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
@@ -421,7 +421,7 @@ textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.36.0"
+tokio = "1.37.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = "0.20"
@@ -659,11 +659,6 @@ branch = "oxide/omicron"
 # to it.
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
-
-# Pulls in https://github.com/njaremko/samael/pull/41
-[patch.crates-io.samael]
-git = "https://github.com/oxidecomputer/samael"
-branch = "oxide/omicron"
 
 # Several crates such as crucible and propolis have have a Git dependency on
 # this repo. Omicron itself depends on these crates, which can lead to two
