@@ -3,6 +3,9 @@
 # NTP servers outside the rack.
 #
 
+# TODO: Removeme once svc-site-ntp file is gone
+pool @SERVER@ iburst maxdelay 0.1 maxsources 16
+
 driftfile /var/lib/chrony/drift
 ntsdumpdir /var/lib/chrony
 dumpdir /var/lib/chrony
