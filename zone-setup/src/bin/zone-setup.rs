@@ -8,16 +8,21 @@ use anyhow::anyhow;
 use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
+use illumos_utils::svcadm::Svcadm;
+use illumos_utils::chronyd::Chronyd;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
 use std::fs::{read_to_string, write, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::os::unix::fs::chown;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
+pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
 pub const INTERNAL_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.internal";
 pub const BOUNDARY_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.boundary";
 
@@ -220,6 +225,7 @@ async fn ntp_smf_start(
         servers, file, allow, is_boundary
     );
 
+    // TODO: Extract gen_config_file function here?
     let template = if *is_boundary {
         BOUNDARY_NTP_CONFIG_TPL
     } else {
@@ -291,10 +297,43 @@ async fn ntp_smf_start(
     if old_file.clone().is_some_and(|f| f != new_config) {
         info!(&log, "Chrony configuration file has changed"; "old configuration file" => ?old_file);
     }
+    // End gen_config_file here
 
-    // TODO: Update logadm
+    // Update logadm
+    //
+    // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
+    // be added to the system's /etc/logadm.conf. Unfortunately, the service which
+    // does this - system/logadm-upgrade - only processes files with mode 444 and
+    // root:sys ownership so we need to adjust things here (until omicron package
+    // supports including ownership and permissions in the generated tar files).
+    //
+    // TODO: There is an error here
+    // zone-setup: Could not create chrony logadm configuration file /etc/logadm.d/chrony.logadm.conf: Invalid argument (os error 22)
+    let mut options = OpenOptions::new();
+    options.mode(444).create(true).open(LOGADM_CONFIG_FILE).map_err(|err| {
+        CmdError::Failure(anyhow!(
+            "Could not create chrony logadm configuration file {}: {}",
+            LOGADM_CONFIG_FILE,
+            err
+        ))
+    })?;
+
+    chown(LOGADM_CONFIG_FILE, Some(0), Some(3)).map_err(|err| {
+        CmdError::Failure(anyhow!(
+            "Could not set ownership of logadm configuration file {}: {}",
+            LOGADM_CONFIG_FILE,
+            err
+        ))
+    })?;
+
+    info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    Svcadm::refresh_logadm_upgrade()
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     // TODO: Start daemon
+    info!(&log, "Starting chronyd daemon"; "chrony config" => ?file);
+    Chronyd::start_daemon(file)
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
     Ok(())
 }
 

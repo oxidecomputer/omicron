@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use cfg_if::cfg_if;
 
 pub mod addrobj;
+pub mod chronyd;
 pub mod coreadm;
 pub mod destructor;
 pub mod dkio;
@@ -24,6 +25,7 @@ pub mod route;
 pub mod running_zone;
 pub mod scf;
 pub mod svc;
+pub mod svcadm;
 pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;

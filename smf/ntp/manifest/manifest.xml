@@ -57,7 +57,10 @@
     The service also always starts the binary with ASLR enabled,
     regardless of whether it was linked with -zaslr
   -->
-  <exec_method type="method" name="start" exec="/var/svc/method/svc-site-ntp %m"
+
+<!-- TODO: Check what the /etc/logadm.d/chrony.logadm.conf file says in the previous one -->  
+  <exec_method type="method" name="start"
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup ntp start -f %{config/file} -b %{config/boundary} -s %{config/server} -a %{config/allow}'
     timeout_seconds="60">
   <method_context security_flags="aslr">
   <method_credential user="root" group="root"
