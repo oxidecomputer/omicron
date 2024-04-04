@@ -20,6 +20,7 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
@@ -115,7 +116,7 @@ pub struct BlueprintBuilder<'a> {
     external_dns_version: Generation,
 
     // These fields are used to allocate resources from sleds.
-    policy: &'a Policy,
+    input: &'a PlanningInput,
     sled_ip_allocators: BTreeMap<Uuid, IpAllocator>,
 
     // These fields will become part of the final blueprint.  See the
@@ -242,7 +243,7 @@ impl<'a> BlueprintBuilder<'a> {
         parent_blueprint: &'a Blueprint,
         internal_dns_version: Generation,
         external_dns_version: Generation,
-        policy: &'a Policy,
+        input: &'a PlanningInput,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
         let log = log.new(o!(
@@ -344,7 +345,8 @@ impl<'a> BlueprintBuilder<'a> {
                 .filter(move |ip| !existing_nexus_v6_ips.contains(ip)),
         );
         let available_external_ips = Box::new(
-            policy
+            input
+                .policy
                 .service_ip_pool_ranges
                 .iter()
                 .flat_map(|r| r.iter())
@@ -359,7 +361,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint,
             internal_dns_version,
             external_dns_version,
-            policy,
+            input,
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             creator: creator.to_owned(),
@@ -376,7 +378,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
         let blueprint_zones =
-            self.zones.into_zones_map(self.policy.sleds.keys().copied());
+            self.zones.into_zones_map(self.input.policy.sleds.keys().copied());
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -718,7 +720,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     fn sled_resources(&self, sled_id: Uuid) -> Result<&SledResources, Error> {
-        self.policy.sleds.get(&sled_id).ok_or_else(|| {
+        self.input.policy.sleds.get(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "attempted to use sled that is not in service: {}",
                 sled_id
@@ -895,14 +897,14 @@ pub mod test {
         // describes no changes.
         static TEST_NAME: &str = "blueprint_builder_test_initial";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, policy) =
+        let (collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let blueprint_initial =
             BlueprintBuilder::build_initial_from_collection_seeded(
                 &collection,
                 Generation::new(),
                 Generation::new(),
-                &policy,
+                &input.policy,
                 "the_test",
                 TEST_NAME,
             )
@@ -933,7 +935,7 @@ pub mod test {
             &blueprint_initial,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input,
             "test_basic",
         )
         .expect("failed to create builder");
@@ -965,7 +967,7 @@ pub mod test {
             blueprint1,
             Generation::new(),
             Generation::new(),
-            &example.policy,
+            &example.input,
             "test_basic",
         )
         .expect("failed to create builder");
@@ -973,7 +975,7 @@ pub mod test {
         // The example blueprint should have internal NTP zones on all the
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
-        for (sled_id, sled_resources) in &example.policy.sleds {
+        for (sled_id, sled_resources) in &example.input.policy.sleds {
             builder.sled_ensure_zone_ntp(*sled_id).unwrap();
             for pool_name in &sled_resources.zpools {
                 builder
@@ -998,17 +1000,22 @@ pub mod test {
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = example.system.to_policy().unwrap();
+        let input = PlanningInput {
+            policy,
+            service_external_ips: example.input.service_external_ips,
+            service_nics: example.input.service_nics,
+        };
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input,
             "test_basic",
         )
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        let new_sled_resources = policy.sleds.get(&new_sled_id).unwrap();
+        let new_sled_resources = input.policy.sleds.get(&new_sled_id).unwrap();
         for pool_name in &new_sled_resources.zpools {
             builder
                 .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
@@ -1082,7 +1089,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, policy) =
+        let (mut collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We don't care about the DNS versions here.
@@ -1103,7 +1110,7 @@ pub mod test {
             &collection,
             internal_dns_version,
             external_dns_version,
-            &policy,
+            &input.policy,
             "test",
             TEST_NAME,
         )
@@ -1114,7 +1121,7 @@ pub mod test {
             &parent,
             internal_dns_version,
             external_dns_version,
-            &policy,
+            &input,
             "test",
         )
         .expect("failed to create builder");
@@ -1143,7 +1150,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, policy) =
+        let (mut collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We don't care about the DNS versions here.
@@ -1172,7 +1179,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input.policy,
             "test",
             TEST_NAME,
         )
@@ -1186,7 +1193,7 @@ pub mod test {
                 &parent,
                 internal_dns_version,
                 external_dns_version,
-                &policy,
+                &input,
                 "test",
             )
             .expect("failed to create builder");
@@ -1206,7 +1213,7 @@ pub mod test {
                 &parent,
                 internal_dns_version,
                 external_dns_version,
-                &policy,
+                &input,
                 "test",
             )
             .expect("failed to create builder");
@@ -1221,7 +1228,7 @@ pub mod test {
             // Replace the policy's external service IP pool ranges with ranges
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
-            let mut policy = policy.clone();
+            let mut input = input.clone();
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
                 if let Some(ip) = z
@@ -1233,14 +1240,14 @@ pub mod test {
                 }
             }
             assert!(!used_ip_ranges.is_empty());
-            policy.service_ip_pool_ranges = used_ip_ranges;
+            input.policy.service_ip_pool_ranges = used_ip_ranges;
 
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
                 internal_dns_version,
                 external_dns_version,
-                &policy,
+                &input,
                 "test",
             )
             .expect("failed to create builder");
@@ -1271,7 +1278,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_external_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, policy) =
+        let (mut collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1303,7 +1310,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input.policy,
             "test",
             TEST_NAME,
         )
@@ -1314,7 +1321,7 @@ pub mod test {
             &parent,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -1333,7 +1340,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_nexus_zones_with_same_nic_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, policy) =
+        let (mut collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1363,7 +1370,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input.policy,
             "test",
             TEST_NAME,
         )
@@ -1374,7 +1381,7 @@ pub mod test {
             &parent,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -1393,7 +1400,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_vnic_mac";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, policy) =
+        let (mut collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1423,7 +1430,7 @@ pub mod test {
             &collection,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input.policy,
             "test",
             TEST_NAME,
         )
@@ -1434,7 +1441,7 @@ pub mod test {
             &parent,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),

@@ -126,11 +126,20 @@ pub fn error_for_enoent() -> String {
 ///
 /// This allows use to use expectorate to verify the shape of the CLI output.
 pub fn redact_variable(input: &str, extra_redactions: &[&str]) -> String {
+    // Perform extra redactions at the beginning, not the end. This is because
+    // some of the built-in redactions below might match a substring of
+    // something that should be handled by extra_redactions (e.g. a temporary
+    // path).
+    let mut s = input.to_owned();
+    for r in extra_redactions {
+        s = s.replace(r, "<REDACTED>");
+    }
+
     // Replace TCP port numbers.  We include the localhost characters to avoid
     // catching any random sequence of numbers.
     let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
         .unwrap()
-        .replace_all(input, "[::1]:REDACTED_PORT")
+        .replace_all(&s, "[::1]:REDACTED_PORT")
         .to_string();
     let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
         .unwrap()
@@ -173,7 +182,7 @@ pub fn redact_variable(input: &str, extra_redactions: &[&str]) -> String {
         .replace_all(&s, "<REDACTED DURATION>ms")
         .to_string();
 
-    let mut s = regex::Regex::new(
+    let s = regex::Regex::new(
         r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
     )
     .unwrap()
@@ -184,9 +193,18 @@ pub fn redact_variable(input: &str, extra_redactions: &[&str]) -> String {
     )
     .to_string();
 
-    for r in extra_redactions {
-        s = s.replace(r, "<REDACTED>");
-    }
-
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_redact_variable() {
+        // Ens
+        let input = "time: 123ms, path: /var/tmp/tmp.456ms123s";
+        let actual = redact_variable(input, &["/var/tmp/tmp.456ms123s"]);
+        assert_eq!(actual, "time: <REDACTED DURATION>ms, path: <REDACTED>");
+    }
 }

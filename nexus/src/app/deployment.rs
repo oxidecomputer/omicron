@@ -14,7 +14,9 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::Policy;
+use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::inventory::Collection;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::CreateResult;
@@ -26,12 +28,15 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
-    policy: Policy,
+    planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
     internal_dns_version: Generation,
@@ -151,6 +156,49 @@ impl super::Nexus {
             NEXUS_REDUNDANCY,
         )?;
 
+        let service_external_ips = datastore
+            .external_ip_list_service_all_batched(opctx)
+            .await?
+            .into_iter()
+            .filter_map(|external_ip| {
+                if !external_ip.is_service {
+                    error!(
+                        opctx.log,
+                        "non-service external IP returned by service IP query";
+                        "external-ip" => ?external_ip,
+                    );
+                    return None;
+                }
+                let Some(service_id) = external_ip.parent_id else {
+                    error!(
+                        opctx.log,
+                        "service external IP with no parent ID set";
+                        "external-ip" => ?external_ip,
+                    );
+                    return None;
+                };
+                Some((
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(service_id),
+                    ExternalIp::from(external_ip),
+                ))
+            })
+            .collect();
+        let service_nics = datastore
+            .service_network_interfaces_all_list_batched(opctx)
+            .await?
+            .into_iter()
+            .map(|nic| {
+                (
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(
+                        nic.service_id,
+                    ),
+                    ServiceNetworkInterface::from(nic),
+                )
+            })
+            .collect();
+        let planning_input =
+            PlanningInput { policy, service_external_ips, service_nics };
+
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to
         // transient (or even persistent) errors.  It's not yet clear what
@@ -186,8 +234,8 @@ impl super::Nexus {
             )?;
 
         Ok(PlanningContext {
+            planning_input,
             creator,
-            policy,
             inventory,
             internal_dns_version: *internal_dns_version.version,
             external_dns_version: *external_dns_version.version,
@@ -216,7 +264,7 @@ impl super::Nexus {
             &collection,
             planning_context.internal_dns_version,
             planning_context.external_dns_version,
-            &planning_context.policy,
+            &planning_context.planning_input.policy,
             &planning_context.creator,
         )
         .map_err(|error| {
@@ -252,7 +300,7 @@ impl super::Nexus {
             &parent_blueprint,
             planning_context.internal_dns_version,
             planning_context.external_dns_version,
-            &planning_context.policy,
+            &planning_context.planning_input,
             &planning_context.creator,
             &inventory,
         )
@@ -270,5 +318,14 @@ impl super::Nexus {
 
         self.blueprint_add(&opctx, &blueprint).await?;
         Ok(blueprint)
+    }
+
+    pub async fn blueprint_import(
+        &self,
+        opctx: &OpContext,
+        blueprint: Blueprint,
+    ) -> Result<(), Error> {
+        let _ = self.blueprint_add(&opctx, &blueprint).await?;
+        Ok(())
     }
 }

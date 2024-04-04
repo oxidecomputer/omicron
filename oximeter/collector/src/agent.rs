@@ -36,7 +36,6 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::num::NonZeroU32;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -150,12 +149,16 @@ async fn perform_collection(
 // also send a `CollectionMessage`, for example to update the collection interval. This is not
 // currently used, but will likely be exposed via control plane interfaces in the future.
 async fn collection_task(
-    log: Logger,
+    orig_log: Logger,
     collector: self_stats::OximeterCollector,
     mut producer: ProducerEndpoint,
     mut inbox: mpsc::Receiver<CollectionMessage>,
     outbox: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
 ) {
+    let mut log = orig_log.new(o!(
+        "route" => producer.collection_route(),
+        "address" => producer.address,
+    ));
     let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
     collection_timer.tick().await; // completes immediately
@@ -194,6 +197,12 @@ async fn collection_task(
                             "interval" => ?producer.interval,
                             "address" => producer.address,
                         );
+
+                        // Update the logger with the new information as well.
+                        log = orig_log.new(o!(
+                            "route" => producer.collection_route(),
+                            "address" => producer.address,
+                        ));
                         collection_timer = interval(producer.interval);
                         collection_timer.tick().await; // completes immediately
                     }
@@ -387,6 +396,7 @@ impl OximeterAgent {
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
+            "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
 
@@ -497,6 +507,7 @@ impl OximeterAgent {
         let log = log.new(o!(
             "component" => "oximeter-standalone",
             "collector_id" => id.to_string(),
+            "collector_ip" => address.ip().to_string(),
         ));
 
         // If we have configuration for ClickHouse, we'll spawn the results
@@ -589,7 +600,10 @@ impl OximeterAgent {
                 // Build channel to control the task and receive results.
                 let (tx, rx) = mpsc::channel(4);
                 let q = self.result_sender.clone();
-                let log = self.log.new(o!("component" => "collection-task", "producer_id" => id.to_string()));
+                let log = self.log.new(o!(
+                    "component" => "collection-task",
+                    "producer_id" => id.to_string(),
+                ));
                 let info_clone = info.clone();
                 let target = self.collection_target;
                 let task = tokio::spawn(async move {
@@ -679,8 +693,10 @@ impl OximeterAgent {
         >,
         id: Uuid,
     ) -> Result<(), Error> {
-        let (_info, task) =
-            tasks.remove(&id).ok_or_else(|| Error::NoSuchProducer(id))?;
+        let Some((_info, task)) = tasks.remove(&id) else {
+            // We have no such producer, so good news, we've removed it!
+            return Ok(());
+        };
         debug!(
             self.log,
             "removed collection task from set";
@@ -746,7 +762,6 @@ impl OximeterAgent {
 // A task which periodically updates our list of producers from Nexus.
 async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
     let mut interval = tokio::time::interval(agent.refresh_interval);
-    let page_size = Some(NonZeroU32::new(100).unwrap());
     loop {
         interval.tick().await;
         info!(agent.log, "refreshing list of producers from Nexus");
@@ -756,7 +771,9 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
         let client = nexus_client::Client::new(&url, agent.log.clone());
         let mut stream = client.cpapi_assigned_producers_list_stream(
             &agent.id,
-            page_size,
+            // This is a _total_ limit, not a page size, so `None` means "get
+            // all entries".
+            None,
             Some(IdSortMode::IdAscending),
         );
         let mut expected_producers = BTreeMap::new();
@@ -1119,6 +1136,29 @@ mod tests {
             N_FAILED_COLLECTIONS.load(Ordering::SeqCst),
         );
         assert_eq!(stats.failed_collections.len(), 1);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_producer_succeeds() {
+        let logctx =
+            test_setup_log("test_delete_nonexistent_producer_succeeds");
+        let log = &logctx.log;
+
+        // Spawn an oximeter collector ...
+        let collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            None,
+            log,
+        )
+        .await
+        .unwrap();
+        assert!(
+            collector.delete_producer(Uuid::new_v4()).await.is_ok(),
+            "Deleting a non-existent producer should be OK"
+        );
         logctx.cleanup_successful();
     }
 }

@@ -1345,7 +1345,7 @@ mod tests {
         assert_eq!(
             context
                 .db_datastore
-                .service_lookup_external_ips(&context.opctx, service1_id)
+                .external_ip_list_service(&context.opctx, service1_id)
                 .await
                 .expect("Failed to look up service external IPs"),
             Vec::new(),
@@ -1354,7 +1354,7 @@ mod tests {
         let id1 = Uuid::new_v4();
         let ip1 = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id1,
                 &Name("service1-ip".parse().unwrap()),
@@ -1372,7 +1372,7 @@ mod tests {
         assert_eq!(
             context
                 .db_datastore
-                .service_lookup_external_ips(&context.opctx, service1_id)
+                .external_ip_list_service(&context.opctx, service1_id)
                 .await
                 .expect("Failed to look up service external IPs"),
             vec![ip1],
@@ -1383,7 +1383,7 @@ mod tests {
         let id2 = Uuid::new_v4();
         let ip2 = context
             .db_datastore
-            .allocate_service_snat_ip(&context.opctx, id2, service2_id)
+            .external_ip_allocate_service_snat(&context.opctx, id2, service2_id)
             .await
             .expect("Failed to allocate service IP address");
         assert!(ip2.is_service);
@@ -1395,7 +1395,7 @@ mod tests {
         assert_eq!(
             context
                 .db_datastore
-                .service_lookup_external_ips(&context.opctx, service2_id)
+                .external_ip_list_service(&context.opctx, service2_id)
                 .await
                 .expect("Failed to look up service external IPs"),
             vec![ip2],
@@ -1406,7 +1406,7 @@ mod tests {
         let id3 = Uuid::new_v4();
         let ip3 = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id3,
                 &Name("service3-ip".parse().unwrap()),
@@ -1424,7 +1424,7 @@ mod tests {
         assert_eq!(
             context
                 .db_datastore
-                .service_lookup_external_ips(&context.opctx, service3_id)
+                .external_ip_list_service(&context.opctx, service3_id)
                 .await
                 .expect("Failed to look up service external IPs"),
             vec![ip3],
@@ -1435,7 +1435,7 @@ mod tests {
         let id3 = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id3,
                 &Name("service3-ip".parse().unwrap()),
@@ -1457,7 +1457,7 @@ mod tests {
         let id4 = Uuid::new_v4();
         let ip4 = context
             .db_datastore
-            .allocate_service_snat_ip(&context.opctx, id4, service4_id)
+            .external_ip_allocate_service_snat(&context.opctx, id4, service4_id)
             .await
             .expect("Failed to allocate service IP address");
         assert!(ip4.is_service);
@@ -1469,7 +1469,7 @@ mod tests {
         assert_eq!(
             context
                 .db_datastore
-                .service_lookup_external_ips(&context.opctx, service4_id)
+                .external_ip_list_service(&context.opctx, service4_id)
                 .await
                 .expect("Failed to look up service external IPs"),
             vec![ip4],
@@ -1498,7 +1498,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1517,7 +1517,7 @@ mod tests {
         // Try allocating the same service IP again.
         let ip_again = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1535,7 +1535,7 @@ mod tests {
         // different UUID.
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 Uuid::new_v4(),
                 &Name("service-ip".parse().unwrap()),
@@ -1554,7 +1554,7 @@ mod tests {
         // different input address.
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1573,7 +1573,7 @@ mod tests {
         // different port range.
         let err = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 id,
                 service_id,
@@ -1592,7 +1592,7 @@ mod tests {
         let snat_id = Uuid::new_v4();
         let snat_ip = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 snat_id,
                 snat_service_id,
@@ -1611,7 +1611,7 @@ mod tests {
         // Try allocating the same service IP again.
         let snat_ip_again = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 snat_id,
                 snat_service_id,
@@ -1630,7 +1630,7 @@ mod tests {
         // different port range.
         let err = context
             .db_datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
                 snat_id,
                 snat_service_id,
@@ -1665,7 +1665,7 @@ mod tests {
         let id = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1703,7 +1703,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1720,7 +1720,7 @@ mod tests {
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1760,7 +1760,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),
@@ -1777,7 +1777,7 @@ mod tests {
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(
+            .external_ip_allocate_service(
                 &context.opctx,
                 id,
                 &Name("service-ip".parse().unwrap()),

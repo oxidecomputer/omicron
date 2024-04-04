@@ -8,6 +8,7 @@ use crate::schema::instance_network_interface;
 use crate::schema::network_interface;
 use crate::schema::service_network_interface;
 use crate::Name;
+use crate::SqlU8;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
@@ -59,7 +60,7 @@ pub struct NetworkInterface {
     // If neither is specified, auto-assign one of each?
     pub ip: ipnetwork::IpNetwork,
 
-    pub slot: i16,
+    pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
 }
@@ -91,10 +92,10 @@ impl NetworkInterface {
             name: self.name().clone(),
             ip: self.ip.ip(),
             mac: self.mac.into(),
-            subnet: subnet,
+            subnet,
             vni: external::Vni::try_from(0).unwrap(),
             primary: self.primary,
-            slot: self.slot.try_into().unwrap(),
+            slot: *self.slot,
         }
     }
 }
@@ -117,7 +118,7 @@ pub struct InstanceNetworkInterface {
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
 
-    pub slot: i16,
+    pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
 }
@@ -140,9 +141,23 @@ pub struct ServiceNetworkInterface {
     pub mac: MacAddr,
     pub ip: ipnetwork::IpNetwork,
 
-    pub slot: i16,
+    pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+}
+
+impl From<ServiceNetworkInterface>
+    for nexus_types::deployment::ServiceNetworkInterface
+{
+    fn from(nic: ServiceNetworkInterface) -> Self {
+        Self {
+            id: nic.id(),
+            mac: *nic.mac,
+            ip: nic.ip,
+            slot: *nic.slot,
+            primary: nic.primary,
+        }
+    }
 }
 
 impl NetworkInterface {

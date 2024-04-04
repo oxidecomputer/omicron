@@ -321,6 +321,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
 
         api.register(system_metric)?;
         api.register(silo_metric)?;
+        api.register(timeseries_schema_list)?;
+        api.register(timeseries_query)?;
 
         api.register(system_update_put_repository)?;
         api.register(system_update_get_repository)?;
@@ -5622,6 +5624,56 @@ async fn silo_metric(
             .await?;
 
         Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List available timeseries schema.
+#[endpoint {
+    method = GET,
+    path = "/v1/timeseries/schema",
+    tags = ["metrics"],
+}]
+async fn timeseries_schema_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    pag_params: Query<oximeter_db::TimeseriesSchemaPaginationParams>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>, HttpError>
+{
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+        nexus
+            .timeseries_schema_list(&opctx, &pagination, limit)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Run a timeseries query, written OxQL.
+#[endpoint {
+    method = POST,
+    path = "/v1/timeseries/query",
+    tags = ["metrics"],
+}]
+async fn timeseries_query(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<params::TimeseriesQuery>,
+) -> Result<HttpResponseOk<Vec<oximeter_db::oxql::Table>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let query = body.into_inner().query;
+        nexus
+            .timeseries_query(&opctx, &query)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

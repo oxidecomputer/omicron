@@ -22,10 +22,14 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use ipnetwork::IpNetwork;
+use newtype_uuid::TypedUuid;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::MacAddr;
+use omicron_uuid_kinds::OmicronZoneKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -99,6 +103,48 @@ impl SledResources {
         self.policy.is_provisionable()
             && self.state.is_eligible_for_discretionary_services()
     }
+}
+
+/// Policy and database inputs to the Reconfigurator planner
+///
+/// The primary inputs to the planner are the parent (either a parent blueprint
+/// or an inventory collection) and this structure. This type holds the
+/// fleet-wide policy as well as any additional information fetched from CRDB
+/// that the planner needs to make decisions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanningInput {
+    /// fleet-wide policy
+    pub policy: Policy,
+
+    /// external IPs allocated to services
+    pub service_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
+
+    /// vNICs allocated to services
+    pub service_nics:
+        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+}
+
+/// External IP allocated to a service
+///
+/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
+/// necessary for blueprint planning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalIp {
+    pub id: Uuid,
+    pub ip: IpNetwork,
+}
+
+/// Network interface allocated to a service
+///
+/// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
+/// the fields necessary for blueprint planning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceNetworkInterface {
+    pub id: Uuid,
+    pub mac: MacAddr,
+    pub ip: IpNetwork,
+    pub slot: u8,
+    pub primary: bool,
 }
 
 /// Describes a complete set of software and configuration for the system

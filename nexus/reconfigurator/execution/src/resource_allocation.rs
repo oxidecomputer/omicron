@@ -100,7 +100,7 @@ impl<'a> ResourceAllocator<'a> {
 
         let allocated_ips = self
             .datastore
-            .service_lookup_external_ips(self.opctx, zone_id)
+            .external_ip_list_service(self.opctx, zone_id)
             .await
             .with_context(|| {
                 format!(
@@ -186,7 +186,7 @@ impl<'a> ResourceAllocator<'a> {
             for allocated_nic in &allocated_nics {
                 if allocated_nic.ip.ip() == nic.ip
                     && *allocated_nic.mac == nic.mac
-                    && allocated_nic.slot == i16::from(nic.slot)
+                    && *allocated_nic.slot == nic.slot
                     && allocated_nic.primary == nic.primary
                 {
                     info!(
@@ -258,7 +258,7 @@ impl<'a> ResourceAllocator<'a> {
         let ip_id = Uuid::new_v4();
         let description = zone_type;
         self.datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 self.opctx,
                 ip_id,
                 ip_name,
@@ -313,7 +313,7 @@ impl<'a> ResourceAllocator<'a> {
 
         let ip_id = Uuid::new_v4();
         self.datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 self.opctx,
                 ip_id,
                 service_id,
@@ -403,14 +403,12 @@ impl<'a> ResourceAllocator<'a> {
         // We do not check `nic.vni`, because it's not stored in the
         // database. (All services are given the constant vni
         // `Vni::SERVICES_VNI`.)
-        if created_nic.primary != nic.primary
-            || created_nic.slot != i16::from(nic.slot)
-        {
+        if created_nic.primary != nic.primary || *created_nic.slot != nic.slot {
             warn!(
                 self.opctx.log, "unexpected property on allocated NIC";
                 "db_primary" => created_nic.primary,
                 "expected_primary" => nic.primary,
-                "db_slot" => created_nic.slot,
+                "db_slot" => *created_nic.slot,
                 "expected_slot" => nic.slot,
             );
 
@@ -671,7 +669,7 @@ mod tests {
 
         // Check that the external IP records were created.
         let db_nexus_ips = datastore
-            .service_lookup_external_ips(&opctx, nexus_id)
+            .external_ip_list_service(&opctx, nexus_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_nexus_ips.len(), 1);
@@ -682,7 +680,7 @@ mod tests {
         assert_eq!(db_nexus_ips[0].last_port, SqlU16(65535));
 
         let db_dns_ips = datastore
-            .service_lookup_external_ips(&opctx, dns_id)
+            .external_ip_list_service(&opctx, dns_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_dns_ips.len(), 1);
@@ -693,7 +691,7 @@ mod tests {
         assert_eq!(db_dns_ips[0].last_port, SqlU16(65535));
 
         let db_ntp_ips = datastore
-            .service_lookup_external_ips(&opctx, ntp_id)
+            .external_ip_list_service(&opctx, ntp_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_ntp_ips.len(), 1);
@@ -715,7 +713,7 @@ mod tests {
         assert_eq!(db_nexus_nics[0].subnet_id, NEXUS_VPC_SUBNET.id());
         assert_eq!(*db_nexus_nics[0].mac, nexus_nic.mac);
         assert_eq!(db_nexus_nics[0].ip, nexus_nic.ip.into());
-        assert_eq!(db_nexus_nics[0].slot, i16::from(nexus_nic.slot));
+        assert_eq!(*db_nexus_nics[0].slot, nexus_nic.slot);
         assert_eq!(db_nexus_nics[0].primary, nexus_nic.primary);
 
         let db_dns_nics = datastore
@@ -729,7 +727,7 @@ mod tests {
         assert_eq!(db_dns_nics[0].subnet_id, DNS_VPC_SUBNET.id());
         assert_eq!(*db_dns_nics[0].mac, dns_nic.mac);
         assert_eq!(db_dns_nics[0].ip, dns_nic.ip.into());
-        assert_eq!(db_dns_nics[0].slot, i16::from(dns_nic.slot));
+        assert_eq!(*db_dns_nics[0].slot, dns_nic.slot);
         assert_eq!(db_dns_nics[0].primary, dns_nic.primary);
 
         let db_ntp_nics = datastore
@@ -743,7 +741,7 @@ mod tests {
         assert_eq!(db_ntp_nics[0].subnet_id, NTP_VPC_SUBNET.id());
         assert_eq!(*db_ntp_nics[0].mac, ntp_nic.mac);
         assert_eq!(db_ntp_nics[0].ip, ntp_nic.ip.into());
-        assert_eq!(db_ntp_nics[0].slot, i16::from(ntp_nic.slot));
+        assert_eq!(*db_ntp_nics[0].slot, ntp_nic.slot);
         assert_eq!(db_ntp_nics[0].primary, ntp_nic.primary);
 
         // We should be able to run the function again with the same inputs, and
@@ -755,21 +753,21 @@ mod tests {
         assert_eq!(
             db_nexus_ips,
             datastore
-                .service_lookup_external_ips(&opctx, nexus_id)
+                .external_ip_list_service(&opctx, nexus_id)
                 .await
                 .expect("failed to get external IPs")
         );
         assert_eq!(
             db_dns_ips,
             datastore
-                .service_lookup_external_ips(&opctx, dns_id)
+                .external_ip_list_service(&opctx, dns_id)
                 .await
                 .expect("failed to get external IPs")
         );
         assert_eq!(
             db_ntp_ips,
             datastore
-                .service_lookup_external_ips(&opctx, ntp_id)
+                .external_ip_list_service(&opctx, ntp_id)
                 .await
                 .expect("failed to get external IPs")
         );

@@ -1152,6 +1152,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
 ) WHERE
     time_deleted IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk (
+    volume_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -3770,7 +3775,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '49.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '50.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
