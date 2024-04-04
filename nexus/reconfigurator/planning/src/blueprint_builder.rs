@@ -285,8 +285,8 @@ impl<'a> BlueprintBuilder<'a> {
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for (_, z) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::BlueprintBuilderActive)
+        for (_, z) in
+            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
             let zone_type = &z.zone_type;
             if let OmicronZoneType::Nexus { nic, .. } = zone_type {
@@ -441,7 +441,7 @@ impl<'a> BlueprintBuilder<'a> {
         // currently exist.
         let ntp_servers = self
             .parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::BlueprintBuilderActive)
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
                     Some(Host::for_zone(z.id, ZoneVariant::Other).fqdn())
@@ -548,7 +548,7 @@ impl<'a> BlueprintBuilder<'a> {
         // settings should be part of `Policy` instead?
         let (external_tls, external_dns_servers) = self
             .parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::BlueprintBuilderActive)
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .find_map(|(_, z)| match &z.zone_type {
                 OmicronZoneType::Nexus {
                     external_tls,

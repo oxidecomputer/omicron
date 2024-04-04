@@ -400,7 +400,6 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::BlueprintBuilderActive => true,
                 BlueprintZoneFilter::Crucible => true,
                 BlueprintZoneFilter::External => true,
                 BlueprintZoneFilter::InternalDns => true,
@@ -409,14 +408,6 @@ impl BlueprintZoneDisposition {
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
-
-                // The blueprint builder currenlty considers quiesced zones to
-                // be active.
-                //
-                // TODO: this may need to be revisited (builder logic gets more
-                // complex) because the builder likely needs to care about
-                // quiesced zones separately.
-                BlueprintZoneFilter::BlueprintBuilderActive => true,
 
                 // Quiesced Crucible zones are still around.
                 BlueprintZoneFilter::Crucible => true,
@@ -471,9 +462,6 @@ pub enum BlueprintZoneFilter {
     // ---
     /// All zones.
     All,
-
-    /// Filter by zones considered to be active by the blueprint builder.
-    BlueprintBuilderActive,
 
     /// Filter by zones that should have Crucible dataset records.
     Crucible,
