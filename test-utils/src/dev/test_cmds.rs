@@ -288,7 +288,7 @@ mod tests {
             path3: /variable-length/path";
         let actual = redact_extra(
             input,
-            &ExtraRedactions::new()
+            ExtraRedactions::new()
                 .fixed_length("tp", "/var/tmp/tmp.456ms123s")
                 .fixed_length("short_redact", "/short")
                 .variable_length("variable", "/variable-length/path"),

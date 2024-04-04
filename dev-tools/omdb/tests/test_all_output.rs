@@ -117,7 +117,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             },
             &cmd_path,
             args,
-            &ExtraRedactions::new()
+            ExtraRedactions::new()
                 .variable_length("tmp_path", tmppath.as_str())
                 .fixed_length("blueprint_id", &initial_blueprint_id),
         )
