@@ -58,7 +58,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
-EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<REDACTED>"]
+EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "TMP_PATH_REDACTED_TMP_PATH_REDACTED_TMP"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -67,7 +67,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
-wrote <REDACTED>
+wrote TMP_PATH_REDACTED_TMP_PATH_REDACTED_TMP
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
 termination: Exited(0)
@@ -459,6 +459,49 @@ task: "switch_port_config_manager"
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+T ENA ID                                   PARENT TIME_CREATED             
+* no  BLUEPRINT_ID_REDACTED_BLUEPRINT_ID_R <none> <REDACTED     TIMESTAMP> 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "BLUEPRINT_ID_REDACTED_BLUEPRINT_ID_R"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+blueprint  BLUEPRINT_ID_REDACTED_BLUEPRINT_ID_R
+parent:    <none>
+
+  -----------------------------------------------------------------------------------------
+    zone type         zone ID                                disposition  underlay IP      
+  -----------------------------------------------------------------------------------------
+                                                                                           
+  sled REDACTED_UUID_REDACTED_UUID_REDACTED: zones at generation 2                         
+   (no zones)                                                                              
+                                                                                           
+  sled REDACTED_UUID_REDACTED_UUID_REDACTED: zones at generation 2                         
+    clickhouse        REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    cockroach_db      REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    crucible_pantry   REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    external_dns      REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    internal_dns      REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    nexus             REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::ffff:127.0.0.1 
+
+METADATA:
+  created by:            nexus-test-utils        
+  created at:            <REDACTED     TIMESTAMP>
+  comment:               initial test blueprint  
+  internal DNS version:  1                       
+  external DNS version:  2                       
 
 ---------------------------------------------
 stderr:

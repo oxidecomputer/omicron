@@ -125,21 +125,12 @@ pub fn error_for_enoent() -> String {
 /// invocation to invocation (e.g., assigned TCP port numbers, timestamps)
 ///
 /// This allows use to use expectorate to verify the shape of the CLI output.
-pub fn redact_variable(input: &str, extra_redactions: &[&str]) -> String {
-    // Perform extra redactions at the beginning, not the end. This is because
-    // some of the built-in redactions below might match a substring of
-    // something that should be handled by extra_redactions (e.g. a temporary
-    // path).
-    let mut s = input.to_owned();
-    for r in extra_redactions {
-        s = s.replace(r, "<REDACTED>");
-    }
-
+pub fn redact_variable(input: &str) -> String {
     // Replace TCP port numbers.  We include the localhost characters to avoid
     // catching any random sequence of numbers.
     let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
         .unwrap()
-        .replace_all(&s, "[::1]:REDACTED_PORT")
+        .replace_all(&input, "[::1]:REDACTED_PORT")
         .to_string();
     let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
         .unwrap()
@@ -196,15 +187,68 @@ pub fn redact_variable(input: &str, extra_redactions: &[&str]) -> String {
     s
 }
 
+/// Redact text from a string, allowing for extra redactions to be specified.
+pub fn redact_extra(input: &str, extra_redactions: &ExtraRedactions) -> String {
+    // Perform extra redactions at the beginning, not the end. This is because
+    // some of the built-in redactions in redact_variable might match a
+    // substring of something that should be handled by extra_redactions (e.g.
+    // a temporary path).
+    let mut s = input.to_owned();
+    for (name, replacement) in &extra_redactions.redactions {
+        s = s.replace(name, replacement);
+    }
+    redact_variable(&s)
+}
+
+/// Represents a list of extra redactions for [`redact_variable`].
+///
+/// Extra redactions are applied in-order, before any builtin redactions.
+#[derive(Clone, Debug, Default)]
+pub struct ExtraRedactions<'a> {
+    // A pair of redaction and replacement strings.
+    redactions: Vec<(&'a str, String)>,
+}
+
+impl<'a> ExtraRedactions<'a> {
+    pub fn new() -> Self {
+        Self { redactions: Vec::new() }
+    }
+
+    pub fn add(&mut self, name: &str, text_to_redact: &'a str) -> &mut Self {
+        // Use the name first because the text to redact may be shorter than
+        // "REDACTED_<NAME>".
+        let gen = name.to_uppercase() + "_REDACTED_";
+        // We try and match the length here so that tabular output looks the
+        // same.
+        //
+        // Use the same number of chars as the number of bytes in
+        // text_to_redact. We're almost entirely in ASCII-land so they're the
+        // same, and getting the length right is nice but doesn't hugely matter
+        // for correctness.
+        let replacement =
+            gen.chars().cycle().take(text_to_redact.len()).collect::<String>();
+
+        self.redactions.push((text_to_redact, replacement));
+
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_redact_variable() {
+    fn test_redact_extra() {
         // Ens
         let input = "time: 123ms, path: /var/tmp/tmp.456ms123s";
-        let actual = redact_variable(input, &["/var/tmp/tmp.456ms123s"]);
-        assert_eq!(actual, "time: <REDACTED DURATION>ms, path: <REDACTED>");
+        let actual = redact_extra(
+            input,
+            &ExtraRedactions::new().add("tmp_path", "/var/tmp/tmp.456ms123s"),
+        );
+        assert_eq!(
+            actual,
+            "time: <REDACTED DURATION>ms, path: TMP_PATH_REDACTED_TMP_"
+        );
     }
 }
