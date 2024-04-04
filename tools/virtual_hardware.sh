@@ -66,9 +66,25 @@ function try_destroy_zpools {
             zfs destroy -r "$ZPOOL" && \
                     (zfs unmount "$ZPOOL" || true) && \
                     zpool destroy "$ZPOOL" || \
-                    fail "Failed to remove ZFS pool and vdev: $ZPOOL"
+                    fail "Failed to remove ZFS pool: $ZPOOL"
 
-            success "Verified ZFS pool and vdev $ZPOOL does not exist"
+            success "Verified ZFS pool $ZPOOL does not exist"
+        done
+    done
+
+    VDEV_TYPES=('m2_' 'u2_')
+    for VDEV_TYPE in "${VDEV_TYPES[@]}"; do
+        readarray -t VDEVS < <( \
+                grep "\"$VDEV_TYPE" "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
+                sed 's/[ ",]//g' \
+            )
+        for VDEV in "${VDEVS[@]}"; do
+            echo "Device: [$VDEV]"
+            VDEV_PATH="${VDEV_DIR:-/var/tmp}/$VDEV"
+            if [[ -f "$VDEV_PATH" ]]; then
+                rm -f "$VDEV_PATH"
+            fi
+            success "vdev $VDEV_PATH removed"
         done
     done
 }
