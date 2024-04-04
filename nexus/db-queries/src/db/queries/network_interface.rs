@@ -159,6 +159,9 @@ impl InsertError {
             InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Service) => {
                 unimplemented!("service network interface")
             }
+            InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Probe) => {
+                unimplemented!("probe network interface")
+            }
             InsertError::NoAvailableIpAddresses => {
                 external::Error::invalid_request(
                     "No available IP addresses for interface",
@@ -408,6 +411,9 @@ fn decode_database_error(
                     NetworkInterfaceKind::Service => {
                         external::ResourceType::ServiceNetworkInterface
                     }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
+                    }
                 };
                 InsertError::External(error::public_error_from_diesel(
                     err,
@@ -647,7 +653,7 @@ impl NextMacShifts {
 impl NextMacAddress {
     pub fn new(vpc_id: Uuid, kind: NetworkInterfaceKind) -> Self {
         let (base, max_shift, min_shift) = match kind {
-            NetworkInterfaceKind::Instance => {
+            NetworkInterfaceKind::Instance | NetworkInterfaceKind::Probe => {
                 let NextMacShifts { base, min_shift, max_shift } =
                     NextMacShifts::for_guest();
                 (base.into(), max_shift, min_shift)
@@ -2294,7 +2300,7 @@ mod tests {
                 .service_create_network_interface_raw(&context.opctx, interface)
                 .await
                 .expect("Failed to insert interface");
-            assert_eq!(inserted_interface.slot, i16::from(slot));
+            assert_eq!(*inserted_interface.slot, slot);
         }
 
         context.success().await;
@@ -2407,7 +2413,7 @@ mod tests {
             .service_create_network_interface_raw(&context.opctx, interface)
             .await
             .expect("Failed to insert interface");
-        assert_eq!(inserted_interface.slot, 0);
+        assert_eq!(*inserted_interface.slot, 0);
 
         // Inserting an interface with the same slot on the same service should
         let new_interface = IncompleteNetworkInterface::new_service(
@@ -2730,6 +2736,7 @@ mod tests {
             NetworkInterfaceKind::Service => {
                 (inserted.mac.is_system(), "system")
             }
+            NetworkInterfaceKind::Probe => (inserted.mac.is_system(), "probe"),
         };
         assert!(
             mac_in_range,
@@ -2769,8 +2776,7 @@ mod tests {
                 )
                 .await
                 .expect("Should be able to insert up to 8 interfaces");
-            let actual_slot = usize::try_from(inserted_interface.slot)
-                .expect("Bad slot index");
+            let actual_slot = usize::from(*inserted_interface.slot);
             assert_eq!(
                 slot, actual_slot,
                 "Failed to allocate next available interface slot"

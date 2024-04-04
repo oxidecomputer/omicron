@@ -5,10 +5,18 @@
 use crate::disk::{
     DiskPaths, DiskVariant, Partition, PooledDiskError, UnparsedDisk,
 };
-use crate::{Baseboard, SledMode};
+use crate::SledMode;
+use omicron_common::disk::DiskIdentity;
+use sled_hardware_types::Baseboard;
 use slog::Logger;
 use std::collections::HashSet;
 use tokio::sync::broadcast;
+
+#[derive(Debug, thiserror::Error)]
+pub enum NvmeFormattingError {
+    #[error("NVMe formatting is unsupported on this platform")]
+    UnsupportedPlatform,
+}
 
 /// An unimplemented, stub representation of the underlying hardware.
 ///
@@ -59,6 +67,8 @@ pub fn ensure_partition_layout(
     _log: &Logger,
     _paths: &DiskPaths,
     _variant: DiskVariant,
+    _identity: &DiskIdentity,
+    _zpool_id: Option<uuid::Uuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }

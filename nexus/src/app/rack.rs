@@ -4,7 +4,6 @@
 
 //! Rack management
 
-use super::silo::silo_dns_name;
 use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
@@ -13,13 +12,14 @@ use gateway_client::types::SpType;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
-use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
+use nexus_db_model::INFRA_LOT;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -54,19 +54,14 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use sled_agent_client::types::AddSledRequest;
-use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
-use sled_agent_client::types::{
-    BgpConfig, BgpPeerConfig as SledBgpPeerConfig, EarlyNetworkConfig,
-    PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
-};
+
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -92,7 +87,7 @@ impl super::Nexus {
         Ok(db_rack)
     }
 
-    /// Marks the rack as initialized with a set of services.
+    /// Marks the rack as initialized with information supplied by RSS.
     ///
     /// This function is a no-op if the rack has already been initialized.
     pub(crate) async fn rack_initialize(
@@ -101,7 +96,36 @@ impl super::Nexus {
         rack_id: Uuid,
         request: RackInitializationRequest,
     ) -> Result<(), Error> {
+        let log = &opctx.log;
+
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let physical_disks: Vec<_> = request
+            .physical_disks
+            .into_iter()
+            .map(|disk| {
+                db::model::PhysicalDisk::new(
+                    disk.id,
+                    disk.vendor,
+                    disk.serial,
+                    disk.model,
+                    disk.variant.into(),
+                    disk.sled_id,
+                )
+            })
+            .collect();
+
+        let zpools: Vec<_> = request
+            .zpools
+            .into_iter()
+            .map(|pool| {
+                db::model::Zpool::new(
+                    pool.id,
+                    pool.sled_id,
+                    pool.physical_disk_id,
+                )
+            })
+            .collect();
 
         let datasets: Vec<_> = request
             .datasets
@@ -190,6 +214,12 @@ impl super::Nexus {
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
         dns_update.add_name(silo_dns_name, dns_records)?;
 
+        // We're providing an update to the initial `external_dns` group we
+        // defined above; also bump RSS's blueprint's `external_dns_version` to
+        // match this update.
+        let mut blueprint = request.blueprint;
+        blueprint.external_dns_version = blueprint.external_dns_version.next();
+
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
         let mapped_fleet_roles = BTreeMap::from([(
@@ -202,9 +232,10 @@ impl super::Nexus {
                 name: request.recovery_silo.silo_name,
                 description: "built-in recovery Silo".to_string(),
             },
-            // The recovery silo is initialized with no allocated capacity given it's
-            // not intended to be used to deploy workloads. Operators can add capacity
-            // after the fact if they want to use it for that purpose.
+            // The recovery silo is initialized with no allocated capacity given
+            // it's not intended to be used to deploy workloads. Operators can
+            // add capacity after the fact if they want to use it for that
+            // purpose.
             quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
@@ -215,46 +246,6 @@ impl super::Nexus {
 
         let rack_network_config = &request.rack_network_config;
 
-        self.db_datastore
-            .rack_set_initialized(
-                opctx,
-                RackInit {
-                    rack_subnet: rack_network_config.rack_subnet.into(),
-                    rack_id,
-                    services: request.services,
-                    datasets,
-                    service_ip_pool_ranges,
-                    internal_dns,
-                    external_dns,
-                    recovery_silo,
-                    recovery_silo_fq_dns_name,
-                    recovery_user_id: request.recovery_silo.user_name,
-                    recovery_user_password_hash: request
-                        .recovery_silo
-                        .user_password_hash
-                        .into(),
-                    dns_update,
-                },
-            )
-            .await?;
-
-        // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
-
-        // We've potentially updated the list of DNS servers and the DNS
-        // configuration for both internal and external DNS, plus the Silo
-        // certificates.  Activate the relevant background tasks.
-        for task in &[
-            &self.background_tasks.task_internal_dns_config,
-            &self.background_tasks.task_internal_dns_servers,
-            &self.background_tasks.task_external_dns_config,
-            &self.background_tasks.task_external_dns_servers,
-            &self.background_tasks.task_external_endpoints,
-            &self.background_tasks.task_inventory_collection,
-        ] {
-            self.background_tasks.activate(task);
-        }
-
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
         // register all switches found during rack initialization
         // identify requested switch from config and associate
@@ -262,10 +253,7 @@ impl super::Nexus {
         match request.external_port_count {
             ExternalPortDiscovery::Auto(switch_mgmt_addrs) => {
                 use dpd_client::Client as DpdClient;
-                info!(
-                    self.log,
-                    "Using automatic external switchport discovery"
-                );
+                info!(log, "Using automatic external switchport discovery");
 
                 for (switch, addr) in switch_mgmt_addrs {
                     let dpd_client = DpdClient::new(
@@ -276,7 +264,7 @@ impl super::Nexus {
                         ),
                         dpd_client::ClientState {
                             tag: "nexus".to_string(),
-                            log: self.log.new(o!("component" => "DpdClient")),
+                            log: log.new(o!("component" => "DpdClient")),
                         },
                     );
 
@@ -285,10 +273,7 @@ impl super::Nexus {
                             Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
                         })?;
 
-                    info!(
-                        self.log,
-                        "discovered ports for {switch}: {all_ports:#?}"
-                    );
+                    info!(log, "discovered ports for {switch}: {all_ports:#?}");
 
                     let qsfp_ports: Vec<Name> = all_ports
                         .iter()
@@ -299,7 +284,7 @@ impl super::Nexus {
                         .collect();
 
                     info!(
-                        self.log,
+                        log,
                         "populating ports for {switch}: {qsfp_ports:#?}"
                     );
 
@@ -314,7 +299,7 @@ impl super::Nexus {
             // TODO: #3602 Eliminate need for static port mappings for switch ports
             ExternalPortDiscovery::Static(port_mappings) => {
                 info!(
-                    self.log,
+                    log,
                     "Using static configuration for external switchports"
                 );
                 for (switch, ports) in port_mappings {
@@ -333,13 +318,12 @@ impl super::Nexus {
         // Currently calling some of the apis directly, but should we be using sagas
         // going forward via self.run_saga()? Note that self.create_runnable_saga and
         // self.execute_saga are currently not available within this scope.
-        info!(self.log, "Recording Rack Network Configuration");
-        let address_lot_name =
-            Name::from_str("initial-infra").map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use `initial-infra` as `Name`: {e}"
-                ))
-            })?;
+        info!(log, "Recording Rack Network Configuration");
+        let address_lot_name = Name::from_str(INFRA_LOT).map_err(|e| {
+            Error::internal_error(&format!(
+                "unable to use `initial-infra` as `Name`: {e}"
+            ))
+        })?;
         let identity = IdentityMetadataCreateParams {
             name: address_lot_name.clone(),
             description: "initial infrastructure ip address lot".to_string(),
@@ -383,7 +367,8 @@ impl super::Nexus {
             let address_lot_name: Name =
                 format!("as{}-lot", bgp_config.asn).parse().unwrap();
 
-            self.db_datastore
+            match self
+                .db_datastore
                 .address_lot_create(
                     &opctx,
                     &AddressLotCreate {
@@ -406,14 +391,19 @@ impl super::Nexus {
                     },
                 )
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to create address lot for BGP as {}: {}",
-                        bgp_config.asn, e
-                    ))
-                })?;
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to create address lot for BGP as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
 
-            self.db_datastore
+            match self
+                .db_datastore
                 .bgp_create_announce_set(
                     &opctx,
                     &BgpAnnounceSetCreate {
@@ -439,14 +429,19 @@ impl super::Nexus {
                     },
                 )
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to create bgp announce set for as {}: {}",
-                        bgp_config.asn, e
-                    ))
-                })?;
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to create bgp announce set for as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
 
-            self.db_datastore
+            match self
+                .db_datastore
                 .bgp_config_set(
                     &opctx,
                     &BgpConfigCreate {
@@ -463,12 +458,16 @@ impl super::Nexus {
                     },
                 )
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to set bgp config for as {}: {}",
-                        bgp_config.asn, e
-                    ))
-                })?;
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to set bgp config for as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
         }
 
         for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()
@@ -607,6 +606,49 @@ impl super::Nexus {
 
         self.initial_bootstore_sync(&opctx).await?;
 
+        self.db_datastore
+            .rack_set_initialized(
+                opctx,
+                RackInit {
+                    rack_subnet: rack_network_config.rack_subnet.into(),
+                    rack_id,
+                    blueprint,
+                    services: request.services,
+                    physical_disks,
+                    zpools,
+                    datasets,
+                    service_ip_pool_ranges,
+                    internal_dns,
+                    external_dns,
+                    recovery_silo,
+                    recovery_silo_fq_dns_name,
+                    recovery_user_id: request.recovery_silo.user_name,
+                    recovery_user_password_hash: request
+                        .recovery_silo
+                        .user_password_hash
+                        .into(),
+                    dns_update,
+                },
+            )
+            .await?;
+
+        // Plumb the firewall rules for the built-in services
+        self.plumb_service_firewall_rules(opctx, &[]).await?;
+
+        // We've potentially updated the list of DNS servers and the DNS
+        // configuration for both internal and external DNS, plus the Silo
+        // certificates.  Activate the relevant background tasks.
+        for task in &[
+            &self.background_tasks.task_internal_dns_config,
+            &self.background_tasks.task_internal_dns_servers,
+            &self.background_tasks.task_external_dns_config,
+            &self.background_tasks.task_external_dns_servers,
+            &self.background_tasks.task_external_endpoints,
+            &self.background_tasks.task_inventory_collection,
+        ] {
+            self.background_tasks.activate(task);
+        }
+
         Ok(())
     }
 
@@ -663,114 +705,6 @@ impl super::Nexus {
         self.datastore().update_rack_subnet(opctx, &rack).await?;
 
         Ok(())
-    }
-
-    pub(crate) async fn bootstore_network_config(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<EarlyNetworkConfig, Error> {
-        let rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        let subnet = rack_subnet(rack.rack_subnet)?;
-
-        let db_ports = self.active_port_settings(opctx).await?;
-        let mut ports = Vec::new();
-        let mut bgp = Vec::new();
-        for (port, info) in &db_ports {
-            let mut peer_info = Vec::new();
-            for p in &info.bgp_peers {
-                let bgp_config =
-                    self.bgp_config_get(&opctx, p.bgp_config_id.into()).await?;
-                let announcements = self
-                    .bgp_announce_list(
-                        &opctx,
-                        &params::BgpAnnounceSetSelector {
-                            name_or_id: bgp_config.bgp_announce_set_id.into(),
-                        },
-                    )
-                    .await?;
-                let addr = match p.addr {
-                    ipnetwork::IpNetwork::V4(addr) => addr,
-                    ipnetwork::IpNetwork::V6(_) => continue, //TODO v6
-                };
-                peer_info.push((p, bgp_config.asn.0, addr.ip()));
-                bgp.push(BgpConfig {
-                    asn: bgp_config.asn.0,
-                    originate: announcements
-                        .iter()
-                        .filter_map(|a| match a.network {
-                            IpNetwork::V4(net) => Some(net.into()),
-                            //TODO v6
-                            _ => None,
-                        })
-                        .collect(),
-                });
-            }
-
-            let p = PortConfigV1 {
-                routes: info
-                    .routes
-                    .iter()
-                    .map(|r| SledRouteConfig {
-                        destination: r.dst,
-                        nexthop: r.gw.ip(),
-                    })
-                    .collect(),
-                addresses: info.addresses.iter().map(|a| a.address).collect(),
-                bgp_peers: peer_info
-                    .iter()
-                    .map(|(p, asn, addr)| SledBgpPeerConfig {
-                        addr: *addr,
-                        asn: *asn,
-                        port: port.port_name.clone(),
-                        hold_time: Some(p.hold_time.0.into()),
-                        connect_retry: Some(p.connect_retry.0.into()),
-                        delay_open: Some(p.delay_open.0.into()),
-                        idle_hold_time: Some(p.idle_hold_time.0.into()),
-                        keepalive: Some(p.keepalive.0.into()),
-                    })
-                    .collect(),
-                switch: port.switch_location.parse().unwrap(),
-                port: port.port_name.clone(),
-                uplink_port_fec: info
-                    .links
-                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                    .map(|l| l.fec)
-                    .unwrap_or(SwitchLinkFec::None)
-                    .into(),
-                uplink_port_speed: info
-                    .links
-                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                    .map(|l| l.speed)
-                    .unwrap_or(SwitchLinkSpeed::Speed100G)
-                    .into(),
-                autoneg: info
-                    .links
-                    .get(0) //TODO breakout support
-                    .map(|l| l.autoneg)
-                    .unwrap_or(false),
-            };
-
-            ports.push(p);
-        }
-
-        let result = EarlyNetworkConfig {
-            generation: 0,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(), //TODO
-                rack_network_config: Some(RackNetworkConfigV1 {
-                    rack_subnet: subnet,
-                    //TODO(ry) you are here. We need to remove these too. They are
-                    // inconsistent with a generic set of addresses on ports.
-                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                    ports,
-                    bgp,
-                }),
-            },
-        };
-
-        Ok(result)
     }
 
     /// Return the list of sleds that are inserted into an initialized rack
@@ -914,8 +848,7 @@ impl super::Nexus {
 
         // Trigger an inventory collection so that the newly added sled is known
         // about.
-        self.background_tasks
-            .activate(&self.background_tasks.task_inventory_collection);
+        self.activate_inventory_collection();
 
         Ok(())
     }

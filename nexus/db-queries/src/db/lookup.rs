@@ -358,29 +358,14 @@ impl<'a> LookupPath<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type Service, identified by its id
-    pub fn service_id(self, id: Uuid) -> Service<'a> {
-        Service::PrimaryKey(Root { lookup_root: self }, id)
-    }
-
     /// Select a resource of type Switch, identified by its id
     pub fn switch_id(self, id: Uuid) -> Switch<'a> {
         Switch::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk(
-        self,
-        vendor: &str,
-        serial: &str,
-        model: &str,
-    ) -> PhysicalDisk<'a> {
-        PhysicalDisk::PrimaryKey(
-            Root { lookup_root: self },
-            vendor.to_string(),
-            serial.to_string(),
-            model.to_string(),
-        )
+    pub fn physical_disk(self, id: Uuid) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -827,15 +812,6 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Service",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Switch",
     ancestors = [],
     children = [],
@@ -850,11 +826,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [
-        { column_name = "vendor", rust_type = String },
-        { column_name = "serial", rust_type = String },
-        { column_name = "model", rust_type = String }
-    ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

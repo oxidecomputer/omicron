@@ -38,6 +38,64 @@ impl BlueprintExecutor {
     pub fn watcher(&self) -> watch::Receiver<usize> {
         self.tx.subscribe()
     }
+
+    /// Implementation for `BackgroundTask::activate` for `BlueprintExecutor`,
+    /// added here to produce better compile errors.
+    ///
+    /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
+    /// confusion with compilation errors in the past. So separate this method
+    /// out.
+    async fn activate_impl<'a>(
+        &mut self,
+        opctx: &OpContext,
+    ) -> serde_json::Value {
+        // Get the latest blueprint, cloning to prevent holding a read lock
+        // on the watch.
+        let update = self.rx_blueprint.borrow_and_update().clone();
+
+        let Some(update) = update else {
+            warn!(&opctx.log,
+                      "Blueprint execution: skipped";
+                      "reason" => "no blueprint");
+            return json!({"error": "no blueprint" });
+        };
+
+        let (bp_target, blueprint) = &*update;
+        if !bp_target.enabled {
+            warn!(&opctx.log,
+                      "Blueprint execution: skipped";
+                      "reason" => "blueprint disabled",
+                      "target_id" => %blueprint.id);
+            return json!({
+                "target_id": blueprint.id.to_string(),
+                "error": "blueprint disabled"
+            });
+        }
+
+        let result = nexus_reconfigurator_execution::realize_blueprint(
+            opctx,
+            &self.datastore,
+            blueprint,
+            &self.nexus_label,
+        )
+        .await;
+
+        // Trigger anybody waiting for this to finish.
+        self.tx.send_modify(|count| *count = *count + 1);
+
+        // Return the result as a `serde_json::Value`
+        match result {
+            Ok(()) => json!({}),
+            Err(errors) => {
+                let errors: Vec<_> =
+                    errors.into_iter().map(|e| format!("{:#}", e)).collect();
+                json!({
+                    "target_id": blueprint.id.to_string(),
+                    "errors": errors
+                })
+            }
+        }
+    }
 }
 
 impl BackgroundTask for BlueprintExecutor {
@@ -45,57 +103,7 @@ impl BackgroundTask for BlueprintExecutor {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        async {
-            // Get the latest blueprint, cloning to prevent holding a read lock
-            // on the watch.
-            let update = self.rx_blueprint.borrow_and_update().clone();
-
-            let Some(update) = update else {
-                warn!(&opctx.log,
-                      "Blueprint execution: skipped";
-                      "reason" => "no blueprint");
-                return json!({"error": "no blueprint" });
-            };
-
-            let (bp_target, blueprint) = &*update;
-            if !bp_target.enabled {
-                warn!(&opctx.log,
-                      "Blueprint execution: skipped";
-                      "reason" => "blueprint disabled",
-                      "target_id" => %blueprint.id);
-                return json!({
-                    "target_id": blueprint.id.to_string(),
-                    "error": "blueprint disabled"
-                });
-            }
-
-            let result = nexus_reconfigurator_execution::realize_blueprint(
-                opctx,
-                &self.datastore,
-                blueprint,
-                &self.nexus_label,
-            )
-            .await;
-
-            // Trigger anybody waiting for this to finish.
-            self.tx.send_modify(|count| *count = *count + 1);
-
-            // Return the result as a `serde_json::Value`
-            match result {
-                Ok(()) => json!({}),
-                Err(errors) => {
-                    let errors: Vec<_> = errors
-                        .into_iter()
-                        .map(|e| format!("{:#}", e))
-                        .collect();
-                    json!({
-                        "target_id": blueprint.id.to_string(),
-                        "errors": errors
-                    })
-                }
-            }
-        }
-        .boxed()
+        self.activate_impl(opctx).boxed()
     }
 }
 
@@ -109,10 +117,13 @@ mod test {
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
+    use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::OmicronZonesConfig;
-    use nexus_types::deployment::{Blueprint, BlueprintTarget};
+    use nexus_types::deployment::{
+        Blueprint, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZonesConfig,
+    };
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     };
@@ -120,7 +131,6 @@ mod test {
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
-    use std::collections::BTreeSet;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
@@ -130,8 +140,8 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     fn create_blueprint(
-        omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-        internal_dns_version: Generation,
+        blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -142,10 +152,10 @@ mod test {
             },
             Blueprint {
                 id,
-                omicron_zones,
-                zones_in_service: BTreeSet::new(),
+                blueprint_zones,
                 parent_blueprint_id: None,
-                internal_dns_version,
+                internal_dns_version: dns_version,
+                external_dns_version: dns_version,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -158,8 +168,10 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
+        let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
+            nexus.authz.clone(),
+            authn::Context::internal_api(),
             datastore.clone(),
         );
 
@@ -191,12 +203,12 @@ mod test {
                     reservoir_size: ByteCount(999.into()),
                 },
                 rack_id,
+                nexus_db_model::Generation::new(),
             );
             datastore
                 .sled_upsert(update)
                 .await
-                .expect("Failed to insert sled to db")
-                .unwrap();
+                .expect("Failed to insert sled to db");
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
@@ -225,31 +237,41 @@ mod test {
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
         // reporting success.
-        fn make_zones() -> OmicronZonesConfig {
-            OmicronZonesConfig {
+        fn make_zones(
+            disposition: BlueprintZoneDisposition,
+        ) -> BlueprintZonesConfig {
+            BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![OmicronZoneConfig {
-                    id: Uuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", Uuid::new_v4())
-                                .parse()
-                                .unwrap(),
+                zones: vec![BlueprintZoneConfig {
+                    config: OmicronZoneConfig {
+                        id: Uuid::new_v4(),
+                        underlay_address: "::1".parse().unwrap(),
+                        zone_type: OmicronZoneType::InternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: format!("oxp_{}", Uuid::new_v4())
+                                    .parse()
+                                    .unwrap(),
+                            },
+                            dns_address: "oh-hello-internal-dns".into(),
+                            gz_address: "::1".parse().unwrap(),
+                            gz_address_index: 0,
+                            http_address: "[::1]:12345".into(),
                         },
-                        dns_address: "oh-hello-internal-dns".into(),
-                        gz_address: "::1".parse().unwrap(),
-                        gz_address_index: 0,
-                        http_address: "some-ipv6-address".into(),
                     },
+                    disposition,
                 }],
             }
         }
+
         let generation = generation.next();
+
+        // Both in-service and quiesced zones should be deployed.
+        //
+        // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
             BTreeMap::from([
-                (sled_id1, make_zones()),
-                (sled_id2, make_zones()),
+                (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
+                (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
             generation,
         );

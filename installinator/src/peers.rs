@@ -14,7 +14,6 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
-use ddm_admin_client::Client as DdmAdminClient;
 use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
 use installinator_artifact_client::ClientError;
@@ -24,8 +23,9 @@ use installinator_common::{
 use itertools::Itertools;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::update::ArtifactHashId;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use reqwest::StatusCode;
-use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
 use update_engine::events::ProgressUnits;
 use uuid::Uuid;

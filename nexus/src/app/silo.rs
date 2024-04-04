@@ -16,6 +16,8 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::{self, lookup};
 use nexus_db_queries::{authn, authz};
+use nexus_reconfigurator_execution::blueprint_nexus_external_ips;
+use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ListResultVec;
@@ -95,8 +97,22 @@ impl super::Nexus {
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
-        let (nexus_external_ips, nexus_external_dns_zones) =
-            datastore.nexus_external_addresses(nexus_opctx).await?;
+        let nexus_external_dns_zones = datastore
+            .dns_zones_list_all(nexus_opctx, DnsGroup::External)
+            .await
+            .internal_context("listing external DNS zones")?;
+        let target_blueprint = datastore
+            .blueprint_target_get_current_full(opctx)
+            .await
+            .internal_context("loading target blueprint")?;
+        let nexus_external_ips = match target_blueprint {
+            Some((_, blueprint)) => blueprint_nexus_external_ips(&blueprint),
+            None => {
+                datastore
+                    .nexus_external_addresses_from_service_table(nexus_opctx)
+                    .await?
+            }
+        };
         let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {
@@ -885,17 +901,4 @@ impl super::Nexus {
     ) -> db::lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
-}
-
-/// Returns the (relative) DNS name for this Silo's API and console endpoints
-/// _within_ the external DNS zone (i.e., without that zone's suffix)
-///
-/// This specific naming scheme is determined under RFD 357.
-pub(crate) fn silo_dns_name(
-    name: &omicron_common::api::external::Name,
-) -> String {
-    // RFD 4 constrains resource names (including Silo names) to DNS-safe
-    // strings, which is why it's safe to directly put the name of the
-    // resource into the DNS name rather than doing any kind of escaping.
-    format!("{}.sys", name)
 }

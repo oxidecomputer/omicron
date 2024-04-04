@@ -14,7 +14,7 @@ serde_with.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-argon2alt = { package = "rust-argon2", version = "1.0" }
+argon2alt = { package = "rust-argon2", version = "2.1.0" }
 criterion.workspace = true
 
 [[bench]]

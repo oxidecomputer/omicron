@@ -15,15 +15,14 @@ use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::NetworkInterface;
-use nexus_types::deployment::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneType;
-use nexus_types::deployment::OmicronZonesConfig;
 use nexus_types::deployment::SourceNatConfig;
+use nexus_types::inventory::OmicronZoneConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use slog::info;
 use slog::warn;
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -31,47 +30,45 @@ use uuid::Uuid;
 pub(crate) async fn ensure_zone_resources_allocated(
     opctx: &OpContext,
     datastore: &DataStore,
-    zones: &BTreeMap<Uuid, OmicronZonesConfig>,
+    all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
 ) -> anyhow::Result<()> {
     let allocator = ResourceAllocator { opctx, datastore };
 
-    for config in zones.values() {
-        for z in &config.zones {
-            match &z.zone_type {
-                OmicronZoneType::Nexus { external_ip, nic, .. } => {
-                    allocator
-                        .ensure_nexus_external_networking_allocated(
-                            z.id,
-                            *external_ip,
-                            nic,
-                        )
-                        .await?;
-                }
-                OmicronZoneType::ExternalDns { dns_address, nic, .. } => {
-                    allocator
-                        .ensure_external_dns_external_networking_allocated(
-                            z.id,
-                            dns_address,
-                            nic,
-                        )
-                        .await?;
-                }
-                OmicronZoneType::BoundaryNtp { snat_cfg, nic, .. } => {
-                    allocator
-                        .ensure_boundary_ntp_external_networking_allocated(
-                            z.id, snat_cfg, nic,
-                        )
-                        .await?;
-                }
-                OmicronZoneType::InternalNtp { .. }
-                | OmicronZoneType::Clickhouse { .. }
-                | OmicronZoneType::ClickhouseKeeper { .. }
-                | OmicronZoneType::CockroachDb { .. }
-                | OmicronZoneType::Crucible { .. }
-                | OmicronZoneType::CruciblePantry { .. }
-                | OmicronZoneType::InternalDns { .. }
-                | OmicronZoneType::Oximeter { .. } => (),
+    for z in all_omicron_zones {
+        match &z.zone_type {
+            OmicronZoneType::Nexus { external_ip, nic, .. } => {
+                allocator
+                    .ensure_nexus_external_networking_allocated(
+                        z.id,
+                        *external_ip,
+                        nic,
+                    )
+                    .await?;
             }
+            OmicronZoneType::ExternalDns { dns_address, nic, .. } => {
+                allocator
+                    .ensure_external_dns_external_networking_allocated(
+                        z.id,
+                        dns_address,
+                        nic,
+                    )
+                    .await?;
+            }
+            OmicronZoneType::BoundaryNtp { snat_cfg, nic, .. } => {
+                allocator
+                    .ensure_boundary_ntp_external_networking_allocated(
+                        z.id, snat_cfg, nic,
+                    )
+                    .await?;
+            }
+            OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::Crucible { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Oximeter { .. } => (),
         }
     }
 
@@ -93,9 +90,17 @@ impl<'a> ResourceAllocator<'a> {
         external_ip: IpAddr,
         port_range: Option<(u16, u16)>,
     ) -> anyhow::Result<bool> {
+        // localhost is used by many components in the test suite.  We can't use
+        // the normal path because normally a given external IP must only be
+        // used once.  Just treat localhost in the test suite as though it's
+        // already allocated.  We do the same in is_nic_already_allocated().
+        if cfg!(test) && external_ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_ips = self
             .datastore
-            .service_lookup_external_ips(self.opctx, zone_id)
+            .external_ip_list_service(self.opctx, zone_id)
             .await
             .with_context(|| {
                 format!(
@@ -157,6 +162,11 @@ impl<'a> ResourceAllocator<'a> {
         zone_id: Uuid,
         nic: &NetworkInterface,
     ) -> anyhow::Result<bool> {
+        // See the comment in is_external_ip_already_allocated().
+        if cfg!(test) && nic.ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_nics = self
             .datastore
             .service_list_network_interfaces(self.opctx, zone_id)
@@ -176,7 +186,7 @@ impl<'a> ResourceAllocator<'a> {
             for allocated_nic in &allocated_nics {
                 if allocated_nic.ip.ip() == nic.ip
                     && *allocated_nic.mac == nic.mac
-                    && allocated_nic.slot == i16::from(nic.slot)
+                    && *allocated_nic.slot == nic.slot
                     && allocated_nic.primary == nic.primary
                 {
                     info!(
@@ -248,7 +258,7 @@ impl<'a> ResourceAllocator<'a> {
         let ip_id = Uuid::new_v4();
         let description = zone_type;
         self.datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 self.opctx,
                 ip_id,
                 ip_name,
@@ -303,7 +313,7 @@ impl<'a> ResourceAllocator<'a> {
 
         let ip_id = Uuid::new_v4();
         self.datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 self.opctx,
                 ip_id,
                 service_id,
@@ -345,6 +355,7 @@ impl<'a> ResourceAllocator<'a> {
                 bail!("invalid NIC kind (expected service, got instance)")
             }
             NetworkInterfaceKind::Service { .. } => (),
+            NetworkInterfaceKind::Probe { .. } => (),
         }
 
         // Only attempt to allocate `nic` if it isn't already assigned to this
@@ -392,14 +403,12 @@ impl<'a> ResourceAllocator<'a> {
         // We do not check `nic.vni`, because it's not stored in the
         // database. (All services are given the constant vni
         // `Vni::SERVICES_VNI`.)
-        if created_nic.primary != nic.primary
-            || created_nic.slot != i16::from(nic.slot)
-        {
+        if created_nic.primary != nic.primary || *created_nic.slot != nic.slot {
             warn!(
                 self.opctx.log, "unexpected property on allocated NIC";
                 "db_primary" => created_nic.primary,
                 "expected_primary" => nic.primary,
-                "db_slot" => created_nic.slot,
+                "db_slot" => *created_nic.slot,
                 "expected_slot" => nic.slot,
             );
 
@@ -496,7 +505,6 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
@@ -546,7 +554,7 @@ mod tests {
             external_ips.next().expect("exhausted external_ips");
         let nexus_nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service(nexus_id),
+            kind: NetworkInterfaceKind::Service { id: nexus_id },
             name: "test-nexus".parse().expect("bad name"),
             ip: NEXUS_OPTE_IPV4_SUBNET
                 .iter()
@@ -554,7 +562,7 @@ mod tests {
                 .unwrap()
                 .into(),
             mac: MacAddr::random_system(),
-            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
@@ -566,7 +574,7 @@ mod tests {
             external_ips.next().expect("exhausted external_ips");
         let dns_nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service(dns_id),
+            kind: NetworkInterfaceKind::Service { id: dns_id },
             name: "test-external-dns".parse().expect("bad name"),
             ip: DNS_OPTE_IPV4_SUBNET
                 .iter()
@@ -574,7 +582,7 @@ mod tests {
                 .unwrap()
                 .into(),
             mac: MacAddr::random_system(),
-            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET).into(),
+            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
@@ -589,7 +597,7 @@ mod tests {
         };
         let ntp_nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service(ntp_id),
+            kind: NetworkInterfaceKind::Service { id: ntp_id },
             name: "test-external-ntp".parse().expect("bad name"),
             ip: NTP_OPTE_IPV4_SUBNET
                 .iter()
@@ -597,7 +605,7 @@ mod tests {
                 .unwrap()
                 .into(),
             mac: MacAddr::random_system(),
-            subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET).into(),
+            subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
@@ -605,72 +613,63 @@ mod tests {
 
         // Build the `zones` map needed by `ensure_zone_resources_allocated`,
         // with an arbitrary sled_id.
-        let mut zones = BTreeMap::new();
-        let sled_id = Uuid::new_v4();
-        zones.insert(
-            sled_id,
-            OmicronZonesConfig {
-                generation: Generation::new().next(),
-                zones: vec![
-                    OmicronZoneConfig {
-                        id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::Nexus {
-                            internal_address: Ipv6Addr::LOCALHOST.to_string(),
-                            external_ip: nexus_external_ip,
-                            nic: nexus_nic.clone(),
-                            external_tls: false,
-                            external_dns_servers: Vec::new(),
-                        },
-                    },
-                    OmicronZoneConfig {
-                        id: dns_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::ExternalDns {
-                            dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", Uuid::new_v4())
-                                    .parse()
-                                    .expect("bad name"),
-                            },
-                            http_address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
-                                0,
-                                0,
-                                0,
-                            )
-                            .to_string(),
-                            dns_address: SocketAddr::new(dns_external_ip, 0)
-                                .to_string(),
-                            nic: dns_nic.clone(),
-                        },
-                    },
-                    OmicronZoneConfig {
-                        id: ntp_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::BoundaryNtp {
-                            address: SocketAddr::new(dns_external_ip, 0)
-                                .to_string(),
-                            ntp_servers: Vec::new(),
-                            dns_servers: Vec::new(),
-                            domain: None,
-                            nic: ntp_nic.clone(),
-                            snat_cfg: ntp_snat,
-                        },
-                    },
-                ],
+        let zones = vec![
+            OmicronZoneConfig {
+                id: nexus_id,
+                underlay_address: Ipv6Addr::LOCALHOST,
+                zone_type: OmicronZoneType::Nexus {
+                    internal_address: Ipv6Addr::LOCALHOST.to_string(),
+                    external_ip: nexus_external_ip,
+                    nic: nexus_nic.clone(),
+                    external_tls: false,
+                    external_dns_servers: Vec::new(),
+                },
             },
-        );
+            OmicronZoneConfig {
+                id: dns_id,
+                underlay_address: Ipv6Addr::LOCALHOST,
+                zone_type: OmicronZoneType::ExternalDns {
+                    dataset: OmicronZoneDataset {
+                        pool_name: format!("oxp_{}", Uuid::new_v4())
+                            .parse()
+                            .expect("bad name"),
+                    },
+                    http_address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        0,
+                        0,
+                        0,
+                    )
+                    .to_string(),
+                    dns_address: SocketAddr::new(dns_external_ip, 0)
+                        .to_string(),
+                    nic: dns_nic.clone(),
+                },
+            },
+            OmicronZoneConfig {
+                id: ntp_id,
+                underlay_address: Ipv6Addr::LOCALHOST,
+                zone_type: OmicronZoneType::BoundaryNtp {
+                    address: SocketAddr::new(dns_external_ip, 0).to_string(),
+                    ntp_servers: Vec::new(),
+                    dns_servers: Vec::new(),
+                    domain: None,
+                    nic: ntp_nic.clone(),
+                    snat_cfg: ntp_snat,
+                },
+            },
+        ];
 
         // Initialize resource allocation: this should succeed and create all
         // the relevant db records.
-        ensure_zone_resources_allocated(&opctx, datastore, &zones)
+        ensure_zone_resources_allocated(&opctx, datastore, zones.iter())
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
 
         // Check that the external IP records were created.
         let db_nexus_ips = datastore
-            .service_lookup_external_ips(&opctx, nexus_id)
+            .external_ip_list_service(&opctx, nexus_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_nexus_ips.len(), 1);
@@ -681,7 +680,7 @@ mod tests {
         assert_eq!(db_nexus_ips[0].last_port, SqlU16(65535));
 
         let db_dns_ips = datastore
-            .service_lookup_external_ips(&opctx, dns_id)
+            .external_ip_list_service(&opctx, dns_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_dns_ips.len(), 1);
@@ -692,7 +691,7 @@ mod tests {
         assert_eq!(db_dns_ips[0].last_port, SqlU16(65535));
 
         let db_ntp_ips = datastore
-            .service_lookup_external_ips(&opctx, ntp_id)
+            .external_ip_list_service(&opctx, ntp_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_ntp_ips.len(), 1);
@@ -714,7 +713,7 @@ mod tests {
         assert_eq!(db_nexus_nics[0].subnet_id, NEXUS_VPC_SUBNET.id());
         assert_eq!(*db_nexus_nics[0].mac, nexus_nic.mac);
         assert_eq!(db_nexus_nics[0].ip, nexus_nic.ip.into());
-        assert_eq!(db_nexus_nics[0].slot, i16::from(nexus_nic.slot));
+        assert_eq!(*db_nexus_nics[0].slot, nexus_nic.slot);
         assert_eq!(db_nexus_nics[0].primary, nexus_nic.primary);
 
         let db_dns_nics = datastore
@@ -728,7 +727,7 @@ mod tests {
         assert_eq!(db_dns_nics[0].subnet_id, DNS_VPC_SUBNET.id());
         assert_eq!(*db_dns_nics[0].mac, dns_nic.mac);
         assert_eq!(db_dns_nics[0].ip, dns_nic.ip.into());
-        assert_eq!(db_dns_nics[0].slot, i16::from(dns_nic.slot));
+        assert_eq!(*db_dns_nics[0].slot, dns_nic.slot);
         assert_eq!(db_dns_nics[0].primary, dns_nic.primary);
 
         let db_ntp_nics = datastore
@@ -742,33 +741,33 @@ mod tests {
         assert_eq!(db_ntp_nics[0].subnet_id, NTP_VPC_SUBNET.id());
         assert_eq!(*db_ntp_nics[0].mac, ntp_nic.mac);
         assert_eq!(db_ntp_nics[0].ip, ntp_nic.ip.into());
-        assert_eq!(db_ntp_nics[0].slot, i16::from(ntp_nic.slot));
+        assert_eq!(*db_ntp_nics[0].slot, ntp_nic.slot);
         assert_eq!(db_ntp_nics[0].primary, ntp_nic.primary);
 
         // We should be able to run the function again with the same inputs, and
         // it should succeed without inserting any new records.
-        ensure_zone_resources_allocated(&opctx, datastore, &zones)
+        ensure_zone_resources_allocated(&opctx, datastore, zones.iter())
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
         assert_eq!(
             db_nexus_ips,
             datastore
-                .service_lookup_external_ips(&opctx, nexus_id)
+                .external_ip_list_service(&opctx, nexus_id)
                 .await
                 .expect("failed to get external IPs")
         );
         assert_eq!(
             db_dns_ips,
             datastore
-                .service_lookup_external_ips(&opctx, dns_id)
+                .external_ip_list_service(&opctx, dns_id)
                 .await
                 .expect("failed to get external IPs")
         );
         assert_eq!(
             db_ntp_ips,
             datastore
-                .service_lookup_external_ips(&opctx, ntp_id)
+                .external_ip_list_service(&opctx, ntp_id)
                 .await
                 .expect("failed to get external IPs")
         );
@@ -800,8 +799,8 @@ mod tests {
         let bogus_ip = external_ips.next().expect("exhausted external_ips");
         for mutate_zones_fn in [
             // non-matching IP on Nexus
-            (&|config: &mut OmicronZonesConfig| {
-                for zone in &mut config.zones {
+            (&|zones: &mut [OmicronZoneConfig]| {
+                for zone in zones {
                     if let OmicronZoneType::Nexus {
                         ref mut external_ip, ..
                     } = &mut zone.zone_type
@@ -813,11 +812,12 @@ mod tests {
                         );
                     }
                 }
+
                 panic!("didn't find expected zone");
-            }) as &dyn Fn(&mut OmicronZonesConfig) -> String,
+            }) as &dyn Fn(&mut [OmicronZoneConfig]) -> String,
             // non-matching IP on External DNS
-            &|config| {
-                for zone in &mut config.zones {
+            &|zones| {
+                for zone in zones {
                     if let OmicronZoneType::ExternalDns {
                         ref mut dns_address,
                         ..
@@ -833,8 +833,8 @@ mod tests {
                 panic!("didn't find expected zone");
             },
             // non-matching SNAT port range on Boundary NTP
-            &|config| {
-                for zone in &mut config.zones {
+            &|zones| {
+                for zone in zones {
                     if let OmicronZoneType::BoundaryNtp {
                         ref mut snat_cfg,
                         ..
@@ -852,24 +852,24 @@ mod tests {
             },
         ] {
             // Run `mutate_zones_fn` on our config...
-            let mut config =
-                zones.remove(&sled_id).expect("missing zone config");
-            let orig_config = config.clone();
-            let expected_error = mutate_zones_fn(&mut config);
-            zones.insert(sled_id, config);
+            let (mutated_zones, expected_error) = {
+                let mut zones = zones.clone();
+                let expected_error = mutate_zones_fn(&mut zones);
+                (zones, expected_error)
+            };
 
-            // ... check that we get the error we expect
-            let err =
-                ensure_zone_resources_allocated(&opctx, datastore, &zones)
-                    .await
-                    .expect_err("unexpected success");
+            // and check that we get the error we expect.
+            let err = ensure_zone_resources_allocated(
+                &opctx,
+                datastore,
+                mutated_zones.iter(),
+            )
+            .await
+            .expect_err("unexpected success");
             assert!(
                 err.to_string().contains(&expected_error),
                 "expected {expected_error:?}, got {err:#}"
             );
-
-            // ... and restore the original, valid config before iterating.
-            zones.insert(sled_id, orig_config);
         }
 
         // Also try some requests that ought to fail because the request
@@ -888,9 +888,14 @@ mod tests {
                             "invalid NIC kind (expected service, got instance)"
                         )
                     }
-                    NetworkInterfaceKind::Service(id) => {
+                    NetworkInterfaceKind::Probe { .. } => {
+                        panic!(
+                            "invalid NIC kind (expected service, got instance)"
+                        )
+                    }
+                    NetworkInterfaceKind::Service { id } => {
                         let id = *id;
-                        nic.kind = NetworkInterfaceKind::Instance(id);
+                        nic.kind = NetworkInterfaceKind::Instance { id };
                     }
                 }
                 "invalid NIC kind".to_string()
@@ -903,11 +908,7 @@ mod tests {
         ] {
             // Try this NIC mutation on Nexus...
             let mut mutated_zones = zones.clone();
-            for zone in &mut mutated_zones
-                .get_mut(&sled_id)
-                .expect("missing sled")
-                .zones
-            {
+            for zone in &mut mutated_zones {
                 if let OmicronZoneType::Nexus { ref mut nic, .. } =
                     &mut zone.zone_type
                 {
@@ -916,7 +917,7 @@ mod tests {
                     let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
-                        &mutated_zones,
+                        mutated_zones.iter(),
                     )
                     .await
                     .expect_err("unexpected success");
@@ -932,11 +933,7 @@ mod tests {
 
             // ... and again on ExternalDns
             let mut mutated_zones = zones.clone();
-            for zone in &mut mutated_zones
-                .get_mut(&sled_id)
-                .expect("missing sled")
-                .zones
-            {
+            for zone in &mut mutated_zones {
                 if let OmicronZoneType::ExternalDns { ref mut nic, .. } =
                     &mut zone.zone_type
                 {
@@ -945,7 +942,7 @@ mod tests {
                     let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
-                        &mutated_zones,
+                        mutated_zones.iter(),
                     )
                     .await
                     .expect_err("unexpected success");
@@ -961,11 +958,7 @@ mod tests {
 
             // ... and again on BoundaryNtp
             let mut mutated_zones = zones.clone();
-            for zone in &mut mutated_zones
-                .get_mut(&sled_id)
-                .expect("missing sled")
-                .zones
-            {
+            for zone in &mut mutated_zones {
                 if let OmicronZoneType::BoundaryNtp { ref mut nic, .. } =
                     &mut zone.zone_type
                 {
@@ -974,7 +967,7 @@ mod tests {
                     let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
-                        &mutated_zones,
+                        mutated_zones.iter(),
                     )
                     .await
                     .expect_err("unexpected success");

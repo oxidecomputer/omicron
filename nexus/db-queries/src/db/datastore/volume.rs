@@ -6,12 +6,20 @@
 
 use super::DataStore;
 use crate::db;
+use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
+use crate::db::model::Disk;
+use crate::db::model::DownstairsClientStopRequestNotification;
+use crate::db::model::DownstairsClientStoppedNotification;
+use crate::db::model::Instance;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
+use crate::db::model::UpstairsRepairNotification;
+use crate::db::model::UpstairsRepairNotificationType;
+use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
 use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
 use crate::transaction_retry::OptionalError;
@@ -19,17 +27,59 @@ use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::OptionalExtension;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
+use omicron_common::api::internal::nexus::DownstairsClientStopped;
+use omicron_common::api::internal::nexus::RepairProgress;
+use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy)]
+pub enum VolumeCheckoutReason {
+    /// Check out a read-only Volume.
+    ReadOnlyCopy,
+
+    /// Check out a Volume to modify and store back to the database.
+    CopyAndModify,
+
+    /// Check out a Volume to send to Propolis to start an instance.
+    InstanceStart { vmm_id: Uuid },
+
+    /// Check out a Volume to send to a migration destination Propolis.
+    InstanceMigrate { vmm_id: Uuid, target_vmm_id: Uuid },
+
+    /// Check out a Volume to send to a Pantry (for background maintenance
+    /// operations).
+    Pantry,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum VolumeGetError {
+    #[error("Serde error during volume_checkout: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Updated {0} database rows, expected {1}")]
+    UnexpectedDatabaseUpdate(usize, usize),
+
+    #[error("Checkout condition failed: {0}")]
+    CheckoutConditionFailed(String),
+
+    #[error("Invalid Volume: {0}")]
+    InvalidVolume(String),
+}
 
 impl DataStore {
     pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
@@ -181,6 +231,244 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    async fn volume_checkout_allowed(
+        reason: &VolumeCheckoutReason,
+        vcr: &VolumeConstructionRequest,
+        maybe_disk: Option<Disk>,
+        maybe_instance: Option<Instance>,
+    ) -> Result<(), VolumeGetError> {
+        match reason {
+            VolumeCheckoutReason::ReadOnlyCopy => {
+                // When checking out to make a copy (usually for use as a
+                // read-only parent), the volume must be read only. Even if a
+                // call-site that uses Copy sends this copied Volume to a
+                // Propolis or Pantry, the Upstairs that will be created will be
+                // read-only, and will not take over from other read-only
+                // Upstairs.
+
+                match volume_is_read_only(&vcr) {
+                    Ok(read_only) => {
+                        if !read_only {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                String::from("Non-read-only Volume Checkout for use Copy!")
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    Err(e) => Err(VolumeGetError::InvalidVolume(e.to_string())),
+                }
+            }
+
+            VolumeCheckoutReason::CopyAndModify => {
+                // `CopyAndModify` is used when taking a read/write Volume,
+                // modifying it (for example, when taking a snapshot, to point
+                // to read-only resources), and committing it back to the DB.
+                // This is a checkout of a read/write Volume, so creating an
+                // Upstairs from it *may* take over from something else. The
+                // call-site must ensure this doesn't happen, but we can't do
+                // that here.
+
+                Ok(())
+            }
+
+            VolumeCheckoutReason::InstanceStart { vmm_id } => {
+                // Check out this volume to send to Propolis to start an
+                // Instance. The VMM id in the enum must match the instance's
+                // propolis_id.
+
+                let Some(instance) = &maybe_instance else {
+                    return Err(VolumeGetError::CheckoutConditionFailed(
+                        format!(
+                            "InstanceStart {}: instance does not exist",
+                            vmm_id
+                        ),
+                    ));
+                };
+
+                let runtime = instance.runtime();
+                match (runtime.propolis_id, runtime.dst_propolis_id) {
+                    (Some(_), Some(_)) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceStart {}: instance {} is undergoing migration",
+                                vmm_id,
+                                instance.id(),
+                            )
+                        ))
+                    }
+
+                    (None, None) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceStart {}: instance {} has no propolis ids",
+                                vmm_id,
+                                instance.id(),
+                            )
+                        ))
+                    }
+
+                    (Some(propolis_id), None) => {
+                        if propolis_id != *vmm_id {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                format!(
+                                    "InstanceStart {}: instance {} propolis id {} mismatch",
+                                    vmm_id,
+                                    instance.id(),
+                                    propolis_id,
+                                )
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    (None, Some(dst_propolis_id)) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceStart {}: instance {} has no propolis id but dst propolis id {}",
+                                vmm_id,
+                                instance.id(),
+                                dst_propolis_id,
+                            )
+                        ))
+                    }
+                }
+            }
+
+            VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id } => {
+                // Check out this volume to send to destination Propolis to
+                // migrate an Instance. Only take over from the specified source
+                // VMM.
+
+                let Some(instance) = &maybe_instance else {
+                    return Err(VolumeGetError::CheckoutConditionFailed(
+                        format!(
+                            "InstanceMigrate {} {}: instance does not exist",
+                            vmm_id, target_vmm_id
+                        ),
+                    ));
+                };
+
+                let runtime = instance.runtime();
+                match (runtime.propolis_id, runtime.dst_propolis_id) {
+                    (Some(propolis_id), Some(dst_propolis_id)) => {
+                        if propolis_id != *vmm_id || dst_propolis_id != *target_vmm_id {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                format!(
+                                    "InstanceMigrate {} {}: instance {} propolis id mismatches {} {}",
+                                    vmm_id,
+                                    target_vmm_id,
+                                    instance.id(),
+                                    propolis_id,
+                                    dst_propolis_id,
+                                )
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    (None, None) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceMigrate {} {}: instance {} has no propolis ids",
+                                vmm_id,
+                                target_vmm_id,
+                                instance.id(),
+                            )
+                        ))
+                    }
+
+                    (Some(propolis_id), None) => {
+                        // XXX is this right?
+                        if propolis_id != *vmm_id {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                format!(
+                                    "InstanceMigrate {} {}: instance {} propolis id {} mismatch",
+                                    vmm_id,
+                                    target_vmm_id,
+                                    instance.id(),
+                                    propolis_id,
+                                )
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    (None, Some(dst_propolis_id)) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceMigrate {} {}: instance {} has no propolis id but dst propolis id {}",
+                                vmm_id,
+                                target_vmm_id,
+                                instance.id(),
+                                dst_propolis_id,
+                            )
+                        ))
+                    }
+                }
+            }
+
+            VolumeCheckoutReason::Pantry => {
+                // Check out this Volume to send to a Pantry, which will create
+                // a read/write Upstairs, for background maintenance operations.
+                // There must not be any Propolis, otherwise this will take over
+                // from that and cause errors for guest OSes.
+
+                let Some(disk) = maybe_disk else {
+                    // This volume isn't backing a disk, it won't take over from
+                    // a Propolis' Upstairs.
+                    return Ok(());
+                };
+
+                let Some(attach_instance_id) =
+                    disk.runtime().attach_instance_id
+                else {
+                    // The volume is backing a disk that is not attached to an
+                    // instance. At this moment it won't take over from a
+                    // Propolis' Upstairs, so send it to a Pantry to create an
+                    // Upstairs there.  A future checkout that happens after
+                    // this transaction that is sent to a Propolis _will_ take
+                    // over from this checkout (sent to a Pantry), which is ok.
+                    return Ok(());
+                };
+
+                let Some(instance) = maybe_instance else {
+                    // The instance, which the disk that this volume backs is
+                    // attached to, doesn't exist?
+                    //
+                    // XXX this is a Nexus bug!
+                    return Err(VolumeGetError::CheckoutConditionFailed(
+                        format!(
+                            "Pantry: instance {} backing disk {} does not exist?",
+                            attach_instance_id,
+                            disk.id(),
+                        )
+                    ));
+                };
+
+                if let Some(propolis_id) = instance.runtime().propolis_id {
+                    // The instance, which the disk that this volume backs is
+                    // attached to, exists and has an active propolis ID.  A
+                    // propolis _may_ exist, so bail here - an activation from
+                    // the Pantry is not allowed to take over from a Propolis.
+                    Err(VolumeGetError::CheckoutConditionFailed(format!(
+                        "Pantry: possible Propolis {}",
+                        propolis_id
+                    )))
+                } else {
+                    // The instance, which the disk that this volume backs is
+                    // attached to, exists, but there is no active propolis ID.
+                    // This is ok.
+                    Ok(())
+                }
+            }
+        }
+    }
+
     /// Checkout a copy of the Volume from the database.
     /// This action (getting a copy) will increase the generation number
     /// of Volumes of the VolumeConstructionRequest::Volume type that have
@@ -190,17 +478,9 @@ impl DataStore {
     pub async fn volume_checkout(
         &self,
         volume_id: Uuid,
+        reason: VolumeCheckoutReason,
     ) -> LookupResult<Volume> {
         use db::schema::volume::dsl;
-
-        #[derive(Debug, thiserror::Error)]
-        enum VolumeGetError {
-            #[error("Serde error during volume_checkout: {0}")]
-            SerdeError(#[from] serde_json::Error),
-
-            #[error("Updated {0} database rows, expected {1}")]
-            UnexpectedDatabaseUpdate(usize, usize),
-        }
 
         // We perform a transaction here, to be sure that on completion
         // of this, the database contains an updated version of the
@@ -227,6 +507,56 @@ impl DataStore {
                         serde_json::from_str(volume.data()).map_err(|e| {
                             err.bail(VolumeGetError::SerdeError(e))
                         })?;
+
+                    // The VolumeConstructionRequest resulting from this checkout will have its
+                    // generation numbers bumped, and as result will (if it has non-read-only
+                    // sub-volumes) take over from previous read/write activations when sent to a
+                    // place that will `construct` a new Volume. Depending on the checkout reason,
+                    // prevent creating multiple read/write Upstairs acting on the same Volume,
+                    // except where the take over is intended.
+
+                    let (maybe_disk, maybe_instance) = {
+                        use db::schema::instance::dsl as instance_dsl;
+                        use db::schema::disk::dsl as disk_dsl;
+
+                        let maybe_disk: Option<Disk> = disk_dsl::disk
+                            .filter(disk_dsl::time_deleted.is_null())
+                            .filter(disk_dsl::volume_id.eq(volume_id))
+                            .select(Disk::as_select())
+                            .get_result_async(&conn)
+                            .await
+                            .optional()?;
+
+                        let maybe_instance: Option<Instance> = if let Some(disk) = &maybe_disk {
+                            if let Some(attach_instance_id) = disk.runtime().attach_instance_id {
+                                instance_dsl::instance
+                                    .filter(instance_dsl::time_deleted.is_null())
+                                    .filter(instance_dsl::id.eq(attach_instance_id))
+                                    .select(Instance::as_select())
+                                    .get_result_async(&conn)
+                                    .await
+                                    .optional()?
+                            } else {
+                                // Disk not attached to an instance
+                                None
+                            }
+                        } else {
+                            // Volume not associated with disk
+                            None
+                        };
+
+                        (maybe_disk, maybe_instance)
+                    };
+
+                    if let Err(e) = Self::volume_checkout_allowed(
+                        &reason,
+                        &vcr,
+                        maybe_disk,
+                        maybe_instance,
+                    )
+                    .await {
+                        return Err(err.bail(e));
+                    }
 
                     // Look to see if the VCR is a Volume type, and if so, look at
                     // its sub_volumes. If they are of type Region, then we need
@@ -340,8 +670,17 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    return Error::internal_error(&format!("Transaction error: {}", err));
+                    match err {
+                        VolumeGetError::CheckoutConditionFailed(message) => {
+                            return Error::conflict(message);
+                        }
+
+                        _ => {
+                            return Error::internal_error(&format!("Transaction error: {}", err));
+                        }
+                    }
                 }
+
                 public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
@@ -434,8 +773,9 @@ impl DataStore {
     pub async fn volume_checkout_randomize_ids(
         &self,
         volume_id: Uuid,
+        reason: VolumeCheckoutReason,
     ) -> CreateResult<Volume> {
-        let volume = self.volume_checkout(volume_id).await?;
+        let volume = self.volume_checkout(volume_id, reason).await?;
 
         let vcr: sled_agent_client::types::VolumeConstructionRequest =
             serde_json::from_str(volume.data())?;
@@ -809,6 +1149,242 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
+
+    // An Upstairs is created as part of a Volume hierarchy if the Volume
+    // Construction Request includes a "Region" variant. This may be at any
+    // layer of the Volume, and some notifications will come from an Upstairs
+    // instead of the top level of the Volume. The following functions have an
+    // Upstairs ID instead of a Volume ID for this reason.
+
+    /// Record when an Upstairs notifies us about a repair. If that record
+    /// (uniquely identified by the four IDs passed in plus the notification
+    /// type) exists already, do nothing.
+    pub async fn upstairs_repair_notification(
+        &self,
+        opctx: &OpContext,
+        record: UpstairsRepairNotification,
+    ) -> Result<(), Error> {
+        use db::schema::upstairs_repair_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("upstairs_repair_notification")
+            .transaction(&conn, |conn| {
+                let record = record.clone();
+                let err = err.clone();
+
+                async move {
+                    // Return 409 if a repair ID does not match types
+                    let mismatched_record_type_count: usize =
+                        dsl::upstairs_repair_notification
+                            .filter(dsl::repair_id.eq(record.repair_id))
+                            .filter(dsl::repair_type.ne(record.repair_type))
+                            .execute_async(&conn)
+                            .await?;
+
+                    if mismatched_record_type_count > 0 {
+                        return Err(err.bail(Error::conflict(&format!(
+                            "existing repair type for id {} does not match {:?}!",
+                            record.repair_id,
+                            record.repair_type,
+                        ))));
+                    }
+
+                    match &record.notification_type {
+                        UpstairsRepairNotificationType::Started => {
+                            // Proceed - the insertion can succeed or fail below
+                            // based on the table's primary key
+                        }
+
+                        UpstairsRepairNotificationType::Succeeded
+                        | UpstairsRepairNotificationType::Failed => {
+                            // However, Nexus must accept only one "finished"
+                            // status - an Upstairs cannot change this and must
+                            // instead perform another repair with a new repair
+                            // ID.
+                            let maybe_existing_finish_record: Option<
+                                UpstairsRepairNotification,
+                            > = dsl::upstairs_repair_notification
+                                .filter(dsl::repair_id.eq(record.repair_id))
+                                .filter(dsl::upstairs_id.eq(record.upstairs_id))
+                                .filter(dsl::session_id.eq(record.session_id))
+                                .filter(dsl::region_id.eq(record.region_id))
+                                .filter(dsl::notification_type.eq_any(vec![
+                                    UpstairsRepairNotificationType::Succeeded,
+                                    UpstairsRepairNotificationType::Failed,
+                                ]))
+                                .get_result_async(&conn)
+                                .await
+                                .optional()?;
+
+                            if let Some(existing_finish_record) =
+                                maybe_existing_finish_record
+                            {
+                                if existing_finish_record.notification_type
+                                    != record.notification_type
+                                {
+                                    return Err(err.bail(Error::conflict(
+                                        "existing finish record does not match",
+                                    )));
+                                } else {
+                                    // inserting the same record, bypass
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+
+                    diesel::insert_into(dsl::upstairs_repair_notification)
+                        .values(record)
+                        .on_conflict((
+                            dsl::repair_id,
+                            dsl::upstairs_id,
+                            dsl::session_id,
+                            dsl::region_id,
+                            dsl::notification_type,
+                        ))
+                        .do_nothing()
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Record Upstairs repair progress
+    pub async fn upstairs_repair_progress(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_id: TypedUuid<UpstairsRepairKind>,
+        repair_progress: RepairProgress,
+    ) -> Result<(), Error> {
+        use db::schema::upstairs_repair_notification::dsl as notification_dsl;
+        use db::schema::upstairs_repair_progress::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("upstairs_repair_progress")
+            .transaction(&conn, |conn| {
+                let repair_progress = repair_progress.clone();
+                let err = err.clone();
+
+                async move {
+                    // Check that there is a repair id for the upstairs id
+                    let matching_repair: Option<UpstairsRepairNotification> =
+                        notification_dsl::upstairs_repair_notification
+                            .filter(notification_dsl::repair_id.eq(nexus_db_model::to_db_typed_uuid(repair_id)))
+                            .filter(notification_dsl::upstairs_id.eq(nexus_db_model::to_db_typed_uuid(upstairs_id)))
+                            .filter(notification_dsl::notification_type.eq(UpstairsRepairNotificationType::Started))
+                            .get_result_async(&conn)
+                            .await
+                            .optional()?;
+
+                    if matching_repair.is_none() {
+                        return Err(err.bail(Error::non_resourcetype_not_found(&format!(
+                            "upstairs {upstairs_id} repair {repair_id} not found"
+                        ))));
+                    }
+
+                    diesel::insert_into(dsl::upstairs_repair_progress)
+                        .values(UpstairsRepairProgress {
+                            repair_id: repair_id.into(),
+                            time: repair_progress.time,
+                            current_item: repair_progress.current_item,
+                            total_items: repair_progress.total_items,
+                        })
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Record when a Downstairs client is requested to stop, and why
+    pub async fn downstairs_client_stop_request_notification(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stop_request: DownstairsClientStopRequest,
+    ) -> Result<(), Error> {
+        use db::schema::downstairs_client_stop_request_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::insert_into(dsl::downstairs_client_stop_request_notification)
+            .values(DownstairsClientStopRequestNotification {
+                time: downstairs_client_stop_request.time,
+                upstairs_id: upstairs_id.into(),
+                downstairs_id: downstairs_id.into(),
+                reason: downstairs_client_stop_request.reason.into(),
+            })
+            .on_conflict((
+                dsl::time,
+                dsl::upstairs_id,
+                dsl::downstairs_id,
+                dsl::reason,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Record when a Downstairs client is stopped, and why
+    pub async fn downstairs_client_stopped_notification(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stopped: DownstairsClientStopped,
+    ) -> Result<(), Error> {
+        use db::schema::downstairs_client_stopped_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::insert_into(dsl::downstairs_client_stopped_notification)
+            .values(DownstairsClientStoppedNotification {
+                time: downstairs_client_stopped.time,
+                upstairs_id: upstairs_id.into(),
+                downstairs_id: downstairs_id.into(),
+                reason: downstairs_client_stopped.reason.into(),
+            })
+            .on_conflict((
+                dsl::time,
+                dsl::upstairs_id,
+                dsl::downstairs_id,
+                dsl::reason,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -1056,6 +1632,51 @@ pub fn read_only_resources_associated_with_volume(
 
         VolumeConstructionRequest::File { id: _, block_size: _, path: _ } => {
             // no action required
+        }
+    }
+}
+
+/// Returns true if the sub-volumes of a Volume are all read-only
+pub fn volume_is_read_only(
+    vcr: &VolumeConstructionRequest,
+) -> anyhow::Result<bool> {
+    match vcr {
+        VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+            for sv in sub_volumes {
+                match sv {
+                    VolumeConstructionRequest::Region { opts, .. } => {
+                        if !opts.read_only {
+                            return Ok(false);
+                        }
+                    }
+
+                    _ => {
+                        bail!("Saw non-Region in sub-volume {:?}", sv);
+                    }
+                }
+            }
+
+            Ok(true)
+        }
+
+        VolumeConstructionRequest::Region { .. } => {
+            // We don't support a pure Region VCR at the volume
+            // level in the database, so this choice should
+            // never be encountered, but I want to know if it is.
+            panic!("Region not supported as a top level volume");
+        }
+
+        VolumeConstructionRequest::File { .. } => {
+            // Effectively, this is read-only, as this BlockIO implementation
+            // does not have a `write` implementation. This will be hit if
+            // trying to make a snapshot or image out of a
+            // `YouCanBootAnythingAsLongAsItsAlpine` image source.
+            Ok(true)
+        }
+
+        VolumeConstructionRequest::Url { .. } => {
+            // ImageSource::Url was deprecated
+            bail!("Saw VolumeConstructionRequest::Url");
         }
     }
 }

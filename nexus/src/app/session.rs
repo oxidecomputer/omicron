@@ -156,7 +156,8 @@ impl super::Nexus {
                 | Error::ServiceUnavailable { .. }
                 | Error::InsufficientCapacity { .. }
                 | Error::TypeVersionMismatch { .. }
-                | Error::Conflict { .. } => {
+                | Error::Conflict { .. }
+                | Error::NotFound { .. } => {
                     Reason::UnknownError { source: error }
                 }
             })?;

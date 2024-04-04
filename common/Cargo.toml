@@ -23,6 +23,7 @@ hex.workspace = true
 http.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
+mg-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
@@ -34,6 +35,7 @@ serde_human_bytes.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 strum.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
@@ -41,6 +43,7 @@ tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 parse-display.workspace = true
 progenitor.workspace = true
+progenitor-client.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
 regress.workspace = true

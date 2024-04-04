@@ -23,7 +23,7 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha3::{Digest, Sha3_256};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::time::Instant;

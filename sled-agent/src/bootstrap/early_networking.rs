@@ -6,7 +6,6 @@
 
 use anyhow::{anyhow, Context};
 use bootstore::schemes::v0 as bootstore;
-use ddm_admin_client::DdmError;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortId, PortSettings,
 };
@@ -17,12 +16,13 @@ use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use ipnetwork::Ipv6Network;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, Prefix4, StaticRoute4,
-    StaticRoute4List,
+    AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
+    Prefix4, StaticRoute4, StaticRoute4List,
 };
 use mg_admin_client::Client as MgdClient;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
+use omicron_common::api::external::BfdMode;
 use omicron_common::api::internal::shared::{
     BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
     RackNetworkConfigV1, SwitchLocation, UplinkConfig,
@@ -32,6 +32,7 @@ use omicron_common::backoff::{
     ExponentialBackoffBuilder,
 };
 use omicron_common::OMICRON_DPD_TAG;
+use omicron_ddm_admin_client::DdmError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -62,6 +63,9 @@ pub enum EarlyNetworkSetupError {
 
     #[error("BGP configuration error: {0}")]
     BgpConfigurationError(String),
+
+    #[error("BFD configuration error: {0}")]
+    BfdConfigurationError(String),
 
     #[error("MGD error: {0}")]
     MgdError(String),
@@ -446,14 +450,12 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
 
         let mgd = MgdClient::new(
-            &self.log,
-            SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0).into(),
-        )
-        .map_err(|e| {
-            EarlyNetworkSetupError::MgdError(format!(
-                "initialize mgd client: {e}"
-            ))
-        })?;
+            &format!(
+                "http://{}",
+                &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
+            ),
+            self.log.clone(),
+        );
 
         let mut config: Option<BgpConfig> = None;
         let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
@@ -509,25 +511,21 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         if !bgp_peer_configs.is_empty() {
             if let Some(config) = &config {
-                mgd.inner
-                    .bgp_apply(&ApplyRequest {
-                        asn: config.asn,
-                        peers: bgp_peer_configs,
-                        originate: config
-                            .originate
-                            .iter()
-                            .map(|x| Prefix4 {
-                                length: x.prefix(),
-                                value: x.ip(),
-                            })
-                            .collect(),
-                    })
-                    .await
-                    .map_err(|e| {
-                        EarlyNetworkSetupError::BgpConfigurationError(format!(
-                            "BGP peer configuration failed: {e}",
-                        ))
-                    })?;
+                mgd.bgp_apply(&ApplyRequest {
+                    asn: config.asn,
+                    peers: bgp_peer_configs,
+                    originate: config
+                        .originate
+                        .iter()
+                        .map(|x| Prefix4 { length: x.prefix(), value: x.ip() })
+                        .collect(),
+                })
+                .await
+                .map_err(|e| {
+                    EarlyNetworkSetupError::BgpConfigurationError(format!(
+                        "BGP peer configuration failed: {e}",
+                    ))
+                })?;
             }
         }
 
@@ -551,11 +549,35 @@ impl<'a> EarlyNetworkSetup<'a> {
                 rq.routes.list.push(sr);
             }
         }
-        mgd.inner.static_add_v4_route(&rq).await.map_err(|e| {
+        mgd.static_add_v4_route(&rq).await.map_err(|e| {
             EarlyNetworkSetupError::BgpConfigurationError(format!(
                 "static routing configuration failed: {e}",
             ))
         })?;
+
+        // BFD config
+        for spec in &rack_network_config.bfd {
+            if spec.switch != switch_location {
+                continue;
+            }
+            let cfg = BfdPeerConfig {
+                detection_threshold: spec.detection_threshold,
+                listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
+                mode: match spec.mode {
+                    BfdMode::SingleHop => {
+                        mg_admin_client::types::SessionMode::SingleHop
+                    }
+                    BfdMode::MultiHop => {
+                        mg_admin_client::types::SessionMode::MultiHop
+                    }
+                },
+                peer: spec.remote,
+                required_rx: spec.required_rx,
+            };
+            mgd.add_bfd_peer(&cfg).await.map_err(|e| {
+                EarlyNetworkSetupError::BfdConfigurationError(e.to_string())
+            })?;
+        }
 
         Ok(our_ports)
     }
@@ -565,11 +587,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         port_config: &PortConfigV1,
     ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
         info!(self.log, "Building Port Configuration");
-        let mut dpd_port_settings = PortSettings {
-            links: HashMap::new(),
-            v4_routes: HashMap::new(),
-            v6_routes: HashMap::new(),
-        };
+        let mut dpd_port_settings = PortSettings { links: HashMap::new() };
         let link_id = LinkId(0);
 
         let mut addrs = Vec::new();
@@ -814,6 +832,7 @@ impl RackNetworkConfigV0 {
                 .map(|uplink| PortConfigV1::from(uplink))
                 .collect(),
             bgp: vec![],
+            bfd: vec![],
         }
     }
 }
@@ -908,6 +927,7 @@ mod tests {
                         bgp_peers: vec![],
                     }],
                     bgp: vec![],
+                    bfd: vec![],
                 }),
             },
         };
