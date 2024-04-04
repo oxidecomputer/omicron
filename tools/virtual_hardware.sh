@@ -45,14 +45,28 @@ function ensure_vdevs {
 }
 
 function try_destroy_zpools {
+    # Grab the list of all files used for swap
+    SWAP_LIST=$( swap -l | tail -n +2 | cut -d' ' -f1 )
+    ZVOL_ROOT="/dev/zvol/dsk"
+
     ZPOOL_TYPES=('oxp_' 'oxi_')
     for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
         readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
         for ZPOOL in "${ZPOOLS[@]}"; do
+            # If this zpool contains a volume for swap, remove it.
+            readarray -t SWAP_PATHS < <(echo "$SWAP_LIST" | grep "$ZVOL_ROOT/$ZPOOL")
+            for SWAP_PATH in "${SWAP_PATHS[@]}"; do
+                swap -d "$SWAP_PATH" || \
+                    fail "Failed to remove swap for $SWAP_PATH"
+
+                success "Removed swap at $SWAP_PATH"
+            done
+
+            # After dealing with swap, try to unmount the zpool and destroy it
             zfs destroy -r "$ZPOOL" && \
                     (zfs unmount "$ZPOOL" || true) && \
-                    zpool destroy "$ZPOOL" && \
-                    warn "Failed to remove ZFS pool and vdev: $ZPOOL"
+                    zpool destroy "$ZPOOL" || \
+                    fail "Failed to remove ZFS pool and vdev: $ZPOOL"
 
             success "Verified ZFS pool and vdev $ZPOOL does not exist"
         done
