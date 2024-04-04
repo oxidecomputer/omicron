@@ -2726,7 +2726,7 @@ dependencies = [
  "slog-term",
  "termios",
  "tokio",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "uuid 1.7.0",
 ]
 
@@ -5360,7 +5360,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "toml 0.8.12",
  "uuid 1.7.0",
 ]
