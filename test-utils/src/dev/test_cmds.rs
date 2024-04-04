@@ -142,12 +142,16 @@ pub fn redact_variable(input: &str) -> String {
         .to_string();
 
     // Replace uuids.
+    //
+    // The length of a UUID is 32 nibbles for the hex encoding of a u128 + 4
+    // dashes = 36.
+    const UUID_LEN: usize = 36;
     let s = regex::Regex::new(
         "[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-\
         [a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}",
     )
     .unwrap()
-    .replace_all(&s, "REDACTED_UUID_REDACTED_UUID_REDACTED")
+    .replace_all(&s, fill_redaction_text("uuid", UUID_LEN))
     .to_string();
 
     // Replace timestamps.
@@ -222,37 +226,13 @@ impl<'a> ExtraRedactions<'a> {
         name: &str,
         text_to_redact: &'a str,
     ) -> &mut Self {
-        // The overall plan is to generate a string of the form
-        // ---<REDACTED_NAME>---, depending on the length of the text to
-        // redact.
-        //
-        // * Always include the < > signs for clarity, and either shorten the
-        //   text or add dashes to compensate for the length.
-
-        let base = format!("REDACTED_{}", name.to_uppercase());
-
         // Use the same number of chars as the number of bytes in
         // text_to_redact. We're almost entirely in ASCII-land so they're the
         // same, and getting the length right is nice but doesn't matter for
         // correctness.
         //
         // A technically more correct impl would use unicode-width, but ehhh.
-        let text_len = text_to_redact.len();
-        let text_len_minus_2 = text_len.saturating_sub(2);
-
-        let replacement = if text_len_minus_2 <= base.len() {
-            // Shorten the base string to fit the text.
-            format!("<{:.width$}>", base, width = text_len_minus_2)
-        } else {
-            // Add dashes on both sides to make up the difference.
-            let dash_len = text_len_minus_2 - base.len();
-            format!(
-                "{}<{base}>{}",
-                ".".repeat(dash_len / 2),
-                ".".repeat(dash_len - dash_len / 2)
-            )
-        };
-
+        let replacement = fill_redaction_text(name, text_to_redact.len());
         self.redactions.push((text_to_redact, replacement));
         self
     }
@@ -268,6 +248,33 @@ impl<'a> ExtraRedactions<'a> {
         self.redactions.push((text_to_redact, replacement));
         self
     }
+}
+
+fn fill_redaction_text(name: &str, text_to_redact_len: usize) -> String {
+    // The overall plan is to generate a string of the form
+    // ---<REDACTED_NAME>---, depending on the length of the text to
+    // redact.
+    //
+    // * Always include the < > signs for clarity, and either shorten the
+    //   text or add dashes to compensate for the length.
+
+    let base = format!("REDACTED_{}", name.to_uppercase());
+
+    let text_len_minus_2 = text_to_redact_len.saturating_sub(2);
+
+    let replacement = if text_len_minus_2 <= base.len() {
+        // Shorten the base string to fit the text.
+        format!("<{:.width$}>", base, width = text_len_minus_2)
+    } else {
+        // Add dashes on both sides to make up the difference.
+        let dash_len = text_len_minus_2 - base.len();
+        format!(
+            "{}<{base}>{}",
+            ".".repeat(dash_len / 2),
+            ".".repeat(dash_len - dash_len / 2)
+        )
+    };
+    replacement
 }
 
 #[cfg(test)]
