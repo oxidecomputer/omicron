@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
-use nexus_config::SchemaConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -70,7 +69,10 @@ mod ipv4_nat_entry;
 mod network_interface;
 mod oximeter;
 mod physical_disk;
+mod probe;
 mod project;
+#[cfg(any(test, feature = "testing"))]
+pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
@@ -99,25 +101,24 @@ mod vpc;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
-pub use db_metadata::{
-    all_sql_for_version_migration, SchemaUpgrade, SchemaUpgradeStep,
-    EARLIEST_SUPPORTED_VERSION,
-};
+pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
+use nexus_db_model::AllSchemaVersions;
+pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use silo::Discoverability;
-pub use sled::SledUpsertOutput;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
+pub use volume::VolumeCheckoutReason;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
-pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
@@ -196,14 +197,13 @@ impl DataStore {
     pub async fn new(
         log: &Logger,
         pool: Arc<Pool>,
-        config: Option<&SchemaConfig>,
+        config: Option<&AllSchemaVersions>,
     ) -> Result<Self, String> {
         let datastore =
             Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
-        const EXPECTED_VERSION: SemverVersion =
-            nexus_db_model::schema::SCHEMA_VERSION;
+        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
@@ -213,7 +213,7 @@ impl DataStore {
                 {
                     Ok(()) => return Ok(()),
                     Err(e) => {
-                        warn!(log, "Failed to ensure schema version: {e}");
+                        warn!(log, "Failed to ensure schema version"; "error" => #%e);
                     }
                 };
                 return Err(BackoffError::transient(()));
@@ -379,20 +379,21 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync;
     use crate::db::fixed_data::silo::DEFAULT_SILO;
-    use crate::db::fixed_data::silo::SILO_ID;
+    use crate::db::fixed_data::silo::DEFAULT_SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
-        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
-        ServiceKind, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
-        SshKey, VpcSubnet, Zpool,
+        PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
+        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
+        SledSystemHardware, SledUpdate, SshKey, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use chrono::{Duration, Utc};
     use futures::stream;
     use futures::StreamExt;
     use nexus_config::RegionAllocationStrategy;
+    use nexus_db_model::Generation;
     use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
@@ -497,8 +498,8 @@ mod test {
         // Associate silo with user
         let authz_silo = authz::Silo::new(
             authz::FLEET,
-            *SILO_ID,
-            LookupType::ById(*SILO_ID),
+            *DEFAULT_SILO_ID,
+            LookupType::ById(*DEFAULT_SILO_ID),
         );
         datastore
             .silo_user_create(
@@ -517,7 +518,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(*SILO_ID, db_silo_user.silo_id);
+        assert_eq!(*DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
         let (.., fetched) = LookupPath::new(&opctx, &datastore)
@@ -575,7 +576,7 @@ mod test {
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::for_test_user(
                 silo_user_id,
-                *SILO_ID,
+                *DEFAULT_SILO_ID,
                 SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
             ),
             Arc::clone(&datastore),
@@ -619,8 +620,9 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
-        datastore.sled_upsert(sled_update).await.unwrap().unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
     }
 
@@ -629,18 +631,23 @@ mod test {
     }
 
     const TEST_VENDOR: &str = "test-vendor";
-    const TEST_SERIAL: &str = "test-serial";
     const TEST_MODEL: &str = "test-model";
 
+    /// Creates a disk on a sled of a particular kind.
+    ///
+    /// The "serial" value of the disk is supplied by the
+    /// caller, and is arbitrary, but should be unique.
     async fn create_test_physical_disk(
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: Uuid,
         kind: PhysicalDiskKind,
+        serial: String,
     ) -> Uuid {
         let physical_disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             TEST_VENDOR.into(),
-            TEST_SERIAL.into(),
+            serial,
             TEST_MODEL.into(),
             kind,
             sled_id,
@@ -649,24 +656,69 @@ mod test {
             .physical_disk_upsert(opctx, physical_disk.clone())
             .await
             .expect("Failed to upsert physical disk");
-        physical_disk.uuid()
+        physical_disk.id()
     }
 
     // Creates a test zpool, returns its UUID.
     async fn create_test_zpool(
         datastore: &DataStore,
+        opctx: &OpContext,
+        sled_id: Uuid,
+        physical_disk_id: Uuid,
+    ) -> Uuid {
+        let zpool_id = create_test_zpool_not_in_inventory(
+            datastore,
+            opctx,
+            sled_id,
+            physical_disk_id,
+        )
+        .await;
+
+        add_test_zpool_to_inventory(datastore, zpool_id, sled_id).await;
+
+        zpool_id
+    }
+
+    // Creates a test zpool, returns its UUID.
+    //
+    // However, this helper doesn't add the zpool to the inventory just yet.
+    async fn create_test_zpool_not_in_inventory(
+        datastore: &DataStore,
+        opctx: &OpContext,
         sled_id: Uuid,
         physical_disk_id: Uuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(
-            zpool_id,
-            sled_id,
-            physical_disk_id,
-            test_zpool_size().into(),
-        );
-        datastore.zpool_upsert(zpool).await.unwrap();
+        let zpool = Zpool::new(zpool_id, sled_id, physical_disk_id);
+        datastore.zpool_upsert(opctx, zpool).await.unwrap();
         zpool_id
+    }
+
+    // Adds a test zpool into the inventory, with a randomly generated
+    // collection UUID.
+    async fn add_test_zpool_to_inventory(
+        datastore: &DataStore,
+        zpool_id: Uuid,
+        sled_id: Uuid,
+    ) {
+        use db::schema::inv_zpool::dsl;
+
+        let inv_collection_id = Uuid::new_v4();
+        let time_collected = Utc::now();
+        let inv_pool = nexus_db_model::InvZpool {
+            inv_collection_id,
+            time_collected,
+            id: zpool_id,
+            sled_id,
+            total_size: test_zpool_size().into(),
+        };
+        diesel::insert_into(dsl::inv_zpool)
+            .values(inv_pool)
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
     }
 
     fn create_test_disk_create_params(
@@ -785,18 +837,21 @@ mod test {
                 .map(|sled_id| {
                     let sled_id_iter: Vec<Uuid> =
                         (0..9).map(|_| sled_id).collect();
-                    stream::iter(sled_id_iter).then(|sled_id| {
-                        let disk_id_future = create_test_physical_disk(
-                            &datastore,
-                            opctx,
-                            sled_id,
-                            PhysicalDiskKind::U2,
-                        );
-                        async move {
-                            let disk_id = disk_id_future.await;
-                            PhysicalDisk { sled_id, disk_id }
-                        }
-                    })
+                    stream::iter(sled_id_iter).enumerate().then(
+                        |(i, sled_id)| {
+                            let disk_id_future = create_test_physical_disk(
+                                &datastore,
+                                opctx,
+                                sled_id,
+                                PhysicalDiskKind::U2,
+                                format!("{sled_id}, disk index {i}"),
+                            );
+                            async move {
+                                let disk_id = disk_id_future.await;
+                                PhysicalDisk { sled_id, disk_id }
+                            }
+                        },
+                    )
                 })
                 .flatten()
                 .collect()
@@ -813,6 +868,7 @@ mod test {
                 .then(|disk| {
                     let pool_id_future = create_test_zpool(
                         &datastore,
+                        &opctx,
                         disk.sled_id,
                         disk.disk_id,
                     );
@@ -893,7 +949,7 @@ mod test {
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -909,10 +965,21 @@ mod test {
             assert_eq!(expected_region_count, dataset_and_regions.len());
             let mut disk_datasets = HashSet::new();
             let mut disk_zpools = HashSet::new();
+            let mut regions = HashSet::new();
 
             for (dataset, region) in dataset_and_regions {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
+                // All regions should be unique
+                assert!(regions.insert(region.id()));
+
+                // Check there's no cross contamination between returned UUIDs
+                //
+                // This is a little goofy, but it catches a bug that has
+                // happened before. The returned columns share names (like
+                // "id"), so we need to process them in-order.
+                assert!(regions.get(&dataset.id()).is_none());
+                assert!(disk_datasets.get(&region.id()).is_none());
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =
@@ -975,7 +1042,7 @@ mod test {
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -1062,7 +1129,7 @@ mod test {
             let volume_id = Uuid::new_v4();
 
             let err = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -1107,7 +1174,7 @@ mod test {
         );
         let volume_id = Uuid::new_v4();
         let mut dataset_and_regions1 = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume_id,
                 &params.disk_source,
@@ -1120,7 +1187,7 @@ mod test {
         // Use a different allocation ordering to ensure we're idempotent even
         // if the shuffle changes.
         let mut dataset_and_regions2 = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume_id,
                 &params.disk_source,
@@ -1154,6 +1221,105 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_region_allocation_only_operates_on_zpools_in_inventory() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_only_operates_on_zpools_in_inventory",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+            "fake serial".to_string(),
+        )
+        .await;
+
+        // Create enough zpools for region allocation to succeed
+        let zpool_ids: Vec<Uuid> = stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
+            .then(|_| {
+                create_test_zpool_not_in_inventory(
+                    &datastore,
+                    &opctx,
+                    sled_id,
+                    physical_disk_id,
+                )
+            })
+            .collect()
+            .await;
+
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+
+        // 1 dataset per zpool
+        stream::iter(zpool_ids.clone())
+            .then(|zpool_id| {
+                let id = Uuid::new_v4();
+                let dataset = Dataset::new(
+                    id,
+                    zpool_id,
+                    bogus_addr,
+                    DatasetKind::Crucible,
+                );
+                let datastore = datastore.clone();
+                async move {
+                    datastore.dataset_upsert(dataset).await.unwrap();
+                    id
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        // Allocate regions from the datasets for this volume.
+        let params = create_test_disk_create_params(
+            "disk1",
+            ByteCount::from_mebibytes_u32(500),
+        );
+        let volume1_id = Uuid::new_v4();
+        let err = datastore
+            .disk_region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
+            )
+            .await
+            .unwrap_err();
+
+        let expected = "Not enough zpool space to allocate disks";
+        assert!(
+            err.to_string().contains(expected),
+            "Saw error: \'{err}\', but expected \'{expected}\'"
+        );
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
+
+        // If we add the zpools to the inventory and try again, the allocation
+        // will succeed.
+        for zpool_id in zpool_ids {
+            add_test_zpool_to_inventory(&datastore, zpool_id, sled_id).await;
+        }
+        datastore
+            .disk_region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
+            )
+            .await
+            .expect("Allocation should have worked after adding zpools to inventory");
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_region_allocation_not_enough_zpools() {
         let logctx =
             dev::test_setup_log("test_region_allocation_not_enough_zpools");
@@ -1169,6 +1335,7 @@ mod test {
             &opctx,
             sled_id,
             PhysicalDiskKind::U2,
+            "fake serial".to_string(),
         )
         .await;
 
@@ -1176,7 +1343,12 @@ mod test {
         let zpool_ids: Vec<Uuid> =
             stream::iter(0..REGION_REDUNDANCY_THRESHOLD - 1)
                 .then(|_| {
-                    create_test_zpool(&datastore, sled_id, physical_disk_id)
+                    create_test_zpool(
+                        &datastore,
+                        &opctx,
+                        sled_id,
+                        physical_disk_id,
+                    )
                 })
                 .collect()
                 .await;
@@ -1209,7 +1381,7 @@ mod test {
         );
         let volume1_id = Uuid::new_v4();
         let err = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,
@@ -1226,6 +1398,123 @@ mod test {
         );
 
         assert!(matches!(err, Error::InsufficientCapacity { .. }));
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation_only_considers_disks_in_service() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_only_considers_disks_in_service",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and create several disks on that sled, each with a zpool/dataset.
+        let mut physical_disk_ids = vec![];
+        for i in 0..REGION_REDUNDANCY_THRESHOLD {
+            let physical_disk_id = create_test_physical_disk(
+                &datastore,
+                &opctx,
+                sled_id,
+                PhysicalDiskKind::U2,
+                format!("fake serial #{i}"),
+            )
+            .await;
+            let zpool_id = create_test_zpool(
+                &datastore,
+                &opctx,
+                sled_id,
+                physical_disk_id,
+            )
+            .await;
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let dataset = Dataset::new(
+                Uuid::new_v4(),
+                zpool_id,
+                bogus_addr,
+                DatasetKind::Crucible,
+            );
+            datastore.dataset_upsert(dataset).await.unwrap();
+            physical_disk_ids.push(physical_disk_id);
+        }
+
+        // Check the following combinations of physical disk policy/state
+        // on region allocation. Since we only created
+        // REGION_REDUNDANCY_THRESHOLD disks/zpools/datasets, updating the
+        // state of a single disk should be sufficient to prevent the
+        // allocations from occurring.
+        use PhysicalDiskPolicy as Policy;
+        use PhysicalDiskState as State;
+
+        // Just a bool with a fancier name -- determines whether or not
+        // we expect the policy/state combinations to pass or not.
+        enum AllocationShould {
+            Fail,
+            Succeed,
+        }
+
+        let policy_state_combos = [
+            (Policy::Expunged, State::Active, AllocationShould::Fail),
+            (Policy::Expunged, State::Decommissioned, AllocationShould::Fail),
+            (Policy::InService, State::Decommissioned, AllocationShould::Fail),
+            // Save this one for last, since it actually leaves an allocation
+            // lying around.
+            (Policy::InService, State::Active, AllocationShould::Succeed),
+        ];
+
+        let volume_id = Uuid::new_v4();
+        let params = create_test_disk_create_params(
+            "disk",
+            ByteCount::from_mebibytes_u32(500),
+        );
+
+        for (policy, state, expected) in policy_state_combos {
+            // Update policy/state only on a single physical disk.
+            //
+            // The rest are assumed "in service" + "active".
+            datastore
+                .physical_disk_update_policy(
+                    &opctx,
+                    physical_disk_ids[0],
+                    policy,
+                )
+                .await
+                .unwrap();
+            datastore
+                .physical_disk_update_state(&opctx, physical_disk_ids[0], state)
+                .await
+                .unwrap();
+
+            let result = datastore
+                .disk_region_allocate(
+                    &opctx,
+                    volume_id,
+                    &params.disk_source,
+                    params.size,
+                    &RegionAllocationStrategy::Random { seed: Some(0) },
+                )
+                .await;
+
+            match expected {
+                AllocationShould::Fail => {
+                    let err = result.unwrap_err();
+                    let expected = "Not enough zpool space to allocate disks";
+                    assert!(
+                        err.to_string().contains(expected),
+                        "Saw error: \'{err}\', but expected \'{expected}\'"
+                    );
+                    assert!(matches!(err, Error::InsufficientCapacity { .. }));
+                }
+                AllocationShould::Succeed => {
+                    let _ = result.expect("Allocation should have succeeded");
+                }
+            }
+        }
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
@@ -1251,7 +1540,7 @@ mod test {
         let volume1_id = Uuid::new_v4();
 
         assert!(datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,
@@ -1338,8 +1627,9 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
-        datastore.sled_upsert(sled1).await.unwrap().unwrap();
+        datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
@@ -1349,8 +1639,9 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
-        datastore.sled_upsert(sled2).await.unwrap().unwrap();
+        datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
@@ -1376,8 +1667,8 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let authz_silo = authz::Silo::new(
             authz::FLEET,
-            *SILO_ID,
-            LookupType::ById(*SILO_ID),
+            *DEFAULT_SILO_ID,
+            LookupType::ById(*DEFAULT_SILO_ID),
         );
         let silo_user_id = Uuid::new_v4();
         datastore
@@ -1427,7 +1718,7 @@ mod test {
                 .fetch()
                 .await
                 .unwrap();
-        assert_eq!(authz_silo.id(), *SILO_ID);
+        assert_eq!(authz_silo.id(), *DEFAULT_SILO_ID);
         assert_eq!(authz_silo_user.id(), silo_user_id);
         assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
         assert_eq!(found.public_key, ssh_key.public_key);
@@ -1678,6 +1969,7 @@ mod test {
                 first_port: crate::db::model::SqlU16(0),
                 last_port: crate::db::model::SqlU16(10),
                 state: nexus_db_model::IpAttachState::Attached,
+                is_probe: false,
             })
             .collect::<Vec<_>>();
         diesel::insert_into(dsl::external_ip)
@@ -1740,6 +2032,7 @@ mod test {
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
             state: nexus_db_model::IpAttachState::Attached,
+            is_probe: false,
         };
         diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
@@ -1811,6 +2104,7 @@ mod test {
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
             state: nexus_db_model::IpAttachState::Attached,
+            is_probe: false,
         };
 
         // Combinations of NULL and non-NULL for:

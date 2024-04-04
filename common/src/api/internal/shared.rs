@@ -4,7 +4,7 @@
 
 //! Types shared between Nexus and Sled Agent.
 
-use crate::api::external::{self, Name};
+use crate::api::external::{self, BfdMode, Name};
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,8 @@ pub enum NetworkInterfaceKind {
     Instance { id: Uuid },
     /// A vNIC associated with an internal service
     Service { id: Uuid },
+    /// A vNIC associated with a probe
+    Probe { id: Uuid },
 }
 
 /// Information required to construct a virtual network interface
@@ -85,6 +87,9 @@ pub struct RackNetworkConfigV1 {
     pub ports: Vec<PortConfigV1>,
     /// BGP configurations for connecting the rack to external networks
     pub bgp: Vec<BgpConfig>,
+    /// BFD configuration for connecting the rack to external networks
+    #[serde(default)]
+    pub bfd: Vec<BfdPeerConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -114,6 +119,16 @@ pub struct BgpPeerConfig {
     pub connect_retry: Option<u64>,
     /// The interval to send keepalive messages at.
     pub keepalive: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct BfdPeerConfig {
+    pub local: Option<IpAddr>,
+    pub remote: IpAddr,
+    pub detection_threshold: u8,
+    pub required_rx: u64,
+    pub mode: BfdMode,
+    pub switch: SwitchLocation,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -264,7 +279,9 @@ pub enum ExternalPortDiscovery {
 }
 
 /// Switchport Speed options
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
     #[serde(alias = "0G")]
@@ -288,7 +305,9 @@ pub enum PortSpeed {
 }
 
 /// Switchport FEC options
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortFec {
     Firecode,

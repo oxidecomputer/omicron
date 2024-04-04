@@ -9,8 +9,13 @@
 
 use expectorate::assert_contents;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
+use omicron_test_utils::dev::test_cmds::redact_extra;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::ExtraRedactions;
+use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::path::Path;
 use subprocess::Exec;
@@ -71,19 +76,28 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+    let tmpdir = camino_tempfile::tempdir()
+        .expect("failed to create temporary directory");
+    let tmppath = tmpdir.path().join("reconfigurator-save.out");
+    let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
+
     let mut output = String::new();
-    let invocations: &[&[&'static str]] = &[
+
+    let invocations: &[&[&str]] = &[
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
+        &["db", "reconfigurator-save", tmppath.as_str()],
         &["db", "services", "list-instances"],
         &["db", "services", "list-by-sled"],
         &["db", "sleds"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        &["nexus", "blueprints", "list"],
+        &["nexus", "blueprints", "show", &initial_blueprint_id],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
@@ -94,7 +108,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         let p = postgres_url.to_string();
         let u = nexus_internal_url.clone();
         let g = mgs_url.clone();
-        do_run(
+        do_run_extra(
             &mut output,
             move |exec| {
                 exec.env("OMDB_DB_URL", &p)
@@ -103,11 +117,43 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             },
             &cmd_path,
             args,
+            ExtraRedactions::new()
+                .variable_length("tmp_path", tmppath.as_str())
+                .fixed_length("blueprint_id", &initial_blueprint_id),
         )
         .await;
     }
 
     assert_contents("tests/successes.out", &output);
+
+    // The `reconfigurator-save` output is not easy to compare as a string.  But
+    // let's make sure we can at least parse it and that it looks broadly like
+    // what we'd expect.
+    let generated = std::fs::read_to_string(&tmppath).unwrap_or_else(|error| {
+        panic!(
+            "failed to read temporary file containing reconfigurator-save \
+            output: {:?}: {}",
+            tmppath,
+            InlineErrorChain::new(&error),
+        )
+    });
+    let parsed: UnstableReconfiguratorState = serde_json::from_str(&generated)
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to parse reconfigurator-save output (path {}): {}",
+                tmppath,
+                InlineErrorChain::new(&error),
+            )
+        });
+    // Did we find at least one sled in the planning input, and at least one
+    // collection?
+    assert!(parsed
+        .planning_input
+        .all_sled_ids(SledFilter::All)
+        .next()
+        .is_some());
+    assert!(!parsed.collections.is_empty());
+
     gwtestctx.teardown().await;
 }
 
@@ -212,12 +258,27 @@ async fn do_run<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
+    do_run_extra(output, modexec, cmd_path, args, &ExtraRedactions::new())
+        .await;
+}
+
+async fn do_run_extra<F>(
+    output: &mut String,
+    modexec: F,
+    cmd_path: &Path,
+    args: &[&str],
+    extra_redactions: &ExtraRedactions<'_>,
+) where
+    F: FnOnce(Exec) -> Exec + Send + 'static,
+{
     println!("running command with args: {:?}", args);
     write!(
         output,
         "EXECUTING COMMAND: {} {:?}\n",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
-        args.iter().map(|r| redact_variable(r)).collect::<Vec<_>>(),
+        args.iter()
+            .map(|r| redact_extra(r, extra_redactions))
+            .collect::<Vec<_>>(),
     )
     .unwrap();
 
@@ -249,75 +310,9 @@ async fn do_run<F>(
     write!(output, "termination: {:?}\n", exit_status).unwrap();
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stdout:\n").unwrap();
-    output.push_str(&redact_variable(&stdout_text));
+    output.push_str(&redact_extra(&stdout_text, extra_redactions));
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stderr:\n").unwrap();
-    output.push_str(&redact_variable(&stderr_text));
+    output.push_str(&redact_extra(&stderr_text, extra_redactions));
     write!(output, "=============================================\n").unwrap();
-}
-
-/// Redacts text from stdout/stderr that may change from invocation to invocation
-/// (e.g., assigned TCP port numbers, timestamps)
-///
-/// This allows use to use expectorate to verify the shape of the CLI output.
-fn redact_variable(input: &str) -> String {
-    // Replace TCP port numbers.  We include the localhost characters to avoid
-    // catching any random sequence of numbers.
-    let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
-        .unwrap()
-        .replace_all(input, "[::1]:REDACTED_PORT")
-        .to_string();
-    let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
-        .unwrap()
-        .replace_all(&s, "[::ffff:127.0.0.1]:REDACTED_PORT")
-        .to_string();
-    let s = regex::Regex::new(r"127\.0\.0\.1:\d{4,5}")
-        .unwrap()
-        .replace_all(&s, "127.0.0.1:REDACTED_PORT")
-        .to_string();
-
-    // Replace uuids.
-    let s = regex::Regex::new(
-        "[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-\
-        [a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}",
-    )
-    .unwrap()
-    .replace_all(&s, "REDACTED_UUID_REDACTED_UUID_REDACTED")
-    .to_string();
-
-    // Replace timestamps.
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
-        .unwrap()
-        .replace_all(&s, "<REDACTED_TIMESTAMP>")
-        .to_string();
-
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
-        .unwrap()
-        .replace_all(&s, "<REDACTED     TIMESTAMP>")
-        .to_string();
-
-    // Replace formatted durations.  These are pretty specific to the background
-    // task output.
-    let s = regex::Regex::new(r"\d+s ago")
-        .unwrap()
-        .replace_all(&s, "<REDACTED DURATION>s ago")
-        .to_string();
-
-    let s = regex::Regex::new(r"\d+ms")
-        .unwrap()
-        .replace_all(&s, "<REDACTED DURATION>ms")
-        .to_string();
-
-    let s = regex::Regex::new(
-        r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
-    )
-    .unwrap()
-    .replace_all(
-        &s,
-        "note: database schema version matches expected \
-        (<redacted database version>)",
-    )
-    .to_string();
-
-    s
 }

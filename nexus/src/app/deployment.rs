@@ -7,44 +7,36 @@
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::Policy;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
-use omicron_common::address::IpRange;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_REDUNDANCY;
-use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
-    policy: Policy,
+    planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
-    internal_dns_version: Generation,
 }
 
 impl super::Nexus {
@@ -104,8 +96,33 @@ impl super::Nexus {
             .blueprint_target_set_current(opctx, new_target)
             .await?;
 
-        // When we add a background task executing the target blueprint,
-        // this is the point where we'd signal it to update its target.
+        // We have a new target: trigger the background task to load this
+        // blueprint.
+        self.background_tasks
+            .activate(&self.background_tasks.task_blueprint_loader);
+
+        Ok(new_target)
+    }
+
+    pub async fn blueprint_target_set_enabled(
+        &self,
+        opctx: &OpContext,
+        params: BlueprintTargetSet,
+    ) -> Result<BlueprintTarget, Error> {
+        let new_target = BlueprintTarget {
+            target_id: params.target_id,
+            enabled: params.enabled,
+            time_made_target: chrono::Utc::now(),
+        };
+
+        self.db_datastore
+            .blueprint_target_set_current_enabled(opctx, new_target)
+            .await?;
+
+        // We don't know whether this actually changed the enabled bit; activate
+        // the background task to load this blueprint which does know.
+        self.background_tasks
+            .activate(&self.background_tasks.task_blueprint_loader);
 
         Ok(new_target)
     }
@@ -118,80 +135,48 @@ impl super::Nexus {
         let datastore = self.datastore();
 
         let sled_rows = datastore.sled_list_all_batched(opctx).await?;
-
-        let mut zpools_by_sled_id = {
-            let mut zpools = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-            while let Some(p) = paginator.next() {
-                let batch = datastore
-                    .zpool_list_all_external(opctx, &p.current_pagparams())
-                    .await?;
-                paginator =
-                    p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
-                for z in batch {
-                    let sled_zpool_names =
-                        zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
-                    // It's unfortunate that Nexus knows how Sled Agent
-                    // constructs zpool names, but there's not currently an
-                    // alternative.
-                    let zpool_name_generated =
-                        illumos_utils::zpool::ZpoolName::new_external(z.id())
-                            .to_string();
-                    let zpool_name = ZpoolName::from_str(&zpool_name_generated)
-                        .map_err(|e| {
-                            Error::internal_error(&format!(
-                                "unexpectedly failed to parse generated \
-                                zpool name: {}: {}",
-                                zpool_name_generated, e
-                            ))
-                        })?;
-                    sled_zpool_names.insert(zpool_name);
-                }
-            }
-            zpools
-        };
-
-        let sleds = sled_rows
-            .into_iter()
-            .map(|sled_row| {
-                let sled_id = sled_row.id();
-                let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
-                let zpools = zpools_by_sled_id
-                    .remove(&sled_id)
-                    .unwrap_or_else(BTreeSet::new);
-                let sled_info = SledResources {
-                    policy: sled_row.policy(),
-                    state: sled_row.state().into(),
-                    subnet,
-                    zpools,
-                };
-                (sled_id, sled_info)
-            })
-            .collect();
-
-        let service_ip_pool_ranges = {
+        let zpool_rows =
+            datastore.zpool_list_all_external_batched(opctx).await?;
+        let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(opctx).await?;
-
-            let mut ip_ranges = Vec::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-            while let Some(p) = paginator.next() {
-                let batch = datastore
-                    .ip_pool_list_ranges(
-                        opctx,
-                        &authz_service_ip_pool,
-                        &p.current_pagparams(),
-                    )
-                    .await?;
-                // The use of `last_address` here assumes `paginator` is sorting
-                // in Ascending order (which it does - see the implementation of
-                // `current_pagparams()`).
-                paginator = p.found_batch(&batch, &|r| r.last_address);
-                ip_ranges.extend(batch.iter().map(IpRange::from));
-            }
-
-            ip_ranges
+            datastore
+                .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
+                .await?
         };
+        let external_ip_rows =
+            datastore.external_ip_list_service_all_batched(opctx).await?;
+        let service_nic_rows = datastore
+            .service_network_interfaces_all_list_batched(opctx)
+            .await?;
+
+        let internal_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::Internal)
+            .await
+            .internal_context(
+                "fetching internal DNS version for blueprint planning",
+            )?
+            .version;
+        let external_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::External)
+            .await
+            .internal_context(
+                "fetching external DNS version for blueprint planning",
+            )?
+            .version;
+
+        let planning_input = PlanningInputFromDb {
+            sled_rows: &sled_rows,
+            zpool_rows: &zpool_rows,
+            ip_pool_range_rows: &ip_pool_range_rows,
+            external_ip_rows: &external_ip_rows,
+            service_nic_rows: &service_nic_rows,
+            target_nexus_zone_count: NEXUS_REDUNDANCY,
+            log: &opctx.log,
+            internal_dns_version,
+            external_dns_version,
+        }
+        .build()?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to
@@ -211,26 +196,7 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        // Fetch the current internal DNS version.  This could be made part of
-        // inventory, but it's enough of a one-off that there's no particular
-        // advantage to doing that work now.
-        let dns_version = datastore
-            .dns_group_latest_version(opctx, DnsGroup::Internal)
-            .await
-            .internal_context(
-                "fetching internal DNS version for blueprint planning",
-            )?;
-
-        Ok(PlanningContext {
-            creator,
-            policy: Policy {
-                sleds,
-                service_ip_pool_ranges,
-                target_nexus_zone_count: NEXUS_REDUNDANCY,
-            },
-            inventory,
-            internal_dns_version: *dns_version.version,
-        })
+        Ok(PlanningContext { planning_input, creator, inventory })
     }
 
     async fn blueprint_add(
@@ -253,8 +219,9 @@ impl super::Nexus {
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
-            planning_context.internal_dns_version,
-            &planning_context.policy,
+            planning_context.planning_input.internal_dns_version(),
+            planning_context.planning_input.external_dns_version(),
+            planning_context.planning_input.all_sled_ids(SledFilter::All),
             &planning_context.creator,
         )
         .map_err(|error| {
@@ -288,8 +255,7 @@ impl super::Nexus {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
-            planning_context.internal_dns_version,
-            &planning_context.policy,
+            &planning_context.planning_input,
             &planning_context.creator,
             &inventory,
         )
@@ -307,5 +273,14 @@ impl super::Nexus {
 
         self.blueprint_add(&opctx, &blueprint).await?;
         Ok(blueprint)
+    }
+
+    pub async fn blueprint_import(
+        &self,
+        opctx: &OpContext,
+        blueprint: Blueprint,
+    ) -> Result<(), Error> {
+        let _ = self.blueprint_add(&opctx, &blueprint).await?;
+        Ok(())
     }
 }

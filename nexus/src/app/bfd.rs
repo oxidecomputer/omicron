@@ -7,15 +7,18 @@ use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::shared::{BfdState, BfdStatus};
 use omicron_common::api::{external::Error, internal::shared::SwitchLocation};
-use std::sync::Arc;
 
 impl super::Nexus {
-    fn mg_client_for_switch_location(
+    async fn mg_client_for_switch_location(
         &self,
         switch: SwitchLocation,
-    ) -> Result<Arc<mg_admin_client::Client>, Error> {
-        let mg_client: Arc<mg_admin_client::Client> = self
-            .mg_clients
+    ) -> Result<mg_admin_client::Client, Error> {
+        let mg_client: mg_admin_client::Client = self
+            .mg_clients()
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!("failed to get mg clients: {e}"))
+            })?
             .get(&switch)
             .ok_or_else(|| {
                 Error::not_found_by_name(
@@ -39,6 +42,10 @@ impl super::Nexus {
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
+        // for timely propagation to bootstore
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
 
@@ -53,6 +60,10 @@ impl super::Nexus {
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
+        // for timely propagation to bootstore
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
 
@@ -64,9 +75,8 @@ impl super::Nexus {
         // be updated for multirack.
         let mut result = Vec::new();
         for s in &[SwitchLocation::Switch0, SwitchLocation::Switch1] {
-            let mg_client = self.mg_client_for_switch_location(*s)?;
+            let mg_client = self.mg_client_for_switch_location(*s).await?;
             let status = mg_client
-                .inner
                 .get_bfd_peers()
                 .await
                 .map_err(|e| {
@@ -91,10 +101,10 @@ impl super::Nexus {
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {
-                            params::BfdMode::SingleHop
+                            omicron_common::api::external::BfdMode::SingleHop
                         }
                         mg_admin_client::types::SessionMode::MultiHop => {
-                            params::BfdMode::MultiHop
+                            omicron_common::api::external::BfdMode::MultiHop
                         }
                     },
                 })

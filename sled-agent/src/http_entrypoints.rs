@@ -11,8 +11,8 @@ use crate::params::{
     BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
-    ZoneBundleId, ZoneBundleMetadata, Zpool,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
+    VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -40,6 +40,7 @@ use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
+use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -60,6 +61,8 @@ pub fn api() -> SledApiDescription {
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
         api.register(zones_list)?;
+        api.register(omicron_physical_disks_get)?;
+        api.register(omicron_physical_disks_put)?;
         api.register(zone_bundle_list)?;
         api.register(zone_bundle_list_all)?;
         api.register(zone_bundle_create)?;
@@ -340,6 +343,31 @@ async fn omicron_zones_get(
 
 #[endpoint {
     method = PUT,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<OmicronPhysicalDisksConfig>,
+) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.omicron_physical_disks_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
+}
+
+#[endpoint {
+    method = PUT,
     path = "/omicron-zones",
 }]
 async fn omicron_zones_put(
@@ -413,6 +441,7 @@ async fn instance_register(
             body_args.instance_runtime,
             body_args.vmm_runtime,
             body_args.propolis_addr,
+            body_args.metadata,
         )
         .await?,
     ))
@@ -838,8 +867,8 @@ async fn host_os_write_start(
 
     // Find our corresponding disk.
     let maybe_disk_path =
-        sa.storage().get_latest_resources().await.disks().values().find_map(
-            |(disk, _pool)| {
+        sa.storage().get_latest_disks().await.iter_managed().find_map(
+            |(_identity, disk)| {
                 // Synthetic disks panic if asked for their `slot()`, so filter
                 // them out first; additionally, filter out any non-M2 disks.
                 if disk.is_synthetic() || disk.variant() != DiskVariant::M2 {
@@ -971,7 +1000,7 @@ async fn inventory(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = request_context.context();
-    Ok(HttpResponseOk(sa.inventory()?))
+    Ok(HttpResponseOk(sa.inventory().await?))
 }
 
 /// Get the internal state of the local bootstore node

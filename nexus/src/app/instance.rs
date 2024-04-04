@@ -173,6 +173,13 @@ enum InstanceStateChangeRequestAction {
     SendToSled(Uuid),
 }
 
+/// What is the higher level operation that is calling
+/// `instance_ensure_registered`?
+pub(crate) enum InstanceRegisterReason {
+    Start { vmm_id: Uuid },
+    Migrate { vmm_id: Uuid, target_vmm_id: Uuid },
+}
+
 impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
@@ -986,6 +993,9 @@ impl super::Nexus {
                 //
                 // If the operation failed, kick the sled agent error back up to
                 // the caller to let it decide how to handle it.
+                //
+                // When creating the zone for the first time, we just get
+                // Ok(None) here, which is a no-op in write_returned_instance_state.
                 match instance_put_result {
                     Ok(state) => self
                         .write_returned_instance_state(&instance_id, state)
@@ -1007,6 +1017,7 @@ impl super::Nexus {
         db_instance: &db::model::Instance,
         propolis_id: &Uuid,
         initial_vmm: &db::model::Vmm,
+        operation: InstanceRegisterReason,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
@@ -1062,8 +1073,19 @@ impl super::Nexus {
                 }
             };
 
-            let volume =
-                self.db_datastore.volume_checkout(disk.volume_id).await?;
+            let volume = self
+                .db_datastore
+                .volume_checkout(
+                    disk.volume_id,
+                    match operation {
+                        InstanceRegisterReason::Start { vmm_id } =>
+                            db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
+                        InstanceRegisterReason::Migrate { vmm_id, target_vmm_id } =>
+                            db::datastore::VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id },
+                    }
+                )
+                .await?;
+
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(slot.0),
@@ -1183,6 +1205,25 @@ impl super::Nexus {
         let ssh_keys: Vec<String> =
             ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
 
+        // Construct instance metadata used to track its statistics.
+        //
+        // This requires another fetch on the silo and project, to extract their
+        // IDs.
+        let (.., db_project) = self
+            .project_lookup(
+                opctx,
+                params::ProjectSelector {
+                    project: NameOrId::Id(db_instance.project_id),
+                },
+            )?
+            .fetch()
+            .await?;
+        let (_, db_silo) = self.current_silo_lookup(opctx)?.fetch().await?;
+        let metadata = sled_agent_client::types::InstanceMetadata {
+            silo_id: db_silo.id(),
+            project_id: db_project.id(),
+        };
+
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
@@ -1226,6 +1267,7 @@ impl super::Nexus {
                         initial_vmm.propolis_port.into(),
                     )
                     .to_string(),
+                    metadata,
                 },
             )
             .await
@@ -1539,7 +1581,7 @@ impl super::Nexus {
             // an instance's state changes.
             //
             // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-            self.unassign_producer(instance_id).await?;
+            self.unassign_producer(opctx, instance_id).await?;
         }
 
         // Write the new instance and VMM states back to CRDB. This needs to be

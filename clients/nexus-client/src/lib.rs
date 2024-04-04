@@ -33,6 +33,17 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
+        TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
+        TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
+        TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
+    },
+    patch = {
+        SledAgentInfo = { derives = [PartialEq, Eq] },
+        ByteCount = { derives = [PartialEq, Eq] },
+        Baseboard = { derives = [PartialEq, Eq] }
     }
 );
 
@@ -369,5 +380,37 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
                 types::ExternalPortDiscovery::Static(new)
             },
         }
+    }
+}
+
+impl From<types::ProducerKind>
+    for omicron_common::api::internal::nexus::ProducerKind
+{
+    fn from(kind: types::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus::ProducerKind;
+        match kind {
+            types::ProducerKind::SledAgent => ProducerKind::SledAgent,
+            types::ProducerKind::Instance => ProducerKind::Instance,
+            types::ProducerKind::Service => ProducerKind::Service,
+        }
+    }
+}
+
+impl TryFrom<types::ProducerEndpoint>
+    for omicron_common::api::internal::nexus::ProducerEndpoint
+{
+    type Error = String;
+
+    fn try_from(ep: types::ProducerEndpoint) -> Result<Self, String> {
+        let Ok(address) = ep.address.parse() else {
+            return Err(format!("Invalid IP address: {}", ep.address));
+        };
+        Ok(Self {
+            id: ep.id,
+            kind: ep.kind.into(),
+            address,
+            base_route: ep.base_route,
+            interval: ep.interval.into(),
+        })
     }
 }

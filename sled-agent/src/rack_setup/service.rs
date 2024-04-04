@@ -17,7 +17,7 @@
 //! state files that get generated as RSS executes:
 //!
 //! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan-v2.json (Service Plan)
+//! - /pool/int/UUID/config/rss-service-plan-v3.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! These phases are described below.  As each phase completes, a corresponding
@@ -65,6 +65,7 @@
 //! thereafter.
 
 use super::config::SetupServiceConfig as Config;
+use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody, EarlyNetworkSetup,
@@ -74,23 +75,25 @@ use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::{d2n_params, ConvertInto};
-use crate::params::{
-    OmicronZoneType, OmicronZonesConfig, TimeSync,
-    OMICRON_ZONES_CONFIG_INITIAL_GENERATION,
-};
+use crate::params::{OmicronZoneType, OmicronZonesConfig, TimeSync};
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
+use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use chrono::Utc;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
+};
+use nexus_types::deployment::{
+    Blueprint, BlueprintZoneConfig, BlueprintZoneDisposition,
+    BlueprintZonesConfig,
 };
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -99,19 +102,22 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
-use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::BTreeSet;
+use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::time::Duration;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -167,6 +173,9 @@ pub enum SetupServiceError {
 
     #[error("Bootstore error: {0}")]
     Bootstore(#[from] bootstore::NodeRequestError),
+
+    #[error("Failed to convert setup plan to blueprint: {0:#}")]
+    ConvertPlanToBlueprint(anyhow::Error),
 
     // We used transparent, because `EarlyNetworkSetupError` contains a subset
     // of error variants already in this type
@@ -268,6 +277,125 @@ impl ServiceInner {
         ServiceInner { log }
     }
 
+    // Ensures that all storage for a particular generation is configured.
+    //
+    // This will either return:
+    // - Ok if the requests are all successful (where "successful" also
+    // includes any of the sleds having a storage configuration more recent than
+    // what we've requested), or
+    // - An error from attempting to configure storage on the underlying sleds
+    async fn ensure_storage_config_at_least(
+        &self,
+        plan: &ServicePlan,
+    ) -> Result<(), SetupServiceError> {
+        cancel_safe_futures::future::join_all_then_try(
+            plan.services.iter().map(|(sled_address, config)| async move {
+                self.initialize_storage_on_sled(
+                    *sled_address,
+                    SledAgentTypes::OmicronPhysicalDisksConfig {
+                        generation: config.disks.generation,
+                        disks: config
+                            .disks
+                            .disks
+                            .iter()
+                            .map(|disk| {
+                                SledAgentTypes::OmicronPhysicalDiskConfig {
+                                    identity: disk.identity.clone(),
+                                    id: disk.id,
+                                    pool_id: disk.pool_id,
+                                }
+                            })
+                            .collect(),
+                    },
+                )
+                .await
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Requests that the specified sled configure storage as described
+    /// by `storage_config`.
+    ///
+    /// This function succeeds if either the configuration is supplied, or if
+    /// the configuration on the target sled is newer than what we're supplying.
+    // This function shares a lot of implementation details with
+    // [Self::initialize_zones_on_sled]. Although it has a different meaning,
+    // the usage (and expectations around generation numbers) are similar.
+    async fn initialize_storage_on_sled(
+        &self,
+        sled_address: SocketAddrV6,
+        storage_config: SledAgentTypes::OmicronPhysicalDisksConfig,
+    ) -> Result<(), SetupServiceError> {
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            log.clone(),
+        );
+
+        let storage_put = || async {
+            info!(
+                log,
+                "attempting to set up sled's storage: {:?}", storage_config,
+            );
+            let result = client
+                .omicron_physical_disks_put(&storage_config.clone())
+                .await;
+            let Err(error) = result else {
+                return Ok::<
+                    (),
+                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
+                >(());
+            };
+
+            if let sled_agent_client::Error::ErrorResponse(response) = &error {
+                if response.status() == http::StatusCode::CONFLICT {
+                    warn!(
+                        log,
+                        "ignoring attempt to initialize storage because \
+                        the server seems to be newer";
+                        "attempted_generation" => i64::from(&storage_config.generation),
+                        "req_id" => &response.request_id,
+                        "server_message" => &response.message,
+                    );
+
+                    // If we attempt to initialize storage at generation X, and
+                    // the server refuses because it's at some generation newer
+                    // than X, then we treat that as success.  See the doc
+                    // comment on this function.
+                    return Ok(());
+                }
+            }
+
+            // TODO Many other codes here should not be retried.  See
+            // omicron#4578.
+            return Err(BackoffError::transient(error));
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to initialize Omicron storage";
+                "error" => #%error,
+                "retry_after" => ?delay,
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            storage_put,
+            log_failure,
+        )
+        .await?;
+
+        Ok(())
+    }
+
     /// Requests that the specified sled configure zones as described by
     /// `zones_config`
     ///
@@ -337,7 +465,7 @@ impl ServiceInner {
             warn!(
                 log,
                 "failed to initialize Omicron zones";
-                "error" => ?error,
+                "error" => #%error,
                 "retry_after" => ?delay,
             );
         };
@@ -548,10 +676,24 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
+        // Build a Blueprint describing our service plan. This should never
+        // fail, unless we've set up an invalid plan.
+        let blueprint =
+            build_initial_blueprint_from_plan(sled_plan, service_plan)
+                .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
-        let nexus_client = NexusClient::new(
+        const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
+        let client = reqwest::Client::builder()
+            .connect_timeout(CLIENT_TIMEOUT)
+            .timeout(CLIENT_TIMEOUT)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+
+        let nexus_client = NexusClient::new_with_client(
             &format!("http://{}", nexus_address),
+            client,
             self.log.new(o!("component" => "NexusClient")),
         );
 
@@ -649,13 +791,68 @@ impl ServiceInner {
                         originate: config.originate.clone(),
                     })
                     .collect(),
+                bfd: config
+                    .bfd
+                    .iter()
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: match spec.mode {
+                            omicron_common::api::external::BfdMode::SingleHop => {
+                                nexus_client::types::BfdMode::SingleHop
+                            }
+                            omicron_common::api::external::BfdMode::MultiHop => {
+                                nexus_client::types::BfdMode::MultiHop
+                            }
+                        },
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch.into(),
+                    })
+                    .collect(),
             }
         };
 
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
+        let physical_disks: Vec<_> = service_plan
+            .services
+            .iter()
+            .flat_map(|(addr, config)| {
+                let sled_id = id_map.get(addr).expect("Missing sled");
+                config.disks.disks.iter().map(|config| {
+                    NexusTypes::PhysicalDiskPutRequest {
+                        id: config.id,
+                        vendor: config.identity.vendor.clone(),
+                        serial: config.identity.serial.clone(),
+                        model: config.identity.model.clone(),
+                        variant: NexusTypes::PhysicalDiskKind::U2,
+                        sled_id: *sled_id,
+                    }
+                })
+            })
+            .collect();
+
+        let zpools = service_plan
+            .services
+            .iter()
+            .flat_map(|(addr, config)| {
+                let sled_id = id_map.get(addr).expect("Missing sled");
+                config.disks.disks.iter().map(|config| {
+                    NexusTypes::ZpoolPutRequest {
+                        id: config.pool_id,
+                        physical_disk_id: config.id,
+                        sled_id: *sled_id,
+                    }
+                })
+            })
+            .collect();
+
         let request = NexusTypes::RackInitializationRequest {
+            blueprint,
             services,
+            physical_disks,
+            zpools,
             datasets,
             internal_services_ip_pool_ranges,
             certs: config.external_certificates.clone(),
@@ -755,7 +952,7 @@ impl ServiceInner {
             warn!(
                 self.log,
                 "Failed to initialize CockroachDB";
-                "error" => ?error,
+                "error" => #%error,
                 "retry_after" => ?delay
             );
         };
@@ -805,7 +1002,7 @@ impl ServiceInner {
         )?;
 
         let marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -970,44 +1167,18 @@ impl ServiceInner {
             .await?
         };
 
-        // The service plan describes all the zones that we will eventually
-        // deploy on each sled.  But we cannot currently just deploy them all
-        // concurrently.  We'll do it in a few stages, each corresponding to a
-        // version of each sled's configuration.
-        //
-        // - version 1: no services running
-        //              (We don't have to do anything for this.  But we do
-        //              reserve this version number for "no services running" so
-        //              that sled agents can begin with an initial, valid
-        //              OmicronZonesConfig before they've got anything running.)
-        // - version 2: internal DNS only
-        // - version 3: internal DNS + NTP servers
-        // - version 4: internal DNS + NTP servers + CockroachDB
-        // - version 5: everything
-        //
-        // At each stage, we're specifying a complete configuration of what
-        // should be running on the sled -- including this version number.
-        // And Sled Agents will reject requests for versions older than the
-        // one they're currently running.  Thus, the version number is a piece
-        // of global, distributed state.
-        //
-        // For now, we hardcode the requests we make to use specific version
-        // numbers.
-        let version1_nothing =
-            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_GENERATION);
-        let version2_dns_only = version1_nothing.next();
-        let version3_dns_and_ntp = version2_dns_only.next();
-        let version4_cockroachdb = version3_dns_and_ntp.next();
-        let version5_everything = version4_cockroachdb.next();
+        // Before we can ask for any services, we need to ensure that storage is
+        // operational.
+        self.ensure_storage_config_at_least(&service_plan).await?;
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         let v1generator = OmicronZonesConfigGenerator::initial_version(
             &service_plan,
-            version1_nothing,
+            DeployStepVersion::V1_NOTHING,
         );
         let v2generator = v1generator.new_version_with(
-            version2_dns_only,
+            DeployStepVersion::V2_DNS_ONLY,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::InternalDns { .. })
             },
@@ -1022,7 +1193,7 @@ impl ServiceInner {
 
         // Next start up the NTP services.
         let v3generator = v2generator.new_version_with(
-            version3_dns_and_ntp,
+            DeployStepVersion::V3_DNS_AND_NTP,
             &|zone_type: &OmicronZoneType| {
                 matches!(
                     zone_type,
@@ -1040,7 +1211,7 @@ impl ServiceInner {
 
         // Wait until Cockroach has been initialized before running Nexus.
         let v4generator = v3generator.new_version_with(
-            version4_cockroachdb,
+            DeployStepVersion::V4_COCKROACHDB,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::CockroachDb { .. })
             },
@@ -1052,8 +1223,8 @@ impl ServiceInner {
         self.initialize_cockroach(&service_plan).await?;
 
         // Issue the rest of the zone initialization requests.
-        let v5generator =
-            v4generator.new_version_with(version5_everything, &|_| true);
+        let v5generator = v4generator
+            .new_version_with(DeployStepVersion::V5_EVERYTHING, &|_| true);
         self.ensure_zone_config_at_least(v5generator.sled_configs()).await?;
 
         info!(self.log, "Finished setting up services");
@@ -1081,6 +1252,122 @@ impl ServiceInner {
         .await?;
 
         Ok(())
+    }
+}
+
+/// The service plan describes all the zones that we will eventually
+/// deploy on each sled.  But we cannot currently just deploy them all
+/// concurrently.  We'll do it in a few stages, each corresponding to a
+/// version of each sled's configuration.
+///
+/// - version 1: no services running
+///              (We don't have to do anything for this.  But we do
+///              reserve this version number for "no services running" so
+///              that sled agents can begin with an initial, valid
+///              OmicronZonesConfig before they've got anything running.)
+/// - version 2: internal DNS only
+/// - version 3: internal DNS + NTP servers
+/// - version 4: internal DNS + NTP servers + CockroachDB
+/// - version 5: everything
+///
+/// At each stage, we're specifying a complete configuration of what
+/// should be running on the sled -- including this version number.
+/// And Sled Agents will reject requests for versions older than the
+/// one they're currently running.  Thus, the version number is a piece
+/// of global, distributed state.
+///
+/// For now, we hardcode the requests we make to use specific version
+/// numbers.
+struct DeployStepVersion;
+
+impl DeployStepVersion {
+    const V1_NOTHING: Generation = OmicronZonesConfig::INITIAL_GENERATION;
+    const V2_DNS_ONLY: Generation = Self::V1_NOTHING.next();
+    const V3_DNS_AND_NTP: Generation = Self::V2_DNS_ONLY.next();
+    const V4_COCKROACHDB: Generation = Self::V3_DNS_AND_NTP.next();
+    const V5_EVERYTHING: Generation = Self::V4_COCKROACHDB.next();
+}
+
+fn build_initial_blueprint_from_plan(
+    sled_plan: &SledPlan,
+    service_plan: &ServicePlan,
+) -> anyhow::Result<Blueprint> {
+    let internal_dns_version =
+        Generation::try_from(service_plan.dns_config.generation)
+            .context("invalid internal dns version")?;
+
+    let mut sled_configs = BTreeMap::new();
+    for sled_request in sled_plan.sleds.values() {
+        let sled_addr = get_sled_address(sled_request.body.subnet);
+        let sled_id = sled_request.body.id;
+        let entry = match sled_configs.entry(sled_id) {
+            btree_map::Entry::Vacant(entry) => entry,
+            btree_map::Entry::Occupied(_) => {
+                bail!(
+                    "duplicate sled address found while deriving blueprint: \
+                     {sled_addr}"
+                );
+            }
+        };
+        let sled_config =
+            service_plan.services.get(&sled_addr).with_context(|| {
+                format!(
+                    "missing services in plan for sled {sled_id} ({sled_addr})"
+                )
+            })?;
+        entry.insert(sled_config.clone());
+    }
+
+    Ok(build_initial_blueprint_from_sled_configs(
+        sled_configs,
+        internal_dns_version,
+    ))
+}
+
+pub(crate) fn build_initial_blueprint_from_sled_configs(
+    sled_configs: BTreeMap<Uuid, SledConfig>,
+    internal_dns_version: Generation,
+) -> Blueprint {
+    let mut blueprint_zones = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs {
+        let zones_config = BlueprintZonesConfig {
+            // This is a bit of a hack. We only construct a blueprint after
+            // completing RSS, so we need to know the final generation value
+            // sent to all sleds. Arguably, we should record this in the
+            // serialized RSS plan; however, we have already deployed
+            // systems that did not. We know that every such system used
+            // `V5_EVERYTHING` as the final generation count, so we can just
+            // use that value here. If we ever change this, in particular in
+            // a way where newly-deployed systems will have a different
+            // value, we will need to revisit storing this in the serialized
+            // RSS plan.
+            generation: DeployStepVersion::V5_EVERYTHING,
+            zones: sled_config
+                .zones
+                .into_iter()
+                .map(|z| BlueprintZoneConfig {
+                    config: z.into(),
+                    // All initial zones are in-service.
+                    disposition: BlueprintZoneDisposition::InService,
+                })
+                .collect(),
+        };
+
+        blueprint_zones.insert(sled_id, zones_config);
+    }
+
+    Blueprint {
+        id: Uuid::new_v4(),
+        blueprint_zones,
+        parent_blueprint_id: None,
+        internal_dns_version,
+        // We don't configure external DNS during RSS, so set it to an initial
+        // generation of 1. Nexus will bump this up when it updates external DNS
+        // (including creating the recovery silo).
+        external_dns_version: Generation::new(),
+        time_created: Utc::now(),
+        creator: "RSS".to_string(),
+        comment: "initial blueprint from rack setup".to_string(),
     }
 }
 
@@ -1181,57 +1468,65 @@ mod test {
         params::OmicronZoneType,
         rack_setup::plan::service::{Plan as ServicePlan, SledInfo},
     };
-    use illumos_utils::zpool::ZpoolName;
-    use omicron_common::{address::Ipv6Subnet, api::external::Generation};
+    use omicron_common::{
+        address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
+        api::external::{ByteCount, Generation},
+        disk::DiskIdentity,
+    };
+    use sled_agent_client::types as SledAgentTypes;
+    use uuid::Uuid;
+
+    fn make_sled_info(
+        sled_id: Uuid,
+        subnet: Ipv6Subnet<SLED_PREFIX>,
+        u2_count: usize,
+    ) -> SledInfo {
+        let sled_agent_address = get_sled_address(subnet);
+        SledInfo::new(
+            sled_id,
+            subnet,
+            sled_agent_address,
+            SledAgentTypes::Inventory {
+                sled_id,
+                sled_agent_address: sled_agent_address.to_string(),
+                sled_role: SledAgentTypes::SledRole::Scrimlet,
+                baseboard: SledAgentTypes::Baseboard::Unknown,
+                usable_hardware_threads: 32,
+                usable_physical_ram: ByteCount::from_gibibytes_u32(16),
+                reservoir_size: ByteCount::from_gibibytes_u32(0),
+                disks: (0..u2_count)
+                    .map(|i| SledAgentTypes::InventoryDisk {
+                        identity: DiskIdentity {
+                            vendor: "test-manufacturer".to_string(),
+                            serial: format!("test-{sled_id}-#{i}"),
+                            model: "v1".to_string(),
+                        },
+                        variant: SledAgentTypes::DiskVariant::U2,
+                        slot: i.try_into().unwrap(),
+                    })
+                    .collect(),
+                zpools: vec![],
+            },
+            true,
+        )
+    }
 
     fn make_test_service_plan() -> ServicePlan {
         let rss_config = crate::bootstrap::params::test_config();
         let fake_sleds = vec![
-            SledInfo::new(
-                "d4ba4bbe-8542-4907-bc8f-48df53eb5089".parse().unwrap(),
-                Ipv6Subnet::new("fd00:1122:3344:101::1".parse().unwrap()),
-                "[fd00:1122:3344:101::1]:80".parse().unwrap(),
-                vec![
-                    ZpoolName::new_internal(
-                        "c5885278-0ae2-4f1e-9223-07f2ada818e1".parse().unwrap(),
-                    ),
-                    ZpoolName::new_internal(
-                        "57465977-8275-43aa-a320-b6cd5cb20ca6".parse().unwrap(),
-                    ),
-                    ZpoolName::new_external(
-                        "886f9fe7-bf70-4ddd-ae92-764dc3ed14ab".parse().unwrap(),
-                    ),
-                    ZpoolName::new_external(
-                        "4c9061b1-345b-4985-8cbd-a2a899f15b68".parse().unwrap(),
-                    ),
-                    ZpoolName::new_external(
-                        "b2bd488e-b187-42a0-b157-9ab0f70d91a8".parse().unwrap(),
-                    ),
-                ],
-                true,
+            make_sled_info(
+                Uuid::new_v4(),
+                Ipv6Subnet::<SLED_PREFIX>::new(
+                    "fd00:1122:3344:101::1".parse().unwrap(),
+                ),
+                5,
             ),
-            SledInfo::new(
-                "b4359dea-665d-41ca-a681-f55912f2d5d0".parse().unwrap(),
-                Ipv6Subnet::new("fd00:1122:3344:102::1".parse().unwrap()),
-                "[fd00:1122:3344:102::1]:80".parse().unwrap(),
-                vec![
-                    ZpoolName::new_internal(
-                        "34d6b5e5-a09f-4e96-a599-fa306ce6d983".parse().unwrap(),
-                    ),
-                    ZpoolName::new_internal(
-                        "e9b8d1ea-da29-4b61-a493-c0ed319098da".parse().unwrap(),
-                    ),
-                    ZpoolName::new_external(
-                        "37f8e903-2adb-4613-b78c-198122c289f0".parse().unwrap(),
-                    ),
-                    ZpoolName::new_external(
-                        "b50f787c-97b3-4b91-a5bd-99d11fc86fb8".parse().unwrap(),
-                    ),
-                    ZpoolName::new_external(
-                        "809e50c8-930e-413a-950c-69a540b688e2".parse().unwrap(),
-                    ),
-                ],
-                true,
+            make_sled_info(
+                Uuid::new_v4(),
+                Ipv6Subnet::<SLED_PREFIX>::new(
+                    "fd00:1122:3344:102::1".parse().unwrap(),
+                ),
+                5,
             ),
         ];
         let service_plan =

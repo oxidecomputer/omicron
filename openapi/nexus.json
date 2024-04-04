@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "0.0.6"
+    "version": "20240327.0"
   },
   "paths": {
     "/device/auth": {
@@ -97,6 +97,206 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/experimental/v1/probes": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "List instrumentation probes",
+        "operationId": "probe_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Create instrumentation probe",
+        "operationId": "probe_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/probes/{probe}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "View instrumentation probe",
+        "operationId": "probe_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "probe",
+            "description": "Name or ID of the probe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Delete instrumentation probe",
+        "operationId": "probe_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "probe",
+            "description": "Name or ID of the probe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -809,7 +1009,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "List all floating IPs",
+        "summary": "List floating IPs",
         "operationId": "floating_ip_list",
         "parameters": [
           {
@@ -2481,7 +2681,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP pools",
+        "summary": "List IP pools",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
@@ -2889,7 +3089,8 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Access metrics data",
+        "summary": "View metrics",
+        "description": "View CPU, memory, or storage utilization metrics at the silo or project level.",
         "operationId": "silo_metric",
         "parameters": [
           {
@@ -3910,6 +4111,45 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/disks/{disk_id}": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get a physical disk",
+        "operationId": "physical_disk_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "description": "ID of the physical disk",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -5232,6 +5472,7 @@
           "system/networking"
         ],
         "summary": "Add range to IP pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -5523,6 +5764,44 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/utilization": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch IP pool utilization",
+        "operationId": "ip_pool_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
@@ -5609,6 +5888,7 @@
           "system/networking"
         ],
         "summary": "Add IP range to Oxide service pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -5675,7 +5955,8 @@
         "tags": [
           "system/metrics"
         ],
-        "summary": "Access metrics data",
+        "summary": "View metrics",
+        "description": "View CPU, memory, or storage utilization metrics at the fleet or silo level.",
         "operationId": "system_metric",
         "parameters": [
           {
@@ -6278,6 +6559,46 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-message-history": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP router message history",
+        "operationId": "networking_bgp_message_history",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateBgpMessageHistory"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7610,6 +7931,100 @@
         }
       }
     },
+    "/v1/timeseries/query": {
+      "post": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Run timeseries query",
+        "description": "Queries are written in OxQL.",
+        "operationId": "timeseries_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeseriesQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Table",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Table"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/timeseries/schema": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "List timeseries schemas",
+        "operationId": "timeseries_schema_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeseriesSchemaResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/users": {
       "get": {
         "tags": [
@@ -8692,6 +9107,22 @@
           "items"
         ]
       },
+      "AggregateBgpMessageHistory": {
+        "description": "BGP message history for rack switches.",
+        "type": "object",
+        "properties": {
+          "switch_histories": {
+            "description": "BGP history organized by switch.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchBgpHistory"
+            }
+          }
+        },
+        "required": [
+          "switch_histories"
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -8714,6 +9145,7 @@
         ]
       },
       "BfdMode": {
+        "description": "BFD connection mode.",
         "type": "string",
         "enum": [
           "single_hop",
@@ -9135,6 +9567,7 @@
           "switch"
         ]
       },
+      "BgpMessageHistory": {},
       "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
@@ -11580,6 +12013,56 @@
           }
         ]
       },
+      "Distributiondouble": {
+        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "bins",
+          "counts"
+        ]
+      },
+      "Distributionint64": {
+        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "bins",
+          "counts"
+        ]
+      },
       "EphemeralIpCreate": {
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
@@ -11768,6 +12251,287 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "FieldSchema": {
+        "description": "The name and type information for a field of a timeseries schema.",
+        "type": "object",
+        "properties": {
+          "field_type": {
+            "$ref": "#/components/schemas/FieldType"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FieldSource"
+          }
+        },
+        "required": [
+          "field_type",
+          "name",
+          "source"
+        ]
+      },
+      "FieldSource": {
+        "description": "The source from which a field is derived, the target or metric.",
+        "type": "string",
+        "enum": [
+          "target",
+          "metric"
+        ]
+      },
+      "FieldType": {
+        "description": "The `FieldType` identifies the data type of a target or metric field.",
+        "type": "string",
+        "enum": [
+          "string",
+          "i8",
+          "u8",
+          "i16",
+          "u16",
+          "i32",
+          "u32",
+          "i64",
+          "u64",
+          "ip_addr",
+          "uuid",
+          "bool"
+        ]
+      },
+      "FieldValue": {
+        "description": "The `FieldValue` contains the value of a target or metric field.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i8"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int8"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u8"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i16"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int16"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u16"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i32"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int32"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u32"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u64"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_addr"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "uuid"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "FinalizeDisk": {
@@ -13210,6 +13974,14 @@
           }
         ]
       },
+      "IpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -13444,6 +14216,31 @@
           }
         }
       },
+      "IpPoolUtilization": {
+        "type": "object",
+        "properties": {
+          "ipv4": {
+            "description": "Number of allocated and total available IPv4 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Utilization"
+              }
+            ]
+          },
+          "ipv6": {
+            "description": "Number of allocated and total available IPv6 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Utilization"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ipv4",
+          "ipv6"
+        ]
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -13489,6 +14286,27 @@
           "last"
         ]
       },
+      "Ipv4Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv4 addresses allocated from this pool",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "capacity": {
+            "description": "The total number of IPv4 addresses in the pool, i.e., the sum of the lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit integer because there are only 2^32 IPv4 addresses.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
+        ]
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -13512,6 +14330,25 @@
         "required": [
           "first",
           "last"
+        ]
+      },
+      "Ipv6Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv6 addresses allocated from this pool. A 128-bit integer string to match the capacity field.",
+            "type": "string",
+            "format": "uint128"
+          },
+          "capacity": {
+            "description": "The total number of IPv6 addresses in the pool, i.e., the sum of the lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
+            "type": "string",
+            "format": "uint128"
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
         ]
       },
       "L4PortRange": {
@@ -13869,6 +14706,32 @@
           "items"
         ]
       },
+      "MetricType": {
+        "description": "The type of the metric itself, indicating what its values represent.",
+        "oneOf": [
+          {
+            "description": "The value represents an instantaneous measurement in time.",
+            "type": "string",
+            "enum": [
+              "gauge"
+            ]
+          },
+          {
+            "description": "The value represents a difference between two points in time.",
+            "type": "string",
+            "enum": [
+              "delta"
+            ]
+          },
+          {
+            "description": "The value represents an accumulation between two points in time.",
+            "type": "string",
+            "enum": [
+              "cumulative"
+            ]
+          }
+        ]
+      },
       "MissingDatum": {
         "type": "object",
         "properties": {
@@ -13914,6 +14777,119 @@
           }
         ]
       },
+      "NetworkInterface": {
+        "description": "Information required to construct a virtual network interface",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NetworkInterfaceKind"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "subnet": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "kind",
+          "mac",
+          "name",
+          "primary",
+          "slot",
+          "subnet",
+          "vni"
+        ]
+      },
+      "NetworkInterfaceKind": {
+        "description": "The type of network interface",
+        "oneOf": [
+          {
+            "description": "A vNIC attached to a guest instance",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with an internal service",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -13935,6 +14911,14 @@
           "model": {
             "type": "string"
           },
+          "policy": {
+            "description": "The operator-defined policy for a physical disk.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalDiskPolicy"
+              }
+            ]
+          },
           "serial": {
             "type": "string"
           },
@@ -13943,6 +14927,14 @@
             "description": "The sled to which this disk is attached, if any.",
             "type": "string",
             "format": "uuid"
+          },
+          "state": {
+            "description": "The current state Nexus believes the disk to be in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalDiskState"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -13962,7 +14954,9 @@
           "form_factor",
           "id",
           "model",
+          "policy",
           "serial",
+          "state",
           "time_created",
           "time_modified",
           "vendor"
@@ -13974,6 +14968,41 @@
         "enum": [
           "m2",
           "u2"
+        ]
+      },
+      "PhysicalDiskPolicy": {
+        "description": "The operator-defined policy of a physical disk.",
+        "oneOf": [
+          {
+            "description": "The operator has indicated that the disk is in-service.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The operator has indicated that the disk has been permanently removed from service.\n\nThis is a terminal state: once a particular disk ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new disk.)\n\nAn expunged disk is always non-provisionable.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
         ]
       },
       "PhysicalDiskResultsPage": {
@@ -13997,6 +15026,25 @@
           "items"
         ]
       },
+      "PhysicalDiskState": {
+        "description": "The current state of the disk, as determined by Nexus.",
+        "oneOf": [
+          {
+            "description": "The disk is currently active, and has resources allocated on it.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The disk has been permanently removed from service.\n\nThis is a terminal state: once a particular disk ID is decommissioned, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new disk.)",
+            "type": "string",
+            "enum": [
+              "decommissioned"
+            ]
+          }
+        ]
+      },
       "Ping": {
         "type": "object",
         "properties": {
@@ -14017,6 +15065,192 @@
         "type": "string",
         "enum": [
           "ok"
+        ]
+      },
+      "Points": {
+        "description": "Timepoints and values for one timeseries.",
+        "type": "object",
+        "properties": {
+          "start_times": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "timestamps": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Values"
+            }
+          }
+        },
+        "required": [
+          "timestamps",
+          "values"
+        ]
+      },
+      "Probe": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "sled",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ProbeCreate": {
+        "description": "Create time parameters for probes.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip_pool": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "sled"
+        ]
+      },
+      "ProbeExternalIp": {
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeExternalIp"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/NetworkInterface"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface",
+          "name",
+          "sled"
+        ]
+      },
+      "ProbeInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Project": {
@@ -15440,6 +16674,31 @@
           "time_modified"
         ]
       },
+      "SwitchBgpHistory": {
+        "description": "BGP message history for a particular switch.",
+        "type": "object",
+        "properties": {
+          "history": {
+            "description": "Message history indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpMessageHistory"
+            }
+          },
+          "switch": {
+            "description": "Switch this message history is associated with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "history",
+          "switch"
+        ]
+      },
       "SwitchInterfaceConfig": {
         "description": "A switch port interface configuration for a port settings object.",
         "type": "object",
@@ -16190,6 +17449,113 @@
           "vlan_id"
         ]
       },
+      "Table": {
+        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "timeseries": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Timeseries"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "timeseries"
+        ]
+      },
+      "Timeseries": {
+        "description": "A timeseries contains a timestamped set of values from one source.\n\nThis includes the typed key-value pairs that uniquely identify it, and the set of timestamps and data values from it.",
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldValue"
+            }
+          },
+          "points": {
+            "$ref": "#/components/schemas/Points"
+          }
+        },
+        "required": [
+          "fields",
+          "points"
+        ]
+      },
+      "TimeseriesName": {
+        "title": "The name of a timeseries",
+        "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
+        "type": "string",
+        "pattern": "^(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)$"
+      },
+      "TimeseriesQuery": {
+        "description": "A timeseries query string, written in the Oximeter query language.",
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "A timeseries query string, written in the Oximeter query language.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "TimeseriesSchema": {
+        "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "field_schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldSchema"
+            },
+            "uniqueItems": true
+          },
+          "timeseries_name": {
+            "$ref": "#/components/schemas/TimeseriesName"
+          }
+        },
+        "required": [
+          "created",
+          "datum_type",
+          "field_schema",
+          "timeseries_name"
+        ]
+      },
+      "TimeseriesSchemaResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimeseriesSchema"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
@@ -16471,6 +17837,169 @@
           "provisioned"
         ]
       },
+      "ValueArray": {
+        "description": "List of data values for one timeseries.\n\nEach element is an option, where `None` represents a missing sample.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "integer"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "double"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "number",
+                  "format": "double"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boolean"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "boolean"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "integer_distribution"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Distributionint64"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "double_distribution"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Distributiondouble"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          }
+        ]
+      },
+      "Values": {
+        "description": "A single list of values, for one dimension of a timeseries.",
+        "type": "object",
+        "properties": {
+          "metric_type": {
+            "$ref": "#/components/schemas/MetricType"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ValueArray"
+          }
+        },
+        "required": [
+          "metric_type",
+          "values"
+        ]
+      },
       "VirtualResourceCounts": {
         "description": "A collection of resource counts used to describe capacity and utilization",
         "type": "object",
@@ -16502,6 +18031,12 @@
           "memory",
           "storage"
         ]
+      },
+      "Vni": {
+        "description": "A Geneve Virtual Network Identifier",
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
       },
       "Vpc": {
         "description": "View of a VPC",
@@ -17450,6 +18985,13 @@
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-networking"
+      }
+    },
+    {
+      "name": "system/probes",
+      "description": "Probes for testing network connectivity",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/probes"
       }
     },
     {

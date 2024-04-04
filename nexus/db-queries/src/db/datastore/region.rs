@@ -8,6 +8,7 @@ use super::DataStore;
 use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
@@ -50,6 +51,18 @@ impl DataStore {
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         Self::get_allocated_regions_query(volume_id)
             .get_results_async::<(Dataset, Region)>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region(&self, region_id: Uuid) -> Result<Region, Error> {
+        use db::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
@@ -115,7 +128,7 @@ impl DataStore {
     ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
-    pub async fn region_allocate(
+    pub async fn disk_region_allocate(
         &self,
         opctx: &OpContext,
         volume_id: Uuid,
@@ -123,24 +136,65 @@ impl DataStore {
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
+        self.arbitrary_region_allocate(
+            opctx,
+            volume_id,
+            disk_source,
+            size,
+            allocation_strategy,
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await
+    }
+
+    /// Idempotently allocates an arbitrary number of regions for a volume.
+    ///
+    /// For regular disk creation, this will be REGION_REDUNDANCY_THRESHOLD.
+    ///
+    /// For region replacement, it's important to allocate the *new* region for
+    /// a volume while respecting the current region allocation strategy.  This
+    /// requires setting `num_regions_required` to one more than the current
+    /// level for a volume. If a single region is allocated in isolation this
+    /// could land on the same dataset as one of the existing volume's regions.
+    ///
+    /// Returns the allocated regions, as well as the datasets to which they
+    /// belong.
+    pub async fn arbitrary_region_allocate(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+        disk_source: &params::DiskSource,
+        size: external::ByteCount,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
         let block_size =
             self.get_block_size_from_disk_source(opctx, &disk_source).await?;
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
+        let query = crate::db::queries::region_allocation::allocation_query(
+            volume_id,
+            block_size.to_bytes() as u64,
+            blocks_per_extent,
+            extent_count,
+            allocation_strategy,
+            num_regions_required,
+        );
+
+        let conn = self.pool_connection_authorized(&opctx).await?;
+
         let dataset_and_regions: Vec<(Dataset, Region)> =
-            crate::db::queries::region_allocation::RegionAllocate::new(
-                volume_id,
-                block_size.to_bytes() as u64,
-                blocks_per_extent,
-                extent_count,
-                allocation_strategy,
-            )
-            .get_results_async(&*self.pool_connection_authorized(&opctx).await?)
-            .await
-            .map_err(|e| {
+            query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;
+
+        info!(
+            self.log,
+            "Allocated regions for volume";
+            "volume_id" => %volume_id,
+            "datasets_and_regions" => ?dataset_and_regions,
+        );
 
         Ok(dataset_and_regions)
     }

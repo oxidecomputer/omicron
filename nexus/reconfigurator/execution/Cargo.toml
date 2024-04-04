@@ -9,14 +9,17 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 dns-service-client.workspace = true
+chrono.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-networking.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
@@ -31,10 +34,10 @@ pq-sys = "*"
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-chrono.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
 nexus-reconfigurator-planning.workspace = true
+nexus-reconfigurator-preparation.workspace = true
 nexus-inventory.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true

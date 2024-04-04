@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, ByteCount, Hostname, IdentityMetadataCreateParams,
+    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
     SemverVersion,
@@ -80,6 +80,7 @@ path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
+path_param!(ProbePath, probe, "probe");
 
 id_path_param!(GroupPath, group_id, "group");
 
@@ -87,10 +88,12 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
+id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,
@@ -1325,6 +1328,16 @@ pub enum PhysicalDiskKind {
     U2,
 }
 
+impl From<sled_agent_client::types::DiskVariant> for PhysicalDiskKind {
+    fn from(variant: sled_agent_client::types::DiskVariant) -> Self {
+        use sled_agent_client::types::DiskVariant;
+        match variant {
+            DiskVariant::U2 => Self::U2,
+            DiskVariant::M2 => Self::M2,
+        }
+    }
+}
+
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1802,24 +1815,6 @@ pub struct BgpStatusSelector {
     pub name_or_id: NameOrId,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
-}
-
 /// Information about a bidirectional forwarding detection (BFD) session.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BfdSessionEnable {
@@ -2041,4 +2036,29 @@ pub struct UpdatesPutRepositoryParams {
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
     pub system_version: SemverVersion,
+}
+
+// Probes
+
+/// Create time parameters for probes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ProbeCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub sled: Uuid,
+    pub ip_pool: Option<NameOrId>,
+}
+
+/// List probes with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ProbeListSelector {
+    /// A name or id to use when selecting a probe.
+    pub name_or_id: Option<NameOrId>,
+}
+
+/// A timeseries query string, written in the Oximeter query language.
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct TimeseriesQuery {
+    /// A timeseries query string, written in the Oximeter query language.
+    pub query: String,
 }

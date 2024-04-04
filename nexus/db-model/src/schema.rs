@@ -6,15 +6,6 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use omicron_common::api::external::SemverVersion;
-
-/// The version of the database schema this particular version of Nexus was
-/// built against.
-///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(38, 0, 0);
-
 table! {
     disk (id) {
         id -> Uuid,
@@ -232,6 +223,20 @@ table! {
         asn -> Int8,
         bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+    }
+}
+
+table! {
+    bgp_peer_view (switch_location, port_name) {
+        switch_location -> Text,
+        port_name -> Text,
+        addr -> Inet,
+        asn -> Int8,
+        connect_retry -> Int8,
+        delay_open -> Int8,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        keepalive -> Int8,
     }
 }
 
@@ -591,6 +596,7 @@ table! {
 
         project_id -> Nullable<Uuid>,
         state -> crate::IpAttachStateEnum,
+        is_probe -> Bool,
     }
 }
 
@@ -827,6 +833,7 @@ table! {
         last_used_address -> Inet,
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
+        sled_agent_gen -> Int8,
     }
 }
 
@@ -893,6 +900,8 @@ table! {
         model -> Text,
 
         variant -> crate::PhysicalDiskKindEnum,
+        disk_policy -> crate::PhysicalDiskPolicyEnum,
+        disk_state -> crate::PhysicalDiskStateEnum,
         sled_id -> Uuid,
     }
 }
@@ -958,8 +967,6 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
-
-        total_size -> Int8,
     }
 }
 
@@ -1360,6 +1367,30 @@ table! {
 }
 
 table! {
+    inv_physical_disk (inv_collection_id, sled_id, slot) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        slot -> Int8,
+
+        vendor -> Text,
+        model -> Text,
+        serial -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
+    }
+}
+
+table! {
+    inv_zpool (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        id -> Uuid,
+        sled_id -> Uuid,
+        total_size -> Int8,
+    }
+}
+
+table! {
     inv_sled_omicron_zones (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -1425,6 +1456,7 @@ table! {
         comment -> Text,
 
         internal_dns_version -> Int8,
+        external_dns_version -> Int8,
     }
 }
 
@@ -1498,16 +1530,19 @@ table! {
 }
 
 table! {
-    bp_expunged_nexus_zones (blueprint_id, bp_nexus_zone_id) {
-        blueprint_id -> Uuid,
-        bp_nexus_zone_id -> Uuid,
+    bootstore_keys (key, generation) {
+        key -> Text,
+        generation -> Int8,
     }
 }
 
 table! {
-    bootstore_keys (key, generation) {
+    bootstore_config (key, generation) {
         key -> Text,
         generation -> Int8,
+        data -> Jsonb,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
@@ -1523,6 +1558,63 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    probe (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
+        sled -> Uuid,
+    }
+}
+
+table! {
+    upstairs_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
+        time -> Timestamptz,
+
+        repair_id -> Uuid,
+        repair_type -> crate::UpstairsRepairTypeEnum,
+        upstairs_id -> Uuid,
+        session_id -> Uuid,
+
+        region_id -> Uuid,
+        target_ip -> Inet,
+        target_port -> Int4,
+
+        notification_type -> crate::UpstairsRepairNotificationTypeEnum,
+    }
+}
+
+table! {
+    upstairs_repair_progress (repair_id, time, current_item, total_items) {
+        repair_id -> Uuid,
+        time -> Timestamptz,
+        current_item -> Int8,
+        total_items -> Int8,
+    }
+}
+
+table! {
+    downstairs_client_stop_request_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStopRequestReasonEnum,
+    }
+}
+
+table! {
+    downstairs_client_stopped_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStoppedReasonEnum,
     }
 }
 
@@ -1556,6 +1648,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    bp_omicron_zone,
+    bp_target,
     dataset,
     disk,
     image,

@@ -6,7 +6,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
@@ -16,6 +16,7 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
+use oximeter::TimeseriesSchema;
 use uuid::Uuid;
 
 pub async fn query_for_metrics(
@@ -173,7 +174,7 @@ async fn test_metrics(
 
     // silo metrics start out zero
     assert_system_metrics(&cptestctx, None, 0, 0, 0).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), 0, 0, 0).await;
+    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), 0, 0, 0).await;
     assert_silo_metrics(&cptestctx, None, 0, 0, 0).await;
 
     let project1_id = create_project(&client, "p-1").await.identity.id;
@@ -189,7 +190,7 @@ async fn test_metrics(
         "/v1/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&project={}", 
         cptestctx.start_time,
         Utc::now(),
-        *SILO_ID,
+        *DEFAULT_SILO_ID,
     );
     assert_404(&cptestctx, &bad_silo_metrics_url).await;
     let bad_system_metrics_url = format!(
@@ -205,14 +206,15 @@ async fn test_metrics(
     assert_silo_metrics(&cptestctx, Some(project1_id), 0, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, 0, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, 0, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), 0, 4, GIB).await;
+    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), 0, 4, GIB).await;
 
     // create disk in project 1
     create_disk(&client, "p-1", "d-1").await;
     assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, GIB, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, GIB, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), GIB, 4, GIB).await;
+    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), GIB, 4, GIB)
+        .await;
 
     // project 2 metrics still empty
     assert_silo_metrics(&cptestctx, Some(project2_id), 0, 0, 0).await;
@@ -225,9 +227,39 @@ async fn test_metrics(
     // both instances show up in silo and fleet metrics
     assert_silo_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
     assert_system_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), 2 * GIB, 8, 2 * GIB)
-        .await;
+    assert_system_metrics(
+        &cptestctx,
+        Some(*DEFAULT_SILO_ID),
+        2 * GIB,
+        8,
+        2 * GIB,
+    )
+    .await;
 
     // project 1 unaffected by project 2's resources
     assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
+}
+
+/// Test that we can correctly list some timeseries schema.
+#[nexus_test]
+async fn test_timeseries_schema_list(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    // We should be able to fetch the list of timeseries, and it should include
+    // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
+    // should always exist after we've registered as a producer and start
+    // producing data. Force a collection to ensure that happens.
+    cptestctx.server.register_as_producer().await;
+    cptestctx.oximeter.force_collect().await;
+    let client = &cptestctx.external_client;
+    let url = "/v1/timeseries/schema";
+    let schema =
+        objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
+    schema
+        .items
+        .iter()
+        .find(|sc| {
+            sc.timeseries_name == "http_service:request_latency_histogram"
+        })
+        .expect("Failed to find HTTP request latency histogram schema");
 }

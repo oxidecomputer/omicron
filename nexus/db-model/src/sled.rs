@@ -6,10 +6,15 @@ use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
+use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_types::{external_api::shared, external_api::views, identity::Asset};
+use nexus_types::{
+    external_api::{shared, views},
+    identity::Asset,
+    internal_api::params,
+};
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -41,7 +46,7 @@ pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
-    rcgen: Generation,
+    pub rcgen: Generation,
 
     pub rack_id: Uuid,
 
@@ -66,6 +71,12 @@ pub struct Sled {
 
     #[diesel(column_name = sled_state)]
     state: SledState,
+
+    /// A generation number owned and incremented by sled-agent
+    ///
+    /// This is specifically distinct from `rcgen`, which is incremented by
+    /// child resources as part of `DatastoreCollectionConfig`.
+    pub sled_agent_gen: Generation,
 }
 
 impl Sled {
@@ -87,6 +98,10 @@ impl Sled {
 
     pub fn serial_number(&self) -> &str {
         &self.serial_number
+    }
+
+    pub fn part_number(&self) -> &str {
+        &self.part_number
     }
 
     /// The policy here is the `views::SledPolicy` because we expect external
@@ -115,6 +130,34 @@ impl From<Sled> for views::Sled {
             state: sled.state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
+        }
+    }
+}
+
+impl From<Sled> for params::SledAgentInfo {
+    fn from(sled: Sled) -> Self {
+        let role = if sled.is_scrimlet {
+            params::SledRole::Scrimlet
+        } else {
+            params::SledRole::Gimlet
+        };
+        let decommissioned = match sled.state {
+            SledState::Active => false,
+            SledState::Decommissioned => true,
+        };
+        Self {
+            sa_address: sled.address(),
+            role,
+            baseboard: Baseboard {
+                serial: sled.serial_number.clone(),
+                part: sled.part_number.clone(),
+                revision: sled.revision,
+            },
+            usable_hardware_threads: sled.usable_hardware_threads.into(),
+            usable_physical_ram: sled.usable_physical_ram.into(),
+            reservoir_size: sled.reservoir_size.into(),
+            generation: sled.sled_agent_gen.into(),
+            decommissioned,
         }
     }
 }
@@ -161,6 +204,9 @@ pub struct SledUpdate {
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
+
+    // Generation number - owned and incremented by sled-agent.
+    pub sled_agent_gen: Generation,
 }
 
 impl SledUpdate {
@@ -170,6 +216,7 @@ impl SledUpdate {
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: Uuid,
+        sled_agent_gen: Generation,
     ) -> Self {
         Self {
             id,
@@ -185,6 +232,7 @@ impl SledUpdate {
             reservoir_size: hardware.reservoir_size,
             ip: addr.ip().into(),
             port: addr.port().into(),
+            sled_agent_gen,
         }
     }
 
@@ -220,6 +268,7 @@ impl SledUpdate {
             ip: self.ip,
             port: self.port,
             last_used_address,
+            sled_agent_gen: self.sled_agent_gen,
         }
     }
 
