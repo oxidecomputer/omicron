@@ -83,8 +83,8 @@ function try_destroy_zpools {
             VDEV_PATH="${VDEV_DIR:-/var/tmp}/$VDEV"
             if [[ -f "$VDEV_PATH" ]]; then
                 rm -f "$VDEV_PATH"
+                success "vdev $VDEV_PATH removed"
             fi
-            success "vdev $VDEV_PATH removed"
         done
     done
 }
