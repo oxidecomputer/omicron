@@ -85,8 +85,10 @@ impl steno::SecStore for CockroachDbSecStore {
                 // errors that likely require operator intervention.)
                 //
                 // At a higher level, callers should plan for the fact that
-                // record_event could potentially loop forever. See the note in
-                // `nexus/src/app/saga.rs`'s `execute_saga` for more details.
+                // record_event could potentially loop forever. See
+                // https://github.com/oxidecomputer/omicron/issues/5406 and the
+                // note in `nexus/src/app/saga.rs`'s `execute_saga` for more
+                // details.
                 self.datastore
                     .saga_create_event(&our_event)
                     .map_err(backoff::BackoffError::transient)

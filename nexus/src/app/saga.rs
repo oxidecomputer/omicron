@@ -223,7 +223,8 @@ impl super::Nexus {
         // - or to stop waiting after a certain period, while still letting the
         //   saga run in the background.
         //
-        // For more, see the note in `sec_store.rs`'s `record_event`.
+        // For more, see https://github.com/oxidecomputer/omicron/issues/5406
+        // and the note in `sec_store.rs`'s `record_event`.
         self.run_saga(runnable_saga).await
     }
 }
