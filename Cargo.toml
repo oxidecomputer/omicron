@@ -362,7 +362,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.1.1"
 rustyline = "13.0.0"
-samael = { version = "0.0.14", features = ["xmlsec"] }
+samael = { version = "0.0.15", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.22", features = ["std", "serde"] }
