@@ -86,7 +86,8 @@ rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] 
 regex = { version = "1.10.4" }
 regex-automata = { version = "0.4.5", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
-reqwest = { version = "0.11.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.2", default-features = false, features = ["cookies", "json", "rustls-tls", "stream"] }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.24", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
@@ -192,7 +193,8 @@ rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] 
 regex = { version = "1.10.4" }
 regex-automata = { version = "0.4.5", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
-reqwest = { version = "0.11.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.2", default-features = false, features = ["cookies", "json", "rustls-tls", "stream"] }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.24", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
@@ -229,6 +231,7 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
@@ -236,30 +239,35 @@ rustix = { version = "0.38.31", features = ["fs", "termios"] }
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
@@ -267,6 +275,7 @@ rustix = { version = "0.38.31", features = ["fs", "termios"] }
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
@@ -276,6 +285,7 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
+hyper-rustls = { version = "0.26.0" }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
