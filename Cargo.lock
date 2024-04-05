@@ -5801,6 +5801,7 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
+ "socket2 0.5.5",
  "spin 0.9.8",
  "string_cache",
  "subtle",
