@@ -41,6 +41,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "authentication_mode",
     "bfd_mode",
     "block_size",
+    "bp_zone_disposition",
     "caboose_which",
     "dataset_kind",
     "dns_group",

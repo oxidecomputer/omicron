@@ -90,6 +90,9 @@ pub enum SledFilter {
 
     /// Sleds on which reservations can be created.
     ReservationCreate,
+
+    /// Sleds which should be sent VPC firewall rules.
+    VpcFirewall,
 }
 
 impl SledFilter {
@@ -140,6 +143,7 @@ impl SledPolicy {
                 SledFilter::EligibleForDiscretionaryServices => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::VpcFirewall => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -148,12 +152,14 @@ impl SledPolicy {
                 SledFilter::EligibleForDiscretionaryServices => false,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => false,
+                SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::VpcFirewall => false,
             },
         }
     }
@@ -182,12 +188,14 @@ impl SledState {
                 SledFilter::EligibleForDiscretionaryServices => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::VpcFirewall => false,
             },
         }
     }

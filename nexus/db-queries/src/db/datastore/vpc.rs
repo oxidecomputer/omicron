@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
+use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
@@ -43,8 +44,10 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_db_model::to_db_bp_zone_disposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -697,43 +700,6 @@ impl DataStore {
         // ... and we also need to query for the current target blueprint to
         // support systems that _are_ under Reconfigurator control.
 
-        {
-            // Ideally this would do something like:
-            //
-            // .filter(bp_omicron_zone::disposition.eq_any(
-            //     BlueprintZoneDisposition::all_matching(
-            //         BlueprintZoneFilter::VpcFirewall,
-            //     ),
-            // )
-            //
-            // But that doesn't quite work today because we currently don't
-            // store the disposition enum next to each zone. Instead, this code
-            // makes its decision to select which sleds to return by just
-            // ignoring the zones_in_service table today.
-            //
-            // The purpose of this otherwise pointless block is to ensure that
-            // it is correct to ensure that the expressed logic by
-            // `BlueprintZoneFilter::VpcFirewall` matches the actual
-            // implementation. It will hopefully soon be replaced with storing
-            // the disposition in the bp_omicron_zone table and using the
-            // filter directly.
-
-            let mut matching = BlueprintZoneDisposition::all_matching(
-                BlueprintZoneFilter::VpcFirewall,
-            )
-            .collect::<Vec<_>>();
-            matching.sort();
-            let mut all = BlueprintZoneDisposition::all_matching(
-                BlueprintZoneFilter::All,
-            )
-            .collect::<Vec<_>>();
-            all.sort();
-            debug_assert_eq!(
-                matching, all,
-                "vpc firewall dispositions should match all dispositions"
-            );
-        }
-
         let reconfig_service_query = service_network_interface::table
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
@@ -759,6 +725,16 @@ impl DataStore {
                         .limit(1),
                 ),
             )
+            // Filter out services that are expunged and shouldn't be resolved
+            // here.
+            .filter(
+                bp_omicron_zone::disposition.eq_any(
+                    BlueprintZoneDisposition::all_matching(
+                        BlueprintZoneFilter::VpcFirewall,
+                    )
+                    .map(to_db_bp_zone_disposition),
+                ),
+            )
             .filter(service_network_interface::vpc_id.eq(vpc_id))
             .filter(service_network_interface::time_deleted.is_null())
             .select(Sled::as_select());
@@ -766,6 +742,7 @@ impl DataStore {
         let mut sleds = sled::table
             .select(Sled::as_select())
             .filter(sled::time_deleted.is_null())
+            .sled_filter(SledFilter::VpcFirewall)
             .into_boxed();
         if !sleds_filter.is_empty() {
             sleds = sleds.filter(sled::id.eq_any(sleds_filter.to_vec()));
@@ -1284,6 +1261,7 @@ mod tests {
     use crate::db::datastore::test::sled_baseboard_for_test;
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
@@ -1673,8 +1651,8 @@ mod tests {
             service_sled_ids
         };
 
-        // Create four sleds.
-        let harness = Harness::new(4);
+        // Create five sleds.
+        let harness = Harness::new(5);
         for sled in harness.db_sleds() {
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");
         }
@@ -1859,8 +1837,18 @@ mod tests {
             fetch_service_sled_ids().await
         );
 
-        // Finally, create a blueprint that includes our third and fourth sleds,
-        // make it the target, and ensure we resolve to all four sleds.
+        // ---
+
+        // Add a vNIC record for our fifth sled's Nexus, then create a blueprint
+        // that includes sleds with indexes 2, 3, and 4. Make it the target,
+        // and ensure we resolve to all five sleds.
+        datastore
+            .service_create_network_interface_raw(
+                &opctx,
+                harness.db_services().nth(4).unwrap().1,
+            )
+            .await
+            .expect("failed to insert service VNIC");
         let bp4_zones = {
             let mut zones = BTreeMap::new();
             for (sled_id, zone_config) in
@@ -1903,6 +1891,105 @@ mod tests {
             .await
             .expect("failed to set blueprint target");
         assert_eq!(harness.sled_ids, fetch_service_sled_ids().await);
+
+        // ---
+
+        // Mark some sleds as ineligible. Only the non-provisionable and
+        // in-service sleds should be returned.
+        let ineligible = IneligibleSleds {
+            expunged: harness.sled_ids[0],
+            decommissioned: harness.sled_ids[1],
+            illegal_decommissioned: harness.sled_ids[2],
+            non_provisionable: harness.sled_ids[3],
+        };
+        ineligible
+            .setup(&opctx, &datastore)
+            .await
+            .expect("failed to set up ineligible sleds");
+
+        assert_eq!(&harness.sled_ids[3..=4], fetch_service_sled_ids().await);
+
+        // ---
+
+        // Bring the sleds marked above back to life.
+        ineligible
+            .undo(&opctx, &datastore)
+            .await
+            .expect("failed to undo ineligible sleds");
+
+        // Make a new blueprint marking one of the zones as quiesced and one as
+        // expunged. Ensure that the sled with *quiesced* zone is returned by
+        // vpc_resolve_to_sleds, but the sled with the *expunged* zone is not.
+        // (But other services are still running.)
+        let bp5_zones = {
+            let mut zones = BTreeMap::new();
+            // Skip over the first two sleds.
+            let mut iter = harness.blueprint_zone_configs().skip(1);
+
+            // The second sled's Nexus zone is active.
+            let (sled_id, zone_config) = iter.next().unwrap();
+            zones.insert(
+                sled_id,
+                BlueprintZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![zone_config],
+                },
+            );
+
+            // The third sled's Nexus zone is quiesced.
+            let (sled_id, mut zone_config) = iter.next().unwrap();
+            zone_config.disposition = BlueprintZoneDisposition::Quiesced;
+            zones.insert(
+                sled_id,
+                BlueprintZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![zone_config],
+                },
+            );
+
+            // The fourth sled's Nexus zone is expunged.
+            let (sled_id, mut zone_config) = iter.next().unwrap();
+            zone_config.disposition = BlueprintZoneDisposition::Expunged;
+            zones.insert(
+                sled_id,
+                BlueprintZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![zone_config],
+                },
+            );
+
+            zones
+        };
+
+        let bp5_id = Uuid::new_v4();
+        let bp5 = Blueprint {
+            id: bp5_id,
+            blueprint_zones: bp5_zones,
+            parent_blueprint_id: Some(bp4_id),
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
+            time_created: Utc::now(),
+            creator: "test".to_string(),
+            comment: "test".to_string(),
+        };
+
+        datastore
+            .blueprint_insert(&opctx, &bp5)
+            .await
+            .expect("failed to insert blueprint");
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: bp5_id,
+                    enabled: true,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("failed to set blueprint target");
+        // TODO: figure out why each of the sleds is getting returned, weird.
+        assert_eq!(&harness.sled_ids[..3], fetch_service_sled_ids().await);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

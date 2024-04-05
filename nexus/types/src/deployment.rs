@@ -381,6 +381,9 @@ pub enum BlueprintZoneDisposition {
 
     /// The zone is not in service.
     Quiesced,
+
+    /// The zone is permanently gone.
+    Expunged,
 }
 
 impl BlueprintZoneDisposition {
@@ -413,6 +416,12 @@ impl BlueprintZoneDisposition {
                 // Quiesced zones should get firewall rules.
                 BlueprintZoneFilter::VpcFirewall => true,
             },
+            Self::Expunged => match filter {
+                BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::InternalDns => false,
+                BlueprintZoneFilter::SledAgentPut => false,
+                BlueprintZoneFilter::VpcFirewall => false,
+            },
         }
     }
 
@@ -431,6 +440,7 @@ impl fmt::Display for BlueprintZoneDisposition {
             // and alignment (used above), but this does.
             BlueprintZoneDisposition::InService => "in service".fmt(f),
             BlueprintZoneDisposition::Quiesced => "quiesced".fmt(f),
+            BlueprintZoneDisposition::Expunged => "expunged".fmt(f),
         }
     }
 }

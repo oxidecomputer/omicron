@@ -1505,6 +1505,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        disposition -> crate::DbBpZoneDispositionEnum,
     }
 }
 
@@ -1519,13 +1520,6 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
-    }
-}
-
-table! {
-    bp_omicron_zones_not_in_service (blueprint_id, bp_omicron_zone_id) {
-        blueprint_id -> Uuid,
-        bp_omicron_zone_id -> Uuid,
     }
 }
 
