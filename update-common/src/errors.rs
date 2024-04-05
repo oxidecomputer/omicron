@@ -53,7 +53,7 @@ pub enum RepositoryError {
     TargetHashRead {
         target: String,
         #[source]
-        error: tough::schema::Error,
+        error: Box<tough::schema::Error>,
     },
 
     #[error("target hash `{}` expected to be 32 bytes long, was {}", hex::encode(.0), .0.len())]

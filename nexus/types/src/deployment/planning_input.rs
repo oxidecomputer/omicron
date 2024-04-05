@@ -6,6 +6,7 @@
 //! blueprints.
 
 use crate::external_api::views::SledPolicy;
+use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
 use crate::inventory::ZpoolName;
 use ipnetwork::IpNetwork;
@@ -22,6 +23,7 @@ use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use strum::IntoEnumIterator;
 use uuid::Uuid;
 
 /// Describes the resources available on each sled for the planner
@@ -85,6 +87,127 @@ pub enum SledFilter {
     /// Sleds that are in service (even if they might not be eligible for
     /// discretionary services).
     InService,
+
+    /// Sleds on which reservations can be created.
+    ReservationCreate,
+
+    /// Sleds which should be sent VPC firewall rules.
+    VpcFirewall,
+}
+
+impl SledFilter {
+    /// Returns true if self matches the provided policy and state.
+    pub fn matches_policy_and_state(
+        self,
+        policy: SledPolicy,
+        state: SledState,
+    ) -> bool {
+        policy.matches(self) && state.matches(self)
+    }
+}
+
+impl SledPolicy {
+    /// Returns true if self matches the filter.
+    ///
+    /// Any users of this must also compare against the [`SledState`], if
+    /// relevant: a sled filter is fully matched when it matches both the
+    /// policy and the state. See [`SledFilter::matches_policy_and_state`].
+    pub fn matches(self, filter: SledFilter) -> bool {
+        // Some notes:
+        //
+        // # Match style
+        //
+        // This code could be written in three ways:
+        //
+        // 1. match self { match filter { ... } }
+        // 2. match filter { match self { ... } }
+        // 3. match (self, filter) { ... }
+        //
+        // We choose 1 here because we expect many filters and just a few
+        // policies, and 1 is the easiest form to represent that.
+        //
+        // # Illegal states
+        //
+        // Some of the code that checks against both policies and filters is
+        // effectively checking for illegal states. We shouldn't be able to
+        // have a policy+state combo where the policy says the sled is in
+        // service but the state is decommissioned, for example, but the two
+        // separate types let us represent that. Code that ANDs
+        // policy.matches(filter) and state.matches(filter) naturally guards
+        // against those states.
+        match self {
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            } => match filter {
+                SledFilter::All => true,
+                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::InService => true,
+                SledFilter::ReservationCreate => true,
+                SledFilter::VpcFirewall => true,
+            },
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            } => match filter {
+                SledFilter::All => true,
+                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::InService => true,
+                SledFilter::ReservationCreate => false,
+                SledFilter::VpcFirewall => true,
+            },
+            SledPolicy::Expunged => match filter {
+                SledFilter::All => true,
+                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::InService => false,
+                SledFilter::ReservationCreate => false,
+                SledFilter::VpcFirewall => false,
+            },
+        }
+    }
+
+    /// Returns all policies matching the given filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`SledState::all_matching`]. See `ApplySledFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |policy| policy.matches(filter))
+    }
+}
+
+impl SledState {
+    /// Returns true if self matches the filter.
+    ///
+    /// Any users of this must also compare against the [`SledPolicy`], if
+    /// relevant: a sled filter is fully matched when both the policy and the
+    /// state match. See [`SledFilter::matches_policy_and_state`].
+    pub fn matches(self, filter: SledFilter) -> bool {
+        // See `SledFilter::matches` above for some notes.
+        match self {
+            SledState::Active => match filter {
+                SledFilter::All => true,
+                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::InService => true,
+                SledFilter::ReservationCreate => true,
+                SledFilter::VpcFirewall => true,
+            },
+            SledState::Decommissioned => match filter {
+                SledFilter::All => true,
+                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::InService => false,
+                SledFilter::ReservationCreate => false,
+                SledFilter::VpcFirewall => false,
+            },
+        }
+    }
+
+    /// Returns all policies matching the given filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`SledPolicy::all_matching`]. See `ApplySledFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |state| state.matches(filter))
+    }
 }
 
 /// Fleet-wide deployment policy
@@ -176,32 +299,10 @@ impl PlanningInput {
         &self,
         filter: SledFilter,
     ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledDetails)> + '_ {
-        self.sleds.iter().filter_map(move |(&sled_id, details)| match filter {
-            SledFilter::All => Some((sled_id, details)),
-            SledFilter::EligibleForDiscretionaryServices => {
-                if details.policy.is_provisionable()
-                    && details.state.is_eligible_for_discretionary_services()
-                {
-                    Some((sled_id, details))
-                } else {
-                    None
-                }
-            }
-            SledFilter::InService => {
-                if details.policy.is_in_service() {
-                    // Check for illegal states; we shouldn't be able to have a
-                    // policy+state combo where the policy says the sled is in
-                    // service but the state is decommissioned, for example, but
-                    // the two separate types let us represent that, so we'll
-                    // guard against it here.
-                    match details.state {
-                        SledState::Active => Some((sled_id, details)),
-                        SledState::Decommissioned => None,
-                    }
-                } else {
-                    None
-                }
-            }
+        self.sleds.iter().filter_map(move |(&sled_id, details)| {
+            filter
+                .matches_policy_and_state(details.policy, details.state)
+                .then_some((sled_id, details))
         })
     }
 

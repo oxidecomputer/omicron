@@ -62,7 +62,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 
     fn hosts(&self) -> Vec<Address> {
         match self.filter_hosts {
-            Some(ref hosts) if hosts.len() > 0 => hosts
+            Some(ref hosts) if !hosts.is_empty() => hosts
                 .iter()
                 .map(|host| match host {
                     HostIdentifier::Ip(IpNet::V4(net))
@@ -98,7 +98,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 
     fn ports(&self) -> Ports {
         match self.filter_ports {
-            Some(ref ports) if ports.len() > 0 => Ports::PortList(
+            Some(ref ports) if !ports.is_empty() => Ports::PortList(
                 ports
                     .iter()
                     .flat_map(|range| {
@@ -117,7 +117,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 
     fn protos(&self) -> Vec<ProtoFilter> {
         match self.filter_protocols {
-            Some(ref protos) if protos.len() > 0 => protos
+            Some(ref protos) if !protos.is_empty() => protos
                 .iter()
                 .map(|proto| {
                     ProtoFilter::Proto(match proto {
