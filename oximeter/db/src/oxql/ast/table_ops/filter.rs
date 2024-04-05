@@ -18,7 +18,6 @@ use crate::oxql::query::special_idents;
 use crate::oxql::Error;
 use crate::oxql::Table;
 use crate::oxql::Timeseries;
-use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
@@ -293,10 +292,10 @@ impl Filter {
         // Ensure that all the identifiers in this filter apply to the
         // input timeseries. We can do this once at the beginning, because all
         // the timeseries in a table have the same set of fields.
-        let first_timeseries = tables[0]
-            .iter()
-            .next()
-            .context("Table contains no timeseries to filter")?;
+        let Some(first_timeseries) = tables[0].iter().next() else {
+            // You give nothing, you get nothing.
+            return Ok(tables.to_vec());
+        };
         let ident_names = self.ident_names();
 
         // There are extra, implied names that depend on the data type of the
