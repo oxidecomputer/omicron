@@ -1088,10 +1088,13 @@ impl SimpleFilter {
 mod tests {
     use crate::oxql::ast::grammar::query_parser;
     use crate::oxql::ast::logical_op::LogicalOp;
+    use crate::oxql::point::DataType;
     use crate::oxql::point::MetricType;
     use crate::oxql::point::Points;
     use crate::oxql::point::ValueArray;
     use crate::oxql::point::Values;
+    use crate::oxql::Table;
+    use crate::oxql::Timeseries;
     use chrono::Utc;
     use oximeter::FieldValue;
     use std::time::Duration;
@@ -1277,6 +1280,22 @@ mod tests {
         assert!(
             parsed.simplify_to_dnf().is_err(),
             "Should fail for extremely deep logical expressions"
+        );
+    }
+
+    #[test]
+    fn test_filter_empty_timeseries() {
+        let ts = Timeseries::new(
+            std::iter::once((String::from("foo"), FieldValue::U8(0))),
+            DataType::Double,
+            MetricType::Gauge,
+        )
+        .unwrap();
+        let table = Table::from_timeseries("foo", std::iter::once(ts)).unwrap();
+        let filt = query_parser::filter_expr("timestamp > @now()").unwrap();
+        assert!(
+            filt.apply(&[table]).is_ok(),
+            "It's not an error to filter an empty table"
         );
     }
 }
