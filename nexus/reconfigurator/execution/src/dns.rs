@@ -1139,7 +1139,7 @@ mod test {
             .await
             .expect("failed to read current target blueprint")
             .expect("no target blueprint set");
-        eprintln!("blueprint: {:?}", blueprint);
+        eprintln!("blueprint: {}", blueprint.display());
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
@@ -1239,7 +1239,7 @@ mod test {
             .unwrap();
         assert_eq!(rv, EnsureMultiple::Added(1));
         let blueprint2 = builder.build();
-        eprintln!("blueprint2: {:?}", blueprint2);
+        eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)

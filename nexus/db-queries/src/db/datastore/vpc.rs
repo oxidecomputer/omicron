@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
+use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
@@ -45,6 +46,7 @@ use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -766,6 +768,7 @@ impl DataStore {
         let mut sleds = sled::table
             .select(Sled::as_select())
             .filter(sled::time_deleted.is_null())
+            .sled_filter(SledFilter::VpcFirewall)
             .into_boxed();
         if !sleds_filter.is_empty() {
             sleds = sleds.filter(sled::id.eq_any(sleds_filter.to_vec()));
@@ -1284,6 +1287,7 @@ mod tests {
     use crate::db::datastore::test::sled_baseboard_for_test;
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
@@ -1673,8 +1677,8 @@ mod tests {
             service_sled_ids
         };
 
-        // Create four sleds.
-        let harness = Harness::new(4);
+        // Create five sleds.
+        let harness = Harness::new(5);
         for sled in harness.db_sleds() {
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");
         }
@@ -1859,8 +1863,18 @@ mod tests {
             fetch_service_sled_ids().await
         );
 
-        // Finally, create a blueprint that includes our third and fourth sleds,
-        // make it the target, and ensure we resolve to all four sleds.
+        // ---
+
+        // Add a vNIC record for our fifth sled's Nexus, then create a blueprint
+        // that includes sleds with indexes 2, 3, and 4. Make it the target,
+        // and ensure we resolve to all five sleds.
+        datastore
+            .service_create_network_interface_raw(
+                &opctx,
+                harness.db_services().nth(4).unwrap().1,
+            )
+            .await
+            .expect("failed to insert service VNIC");
         let bp4_zones = {
             let mut zones = BTreeMap::new();
             for (sled_id, zone_config) in
@@ -1903,6 +1917,25 @@ mod tests {
             .await
             .expect("failed to set blueprint target");
         assert_eq!(harness.sled_ids, fetch_service_sled_ids().await);
+
+        // ---
+
+        // Mark some sleds as ineligible. Only the non-provisionable and
+        // in-service sleds should be returned.
+        let ineligible = IneligibleSleds {
+            expunged: harness.sled_ids[0],
+            decommissioned: harness.sled_ids[1],
+            illegal_decommissioned: harness.sled_ids[2],
+            non_provisionable: harness.sled_ids[3],
+        };
+        ineligible
+            .setup(&opctx, &datastore)
+            .await
+            .expect("failed to set up ineligible sleds");
+
+        assert_eq!(&harness.sled_ids[3..=4], fetch_service_sled_ids().await);
+
+        // ---
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

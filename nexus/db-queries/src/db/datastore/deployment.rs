@@ -945,7 +945,17 @@ impl From<InsertTargetError> for Error {
 ///              AND "parent_blueprint_id" IS NULL
 ///              AND NOT EXISTS (SELECT version FROM current_target)
 ///         ) = 1,
-///         <new_target_id>,
+///         -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
+///         -- became too smart for our `CAST(... as UUID)` error checking
+///         -- gadget: it can infer that `<new_target_id>` must be a UUID, so
+///         -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
+///         -- as UUIDs _during typechecking_, which causes the query to always
+///         -- fail. We can defeat this by casting the UUID to text here, which
+///         -- will allow the 'parent-not-target' and 'no-such-blueprint'
+///         -- sentinels to survive type checking, making it to query execution
+///         -- where they will only be cast to UUIDs at runtime in the failure
+///         -- cases they're supposed to catch.
+///         CAST(<new_target_id> AS text),
 ///         'parent-not-target'
 ///       )
 ///     ) AS UUID)
@@ -1109,8 +1119,9 @@ impl QueryFragment<Pg> for InsertTargetQuery {
                           SELECT version FROM current_target) \
                         ) = 1, ",
         );
+        out.push_sql("  CAST(");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
-        out.push_sql(", ");
+        out.push_sql("  AS text), ");
         out.push_bind_param::<sql_types::Text, &'static str>(
             &PARENT_NOT_TARGET_SENTINEL,
         )?;

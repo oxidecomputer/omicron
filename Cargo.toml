@@ -421,7 +421,7 @@ textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.36.0"
+tokio = "1.37.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = "0.20"
@@ -443,7 +443,7 @@ update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 usdt = "0.5.0"
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
-walkdir = "2.4"
+walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
