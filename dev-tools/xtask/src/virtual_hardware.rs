@@ -16,26 +16,34 @@ use std::str::FromStr;
 enum Commands {
     /// Create virtual hardware to simulate a Gimlet
     Create {
+        /// The physical link over which Chelsio links are simulated
+        ///
+        /// Will be inferred by `dladm show-phys` if unsupplied.
+        #[clap(long)]
+        physical_link: Option<String>,
+
         /// Sets `promisc-filtered` off for the sc0_1 vnic.
+        ///
+        /// Won't do anything if unsupplied.
         #[clap(long)]
         promiscuous_filter_off: bool,
 
         /// The gateway IP address of your local network
         ///
-        /// (Will be inferred via `netstat` if not supplied).
+        /// Will be inferred via `netstat` if unsupplied.
         #[clap(long)]
         gateway_ip: Option<String>,
 
         /// The MAC address of your gateway IP
         ///
-        /// (Will be inferred via `arp` if not supplied).
+        /// Will be inferred via `arp` if unsupplied.
         #[clap(long)]
         gateway_mac: Option<String>,
 
         #[command(flatten)]
         pxa: Pxa,
 
-        #[clap(long, default_value = "a8:e1:de:01:70:1d")]
+        #[clap(long, default_value = PXA_MAC_DEFAULT)]
         pxa_mac: String,
     },
     /// Destroy virtual hardware which was initialized with "Create"
@@ -60,10 +68,6 @@ pub struct Pxa {
 
 #[derive(Parser)]
 pub struct Args {
-    /// The physical link over which Chelsio links are simulated
-    #[clap(long)]
-    physical_link: Option<String>,
-
     /// The directory in which virtual devices are stored
     #[clap(long, default_value = "/var/tmp")]
     vdev_dir: Utf8PathBuf,
@@ -76,17 +80,24 @@ static NO_INSTALL_MARKER: &'static str = "/etc/opt/oxide/NO_INSTALL";
 const GB: u64 = 1 << 30;
 const VDEV_SIZE: u64 = 20 * GB;
 
+const ARP: &'static str = "/usr/sbin/arp";
 const DLADM: &'static str = "/usr/sbin/dladm";
 const IPADM: &'static str = "/usr/sbin/ipadm";
+const MODINFO: &'static str = "/usr/sbin/modinfo";
+const MODUNLOAD: &'static str = "/usr/sbin/modunload";
+const NETSTAT: &'static str = "/usr/bin/netstat";
 const PFEXEC: &'static str = "/usr/bin/pfexec";
+const PING: &'static str = "/usr/sbin/ping";
 const SWAP: &'static str = "/usr/sbin/swap";
 const ZFS: &'static str = "/usr/sbin/zfs";
+const ZLOGIN: &'static str = "/usr/sbin/zlogin";
 const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
     "e3ea4b495ba0a71801ded0776ae4bbd31df57e26";
 const SOFTNPU_COMMIT: &'static str = "dbab082dfa89da5db5ca2325c257089d2f130092";
+const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
   PXA_START and PXA_END. These variables are necessary to allow
@@ -107,20 +118,21 @@ pub fn run_cmd(args: Args) -> Result<()> {
         workspace_root.join("smf/sled-agent/non-gimlet/config.toml");
     let npu_zone = workspace_root.join("out/npuzone/npuzone");
 
-    let physical_link = if let Some(l) = args.physical_link {
-        l
-    } else {
-        default_physical_link()?
-    };
-
     match args.command {
         Commands::Create {
+            physical_link,
             promiscuous_filter_off,
             gateway_ip,
             gateway_mac,
             pxa,
             pxa_mac,
         } => {
+            let physical_link = if let Some(l) = physical_link {
+                l
+            } else {
+                default_physical_link()?
+            };
+
             println!("creating virtual hardware");
             ensure_vdevs(&sled_agent_config, &args.vdev_dir)?;
             ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
@@ -169,7 +181,7 @@ fn demount_backingfs() -> Result<()> {
 }
 
 fn unload_xde_driver() -> Result<()> {
-    let cmd = Command::new("modinfo");
+    let cmd = Command::new(MODINFO);
     let output = execute(cmd)?;
 
     let id = String::from_utf8(output.stdout)
@@ -192,7 +204,7 @@ fn unload_xde_driver() -> Result<()> {
     println!("unloading xde driver");
 
     let mut cmd = Command::new(PFEXEC);
-    cmd.arg("modunload");
+    cmd.arg(MODUNLOAD);
     cmd.arg("-i");
     cmd.arg(id);
     execute(cmd)?;
@@ -251,7 +263,7 @@ fn ensure_simulated_links(
 
     let sc = "sc0_1".to_string();
     if !vnic_exists(&sc) {
-        create_vnic(&sc, physical_link, "a8:e1:de:01:70:1d")?;
+        create_vnic(&sc, physical_link, PXA_MAC_DEFAULT)?;
         if promiscuous_filter_off {
             set_linkprop(&sc, "promisc-filtered", "off")?;
         }
@@ -331,7 +343,7 @@ fn initialize_softnpu_zone(
 fn run_scadm_command(args: Vec<&str>) -> Result<Output> {
     let mut cmd = Command::new(PFEXEC);
     cmd.args([
-        "zlogin",
+        ZLOGIN,
         "sidecar_softnpu",
         "/softnpu/scadm",
         "--server",
@@ -347,7 +359,7 @@ fn run_scadm_command(args: Vec<&str>) -> Result<Output> {
 }
 
 fn default_gateway_ip() -> Result<String> {
-    let mut cmd = Command::new("netstat");
+    let mut cmd = Command::new(NETSTAT);
     cmd.args(["-rn", "-f", "inet"]);
     let output = execute(cmd)?;
 
@@ -377,13 +389,13 @@ fn get_gateway_mac(
             let retries = 3;
             for i in 0..=retries {
                 println!("Pinging {gateway_ip} and sleeping ({i} / {retries})");
-                let mut cmd = Command::new("ping");
+                let mut cmd = Command::new(PING);
                 cmd.arg(&gateway_ip);
                 execute(cmd)?;
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
 
-            let mut cmd = Command::new("arp");
+            let mut cmd = Command::new(ARP);
             cmd.arg("-an");
             let output = execute(cmd)?;
 
