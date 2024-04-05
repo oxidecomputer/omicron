@@ -2,22 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! CLI to set up zone networking
+//! CLI to set up zone configuration
 
 use anyhow::anyhow;
 use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
+use illumos_utils::chronyd::Chronyd;
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
-use illumos_utils::chronyd::Chronyd;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
-use std::fs::{read_to_string, write, OpenOptions};
+use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
@@ -66,12 +65,20 @@ fn parse_opte_iface(s: &str) -> anyhow::Result<String> {
     s.parse().map_err(|_| anyhow!("ERROR: Invalid OPTE interface"))
 }
 
+fn parse_allow(s: &str) -> anyhow::Result<String> {
+    if s == "unknown" {
+        return Err(anyhow!("ERROR: Missing allowed address range"));
+    };
+
+    s.parse().map_err(|_| anyhow!("ERROR: Invalid allowed address range"))
+}
+
 fn parse_chrony_conf(s: &str) -> anyhow::Result<String> {
     if s == "unknown" {
         return Err(anyhow!("ERROR: Missing chrony configuration file"));
     };
 
-    // TODO: actually check the format of the string mends with "chrony.conf"
+    // TODO: actually check the format of the string ends with "chrony.conf"
     s.parse().map_err(|_| anyhow!("ERROR: Invalid chrony configuration file"))
 }
 
@@ -176,8 +183,8 @@ async fn do_run() -> Result<(), CmdError> {
                         // TODO: Add some parsing to this?
                     )
                     .arg(
-                        arg!(-a --allow <Ipv6Addr> "Allowed IPv6 address")                       
-                        .value_parser(parse_ipv6),
+                        arg!(-a --allow <String> "Allowed IPv6 range")                       
+                        .value_parser(parse_allow),
                     ),
                 ),
         )
@@ -216,7 +223,7 @@ async fn ntp_smf_start(
 ) -> Result<(), CmdError> {
     let servers =
         matches.get_many::<String>("servers").unwrap().collect::<Vec<_>>();
-    let allow: Option<&Ipv6Addr> = matches.get_one("allow");
+    let allow: Option<&String> = matches.get_one("allow");
 
     let file: &String = matches.get_one("file").unwrap();
     let is_boundary: &bool = matches.get_one("boundary").unwrap();
@@ -306,17 +313,23 @@ async fn ntp_smf_start(
     // does this - system/logadm-upgrade - only processes files with mode 444 and
     // root:sys ownership so we need to adjust things here (until omicron package
     // supports including ownership and permissions in the generated tar files).
-    //
-    // TODO: There is an error here
-    // zone-setup: Could not create chrony logadm configuration file /etc/logadm.d/chrony.logadm.conf: Invalid argument (os error 22)
-    let mut options = OpenOptions::new();
-    options.mode(444).create(true).open(LOGADM_CONFIG_FILE).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not create chrony logadm configuration file {}: {}",
+    let mut perms = metadata(LOGADM_CONFIG_FILE)
+        .map_err(|err| {
+            CmdError::Failure(anyhow!(
+            "Could not retrieve chrony logadm configuration file {} metadata: {}",
             LOGADM_CONFIG_FILE,
             err
         ))
-    })?;
+        })?
+        .permissions();
+    perms.set_readonly(true);
+    set_permissions(LOGADM_CONFIG_FILE, perms).map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "Could not set 444 permissions on chrony logadm configuration file {}: {}",
+                    LOGADM_CONFIG_FILE,
+                    err
+                ))
+            })?;
 
     chown(LOGADM_CONFIG_FILE, Some(0), Some(3)).map_err(|err| {
         CmdError::Failure(anyhow!(
@@ -330,7 +343,6 @@ async fn ntp_smf_start(
     Svcadm::refresh_logadm_upgrade()
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    // TODO: Start daemon
     info!(&log, "Starting chronyd daemon"; "chrony config" => ?file);
     Chronyd::start_daemon(file)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;

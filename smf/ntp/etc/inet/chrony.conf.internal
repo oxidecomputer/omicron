@@ -4,7 +4,7 @@
 #
 
 # TODO: Removeme once svc-site-ntp file is gone
-server @SERVER@ iburst minpoll 0 maxpoll 4
+# server @SERVER@ iburst minpoll 0 maxpoll 4
 
 driftfile /var/lib/chrony/drift
 ntsdumpdir /var/lib/chrony
