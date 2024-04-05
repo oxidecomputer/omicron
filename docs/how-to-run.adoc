@@ -227,7 +227,7 @@ If you're using an existing external network, you likely don't need to specify a
     --physical_link igb0           # The physical link for your external network.
 ----
 
-If you're running on a Gimlet, you don't need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
+If you're running on a Gimlet, you may not need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU. You can tweak what resources are created with the `--scope` flag.
 
 Later, you can clean up the resources created by `cargo xtask virtual-hardware create` with:
 

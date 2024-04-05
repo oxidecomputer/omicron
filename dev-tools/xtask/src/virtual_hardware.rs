@@ -50,6 +50,17 @@ enum Commands {
     Destroy,
 }
 
+/// Describes which objects should be manipulated by these commands.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum Scope {
+    /// Everything (this is the default).
+    All,
+    /// Only storage (e.g. vdevs).
+    Disks,
+    /// Only networking (e.g. SoftNPU).
+    Network,
+}
+
 #[derive(clap::Args)]
 #[group(multiple = true)]
 pub struct Pxa {
@@ -68,6 +79,9 @@ pub struct Pxa {
 
 #[derive(Parser)]
 pub struct Args {
+    #[clap(long, value_enum, default_value_t = Scope::All)]
+    scope: Scope,
+
     /// The directory in which virtual devices are stored
     #[clap(long, default_value = "/var/tmp")]
     vdev_dir: Utf8PathBuf,
@@ -134,20 +148,28 @@ pub fn run_cmd(args: Args) -> Result<()> {
             };
 
             println!("creating virtual hardware");
-            ensure_vdevs(&sled_agent_config, &args.vdev_dir)?;
-            ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
-            ensure_softnpu_zone(&npu_zone)?;
-            initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
+            if matches!(args.scope, Scope::All | Scope::Disks) {
+                ensure_vdevs(&sled_agent_config, &args.vdev_dir)?;
+            }
+            if matches!(args.scope, Scope::All | Scope::Network) {
+                ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
+                ensure_softnpu_zone(&npu_zone)?;
+                initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
+            }
             println!("created virtual hardware");
         }
         Commands::Destroy => {
             println!("destroying virtual hardware");
             verify_omicron_uninstalled()?;
             demount_backingfs()?;
-            unload_xde_driver()?;
-            remove_softnpu_zone(&npu_zone)?;
-            remove_vnics()?;
-            destroy_vdevs(&sled_agent_config, &args.vdev_dir)?;
+            if matches!(args.scope, Scope::All | Scope::Network) {
+                unload_xde_driver()?;
+                remove_softnpu_zone(&npu_zone)?;
+                remove_vnics()?;
+            }
+            if matches!(args.scope, Scope::All | Scope::Disks) {
+                destroy_vdevs(&sled_agent_config, &args.vdev_dir)?;
+            }
             println!("destroyed virtual hardware");
         }
     }
