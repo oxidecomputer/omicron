@@ -589,7 +589,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
                 let server_results = &details.server_results;
 
-                if server_results.len() != 0 {
+                if !server_results.is_empty() {
                     let rows = server_results.iter().map(|(addr, result)| {
                         DnsPropRow {
                             dns_server_addr: addr,
@@ -713,7 +713,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
                 println!("");
                 println!("    TLS certificates: {}", tls_cert_rows.len());
-                if tls_cert_rows.len() > 0 {
+                if !tls_cert_rows.is_empty() {
                     let table = tabled::Table::new(tls_cert_rows)
                         .with(tabled::settings::Style::empty())
                         .with(tabled::settings::Padding::new(0, 1, 0, 0))
