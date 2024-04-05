@@ -313,3 +313,64 @@ impl BpOmicronZoneNic {
         zone_nic.into_network_interface_for_zone(zone_id)
     }
 }
+
+mod diesel_util {
+    use crate::{
+        schema::bp_omicron_zone::disposition, to_db_bp_zone_disposition,
+        DbBpZoneDisposition,
+    };
+    use diesel::{
+        helper_types::EqAny, prelude::*, query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::deployment::{
+        BlueprintZoneDisposition, BlueprintZoneFilter,
+    };
+
+    /// An extension trait to apply a [`BlueprintZoneFilter`] to a Diesel
+    /// expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the
+    /// `bp_omicron_zone` table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbBpZoneDisposition` type which is private to this crate.
+    pub trait ApplyBlueprintZoneFilterExt {
+        type Output;
+
+        /// Applies a [`BlueprintZoneFilter`] to a Diesel expression.
+        fn blueprint_zone_filter(
+            self,
+            filter: BlueprintZoneFilter,
+        ) -> Self::Output;
+    }
+
+    impl<E> ApplyBlueprintZoneFilterExt for E
+    where
+        E: FilterDsl<BlueprintZoneFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn blueprint_zone_filter(
+            self,
+            filter: BlueprintZoneFilter,
+        ) -> Self::Output {
+            // This is only boxed for ease of reference above.
+            let all_matching_dispositions: BoxedIterator<DbBpZoneDisposition> =
+                Box::new(
+                    BlueprintZoneDisposition::all_matching(filter)
+                        .map(to_db_bp_zone_disposition),
+                );
+
+            FilterDsl::filter(
+                self,
+                disposition.eq_any(all_matching_dispositions),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type BlueprintZoneFilterQuery =
+        EqAny<disposition, BoxedIterator<DbBpZoneDisposition>>;
+}
+
+pub use diesel_util::ApplyBlueprintZoneFilterExt;

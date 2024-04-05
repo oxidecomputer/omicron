@@ -391,6 +391,7 @@ table! {
         state_generation -> Int8,
     }
 }
+joinable!(vmm -> sled (sled_id));
 
 table! {
     sled_instance (id) {
@@ -483,6 +484,7 @@ table! {
         is_primary -> Bool,
     }
 }
+joinable!(instance_network_interface -> instance (instance_id));
 
 table! {
     service_network_interface (id) {

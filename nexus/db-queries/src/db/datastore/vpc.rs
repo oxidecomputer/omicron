@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
+use crate::db::model::ApplyBlueprintZoneFilterExt;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
@@ -44,8 +45,6 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
-use nexus_db_model::to_db_bp_zone_disposition;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -666,11 +665,7 @@ impl DataStore {
         );
 
         let instance_query = instance_network_interface::table
-            .inner_join(
-                instance::table
-                    .on(instance::id
-                        .eq(instance_network_interface::instance_id)),
-            )
+            .inner_join(instance::table)
             .inner_join(
                 vmm::table
                     .on(vmm::id.nullable().eq(instance::active_propolis_id)),
@@ -727,14 +722,7 @@ impl DataStore {
             )
             // Filter out services that are expunged and shouldn't be resolved
             // here.
-            .filter(
-                bp_omicron_zone::disposition.eq_any(
-                    BlueprintZoneDisposition::all_matching(
-                        BlueprintZoneFilter::VpcFirewall,
-                    )
-                    .map(to_db_bp_zone_disposition),
-                ),
-            )
+            .blueprint_zone_filter(BlueprintZoneFilter::VpcFirewall)
             .filter(service_network_interface::vpc_id.eq(vpc_id))
             .filter(service_network_interface::time_deleted.is_null())
             .select(Sled::as_select());
@@ -1265,6 +1253,8 @@ mod tests {
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
+    use async_bb8_diesel::AsyncConnection;
+    use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SledUpdate;
     use nexus_test_utils::db::test_setup_database;
@@ -1917,16 +1907,45 @@ mod tests {
             .await
             .expect("failed to undo ineligible sleds");
 
+        // Clear out the service table entirely so we're only testing
+        // blueprints. (The services table is going to go away soon so this is
+        // an easy workaround for now.)
+        {
+            use db::schema::service::dsl;
+
+            let conn = datastore
+                .pool_connection_authorized(&opctx)
+                .await
+                .expect("getting a connection succeeded");
+            conn.transaction_async(|conn| async move {
+                // Need to do a full table scan for a full delete.
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .expect("allowing full table scan succeeded");
+
+                diesel::delete(dsl::service)
+                    .execute_async(&conn)
+                    .await
+                    .expect("failed to delete services");
+
+                Ok::<_, DieselError>(())
+            })
+            .await
+            .expect("transaction succeed");
+        }
+
         // Make a new blueprint marking one of the zones as quiesced and one as
         // expunged. Ensure that the sled with *quiesced* zone is returned by
         // vpc_resolve_to_sleds, but the sled with the *expunged* zone is not.
         // (But other services are still running.)
         let bp5_zones = {
             let mut zones = BTreeMap::new();
-            // Skip over the first two sleds.
+            // Skip over sled index 0 (should be excluded).
             let mut iter = harness.blueprint_zone_configs().skip(1);
 
-            // The second sled's Nexus zone is active.
+            // Sled index 1's zone is active (should be included).
             let (sled_id, zone_config) = iter.next().unwrap();
             zones.insert(
                 sled_id,
@@ -1936,7 +1955,7 @@ mod tests {
                 },
             );
 
-            // The third sled's Nexus zone is quiesced.
+            // Sled index 2's zone is quiesced (should be included).
             let (sled_id, mut zone_config) = iter.next().unwrap();
             zone_config.disposition = BlueprintZoneDisposition::Quiesced;
             zones.insert(
@@ -1947,7 +1966,7 @@ mod tests {
                 },
             );
 
-            // The fourth sled's Nexus zone is expunged.
+            // Sled index 3's zone is expunged (should be excluded).
             let (sled_id, mut zone_config) = iter.next().unwrap();
             zone_config.disposition = BlueprintZoneDisposition::Expunged;
             zones.insert(
@@ -1957,6 +1976,8 @@ mod tests {
                     zones: vec![zone_config],
                 },
             );
+
+            // Sled index 4's zone is not in the blueprint (should be excluded).
 
             zones
         };
@@ -1988,8 +2009,7 @@ mod tests {
             )
             .await
             .expect("failed to set blueprint target");
-        // TODO: figure out why each of the sleds is getting returned, weird.
-        assert_eq!(&harness.sled_ids[..3], fetch_service_sled_ids().await);
+        assert_eq!(&harness.sled_ids[1..=2], fetch_service_sled_ids().await);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
