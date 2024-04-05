@@ -1813,7 +1813,7 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 0.8.2",
+ "uuid 1.8.0",
 ]
 
 [[package]]
@@ -1824,7 +1824,7 @@ dependencies = [
  "diesel",
  "serde",
  "usdt 0.5.0",
- "uuid 0.8.2",
+ "uuid 1.8.0",
  "version_check",
 ]
 
@@ -5822,7 +5822,6 @@ dependencies = [
  "unicode-normalization",
  "usdt 0.3.5",
  "usdt-impl 0.5.0",
- "uuid 0.8.2",
  "uuid 1.8.0",
  "yasna",
  "zerocopy 0.7.32",
@@ -10686,10 +10685,6 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom 0.2.12",
- "serde",
-]
 
 [[package]]
 name = "uuid"
