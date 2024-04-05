@@ -482,8 +482,8 @@ impl DataStore {
     /// # Errors
     ///
     /// This method returns an error if the sled policy is not a state that is
-    /// valid to decommission from (i.e. if, the cur,
-    /// [`SledPolicy::is_decommissionable`] returns `false`).
+    /// valid to decommission from (i.e. if [`SledPolicy::is_decommissionable`]
+    /// returns `false`).
     pub async fn sled_set_state_to_decommissioned(
         &self,
         opctx: &OpContext,
