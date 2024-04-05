@@ -654,8 +654,8 @@ impl DataStore {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
         use db::schema::{
-            bp_omicron_zone, bp_target, instance, instance_network_interface,
-            service, service_network_interface, sled, vmm,
+            bp_omicron_zone, bp_target, service, service_network_interface,
+            sled,
         };
         // Diesel requires us to use aliases in order to refer to the
         // `bp_target` table twice in the same query.
@@ -664,22 +664,22 @@ impl DataStore {
             db::schema::bp_target as bp_target2
         );
 
-        let instance_query = instance_network_interface::table
-            .inner_join(
-                instance::table
-                    .on(instance::id
-                        .eq(instance_network_interface::instance_id)),
-            )
-            .inner_join(
-                vmm::table
-                    .on(vmm::id.nullable().eq(instance::active_propolis_id)),
-            )
-            .inner_join(sled::table.on(sled::id.eq(vmm::sled_id)))
-            .filter(instance_network_interface::vpc_id.eq(vpc_id))
-            .filter(instance_network_interface::time_deleted.is_null())
-            .filter(instance::time_deleted.is_null())
-            .filter(vmm::time_deleted.is_null())
-            .select(Sled::as_select());
+        // let instance_query = instance_network_interface::table
+        //     .inner_join(
+        //         instance::table
+        //             .on(instance::id
+        //                 .eq(instance_network_interface::instance_id)),
+        //     )
+        //     .inner_join(
+        //         vmm::table
+        //             .on(vmm::id.nullable().eq(instance::active_propolis_id)),
+        //     )
+        //     .inner_join(sled::table.on(sled::id.eq(vmm::sled_id)))
+        //     .filter(instance_network_interface::vpc_id.eq(vpc_id))
+        //     .filter(instance_network_interface::time_deleted.is_null())
+        //     .filter(instance::time_deleted.is_null())
+        //     .filter(vmm::time_deleted.is_null())
+        //     .select(Sled::as_select());
 
         // When Nexus accepts the rack initialization handoff from RSS, it
         // populates the `service` table. We eventually want to retire it
@@ -776,11 +776,7 @@ impl DataStore {
 
         let conn = self.pool_connection_unauthorized().await?;
         sleds
-            .intersect(
-                instance_query
-                    .union(rss_service_query)
-                    .union(reconfig_service_query),
-            )
+            .intersect(rss_service_query.union(reconfig_service_query))
             .get_results_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
