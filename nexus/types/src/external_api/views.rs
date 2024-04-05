@@ -592,42 +592,6 @@ impl SledPolicy {
         Self::InService { provision_policy: SledProvisionPolicy::Provisionable }
     }
 
-    /// Returns the list of all in-service policies.
-    pub fn all_in_service() -> &'static [Self] {
-        &[
-            Self::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            },
-            Self::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            },
-        ]
-    }
-
-    /// Returns true if the sled is in-service.
-    ///
-    /// Note that a sled being in service does not mean it's provisionable; most
-    /// consumers probably want `is_provisionable` instead.
-    pub fn is_in_service(&self) -> bool {
-        match self {
-            Self::InService { .. } => true,
-            Self::Expunged => false,
-        }
-    }
-
-    /// Returns true if the sled can have services provisioned on it.
-    pub fn is_provisionable(&self) -> bool {
-        match self {
-            Self::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            } => true,
-            Self::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            }
-            | Self::Expunged => false,
-        }
-    }
-
     /// Returns the provision policy, if the sled is in service.
     pub fn provision_policy(&self) -> Option<SledProvisionPolicy> {
         match self {
@@ -636,9 +600,13 @@ impl SledPolicy {
         }
     }
 
-    /// Returns true if the sled can be decommissioned in this state.
+    /// Returns true if the sled can be decommissioned with this policy
+    ///
+    /// This is a method here, rather than being a variant on `SledFilter`,
+    /// because the "decommissionable" condition only has meaning for policies,
+    /// not states.
     pub fn is_decommissionable(&self) -> bool {
-        // This should be kept in sync with decommissionable_states below.
+        // This should be kept in sync with `all_decommissionable` below.
         match self {
             Self::InService { .. } => false,
             Self::Expunged => true,
@@ -647,6 +615,10 @@ impl SledPolicy {
 
     /// Returns all the possible policies a sled can have for it to be
     /// decommissioned.
+    ///
+    /// This is a method here, rather than being a variant on `SledFilter`,
+    /// because the "decommissionable" condition only has meaning for policies,
+    /// not states.
     pub fn all_decommissionable() -> &'static [Self] {
         &[Self::Expunged]
     }
@@ -689,21 +661,6 @@ pub enum SledState {
     /// it will never return to service. (The actual hardware may be reused,
     /// but it will be treated as a brand-new sled.)
     Decommissioned,
-}
-
-impl SledState {
-    /// Returns true if the sled state makes it eligible for services that
-    /// aren't required to be on every sled.
-    ///
-    /// For example, NTP must exist on every sled, but Nexus does not have to.
-    pub fn is_eligible_for_discretionary_services(&self) -> bool {
-        // (Explicit match, so that this fails to compile if a new state is
-        // added.)
-        match self {
-            SledState::Active => true,
-            SledState::Decommissioned => false,
-        }
-    }
 }
 
 impl fmt::Display for SledState {
