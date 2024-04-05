@@ -60,9 +60,6 @@ files=(
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
-	tools/create_virtual_hardware.sh
-    tools/virtual_hardware.sh
-	tools/scrimlet/*
 )
 
 pfexec mkdir -p /work && pfexec chown $USER /work
