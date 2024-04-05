@@ -1238,7 +1238,7 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                 component: self.step_info.info.component.clone(),
                 id: self.step_info.info.id.clone(),
                 description: self.step_info.info.description.clone(),
-                message: message,
+                message,
             },
             Err(error) => error,
         }

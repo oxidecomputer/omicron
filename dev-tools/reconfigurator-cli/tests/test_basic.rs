@@ -135,7 +135,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     assert!(!state1.external_dns.is_empty());
 
     // unwrap: we checked above that this list was non-empty.
-    let blueprint = state1.blueprints.iter().next().unwrap();
+    let blueprint = state1.blueprints.first().unwrap();
 
     // Write a reconfigurator-cli script to load the file, edit the
     // blueprint, and save the entire state to a new file.

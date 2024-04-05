@@ -286,7 +286,7 @@ impl Filter {
     // Apply the filtering table operation.
     pub(crate) fn apply(&self, tables: &[Table]) -> Result<Vec<Table>, Error> {
         anyhow::ensure!(
-            tables.len() >= 1,
+            !tables.is_empty(),
             "Filtering operations require at least one table",
         );
         let mut output_tables = Vec::with_capacity(tables.len());

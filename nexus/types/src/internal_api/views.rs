@@ -141,7 +141,7 @@ impl From<steno::SagaStateView> for SagaState {
                     },
                 ..
             } => SagaState::Failed {
-                error_node_name: error_node_name,
+                error_node_name,
                 error_info: SagaErrorInfo::from(error_source),
             },
         }
