@@ -51,7 +51,23 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         .arg("--warn")
         .arg("clippy::disallowed_script_idents")
         .arg("--warn")
-        .arg("clippy::disallowed_types");
+        .arg("clippy::disallowed_types")
+        // Warn on some more style lints that are relatively stable and make
+        // sense.
+        .arg("--warn")
+        .arg("clippy::iter_cloned_collect")
+        .arg("--warn")
+        .arg("clippy::iter_next_slice")
+        .arg("--warn")
+        .arg("clippy::iter_nth")
+        .arg("--warn")
+        .arg("clippy::iter_nth_zero")
+        .arg("--warn")
+        .arg("clippy::iter_skip_next")
+        .arg("--warn")
+        .arg("clippy::len_zero")
+        .arg("--warn")
+        .arg("clippy::redundant_field_names");
 
     eprintln!(
         "running: {:?} {}",

@@ -662,7 +662,7 @@ impl Client {
 
                 // Push the predicate that selects the timeseries keys, which
                 // are unique to this group.
-                let maybe_key_set = if group.consistent_keys.len() > 0 {
+                let maybe_key_set = if !group.consistent_keys.is_empty() {
                     let mut chunk = String::from("timeseries_key IN (");
                     let keys = group
                         .consistent_keys
