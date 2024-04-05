@@ -696,7 +696,7 @@ Once all the Omicron services are uninstalled, you can also remove the previousl
 
 [source,console]
 ----
-$ pfexec ./tools/destroy_virtual_hardware.sh
+$ cargo xtask virtual-hardware destroy
 ----
 
 == More information
