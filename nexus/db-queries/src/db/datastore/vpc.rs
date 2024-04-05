@@ -652,8 +652,8 @@ impl DataStore {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
         use db::schema::{
-            bp_omicron_zone, bp_target, instance, instance_network_interface,
-            service, service_network_interface, sled, vmm,
+            bp_omicron_zone, bp_target, service, service_network_interface,
+            sled,
         };
         // Diesel requires us to use aliases in order to refer to the
         // `bp_target` table twice in the same query.
