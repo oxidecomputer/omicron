@@ -20,6 +20,8 @@ use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::redact_variable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog::debug;
 use std::io::BufReader;
 use std::io::BufWriter;
@@ -29,7 +31,6 @@ use std::time::Duration;
 use subprocess::Exec;
 use swrite::swriteln;
 use swrite::SWrite;
-use uuid::Uuid;
 
 fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
@@ -41,7 +42,7 @@ fn test_basic() {
     let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds.txt");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
-    let stdout_text = redact_variable(&stdout_text, &[]);
+    let stdout_text = redact_variable(&stdout_text);
     assert_contents("tests/output/cmd-stdout", &stdout_text);
     assert_contents("tests/output/cmd-stderr", &stderr_text);
 }
@@ -118,9 +119,9 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to assemble reconfigurator state");
 
     // Smoke check the initial state.
-    let sled_id: Uuid = SLED_AGENT_UUID.parse().unwrap();
-    assert!(state1.policy.sleds.contains_key(&sled_id));
-    assert!(!state1.policy.service_ip_pool_ranges.is_empty());
+    let sled_id: TypedUuid<SledKind> = SLED_AGENT_UUID.parse().unwrap();
+    assert!(state1.planning_input.sled_resources(&sled_id).is_some());
+    assert!(!state1.planning_input.service_ip_pool_ranges().is_empty());
     assert!(!state1.silo_names.is_empty());
     assert!(!state1.external_dns_zone_names.is_empty());
     // We waited for the first inventory collection already.
