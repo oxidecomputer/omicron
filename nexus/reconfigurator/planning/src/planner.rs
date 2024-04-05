@@ -12,9 +12,11 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::external_api::views::SledState;
+use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -41,8 +43,6 @@ impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
         parent_blueprint: &'a Blueprint,
-        internal_dns_version: Generation,
-        external_dns_version: Generation,
         input: &'a PlanningInput,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
@@ -52,8 +52,6 @@ impl<'a> Planner<'a> {
         let blueprint = BlueprintBuilder::new_based_on(
             &log,
             parent_blueprint,
-            internal_dns_version,
-            external_dns_version,
             input,
             creator,
         )?;
@@ -96,19 +94,13 @@ impl<'a> Planner<'a> {
         // We will not mark sleds getting Crucible zones as ineligible; other
         // control plane service zones starting concurrently with Crucible zones
         // is fine.
-        let mut sleds_ineligible_for_services = BTreeSet::new();
+        let mut sleds_waiting_for_ntp_zones = BTreeSet::new();
 
-        for (sled_id, sled_info) in &self.input.policy.sleds {
-            // Decommissioned sleds don't get any services. (This is an
-            // explicit match so that when more states are added, this fails to
-            // compile.)
-            match sled_info.state {
-                SledState::Decommissioned => {
-                    sleds_ineligible_for_services.insert(*sled_id);
-                    continue;
-                }
-                SledState::Active => {}
-            }
+        for (sled_id, sled_info) in
+            self.input.all_sled_resources(SledFilter::InService)
+        {
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = sled_id.as_untyped_uuid();
 
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
@@ -125,7 +117,7 @@ impl<'a> Planner<'a> {
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
-                sleds_ineligible_for_services.insert(*sled_id);
+                sleds_waiting_for_ntp_zones.insert(*sled_id);
                 continue;
             }
 
@@ -194,22 +186,8 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // We've now placed all the services that should always exist on all
-        // sleds. Before moving on to make decisions about placing services that
-        // are _not_ present on all sleds, check the provision state of all our
-        // sleds so we can avoid any non-provisionable sleds under the
-        // assumption that there is something amiss with them.
-        sleds_ineligible_for_services.extend(
-            self.input.policy.sleds.iter().filter_map(
-                |(sled_id, sled_info)| {
-                    (!sled_info.is_eligible_for_discretionary_services())
-                        .then_some(*sled_id)
-                },
-            ),
-        );
-
         self.ensure_correct_number_of_nexus_zones(
-            &sleds_ineligible_for_services,
+            &sleds_waiting_for_ntp_zones,
         )?;
 
         Ok(())
@@ -217,23 +195,17 @@ impl<'a> Planner<'a> {
 
     fn ensure_correct_number_of_nexus_zones(
         &mut self,
-        sleds_ineligible_for_services: &BTreeSet<Uuid>,
+        sleds_waiting_for_ntp_zone: &BTreeSet<Uuid>,
     ) -> Result<(), Error> {
-        // Bin every sled by the number of Nexus zones it currently has while
-        // counting the total number of Nexus zones.
+        // Count the number of Nexus zones on all in-service sleds. This will
+        // include sleds that are in service but not eligible for new services,
+        // but will not include sleds that have been expunged or decommissioned.
         let mut num_total_nexus = 0;
-        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<Uuid>> =
-            BTreeMap::new();
-        for &sled_id in self.input.policy.sleds.keys() {
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = *sled_id.as_untyped_uuid();
             let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
             num_total_nexus += num_nexus;
-
-            // Only bin this sled if we're allowed to use it. If we have a sled
-            // we're not allowed to use that's already running a Nexus (seems
-            // fishy!), we counted its Nexus above but will ignore it here.
-            if !sleds_ineligible_for_services.contains(&sled_id) {
-                sleds_by_num_nexus.entry(num_nexus).or_default().push(sled_id);
-            }
         }
 
         // TODO-correctness What should we do if we have _too many_ Nexus
@@ -241,16 +213,34 @@ impl<'a> Planner<'a> {
         // at least the minimum number.
         let nexus_to_add = self
             .input
-            .policy
-            .target_nexus_zone_count
+            .target_nexus_zone_count()
             .saturating_sub(num_total_nexus);
         if nexus_to_add == 0 {
             info!(
                 self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.input.policy.target_nexus_zone_count,
+                "desired_count" => self.input.target_nexus_zone_count(),
                 "current_count" => num_total_nexus,
             );
             return Ok(());
+        }
+
+        // Now bin all the sleds which are eligible choices for a new Nexus zone
+        // by their current Nexus zone count. Skip sleds with a policy/state
+        // that should be eligible for Nexus but that don't yet have an NTP
+        // zone.
+        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<TypedUuid<SledKind>>> =
+            BTreeMap::new();
+        for sled_id in self
+            .input
+            .all_sled_ids(SledFilter::EligibleForDiscretionaryServices)
+            .filter(|sled_id| {
+                // TODO-cleanup use `TypedUuid` everywhere
+                !sleds_waiting_for_ntp_zone.contains(sled_id.as_untyped_uuid())
+            })
+        {
+            let num_nexus =
+                self.blueprint.sled_num_nexus_zones(*sled_id.as_untyped_uuid());
+            sleds_by_num_nexus.entry(num_nexus).or_default().push(sled_id);
         }
 
         // Ensure we have at least one sled on which we can add Nexus zones. If
@@ -264,7 +254,8 @@ impl<'a> Planner<'a> {
         }
 
         // Build a map of sled -> new nexus zone count.
-        let mut sleds_to_change: BTreeMap<Uuid, usize> = BTreeMap::new();
+        let mut sleds_to_change: BTreeMap<TypedUuid<SledKind>, usize> =
+            BTreeMap::new();
 
         'outer: for _ in 0..nexus_to_add {
             // `sleds_by_num_nexus` is sorted by key already, and we want to
@@ -302,10 +293,10 @@ impl<'a> Planner<'a> {
         // For each sled we need to change, actually do so.
         let mut total_added = 0;
         for (sled_id, new_nexus_count) in sleds_to_change {
-            match self
-                .blueprint
-                .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
-            {
+            match self.blueprint.sled_ensure_zone_multiple_nexus(
+                *sled_id.as_untyped_uuid(),
+                new_nexus_count,
+            )? {
                 EnsureMultiple::Added(n) => {
                     info!(
                         self.log, "will add {n} Nexus zone(s) to sled";
@@ -350,7 +341,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
-    use nexus_types::deployment::PlanningInput;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -358,6 +349,7 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::GenericUuid;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -380,7 +372,7 @@ mod test {
                 &example.collection,
                 internal_dns_version,
                 external_dns_version,
-                &example.input.policy,
+                example.input.all_sled_ids(SledFilter::All),
                 "the_test",
                 (TEST_NAME, "bp1"),
             )
@@ -393,8 +385,6 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            internal_dns_version,
-            external_dns_version,
             &example.input,
             "no-op?",
             &example.collection,
@@ -415,19 +405,12 @@ mod test {
         let new_sled_id = example.sled_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let policy = example.system.to_policy().unwrap();
-        let input = PlanningInput {
-            policy,
-            service_external_ips: example.input.service_external_ips,
-            service_nics: example.input.service_nics,
-        };
+        let input = example.system.to_planning_input_builder().unwrap().build();
 
         // Check that the first step is to add an NTP zone
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint2,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: add NTP?",
             &example.collection,
@@ -468,8 +451,6 @@ mod test {
         let blueprint4 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: add nothing more",
             &example.collection,
@@ -510,8 +491,6 @@ mod test {
         let blueprint5 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: add Crucible zones?",
             &collection,
@@ -552,8 +531,6 @@ mod test {
         let blueprint6 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint5,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test: no-op?",
             &collection,
@@ -586,21 +563,27 @@ mod test {
 
         // Use our example inventory collection as a starting point, but strip
         // it down to just one sled.
-        let (sled_id, collection, mut input) = {
-            let (mut collection, mut input) =
+        let (sled_id, collection, input) = {
+            let (mut collection, input) =
                 example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
             // Pick one sled ID to keep and remove the rest.
+            let mut builder = input.into_builder();
             let keep_sled_id =
-                input.policy.sleds.keys().next().copied().expect("no sleds");
-            input.policy.sleds.retain(|&k, _v| keep_sled_id == k);
-            collection.sled_agents.retain(|&k, _v| keep_sled_id == k);
-            collection.omicron_zones.retain(|&k, _v| keep_sled_id == k);
+                builder.sleds().keys().next().copied().expect("no sleds");
+            builder.sleds_mut().retain(|&k, _v| keep_sled_id == k);
+            // TODO-cleanup use `TypedUuid` everywhere
+            collection
+                .sled_agents
+                .retain(|&k, _v| *keep_sled_id.as_untyped_uuid() == k);
+            collection
+                .omicron_zones
+                .retain(|&k, _v| *keep_sled_id.as_untyped_uuid() == k);
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
 
-            (keep_sled_id, collection, input)
+            (keep_sled_id, collection, builder.build())
         };
 
         // Build the initial blueprint.
@@ -609,7 +592,7 @@ mod test {
                 &collection,
                 internal_dns_version,
                 external_dns_version,
-                &input.policy,
+                input.all_sled_ids(SledFilter::All),
                 "the_test",
                 (TEST_NAME, "bp1"),
             )
@@ -621,7 +604,7 @@ mod test {
         assert_eq!(
             blueprint1
                 .blueprint_zones
-                .get(&sled_id)
+                .get(sled_id.as_untyped_uuid())
                 .expect("missing kept sled")
                 .zones
                 .iter()
@@ -632,12 +615,12 @@ mod test {
 
         // Now run the planner.  It should add additional Nexus instances to the
         // one sled we have.
-        input.policy.target_nexus_zone_count = 5;
+        let mut builder = input.into_builder();
+        builder.policy_mut().target_nexus_zone_count = 5;
+        let input = builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            internal_dns_version,
-            external_dns_version,
             &input,
             "test_blueprint2",
             &collection,
@@ -654,11 +637,12 @@ mod test {
         let mut sleds = diff.sleds_modified().collect::<Vec<_>>();
         assert_eq!(sleds.len(), 1);
         let (changed_sled_id, sled_changes) = sleds.pop().unwrap();
-        assert_eq!(changed_sled_id, sled_id);
+        // TODO-cleanup use `TypedUuid` everywhere
+        assert_eq!(changed_sled_id, *sled_id.as_untyped_uuid());
         assert_eq!(sled_changes.zones_removed().len(), 0);
         assert_eq!(sled_changes.zones_modified().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
-        assert_eq!(zones.len(), input.policy.target_nexus_zone_count - 1);
+        assert_eq!(zones.len(), input.target_nexus_zone_count() - 1);
         for zone in &zones {
             if !zone.config.zone_type.is_nexus() {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
@@ -677,7 +661,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example inventory collection as a starting point.
-        let (collection, mut input) =
+        let (collection, input) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.
@@ -686,7 +670,7 @@ mod test {
                 &collection,
                 Generation::new(),
                 Generation::new(),
-                &input.policy,
+                input.all_sled_ids(SledFilter::All),
                 "the_test",
                 (TEST_NAME, "bp1"),
             )
@@ -706,12 +690,12 @@ mod test {
         }
 
         // Now run the planner with a high number of target Nexus zones.
-        input.policy.target_nexus_zone_count = 14;
+        let mut builder = input.into_builder();
+        builder.policy_mut().target_nexus_zone_count = 14;
+        let input = builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test_blueprint2",
             &collection,
@@ -769,7 +753,7 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, mut input) = example(&logctx.log, TEST_NAME, 5);
+        let (collection, input) = example(&logctx.log, TEST_NAME, 5);
 
         // Build the initial blueprint.
         let blueprint1 =
@@ -777,7 +761,7 @@ mod test {
                 &collection,
                 Generation::new(),
                 Generation::new(),
-                &input.policy,
+                input.all_sled_ids(SledFilter::All),
                 "the_test",
                 (TEST_NAME, "bp1"),
             )
@@ -798,42 +782,47 @@ mod test {
 
         // Arbitrarily choose some of the sleds and mark them non-provisionable
         // in various ways.
-        let mut sleds_iter = input.policy.sleds.iter_mut();
+        let mut builder = input.into_builder();
+        let mut sleds_iter = builder.sleds_mut().iter_mut();
 
         let nonprovisionable_sled_id = {
-            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
-            resources.policy = SledPolicy::InService {
+            let (sled_id, details) = sleds_iter.next().expect("no sleds");
+            details.policy = SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             };
-            *sled_id
+            // TODO-cleanup use `TypedUuid` everywhere
+            *sled_id.as_untyped_uuid()
         };
+        println!("1 -> 2: marked non-provisionable {nonprovisionable_sled_id}");
         let expunged_sled_id = {
-            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
-            resources.policy = SledPolicy::Expunged;
-            *sled_id
+            let (sled_id, details) = sleds_iter.next().expect("no sleds");
+            details.policy = SledPolicy::Expunged;
+            // TODO-cleanup use `TypedUuid` everywhere
+            *sled_id.as_untyped_uuid()
         };
+        println!("1 -> 2: expunged {expunged_sled_id}");
         let decommissioned_sled_id = {
-            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
-            resources.state = SledState::Decommissioned;
-            *sled_id
+            let (sled_id, details) = sleds_iter.next().expect("no sleds");
+            details.state = SledState::Decommissioned;
+            // TODO-cleanup use `TypedUuid` everywhere
+            *sled_id.as_untyped_uuid()
         };
+        println!("1 -> 2: decommissioned {decommissioned_sled_id}");
 
         // Now run the planner with a high number of target Nexus zones. The
-        // number (16) is chosen such that:
+        // number (9) is chosen such that:
         //
-        // * we start with 5 sleds
-        // * we need to add 11 Nexus zones
-        // * there are two sleds eligible for provisioning
-        // * => 5 or 6 new Nexus zones per sled
-        //
-        // When the planner gets smarter about removing zones from expunged
-        // and/or removed sleds, we'll have to adjust this number.
-        input.policy.target_nexus_zone_count = 16;
+        // * we start with 5 sleds with 1 Nexus each
+        // * we take two sleds out of service (one expunged, one
+        //   decommissioned), so we're down to 3 in-service Nexuses: we need to
+        //   add 6 to get to the new policy target of 9
+        // * of the remaining 3 sleds, only 2 are eligible for provisioning
+        // * each of those 2 sleds should get exactly 3 new Nexuses
+        builder.policy_mut().target_nexus_zone_count = 9;
+        let input = builder.build();
         let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            Generation::new(),
-            Generation::new(),
             &input,
             "test_blueprint2",
             &collection,
@@ -863,9 +852,8 @@ mod test {
         let sleds = diff.sleds_modified().collect::<Vec<_>>();
 
         // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
-        // total of 12 new Nexus zones, which should be spread evenly across the
-        // two sleds (one gets 6 and the other gets 5), while the
-        // non-provisionable sled should be unchanged.
+        // total of 6 new Nexus zones, which should be split evenly between the
+        // two sleds, while the non-provisionable sled should be unchanged.
         assert_eq!(sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
         for (sled_id, sled_changes) in sleds {
@@ -875,22 +863,22 @@ mod test {
             assert_eq!(sled_changes.zones_removed().len(), 0);
             assert_eq!(sled_changes.zones_modified().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
-            match zones.len() {
-                n @ (5 | 6) => {
-                    total_new_nexus_zones += n;
-                }
-                n => {
-                    panic!("unexpected number of zones added to {sled_id}: {n}")
-                }
-            }
             for zone in &zones {
                 let OmicronZoneType::Nexus { .. } = zone.config.zone_type
                 else {
                     panic!("unexpectedly added a non-Crucible zone: {zone:?}");
                 };
             }
+            if zones.len() == 3 {
+                total_new_nexus_zones += 3;
+            } else {
+                panic!(
+                    "unexpected number of zones added to {sled_id}: {}",
+                    zones.len()
+                );
+            }
         }
-        assert_eq!(total_new_nexus_zones, 11);
+        assert_eq!(total_new_nexus_zones, 6);
 
         // ---
 
