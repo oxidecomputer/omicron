@@ -102,6 +102,7 @@ pub const MAX_DATABASE_ROWS: u64 = 1_000_000;
 //
 // This type stores the predicates used to generate the keys, and the keys
 // consistent with it.
+#[derive(Clone, Debug, PartialEq)]
 struct ConsistentKeyGroup {
     predicates: Option<Filter>,
     consistent_keys: BTreeMap<TimeseriesKey, (Target, Metric)>,
@@ -476,7 +477,7 @@ impl Client {
         // organized by timeseries key. That's because we fetch all consistent
         // samples at once, so we get many concrete _timeseries_ in the returned
         // response, even though they're all from the same schema.
-        let (summary, timeseries_by_key) = self
+        let (summaries, timeseries_by_key) = self
             .select_matching_samples(
                 query_log,
                 &schema,
@@ -484,7 +485,7 @@ impl Client {
                 total_rows_fetched,
             )
             .await?;
-        query_summaries.push(summary);
+        query_summaries.extend(summaries);
 
         // At this point, let's construct a set of tables and run the results
         // through the transformation pipeline.
@@ -536,24 +537,40 @@ impl Client {
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
         total_rows_fetched: &mut u64,
-    ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, oxql::Timeseries>), Error>
-    {
+    ) -> Result<
+        (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql::Timeseries>),
+        Error,
+    > {
         // We'll create timeseries for each key on the fly. To enable computing
         // deltas, we need to track the last measurement we've seen as well.
         let mut measurements_by_key: BTreeMap<_, Vec<_>> = BTreeMap::new();
-        let measurements_query = self.measurements_query(
-            schema,
-            consistent_key_groups,
-            total_rows_fetched,
-        )?;
+
+        // If the set of consistent keys is quite large, we may run into
+        // ClickHouse's SQL query size limit, which is 256KiB by default.
+        // See https://clickhouse.com/docs/en/operations/settings/settings#max_query_size
+        // for that limit.
+        //
+        // To avoid this, we have to split large groups of keys into pages, and
+        // concatenate the results ourself.
         let mut n_measurements: u64 = 0;
-        let (summary, body) =
-            self.execute_with_body(&measurements_query).await?;
-        for line in body.lines() {
-            let (key, measurement) =
-                model::parse_measurement_from_row(line, schema.datum_type);
-            measurements_by_key.entry(key).or_default().push(measurement);
-            n_measurements += 1;
+        let mut summaries = Vec::new();
+        for key_group_chunk in
+            chunk_consistent_key_groups(consistent_key_groups)
+        {
+            let measurements_query = self.measurements_query(
+                schema,
+                &key_group_chunk,
+                total_rows_fetched,
+            )?;
+            let (summary, body) =
+                self.execute_with_body(&measurements_query).await?;
+            summaries.push(summary);
+            for line in body.lines() {
+                let (key, measurement) =
+                    model::parse_measurement_from_row(line, schema.datum_type);
+                measurements_by_key.entry(key).or_default().push(measurement);
+                n_measurements += 1;
+            }
         }
         debug!(
             query_log,
@@ -621,7 +638,7 @@ impl Client {
             );
             out.insert(key, timeseries);
         }
-        Ok((summary, out))
+        Ok((summaries, out))
     }
 
     fn measurements_query(
@@ -881,6 +898,113 @@ impl Client {
     }
 }
 
+// Split the list of consistent key groups, ensuring none exceeds ClickHouse's
+// query limit.
+//
+// The set of consistent keys for an OxQL query can be quite large. When stuffed
+// into a giant list of keys and used in a SQL query like so:
+//
+// ```
+// timeseries_key IN (list, of, many, keys)
+// ```
+//
+// this can hit ClickHouse's SQL query size limit (defaulting to 256KiB, see
+// https://clickhouse.com/docs/en/operations/settings/settings#max_query_size).
+//
+// This function chunks the list of consistent keys, ensuring that each group is
+// small enough to fit within that query limit.
+//
+// Note that this unfortunately needs to chunk and reallocate the groups,
+// because it may entail splitting each key group. That requires a copy of the
+// internal map, to split it at a particular size.
+fn chunk_consistent_key_groups(
+    consistent_key_groups: &[ConsistentKeyGroup],
+) -> Vec<Vec<ConsistentKeyGroup>> {
+    // The max number of keys allowed in each measurement query.
+    //
+    // Keys are u64s, so their max is 18446744073709551615, which has 20 base-10
+    // digits. We also separate the keys by a `,`, so let's call it 21 digits.
+    //
+    // ClickHouse's max query size is 256KiB, but we allow for 6KiB of overhead
+    // for the other parts of the query (select, spaces, column names, etc).
+    // That's very conservative.
+    const MAX_QUERY_SIZE_FOR_KEYS: usize = 250 * 1024;
+    const DIGITS_PER_KEY: usize = 21;
+    const MAX_KEYS_PER_MEASUREMENT_QUERY: usize =
+        MAX_QUERY_SIZE_FOR_KEYS / DIGITS_PER_KEY;
+    chunk_consistent_key_groups_impl(
+        consistent_key_groups,
+        MAX_KEYS_PER_MEASUREMENT_QUERY,
+    )
+}
+
+fn chunk_consistent_key_groups_impl(
+    consistent_key_groups: &[ConsistentKeyGroup],
+    chunk_size: usize,
+) -> Vec<Vec<ConsistentKeyGroup>> {
+    // Create the output vec-of-vec of key groups. We'll always push to the last
+    // one, so grab a reference to it.
+    let mut out = vec![vec![]];
+    let mut current_chunk = out.last_mut().unwrap();
+    let mut room = chunk_size;
+    'group: for next_group in consistent_key_groups.iter().cloned() {
+        // If we have room for it in this chunk, push it onto the current chunk,
+        // and then continue to the next group.
+        let group_size = next_group.consistent_keys.len();
+        if room >= group_size {
+            current_chunk.push(next_group);
+            room -= group_size;
+            continue;
+        }
+
+        // If we don't have enough room for this entire group, then we need to
+        // split it up and push whatever we can. It's actually possible that the
+        // next group needs to be split multiple times. So we'll do that until
+        // it's empty, possibly adding new chunks to the output array.
+        //
+        // It's tricky to iterate over a map by the index / count, and since
+        // we're operating on a clone anyway, convert this to a vec.
+        let predicates = next_group.predicates;
+        let mut group_keys: Vec<_> =
+            next_group.consistent_keys.into_iter().collect();
+        while !group_keys.is_empty() {
+            // On a previous pass through this loop, we may have exhausted all
+            // the remaining room. As we have re-entered it, we still have items
+            // in this current group of keys. So "close" the last chunk and push
+            // a new one, onto which we'll start adding the remaining items.
+            if room == 0 {
+                out.push(vec![]);
+                current_chunk = out.last_mut().unwrap();
+                room = chunk_size;
+            }
+
+            // Fetch up to the remaining set of keys.
+            let ix = room.min(group_keys.len());
+            let consistent_keys: BTreeMap<_, _> =
+                group_keys.drain(..ix).collect();
+
+            // There are no more keys in this group, we need to continue to the
+            // next one.
+            if consistent_keys.is_empty() {
+                continue 'group;
+            }
+
+            // We need to update the amount of room we have left, to be sure we
+            // don't push this whole group if the chunk boundary falls in the
+            // middle of it.
+            room -= consistent_keys.len();
+
+            // Push this set of keys onto the current chunk.
+            let this_group_chunk = ConsistentKeyGroup {
+                predicates: predicates.clone(),
+                consistent_keys,
+            };
+            current_chunk.push(this_group_chunk);
+        }
+    }
+    out
+}
+
 // Helper to update the number of total rows fetched so far, and check it's
 // still under the limit.
 fn update_total_rows_and_check(
@@ -909,19 +1033,21 @@ fn update_total_rows_and_check(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
-    use dropshot::test_util::LogContext;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
-    use omicron_test_utils::dev::test_setup_log;
-    use oximeter::Sample;
-    use oximeter::{types::Cumulative, FieldValue};
-    use std::collections::BTreeMap;
-    use std::time::Duration;
-
+    use super::ConsistentKeyGroup;
+    use crate::client::oxql::chunk_consistent_key_groups_impl;
     use crate::{
         oxql::{point::Points, Table, Timeseries},
         Client, DbWrite,
     };
+    use crate::{Metric, Target};
+    use chrono::{DateTime, Utc};
+    use dropshot::test_util::LogContext;
+    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::test_setup_log;
+    use oximeter::{types::Cumulative, FieldValue};
+    use oximeter::{DatumType, Sample};
+    use std::collections::BTreeMap;
+    use std::time::Duration;
 
     #[derive(
         Clone, Debug, Eq, PartialEq, PartialOrd, Ord, oximeter::Target,
@@ -1277,5 +1403,128 @@ mod tests {
             return Some(timeseries);
         }
         None
+    }
+
+    fn make_consistent_key_group(size: u64) -> ConsistentKeyGroup {
+        let consistent_keys = (0..size)
+            .map(|key| {
+                let target = Target { name: "foo".to_string(), fields: vec![] };
+                let metric = Metric {
+                    name: "bar".to_string(),
+                    fields: vec![],
+                    datum_type: DatumType::U8,
+                };
+                (key, (target, metric))
+            })
+            .collect();
+        ConsistentKeyGroup { predicates: None, consistent_keys }
+    }
+
+    #[test]
+    fn test_chunk_consistent_key_groups_all_in_one_chunk() {
+        // Create two key groups, each with 5 keys.
+        //
+        // With a chunk size of 12, these should all be in the same chunk, so
+        // we're really just cloning the inputs. They do go into an outer vec
+        // though, because we can have multiple chunks in theory.
+        let keys =
+            vec![make_consistent_key_group(5), make_consistent_key_group(5)];
+        let chunks = chunk_consistent_key_groups_impl(&keys, 12);
+        assert_eq!(
+            chunks.len(),
+            1,
+            "All key groups should fit into one chunk when their \
+            total size is less than the chunk size"
+        );
+        assert_eq!(
+            keys, chunks[0],
+            "All key groups should fit into one chunk when their \
+            total size is less than the chunk size"
+        );
+    }
+
+    #[test]
+    fn test_chunk_consistent_key_groups_split_middle_of_key_group() {
+        // Create one key group, with 10 keys.
+        //
+        // With a chunk size of 5, this should be split in half across two
+        // chunks.
+        let keys = vec![make_consistent_key_group(10)];
+        let chunks = chunk_consistent_key_groups_impl(&keys, 5);
+        assert_eq!(
+            chunks.len(),
+            2,
+            "Consistent key group should be split into two chunks",
+        );
+
+        let first = keys[0]
+            .consistent_keys
+            .range(..5)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[0][0].consistent_keys, first,
+            "The first chunk of the consistent keys should be \
+            the first half of the input keys"
+        );
+
+        let second = keys[0]
+            .consistent_keys
+            .range(5..)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[1][0].consistent_keys, second,
+            "The second chunk of the consistent keys should be \
+            the second half of the input keys"
+        );
+    }
+
+    #[test]
+    fn test_chunk_consistent_key_groups_split_key_group_multiple_times() {
+        // Create one key group, with 10 keys.
+        //
+        // With a chunk size of 4, this should be split 3 times, with the first
+        // two having 4 items and the last the remaining 2.
+        let keys = vec![make_consistent_key_group(10)];
+        let chunks = chunk_consistent_key_groups_impl(&keys, 4);
+        assert_eq!(
+            chunks.len(),
+            3,
+            "Consistent key group should be split into three chunks",
+        );
+
+        let first = keys[0]
+            .consistent_keys
+            .range(..4)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[0][0].consistent_keys, first,
+            "The first chunk of the consistent keys should be \
+            the first 4 input keys"
+        );
+
+        let second = keys[0]
+            .consistent_keys
+            .range(4..8)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[1][0].consistent_keys, second,
+            "The second chunk of the consistent keys should be \
+            the next 4 input keys",
+        );
+
+        let third = keys[0]
+            .consistent_keys
+            .range(8..)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[2][0].consistent_keys, third,
+            "The second chunk of the consistent keys should be \
+            the remaining 2 input keys",
+        );
     }
 }
