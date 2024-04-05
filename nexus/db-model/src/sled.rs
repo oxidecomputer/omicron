@@ -370,7 +370,7 @@ mod diesel_util {
     /// table.
     ///
     /// This needs to live here, rather than in `nexus-db-queries`, because it
-    /// names the [`DbSledPolicy`] type which is private to this crate.
+    /// names the `DbSledPolicy` type which is private to this crate.
     pub trait ApplySledFilterExt {
         type Output;
 
