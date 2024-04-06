@@ -361,7 +361,7 @@ rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.1.1"
-rustyline = "13.0.0"
+rustyline = "14.0.0"
 samael = { version = "0.0.15", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
@@ -391,7 +391,7 @@ slog-bunyan = "2.5"
 slog-dtrace = "0.3"
 slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
-slog-term = "2.9"
+slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
@@ -413,7 +413,6 @@ libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
-tempdir = "0.3"
 tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
