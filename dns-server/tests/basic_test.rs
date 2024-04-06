@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
+use camino_tempfile::Utf8TempDir;
 use dns_service_client::{
     types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     Client,
@@ -332,7 +333,7 @@ struct TestContext {
     resolver: TokioAsyncResolver,
     dns_server: dns_server::dns_server::ServerHandle,
     dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
-    tmp: tempdir::TempDir,
+    tmp: Utf8TempDir,
     logctx: LogContext,
 }
 
@@ -401,7 +402,7 @@ fn test_config(
     test_name: &str,
 ) -> Result<
     (
-        tempdir::TempDir,
+        Utf8TempDir,
         dns_server::storage::Config,
         dropshot::ConfigDropshot,
         LogContext,
@@ -409,10 +410,9 @@ fn test_config(
     anyhow::Error,
 > {
     let logctx = test_setup_log(test_name);
-    let tmp_dir = tempdir::TempDir::new("dns-server-test")?;
+    let tmp_dir = Utf8TempDir::with_prefix("dns-server-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
-    let storage_path = storage_path.to_str().unwrap().into();
     let config_storage =
         dns_server::storage::Config { storage_path, keep_old_generations: 3 };
     let config_dropshot = dropshot::ConfigDropshot {
