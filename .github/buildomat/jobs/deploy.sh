@@ -205,7 +205,7 @@ pfexec zpool create -f scratch c1t1d0 c2t1d0
 
 ptime -m \
     ./target/release/xtask virtual-hardware \
-    --vdev-dir scratch \
+    --vdev-dir /scratch \
     create \
     --gateway-ip "$GATEWAY_IP" \
     --gateway-mac "$GATEWAY_MAC" \
