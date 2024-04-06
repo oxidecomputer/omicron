@@ -88,7 +88,7 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
         syn::ReturnType::Default => true,
         syn::ReturnType::Type(_, ref t) => {
             if let syn::Type::Tuple(syn::TypeTuple { elems, .. }) = &**t {
-                elems.len() == 0
+                elems.is_empty()
             } else {
                 false
             }

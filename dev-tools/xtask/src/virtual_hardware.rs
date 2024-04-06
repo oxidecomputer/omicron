@@ -126,11 +126,28 @@ pub fn run_cmd(args: Args) -> Result<()> {
         bail!("This system has the marker file {NO_INSTALL_MARKER}, aborting");
     }
 
-    let metadata = crate::load_workspace()?;
-    let workspace_root = metadata.workspace_root;
-    let sled_agent_config =
-        workspace_root.join("smf/sled-agent/non-gimlet/config.toml");
-    let npu_zone = workspace_root.join("out/npuzone/npuzone");
+    let workspace_root = match crate::load_workspace() {
+        Ok(metadata) => metadata.workspace_root,
+        Err(_err) => {
+            let pwd = Utf8PathBuf::try_from(std::env::current_dir()?)?;
+            eprintln!(
+                "Couldn't find Cargo.toml, using {pwd} as workspace root"
+            );
+            pwd
+        }
+    };
+
+    let smf_path = "smf/sled-agent/non-gimlet/config.toml";
+    let sled_agent_config = workspace_root.join(smf_path);
+    if !sled_agent_config.exists() {
+        bail!("Could not find {smf_path}. We need it to configure vdevs");
+    }
+
+    let npuzone_path = "out/npuzone/npuzone";
+    let npu_zone = workspace_root.join(npuzone_path);
+    if !npu_zone.exists() {
+        bail!("Could not find {npuzone_path}. We need it to configure SoftNPU");
+    }
 
     match args.command {
         Commands::Create {
@@ -408,9 +425,11 @@ fn get_gateway_mac(
     match gateway_mac {
         Some(mac) => Ok(MacAddr::from_str(&mac)?),
         None => {
-            let retries = 3;
-            for i in 0..=retries {
-                println!("Pinging {gateway_ip} and sleeping ({i} / {retries})");
+            let attempts = 3;
+            for i in 0..=attempts {
+                println!(
+                    "Pinging {gateway_ip} and sleeping ({i} / {attempts})"
+                );
                 let mut cmd = Command::new(PING);
                 cmd.arg(&gateway_ip);
                 execute(cmd)?;

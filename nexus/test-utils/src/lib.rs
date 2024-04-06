@@ -114,6 +114,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
+    pub initial_blueprint_id: Uuid,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -299,6 +300,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
+    initial_blueprint_id: Option<Uuid>,
     omicron_zones: Vec<OmicronZoneConfig>,
     omicron_zones2: Vec<OmicronZoneConfig>,
 
@@ -343,6 +345,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_dns: None,
             internal_dns: None,
             dns_config: None,
+            initial_blueprint_id: None,
             omicron_zones: Vec::new(),
             omicron_zones2: Vec::new(),
             silo_name: None,
@@ -836,6 +839,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             }
         };
 
+        self.initial_blueprint_id = Some(blueprint.id);
+
         // Handoff all known service information to Nexus
         let server = N::start(
             self.nexus_internal
@@ -1124,6 +1129,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
             internal_dns: self.internal_dns.unwrap(),
+            initial_blueprint_id: self.initial_blueprint_id.unwrap(),
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
         }

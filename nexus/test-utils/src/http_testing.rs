@@ -424,7 +424,7 @@ impl<'a> RequestBuilder<'a> {
         // the body.
         if status == http::StatusCode::NO_CONTENT {
             ensure!(
-                response_body.len() == 0,
+                response_body.is_empty(),
                 "expected empty response for 204 status code"
             )
         }
