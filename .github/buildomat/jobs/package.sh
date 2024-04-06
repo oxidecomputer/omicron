@@ -50,6 +50,9 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
+# Build the xtask binary used by the deploy job
+ptime -m cargo build --locked --release -p xtask
+
 # Assemble some utilities into a tarball that can be used by deployment
 # phases of buildomat.
 
@@ -60,6 +63,7 @@ files=(
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
+	target/release/xtask
 )
 
 pfexec mkdir -p /work && pfexec chown $USER /work
