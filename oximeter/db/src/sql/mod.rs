@@ -588,10 +588,11 @@ impl RestrictedQuery {
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         };
         let mut query = Self::select_to_query(top_level_select);
         query.order_by = order_by;
-        Cte { alias, query, from: None }
+        Cte { alias, query, from: None, materialized: None }
     }
 
     // Create a SQL parser `Ident` with a the given name.
@@ -716,6 +717,7 @@ impl RestrictedQuery {
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         }
     }
 
@@ -786,6 +788,7 @@ impl RestrictedQuery {
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         }
     }
 

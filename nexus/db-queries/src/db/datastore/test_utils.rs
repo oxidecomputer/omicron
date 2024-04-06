@@ -14,6 +14,7 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use dropshot::test_util::LogContext;
+use futures::future::try_join_all;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -187,6 +188,67 @@ impl IneligibleSleds {
             decommissioned_fut,
             illegal_decommissioned_fut
         )?;
+
+        Ok(())
+    }
+
+    /// Brings all of the sleds back to being in-service and provisionable.
+    ///
+    /// This is never going to happen in production, but it's easier to do this
+    /// in many tests than to set up a new set of sleds.
+    ///
+    /// Note: there's no memory of the previous state stored here -- this just
+    /// resets the sleds to the default state.
+    pub async fn undo(
+        &self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Result<()> {
+        async fn undo_single(
+            opctx: &OpContext,
+            datastore: &DataStore,
+            sled_id: Uuid,
+            kind: IneligibleSledKind,
+        ) -> Result<()> {
+            sled_set_policy(
+                &opctx,
+                &datastore,
+                sled_id,
+                SledPolicy::provisionable(),
+                ValidateTransition::No,
+                Expected::Ignore,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to set provisionable policy for sled {} ({:?})",
+                    sled_id, kind,
+                )
+            })?;
+
+            sled_set_state(
+                &opctx,
+                &datastore,
+                sled_id,
+                SledState::Active,
+                ValidateTransition::No,
+                Expected::Ignore,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to set active state for sled {} ({:?})",
+                    sled_id, kind,
+                )
+            })?;
+
+            Ok(())
+        }
+
+        _ = try_join_all(self.iter().map(|(kind, sled_id)| {
+            undo_single(opctx, datastore, sled_id, kind)
+        }))
+        .await?;
 
         Ok(())
     }
