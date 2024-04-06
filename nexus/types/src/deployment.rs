@@ -430,6 +430,8 @@ impl BlueprintZoneDisposition {
             },
             Self::Expunged => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Crucible => false,
+                BlueprintZoneFilter::External => false,
                 BlueprintZoneFilter::InternalDns => false,
                 BlueprintZoneFilter::SledAgentPut => false,
                 BlueprintZoneFilter::VpcFirewall => false,
