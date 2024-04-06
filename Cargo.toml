@@ -391,7 +391,7 @@ slog-bunyan = "2.5"
 slog-dtrace = "0.3"
 slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
-slog-term = "2.9"
+slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
