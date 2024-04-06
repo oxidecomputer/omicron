@@ -24,6 +24,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::ApplySledFilterExt;
+use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::identity::Asset;
@@ -198,26 +200,22 @@ impl DataStore {
 
                     // Generate a query describing all of the sleds that have space
                     // for this reservation.
-                    let mut sled_targets =
-                        sled_dsl::sled
-                            .left_join(
-                                resource_dsl::sled_resource
-                                    .on(resource_dsl::sled_id.eq(sled_dsl::id)),
-                            )
-                            .group_by(sled_dsl::id)
-                            .having(
-                                sled_has_space_for_threads
-                                    .and(sled_has_space_for_rss)
-                                    .and(sled_has_space_in_reservoir),
-                            )
-                            .filter(sled_dsl::time_deleted.is_null())
-                            // Ensure that the sled is in-service and active.
-                            .filter(sled_dsl::sled_policy.eq(
-                                to_db_sled_policy(SledPolicy::provisionable()),
-                            ))
-                            .filter(sled_dsl::sled_state.eq(SledState::Active))
-                            .select(sled_dsl::id)
-                            .into_boxed();
+                    let mut sled_targets = sled_dsl::sled
+                        .left_join(
+                            resource_dsl::sled_resource
+                                .on(resource_dsl::sled_id.eq(sled_dsl::id)),
+                        )
+                        .group_by(sled_dsl::id)
+                        .having(
+                            sled_has_space_for_threads
+                                .and(sled_has_space_for_rss)
+                                .and(sled_has_space_in_reservoir),
+                        )
+                        .filter(sled_dsl::time_deleted.is_null())
+                        // Ensure that reservations can be created on the sled.
+                        .sled_filter(SledFilter::ReservationCreate)
+                        .select(sled_dsl::id)
+                        .into_boxed();
 
                     // Further constrain the sled IDs according to any caller-
                     // supplied constraints.
@@ -484,8 +482,8 @@ impl DataStore {
     /// # Errors
     ///
     /// This method returns an error if the sled policy is not a state that is
-    /// valid to decommission from (i.e. if, for the current sled policy,
-    /// [`SledPolicy::is_decommissionable`] returns `false`).
+    /// valid to decommission from (i.e. if [`SledPolicy::is_decommissionable`]
+    /// returns `false`).
     pub async fn sled_set_state_to_decommissioned(
         &self,
         opctx: &OpContext,
@@ -1147,7 +1145,9 @@ mod test {
             (
                 // In-service and active sleds can be marked as expunged.
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_in_service()),
+                    predicate::in_iter(SledPolicy::all_matching(
+                        SledFilter::InService,
+                    )),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::Expunged),
@@ -1156,7 +1156,9 @@ mod test {
                 // The provision policy of in-service sleds can be changed, or
                 // kept the same (1 of 2).
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_in_service()),
+                    predicate::in_iter(SledPolicy::all_matching(
+                        SledFilter::InService,
+                    )),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {
@@ -1166,7 +1168,9 @@ mod test {
             (
                 // (2 of 2)
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_in_service()),
+                    predicate::in_iter(SledPolicy::all_matching(
+                        SledFilter::InService,
+                    )),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {

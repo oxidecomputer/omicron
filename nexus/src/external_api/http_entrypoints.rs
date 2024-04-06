@@ -5539,7 +5539,9 @@ struct SystemMetricsPathParam {
     metric_name: SystemMetricName,
 }
 
-/// Access metrics data
+/// View metrics
+///
+/// View CPU, memory, or storage utilization metrics at the fleet or silo level.
 #[endpoint {
      method = GET,
      path = "/v1/system/metrics/{metric_name}",
@@ -5581,7 +5583,9 @@ async fn system_metric(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Access metrics data
+/// View metrics
+///
+/// View CPU, memory, or storage utilization metrics at the silo or project level.
 #[endpoint {
      method = GET,
      path = "/v1/metrics/{metric_name}",
@@ -5628,7 +5632,7 @@ async fn silo_metric(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List available timeseries schema.
+/// List timeseries schemas
 #[endpoint {
     method = GET,
     path = "/v1/timeseries/schema",
@@ -5654,7 +5658,11 @@ async fn timeseries_schema_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Run a timeseries query, written OxQL.
+// TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
+
+/// Run timeseries query
+///
+/// Queries are written in OxQL.
 #[endpoint {
     method = POST,
     path = "/v1/timeseries/query",

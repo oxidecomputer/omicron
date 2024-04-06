@@ -204,7 +204,7 @@ PXA_END="$EXTRA_IP_END"
 pfexec zpool create -f scratch c1t1d0 c2t1d0
 
 ptime -m \
-    cargo xtask virtual-hardware \
+    ./target/release/xtask virtual-hardware \
     --vdev-dir scratch \
     create \
     --gateway-ip "$GATEWAY_IP" \

@@ -48,7 +48,7 @@ impl GroupBy {
     }
 
     fn check_input_timeseries(input: &Timeseries) -> Result<(), Error> {
-        anyhow::ensure!(input.points.len() > 0, "Timeseries cannot be empty");
+        anyhow::ensure!(!input.points.is_empty(), "Timeseries cannot be empty");
 
         // For now, we can only apply this to 1-D timeseries.
         anyhow::ensure!(

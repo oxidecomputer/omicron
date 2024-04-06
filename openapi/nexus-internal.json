@@ -2787,6 +2787,13 @@
             "enum": [
               "quiesced"
             ]
+          },
+          {
+            "description": "The zone is permanently gone.",
+            "type": "string",
+            "enum": [
+              "expunged"
+            ]
           }
         ]
       },

@@ -8,10 +8,12 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_omicron_zones_not_in_service, bp_sled_omicron_zones, bp_target,
+    blueprint, bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_zones,
+    bp_target,
 };
-use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
+use crate::{
+    impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
+};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
@@ -141,15 +143,17 @@ pub struct BpOmicronZone {
     pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+
+    disposition: DbBpZoneDisposition,
 }
 
 impl BpOmicronZone {
     pub fn new(
         blueprint_id: Uuid,
         sled_id: Uuid,
-        zone: &BlueprintZoneConfig,
+        blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
-        let zone = OmicronZone::new(sled_id, &zone.config)?;
+        let zone = OmicronZone::new(sled_id, &blueprint_zone.config)?;
         Ok(Self {
             blueprint_id,
             sled_id: zone.sled_id,
@@ -172,13 +176,13 @@ impl BpOmicronZone {
             snat_ip: zone.snat_ip,
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
+            disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
         })
     }
 
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-        disposition: BlueprintZoneDisposition,
     ) -> Result<BlueprintZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
             sled_id: self.sled_id,
@@ -204,7 +208,52 @@ impl BpOmicronZone {
         };
         let config =
             zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
-        Ok(BlueprintZoneConfig { config, disposition })
+        Ok(BlueprintZoneConfig { config, disposition: self.disposition.into() })
+    }
+}
+
+impl_enum_type!(
+    #[derive(Clone, SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "bp_zone_disposition", schema = "public"))]
+    pub struct DbBpZoneDispositionEnum;
+
+    /// This type is not actually public, because [`BlueprintZoneDisposition`]
+    /// interacts with external logic.
+    ///
+    /// However, it must be marked `pub` to avoid errors like `crate-private
+    /// type `BpZoneDispositionEnum` in public interface`. Marking this type `pub`,
+    /// without actually making it public, tricks rustc in a desirable way.
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = DbBpZoneDispositionEnum)]
+    pub enum DbBpZoneDisposition;
+
+    // Enum values
+    InService => b"in_service"
+    Quiesced => b"quiesced"
+    Expunged => b"expunged"
+);
+
+/// Converts a [`BlueprintZoneDisposition`] to a version that can be inserted
+/// into a database.
+pub fn to_db_bp_zone_disposition(
+    disposition: BlueprintZoneDisposition,
+) -> DbBpZoneDisposition {
+    match disposition {
+        BlueprintZoneDisposition::InService => DbBpZoneDisposition::InService,
+        BlueprintZoneDisposition::Quiesced => DbBpZoneDisposition::Quiesced,
+        BlueprintZoneDisposition::Expunged => DbBpZoneDisposition::Expunged,
+    }
+}
+
+impl From<DbBpZoneDisposition> for BlueprintZoneDisposition {
+    fn from(disposition: DbBpZoneDisposition) -> Self {
+        match disposition {
+            DbBpZoneDisposition::InService => {
+                BlueprintZoneDisposition::InService
+            }
+            DbBpZoneDisposition::Quiesced => BlueprintZoneDisposition::Quiesced,
+            DbBpZoneDisposition::Expunged => BlueprintZoneDisposition::Expunged,
+        }
     }
 }
 
@@ -265,12 +314,63 @@ impl BpOmicronZoneNic {
     }
 }
 
-/// Nexus wants to think in terms of "zones in service", but since most zones of
-/// most blueprints are in service, we store the zones NOT in service in the
-/// database. We handle that inversion internally in the db-queries layer.
-#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = bp_omicron_zones_not_in_service)]
-pub struct BpOmicronZoneNotInService {
-    pub blueprint_id: Uuid,
-    pub bp_omicron_zone_id: Uuid,
+mod diesel_util {
+    use crate::{
+        schema::bp_omicron_zone::disposition, to_db_bp_zone_disposition,
+        DbBpZoneDisposition,
+    };
+    use diesel::{
+        helper_types::EqAny, prelude::*, query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::deployment::{
+        BlueprintZoneDisposition, BlueprintZoneFilter,
+    };
+
+    /// An extension trait to apply a [`BlueprintZoneFilter`] to a Diesel
+    /// expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the
+    /// `bp_omicron_zone` table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbBpZoneDisposition` type which is private to this crate.
+    pub trait ApplyBlueprintZoneFilterExt {
+        type Output;
+
+        /// Applies a [`BlueprintZoneFilter`] to a Diesel expression.
+        fn blueprint_zone_filter(
+            self,
+            filter: BlueprintZoneFilter,
+        ) -> Self::Output;
+    }
+
+    impl<E> ApplyBlueprintZoneFilterExt for E
+    where
+        E: FilterDsl<BlueprintZoneFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn blueprint_zone_filter(
+            self,
+            filter: BlueprintZoneFilter,
+        ) -> Self::Output {
+            // This is only boxed for ease of reference above.
+            let all_matching_dispositions: BoxedIterator<DbBpZoneDisposition> =
+                Box::new(
+                    BlueprintZoneDisposition::all_matching(filter)
+                        .map(to_db_bp_zone_disposition),
+                );
+
+            FilterDsl::filter(
+                self,
+                disposition.eq_any(all_matching_dispositions),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type BlueprintZoneFilterQuery =
+        EqAny<disposition, BoxedIterator<DbBpZoneDisposition>>;
 }
+
+pub use diesel_util::ApplyBlueprintZoneFilterExt;
