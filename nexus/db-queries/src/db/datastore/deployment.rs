@@ -37,14 +37,11 @@ use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
-use nexus_db_model::BpOmicronZoneNotInService;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -53,7 +50,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use uuid::Uuid;
 
 impl DataStore {
@@ -107,36 +103,6 @@ impl DataStore {
         // so that we can produce the `Error` type that we want here.
         let row_blueprint = DbBlueprint::from(blueprint);
         let blueprint_id = row_blueprint.id;
-
-        // `Blueprint` stores the policy for each zone next to the zone itself.
-        // This would ideally be represented as a simple column in
-        // bp_omicron_zone.
-        //
-        // But historically, `Blueprint` used to store the set of zones in
-        // service in a BTreeSet. Since most zones are expected to be in
-        // service, we store the set of zones NOT in service (which we expect
-        // to be much smaller, often empty). Build that inverted set here.
-        //
-        // This will soon be replaced with an extra column in the
-        // `bp_omicron_zone` table, coupled with other data migrations.
-        let omicron_zones_not_in_service = blueprint
-            .all_blueprint_zones(BlueprintZoneFilter::All)
-            .filter_map(|(_, zone)| {
-                // This is going to go away soon when we change the database
-                // representation to store the zone disposition enum next to
-                // each zone. For now, do an exhaustive match so that this
-                // fails if we add a new variant.
-                match zone.disposition {
-                    BlueprintZoneDisposition::InService => None,
-                    BlueprintZoneDisposition::Quiesced => {
-                        Some(BpOmicronZoneNotInService {
-                            blueprint_id,
-                            bp_omicron_zone_id: zone.config.id,
-                        })
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
 
         let sled_omicron_zones = blueprint
             .blueprint_zones
@@ -214,15 +180,6 @@ impl DataStore {
                 let _ =
                     diesel::insert_into(omicron_zone_nic::bp_omicron_zone_nic)
                         .values(omicron_zone_nics)
-                        .execute_async(&conn)
-                        .await?;
-            }
-
-            {
-                use db::schema::bp_omicron_zones_not_in_service::dsl;
-                let _ =
-                    diesel::insert_into(dsl::bp_omicron_zones_not_in_service)
-                        .values(omicron_zones_not_in_service)
                         .execute_async(&conn)
                         .await?;
             }
@@ -369,45 +326,6 @@ impl DataStore {
             omicron_zone_nics
         };
 
-        // Load the list of not-in-service zones. Similar to NICs, we'll use a
-        // mutable set of zone IDs so we can tell if a zone we expected to be
-        // inactive wasn't present in the blueprint at all.
-        let mut omicron_zones_not_in_service = {
-            use db::schema::bp_omicron_zones_not_in_service::dsl;
-
-            let mut omicron_zones_not_in_service = BTreeSet::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::bp_omicron_zones_not_in_service,
-                    dsl::bp_omicron_zone_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::blueprint_id.eq(blueprint_id))
-                .select(BpOmicronZoneNotInService::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-                paginator = p.found_batch(&batch, &|z| z.bp_omicron_zone_id);
-
-                for z in batch {
-                    let inserted = omicron_zones_not_in_service
-                        .insert(z.bp_omicron_zone_id);
-                    bail_unless!(
-                        inserted,
-                        "found duplicate zone ID in \
-                         bp_omicron_zones_not_in_service: {}",
-                        z.bp_omicron_zone_id,
-                    );
-                }
-            }
-
-            omicron_zones_not_in_service
-        };
-
         // Load all the zones for each sled.
         {
             use db::schema::bp_omicron_zone::dsl;
@@ -464,14 +382,8 @@ impl DataStore {
                             ))
                         })?;
                     let zone_id = z.id;
-                    let disposition =
-                        if omicron_zones_not_in_service.remove(&zone_id) {
-                            BlueprintZoneDisposition::Quiesced
-                        } else {
-                            BlueprintZoneDisposition::InService
-                        };
                     let zone = z
-                        .into_blueprint_zone_config(nic_row, disposition)
+                        .into_blueprint_zone_config(nic_row)
                         .with_context(|| {
                             format!("zone {:?}: parse from database", zone_id)
                         })
@@ -495,11 +407,6 @@ impl DataStore {
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
             omicron_zone_nics.keys()
-        );
-        bail_unless!(
-            omicron_zones_not_in_service.is_empty(),
-            "found extra Omicron zones not in service: {:?}",
-            omicron_zones_not_in_service,
         );
 
         Ok(Blueprint {
@@ -531,13 +438,7 @@ impl DataStore {
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let (
-            nblueprints,
-            nsled_agent_zones,
-            nzones,
-            nnics,
-            nzones_not_in_service,
-        ) = conn
+        let (nblueprints, nsled_agent_zones, nzones, nnics) = conn
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
@@ -604,23 +505,7 @@ impl DataStore {
                     .await?
                 };
 
-                let nzones_not_in_service = {
-                    use db::schema::bp_omicron_zones_not_in_service::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_zones_not_in_service
-                            .filter(dsl::blueprint_id.eq(blueprint_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
-
-                Ok((
-                    nblueprints,
-                    nsled_agent_zones,
-                    nzones,
-                    nnics,
-                    nzones_not_in_service,
-                ))
+                Ok((nblueprints, nsled_agent_zones, nzones, nnics))
             })
             .await
             .map_err(|error| match error {
@@ -636,7 +521,6 @@ impl DataStore {
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
-            "nzones_not_in_service" => nzones_not_in_service,
         );
 
         Ok(())
@@ -1193,6 +1077,8 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::Policy;
@@ -1242,7 +1128,6 @@ mod tests {
             query_count!(blueprint, id),
             query_count!(bp_omicron_zone, blueprint_id),
             query_count!(bp_omicron_zone_nic, blueprint_id),
-            query_count!(bp_omicron_zones_not_in_service, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
