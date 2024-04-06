@@ -425,9 +425,11 @@ fn get_gateway_mac(
     match gateway_mac {
         Some(mac) => Ok(MacAddr::from_str(&mac)?),
         None => {
-            let retries = 3;
-            for i in 0..=retries {
-                println!("Pinging {gateway_ip} and sleeping ({i} / {retries})");
+            let attempts = 3;
+            for i in 0..=attempts {
+                println!(
+                    "Pinging {gateway_ip} and sleeping ({i} / {attempts})"
+                );
                 let mut cmd = Command::new(PING);
                 cmd.arg(&gateway_ip);
                 execute(cmd)?;
