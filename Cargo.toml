@@ -238,7 +238,7 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 highway = "1.1.0"
 hkdf = "0.12.4"
-http = "0.2.12"
+http = "1.1.0"
 httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
