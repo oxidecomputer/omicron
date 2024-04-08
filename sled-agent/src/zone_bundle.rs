@@ -987,13 +987,7 @@ async fn create(
     let zone_metadata = ZoneBundleMetadata::new(zone.name(), context.cause);
     let filename = format!("{}.tar.gz", zone_metadata.id.bundle_id);
     let full_path = zone_bundle_dirs[0].join(&filename);
-    let file = match tokio::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&full_path)
-        .await
-    {
+    let file = match tokio::fs::File::create(&full_path).await {
         Ok(f) => f.into_std().await,
         Err(e) => {
             error!(
@@ -2676,11 +2670,7 @@ mod illumos_tests {
         let path = zone_dir.join(format!("{}.tar.gz", metadata.id.bundle_id));
 
         // Create a tarball at the path with this fake metadata.
-        let file = tokio::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&path)
+        let file = tokio::fs::File::create(&path)
             .await
             .context("failed to open zone bundle path")?
             .into_std()
