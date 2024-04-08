@@ -15,6 +15,12 @@ mod clippy;
 #[cfg(target_os = "illumos")]
 mod verify_libraries;
 
+#[cfg(target_os = "illumos")]
+mod virtual_hardware;
+#[cfg(not(target_os = "illumos"))]
+#[path = "virtual_hardware_stub.rs"]
+mod virtual_hardware;
+
 #[derive(Parser)]
 #[command(name = "cargo xtask", about = "Workspace-related developer tools")]
 struct Args {
@@ -32,6 +38,8 @@ enum Cmds {
     /// Verify we are not leaking library bindings outside of intended
     /// crates
     VerifyLibraries,
+    /// Manage virtual hardware
+    VirtualHardware(virtual_hardware::Args),
 }
 
 fn main() -> Result<()> {
@@ -47,6 +55,7 @@ fn main() -> Result<()> {
                 "Library verification is only available on illumos!"
             );
         }
+        Cmds::VirtualHardware(args) => virtual_hardware::run_cmd(args),
     }
 }
 
