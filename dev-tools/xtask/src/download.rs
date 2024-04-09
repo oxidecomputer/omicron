@@ -127,25 +127,25 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::All => {
                         bail!("We should have already filtered this 'All' target out?");
                     }
-                    Target::Clickhouse => downloader.download_clickhouse().await?,
-                    Target::Cockroach => downloader.download_cockroach().await?,
-                    Target::Console => downloader.download_console().await?,
+                    Target::Clickhouse => downloader.download_clickhouse().await,
+                    Target::Cockroach => downloader.download_cockroach().await,
+                    Target::Console => downloader.download_console().await,
                     Target::DendriteOpenapi => {
-                        downloader.download_dendrite_openapi().await?
+                        downloader.download_dendrite_openapi().await
                     }
-                    Target::DendriteStub => downloader.download_dendrite_stub().await?,
-                    Target::MaghemiteMgd => downloader.download_maghemite_mgd().await?,
+                    Target::DendriteStub => downloader.download_dendrite_stub().await,
+                    Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::MaghemiteOpenapi => {
-                        downloader.download_maghemite_openapi().await?
+                        downloader.download_maghemite_openapi().await
                     }
-                    Target::Softnpu => downloader.download_softnpu().await?,
+                    Target::Softnpu => downloader.download_softnpu().await,
                     Target::Thundermuffin => {
-                        downloader.download_thundermuffin().await?
+                        downloader.download_thundermuffin().await
                     }
                     Target::TransceiverControl => {
-                        downloader.download_transceiver_control().await?
+                        downloader.download_transceiver_control().await
                     }
-                };
+                }.context("Failed to download {target:?}")?;
                 Ok(())
             }
         })
