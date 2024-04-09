@@ -74,11 +74,8 @@ pub async fn spawn_all_longrunning_tasks(
 
     spawn_storage_monitor(log, storage_manager.clone());
 
-    let supplied_unparsed_disks = config
-        .supplied_unparsed_disks
-        .as_ref()
-        .map(|x| x.clone())
-        .unwrap_or(vec![]);
+    let supplied_unparsed_disks =
+        config.supplied_unparsed_disks.clone().unwrap_or(vec![]);
 
     let hardware_manager =
         spawn_hardware_manager(log, sled_mode, supplied_unparsed_disks).await;
