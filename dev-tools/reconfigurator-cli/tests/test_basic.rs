@@ -247,11 +247,8 @@ fn write_json<T: serde::Serialize>(
     path: &Utf8Path,
     obj: &T,
 ) -> Result<(), anyhow::Error> {
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(path)
-        .with_context(|| format!("open {:?}", path))?;
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("create {:?}", path))?;
     let bufwrite = BufWriter::new(file);
     serde_json::to_writer_pretty(bufwrite, obj)
         .with_context(|| format!("write {:?}", path))?;

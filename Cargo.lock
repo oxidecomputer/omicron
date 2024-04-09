@@ -160,9 +160,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.79"
+version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
+checksum = "0952808a6c2afd1aa8947271f3a60f1a6763c7b912d210184c5149b5cf147247"
 dependencies = [
  "backtrace",
 ]
@@ -963,9 +963,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.34"
+version = "0.4.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bc015644b92d5890fab7489e49d21f879d5c990186827d42ec511919404f38b"
+checksum = "8a0d04d43504c61aa6c7531f1871dd0d418d91130162063b789da00fd7057a5e"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -1042,9 +1042,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.1"
+version = "4.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c918d541ef2913577a0f9566e9ce27cb35b6df072075769e0b26cb5a554520da"
+checksum = "90bc066a67923782aa8515dbaea16946c5bcc5addbd668bb80af688e53e548a0"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1052,9 +1052,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.1"
+version = "4.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f3e7391dad68afb0c2ede1bf619f579a3dc9c2ec67f089baa397123a2f3d1eb"
+checksum = "ae129e2e766ae0ec03484e609954119f123cc1fe650337e155d03b022f24f7b4"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1065,11 +1065,11 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.0"
+version = "4.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "307bc0538d5f0f83b8248db3087aa92fe504e4691294d0c96c0eabc33f47ba47"
+checksum = "528131438037fd55894f62d6e9f068b8f45ac57ffa77517819645d10aed04f64"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.52",
@@ -1314,7 +1314,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.1",
+ "clap 4.5.4",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1604,9 +1604,9 @@ checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
 name = "datatest-stable"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a384d02609f0774f4dbf0c38fc57eb2769b24c30b9185911ff657ec14837da"
+checksum = "d89ee5ef93235f39066e9fbd304b19fd876ec89570e4d7894b3e28ec749400fa"
 dependencies = [
  "camino",
  "libtest-mimic",
@@ -1957,7 +1957,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -2264,7 +2264,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.0",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "colored",
  "dhcproto",
  "http 0.2.12",
@@ -2362,6 +2362,15 @@ name = "error-code"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "281e452d3bad4005426416cdba5ccfd4f5c1280e10099e21db27f7c1c28347fc"
+
+[[package]]
+name = "escape8259"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba4f4911e3666fcd7826997b4745c8224295a6f3072f1418c3067b97a67557ee"
+dependencies = [
+ "rustversion",
+]
 
 [[package]]
 name = "expectorate"
@@ -2677,7 +2686,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.1",
+ "clap 4.5.4",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3599,7 +3608,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.5.1",
+ "clap 4.5.4",
  "display-error-chain",
  "futures",
  "hex",
@@ -3660,7 +3669,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "expectorate",
  "hyper 0.14.28",
@@ -3741,7 +3750,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "internal-dns",
  "omicron-common",
@@ -3982,7 +3991,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "camino",
- "clap 4.5.1",
+ "clap 4.5.4",
  "colored",
  "futures",
  "libc",
@@ -4088,11 +4097,12 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.6.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
+checksum = "fefdf21230d6143476a28adbee3d930e2b68a3d56443c777cae3fe9340eebff9"
 dependencies = [
- "clap 4.5.1",
+ "clap 4.5.4",
+ "escape8259",
  "termcolor",
  "threadpool",
 ]
@@ -4148,7 +4158,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
 dependencies = [
  "bitfield",
- "clap 4.5.1",
+ "clap 4.5.4",
  "packed_struct",
  "serde",
 ]
@@ -5264,7 +5274,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -5298,7 +5308,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.0",
  "camino",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -5349,7 +5359,7 @@ dependencies = [
  "camino-tempfile",
  "cancel-safe-futures",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",
@@ -5466,7 +5476,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "crossterm",
  "crucible-agent-client",
  "csv",
@@ -5519,7 +5529,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "clap 4.5.1",
+ "clap 4.5.4",
  "expectorate",
  "futures",
  "hex",
@@ -5586,7 +5596,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
@@ -5732,7 +5742,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cipher",
- "clap 4.5.1",
+ "clap 4.5.4",
  "clap_builder",
  "console",
  "const-oid",
@@ -6111,7 +6121,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -6155,7 +6165,7 @@ dependencies = [
  "bytes",
  "camino",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "crossterm",
  "dropshot",
  "expectorate",
@@ -6228,7 +6238,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "nexus-client",
  "omicron-common",
@@ -6250,7 +6260,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "omicron-workspace-hack",
  "sigpipe",
  "uuid 1.8.0",
@@ -7098,7 +7108,7 @@ dependencies = [
  "anyhow",
  "atty",
  "base64 0.21.7",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "futures",
  "hyper 0.14.28",
@@ -7387,7 +7397,7 @@ dependencies = [
  "assert_matches",
  "camino",
  "camino-tempfile",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -8963,7 +8973,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -10145,7 +10155,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "console",
  "datatest-stable",
  "fs-err",
@@ -10421,7 +10431,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.1",
+ "clap 4.5.4",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -10452,7 +10462,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
- "clap 4.5.1",
+ "clap 4.5.4",
  "debug-ignore",
  "derive-where",
  "either",
@@ -10896,7 +10906,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.5.1",
+ "clap 4.5.4",
  "crossterm",
  "futures",
  "humantime",
@@ -10957,7 +10967,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.5.1",
+ "clap 4.5.4",
  "crossterm",
  "omicron-workspace-hack",
  "reedline",
@@ -10982,7 +10992,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.5.1",
+ "clap 4.5.4",
  "debug-ignore",
  "display-error-chain",
  "dpd-client",
@@ -11308,14 +11318,19 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.5.1",
+ "clap 4.5.4",
  "flate2",
  "fs-err",
+ "futures",
  "macaddr",
  "md5",
  "reqwest",
  "serde",
  "sha2",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-term",
  "strum",
  "swrite",
  "tar",
@@ -11463,7 +11478,7 @@ name = "zone-network-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.1",
+ "clap 4.5.4",
  "dropshot",
  "illumos-utils",
  "omicron-common",

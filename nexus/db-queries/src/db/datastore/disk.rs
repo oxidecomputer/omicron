@@ -170,7 +170,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        let ok_to_attach_disk_states = vec![
+        let ok_to_attach_disk_states = [
             api::external::DiskState::Creating,
             api::external::DiskState::Detached,
         ];
@@ -311,7 +311,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let ok_to_detach_disk_states =
-            vec![api::external::DiskState::Attached(authz_instance.id())];
+            [api::external::DiskState::Attached(authz_instance.id())];
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
