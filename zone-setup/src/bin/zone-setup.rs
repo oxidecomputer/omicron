@@ -6,7 +6,8 @@
 
 use anyhow::anyhow;
 use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
-use illumos_utils::chronyd::Chronyd;
+// TODO: Removeme
+// use illumos_utils::chronyd::Chronyd;
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
@@ -230,11 +231,14 @@ async fn do_run() -> Result<(), CmdError> {
         opte_interface_set_up(matches, log.clone()).await?;
     }
 
+    // TODO: Removeme
     if let Some(matches) = matches.subcommand_matches(NTP_CMD) {
         ntp_smf_methods(matches, log.clone()).await?;
     }
 
-    // TODO: Match on chrony setup
+    if let Some(matches) = matches.subcommand_matches(CHRONY_SETUP_CMD) {
+        chrony_setup(matches, log.clone()).await?;
+    }
 
     Ok(())
 }
@@ -244,14 +248,14 @@ async fn ntp_smf_methods(
     log: Logger,
 ) -> Result<(), CmdError> {
     if let Some(matches) = matches.subcommand_matches(NTP_START_CMD) {
-        ntp_smf_start(matches, log.clone()).await?;
+        chrony_setup(matches, log.clone()).await?;
     }
 
     // TODO: Add refresh and stop
     Ok(())
 }
 
-async fn ntp_smf_start(
+async fn chrony_setup(
     matches: &ArgMatches,
     log: Logger,
 ) -> Result<(), CmdError> {
@@ -376,10 +380,10 @@ async fn ntp_smf_start(
     info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
     Svcadm::refresh_logadm_upgrade()
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
-    info!(&log, "Starting chronyd daemon"; "chrony config" => ?file);
-    Chronyd::start_daemon(file)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+ // TODO: Removeme
+ //   info!(&log, "Starting chronyd daemon"; "chrony config" => ?file);
+ //   Chronyd::start_daemon(file)
+ //       .map_err(|err| CmdError::Failure(anyhow!(err)))?;
     Ok(())
 }
 
