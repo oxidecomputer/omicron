@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 mod check_workspace_deps;
 mod clippy;
+mod download;
 #[cfg(target_os = "illumos")]
 mod verify_libraries;
 
@@ -35,6 +36,8 @@ enum Cmds {
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
+    /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
+    Download(download::DownloadArgs),
     /// Verify we are not leaking library bindings outside of intended
     /// crates
     VerifyLibraries,
@@ -42,11 +45,13 @@ enum Cmds {
     VirtualHardware(virtual_hardware::Args),
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
+        Cmds::Download(args) => download::run_cmd(args).await,
         Cmds::VerifyLibraries => {
             #[cfg(target_os = "illumos")]
             return verify_libraries::run_cmd();

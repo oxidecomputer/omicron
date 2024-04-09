@@ -11309,10 +11309,17 @@ dependencies = [
  "cargo_metadata",
  "cargo_toml",
  "clap 4.5.1",
+ "flate2",
  "fs-err",
  "macaddr",
+ "md5",
+ "reqwest",
  "serde",
+ "sha2",
+ "strum",
  "swrite",
+ "tar",
+ "tokio",
  "toml 0.8.12",
 ]
 

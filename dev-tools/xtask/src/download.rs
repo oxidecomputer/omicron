@@ -1,0 +1,710 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Subcommand: cargo xtask download
+
+use anyhow::{anyhow, bail, Context, Result};
+use camino::{Utf8Path, Utf8PathBuf};
+use clap::Parser;
+use clap::ValueEnum;
+use flate2::bufread::GzDecoder;
+use sha2::Digest;
+use std::collections::{BTreeSet, HashMap};
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
+use strum::EnumIter;
+use strum::IntoEnumIterator;
+use tar::Archive;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+
+/// What is being downloaded?
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    EnumIter,
+)]
+enum Target {
+    /// Implies "download all targets"
+    All,
+
+    /// Downloads the Clickhouse binary
+    Clickhouse,
+
+    /// Downloads the CockroachDB binary
+    Cockroach,
+
+    /// Downloads the web console assets
+    Console,
+
+    /// Downloads the Dendrite OpenAPI spec
+    DendriteOpenapi,
+
+    /// Downloads a "Stub" Dendrite binary tarball
+    DendriteStub,
+
+    MaghemiteMgd,
+
+    MaghemiteOpenapi,
+
+    MaghemiteMachinery,
+
+    Softnpu,
+
+    Thundermuffin,
+
+    TransceiverControl,
+}
+
+#[derive(Parser)]
+pub struct DownloadArgs {
+    /// The targets to be downloaded. This list is additive.
+    #[clap(required = true)]
+    targets: Vec<Target>,
+
+    /// The path to the "out" directory of omicron.
+    #[clap(long, default_value = "out")]
+    output_dir: Utf8PathBuf,
+
+    /// The path to the versions and checksums directory.
+    #[clap(long, default_value = "tools")]
+    versions_dir: Utf8PathBuf,
+}
+
+pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
+    let mut targets = BTreeSet::new();
+
+    for target in args.targets {
+        match target {
+            Target::All => {
+                // Add all targets, then remove the "All" variant because that
+                // isn't a real thing we can download.
+                let mut all = BTreeSet::from_iter(Target::iter());
+                all.remove(&Target::All);
+                targets.append(&mut all);
+            }
+            _ => _ = targets.insert(target),
+        }
+    }
+
+    for target in &targets {
+        println!("Download target: {target:?}");
+
+        match target {
+            Target::Clickhouse => {
+                download_clickhouse(&args.output_dir, &args.versions_dir)
+                    .await?
+            }
+            Target::Cockroach => {
+                download_cockroach(&args.output_dir, &args.versions_dir).await?
+            }
+            Target::Console => {
+                download_console(&args.output_dir, &args.versions_dir).await?
+            }
+            Target::DendriteOpenapi => {
+                download_dendrite_openapi(&args.output_dir, &args.versions_dir)
+                    .await?
+            }
+            Target::DendriteStub => {
+                download_dendrite_stub(&args.output_dir, &args.versions_dir)
+                    .await?
+            }
+            _ => todo!("Not yet implemented"),
+        }
+    }
+
+    Ok(())
+}
+
+enum Os {
+    Illumos,
+    Linux,
+    Mac,
+}
+
+impl Os {
+    fn env_name(&self) -> &'static str {
+        match self {
+            Os::Illumos => "ILLUMOS",
+            Os::Linux => "LINUX",
+            Os::Mac => "DARWIN",
+        }
+    }
+}
+
+fn os_name() -> Result<Os> {
+    let os = match std::env::consts::OS {
+        "linux" => Os::Linux,
+        "macos" => Os::Mac,
+        "solaris" | "illumos" => Os::Illumos,
+        other => bail!("OS not supported: {other}"),
+    };
+    Ok(os)
+}
+
+/// Parses a file of the format:
+///
+/// ```ignore
+/// KEY1="value1"
+/// KEY2="value2"
+/// ```
+async fn get_values_from_file<Keys: Into<BTreeSet<String>>>(
+    keys: Keys,
+    path: &Utf8Path,
+) -> Result<HashMap<String, String>> {
+    let keys: BTreeSet<String> = keys.into();
+
+    let mut map = HashMap::new();
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .context("Failed to read {path}")?;
+    for line in content.lines() {
+        let line = line.trim();
+        let Some((key, value)) = line.split_once("=") else {
+            continue;
+        };
+        let value = value.trim_matches('"');
+        if keys.contains(key) {
+            map.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    if keys.len() != map.len() {
+        bail!("Not all keys found in {path}");
+    }
+    Ok(map)
+}
+
+async fn get_value_from_lines(key: &str, path: &Utf8Path) -> Result<String> {
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .context("Failed to read {path}")?;
+    let key = format!("{key}=");
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix(&key) {
+            let value = value.trim_matches('"');
+            return Ok(value.to_string());
+        }
+    }
+    bail!("Key {key} not found in {path}")
+}
+
+/// Send a GET request to `url`, downloading the contents to `path`.
+///
+/// Writes the response to the file as it is received.
+async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
+    let mut response = reqwest::get(url).await?;
+    let mut tarball = tokio::fs::File::create(&path).await?;
+    let mut total = 0;
+    while let Some(chunk) = response.chunk().await? {
+        tarball.write_all(chunk.as_ref()).await?;
+        total += chunk.len();
+        println!("Downloaded {total} bytes of {path}");
+    }
+    Ok(())
+}
+
+/// Returns the hex, lowercase md5 checksum of a file at `path`.
+async fn md5_checksum(path: &Utf8Path) -> Result<String> {
+    let mut buf = [0u8; 65536];
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut ctx = md5::Context::new();
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        ctx.write_all(&buf[0..n])?;
+    }
+
+    let digest = ctx.compute();
+    Ok(format!("{digest:x}"))
+}
+
+/// Returns the hex, lowercase sha2 checksum of a file at `path`.
+async fn sha2_checksum(path: &Utf8Path) -> Result<String> {
+    let mut buf = [0u8; 65536];
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut ctx = sha2::Sha256::new();
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        ctx.write_all(&buf[0..n])?;
+    }
+
+    let digest = ctx.finalize();
+    Ok(format!("{digest:x}"))
+}
+
+async fn unpack_tarball(
+    tarball_path: &Utf8Path,
+    destination_dir: &Utf8Path,
+) -> Result<()> {
+    println!("Unpacking {tarball_path} to {destination_dir}");
+    let tarball_path = tarball_path.to_owned();
+    let destination_dir = destination_dir.to_owned();
+
+    let task = tokio::task::spawn_blocking(move || {
+        let reader = std::fs::File::open(tarball_path)?;
+        let buf_reader = std::io::BufReader::new(reader);
+        let gz = GzDecoder::new(buf_reader);
+        let mut archive = Archive::new(gz);
+        archive.unpack(&destination_dir)?;
+        Ok(())
+    });
+    task.await?
+}
+
+async fn remove_quarantine(binary: &Utf8Path) -> Result<()> {
+    let mut cmd = Command::new("xattr");
+    cmd.arg("-d");
+    cmd.arg("com.apple.quarantine");
+    cmd.arg(&binary);
+
+    let output = cmd
+        .output()
+        .await
+        .context(format!("Failed to remove quarantine from {binary}"))?;
+    if !output.status.success() {
+        let stderr =
+            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
+        bail!("xattr failed: {} (stderr: {stderr})", output.status);
+    }
+    Ok(())
+}
+
+async fn clickhouse_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
+    let mut cmd = Command::new(binary);
+    cmd.args(["server", "--version"]);
+
+    let output =
+        cmd.output().await.context(format!("Failed to run {binary}"))?;
+    if !output.status.success() {
+        let stderr =
+            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
+        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
+    }
+    Ok(())
+}
+
+async fn cockroach_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
+    let mut cmd = Command::new(binary);
+    cmd.arg("version");
+
+    let output =
+        cmd.output().await.context(format!("Failed to run {binary}"))?;
+    if !output.status.success() {
+        let stderr =
+            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
+        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
+    }
+    Ok(())
+}
+
+fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in src.read_dir_utf8()? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), &dst.join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), &dst.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+async fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> {
+    let mut p = tokio::fs::metadata(&path).await?.permissions();
+    p.set_mode(mode);
+    tokio::fs::set_permissions(&path, p).await?;
+    Ok(())
+}
+
+enum ChecksumAlgorithm {
+    Md5,
+    Sha2,
+}
+
+impl ChecksumAlgorithm {
+    async fn checksum(&self, path: &Utf8Path) -> Result<String> {
+        match self {
+            ChecksumAlgorithm::Md5 => md5_checksum(path).await,
+            ChecksumAlgorithm::Sha2 => sha2_checksum(path).await,
+        }
+    }
+}
+
+/// Downloads a file and verifies the checksum.
+///
+/// If the file already exists and the checksum matches,
+/// avoids performing the download altogether.
+async fn download_file_and_verify(
+    path: &Utf8Path,
+    url: &str,
+    algorithm: ChecksumAlgorithm,
+    checksum: &str,
+) -> Result<()> {
+    let do_download = if path.exists() {
+        println!("Already downloaded ({path})");
+        if algorithm.checksum(&path).await? == checksum {
+            println!(
+                "Checksum matches already downloaded file - skipping download"
+            );
+            false
+        } else {
+            println!("Checksum mismatch - retrying download");
+            true
+        }
+    } else {
+        true
+    };
+
+    if do_download {
+        println!("Downloading...");
+        streaming_download(&url, &path).await?;
+    }
+
+    let observed_checksum = algorithm.checksum(&path).await?;
+    if observed_checksum != checksum {
+        bail!(
+            "Checksum mismatch (saw {observed_checksum}, expected {checksum})"
+        );
+    }
+    Ok(())
+}
+
+async fn download_clickhouse(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let os = os_name()?;
+
+    let download_dir = output_dir.join("downloads");
+    let destination_dir = output_dir.join("clickhouse");
+
+    let checksums_path = versions_dir.join("clickhouse_checksums");
+    let checksum = get_value_from_lines(
+        &format!("CIDL_MD5_{}", os.env_name()),
+        &checksums_path,
+    )
+    .await?;
+
+    let versions_path = versions_dir.join("clickhouse_version");
+    let version = tokio::fs::read_to_string(&versions_path)
+        .await
+        .context("Failed to read version from {versions_path}")?;
+    let version = version.trim();
+
+    const S3_BUCKET: &'static str =
+        "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com";
+
+    let platform = match os {
+        Os::Illumos => "illumos",
+        Os::Linux => "linux",
+        Os::Mac => "macos",
+    };
+    let tarball_filename = format!("clickhouse-{version}.{platform}.tar.gz");
+    let tarball_url = format!("{S3_BUCKET}/{tarball_filename}");
+
+    let tarball_path = download_dir.join(tarball_filename);
+
+    println!("Tarball URL: {tarball_url}");
+    println!("Version: {version}");
+
+    tokio::fs::create_dir_all(&download_dir).await?;
+    tokio::fs::create_dir_all(&destination_dir).await?;
+
+    download_file_and_verify(
+        &tarball_path,
+        &tarball_url,
+        ChecksumAlgorithm::Md5,
+        &checksum,
+    )
+    .await?;
+
+    unpack_tarball(&tarball_path, &destination_dir).await?;
+    let clickhouse_binary = destination_dir.join("clickhouse");
+
+    // on macOS, we need to take the binary out of quarantine after download
+    // https://github.com/ClickHouse/clickhouse-docs/blob/08d7a329d/knowledgebase/fix-developer-verification-error-in-macos.md
+    if matches!(os, Os::Mac) {
+        remove_quarantine(&clickhouse_binary).await?;
+    }
+
+    println!("Checking that binary works");
+    clickhouse_confirm_binary_works(&clickhouse_binary).await?;
+
+    Ok(())
+}
+
+async fn download_cockroach(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let os = os_name()?;
+
+    let download_dir = output_dir.join("downloads");
+    let destination_dir = output_dir.join("cockroachdb");
+
+    let checksums_path = versions_dir.join("cockroachdb_checksums");
+    let checksum = get_value_from_lines(
+        &format!("CIDL_SHA256_{}", os.env_name()),
+        &checksums_path,
+    )
+    .await?;
+
+    let versions_path = versions_dir.join("cockroachdb_version");
+    let version = tokio::fs::read_to_string(&versions_path)
+        .await
+        .context("Failed to read version from {versions_path}")?;
+    let version = version.trim();
+
+    let (url_base, suffix) = match os {
+        Os::Illumos => ("https://illumos.org/downloads", "tar.gz"),
+        Os::Linux | Os::Mac => ("https://binaries.cockroachdb.com", "tgz"),
+    };
+    let build = match os {
+        Os::Illumos => "illumos",
+        Os::Linux => "linux-amd64",
+        Os::Mac => "darwin-10.9-amd64",
+    };
+
+    let version_directory = format!("cockroach-{version}");
+    let tarball_name = format!("{version_directory}.{build}");
+    let tarball_filename = format!("{tarball_name}.{suffix}");
+    let tarball_url = format!("{url_base}/{tarball_filename}");
+
+    let tarball_path = download_dir.join(tarball_filename);
+
+    println!("Tarball URL: {tarball_url}");
+    println!("Version: {version}");
+
+    tokio::fs::create_dir_all(&download_dir).await?;
+    tokio::fs::create_dir_all(&destination_dir).await?;
+
+    download_file_and_verify(
+        &tarball_path,
+        &tarball_url,
+        ChecksumAlgorithm::Sha2,
+        &checksum,
+    )
+    .await?;
+
+    // We unpack the tarball in the download directory to emulate the old
+    // behavior. This could be a little more consistent with Clickhouse.
+    println!("tarball path: {tarball_path}");
+    unpack_tarball(&tarball_path, &download_dir).await?;
+
+    // This is where the binary will end up eventually
+    let cockroach_binary = destination_dir.join("bin/cockroach");
+
+    // Re-shuffle the downloaded tarball to our "destination" location.
+    //
+    // This ensures some uniformity, even though different platforms bundle
+    // the Cockroach package differently.
+    let binary_dir = destination_dir.join("bin");
+    tokio::fs::create_dir_all(&binary_dir).await?;
+    match os {
+        Os::Illumos => {
+            let src = tarball_path.with_file_name(version_directory);
+            let dst = &destination_dir;
+            println!("Copying from {src} to {dst}");
+            copy_dir_all(&src, &dst)?;
+        }
+        Os::Linux | Os::Mac => {
+            let src =
+                tarball_path.with_file_name(tarball_name).join("cockroach");
+            tokio::fs::copy(src, &cockroach_binary).await?;
+        }
+    }
+
+    println!("Checking that binary works");
+    cockroach_confirm_binary_works(&cockroach_binary).await?;
+
+    Ok(())
+}
+
+async fn download_console(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let download_dir = output_dir.join("downloads");
+    let tarball_path = download_dir.join("console.tar.gz");
+
+    let checksums_path = versions_dir.join("console_version");
+    let commit = get_value_from_lines("COMMIT", &checksums_path).await?;
+    let checksum = get_value_from_lines("SHA2", &checksums_path).await?;
+
+    tokio::fs::create_dir_all(&download_dir).await?;
+    let tarball_url =
+        format!("https://dl.oxide.computer/releases/console/{commit}.tar.gz");
+    download_file_and_verify(
+        &tarball_path,
+        &tarball_url,
+        ChecksumAlgorithm::Sha2,
+        &checksum,
+    )
+    .await?;
+
+    let destination_dir = output_dir.join("console-assets");
+    let _ = tokio::fs::remove_dir_all(&destination_dir).await;
+    tokio::fs::create_dir_all(&destination_dir).await?;
+
+    unpack_tarball(&tarball_path, &destination_dir).await?;
+
+    Ok(())
+}
+
+async fn download_dendrite_openapi(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let download_dir = output_dir.join("downloads");
+
+    let checksums_path = versions_dir.join("dendrite_openapi_version");
+    let commit = get_value_from_lines("COMMIT", &checksums_path).await?;
+    let checksum = get_value_from_lines("SHA2", &checksums_path).await?;
+
+    let url = format!("https://buildomat.eng.oxide.computer/public/file/oxidecomputer/dendrite/openapi/{commit}/dpd.json");
+    let path = download_dir.join(format!("dpd-{commit}.json"));
+
+    tokio::fs::create_dir_all(&download_dir).await?;
+    download_file_and_verify(&path, &url, ChecksumAlgorithm::Sha2, &checksum)
+        .await?;
+
+    Ok(())
+}
+
+async fn download_dendrite_stub(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let download_dir = output_dir.join("downloads");
+    let destination_dir = output_dir.join("dendrite-stub");
+
+    let stub_checksums_path = versions_dir.join("dendrite_stub_checksums");
+    let stub_checksums = get_values_from_file(
+        [
+            "CIDL_SHA256_ILLUMOS".to_string(),
+            "CIDL_SHA256_LINUX_DPD".to_string(),
+            "CIDL_SHA256_LINUX_SWADM".to_string(),
+        ],
+        &stub_checksums_path,
+    )
+    .await?;
+
+    let dpd_sha2 = stub_checksums
+        .get("CIDL_SHA256_LINUX_DPD")
+        .ok_or_else(|| anyhow!("Did not parse CIDL_SHA256_LINUX_DPD"))?;
+    let swadm_sha2 = stub_checksums
+        .get("CIDL_SHA256_LINUX_SWADM")
+        .ok_or_else(|| anyhow!("Did not parse CIDL_SHA256_LINUX_SWADM"))?;
+
+    let checksums_path = versions_dir.join("dendrite_openapi_version");
+    let version_info = get_values_from_file(
+        ["COMMIT".to_string(), "SHA2".to_string()],
+        &checksums_path,
+    )
+    .await?;
+    let commit = version_info
+        .get("COMMIT")
+        .ok_or_else(|| anyhow!("Did not parse a COMMIT"))?;
+    // NOTE: This seems odd to me -- the "dendrite_openapi_version" file also
+    // contains a SHA2, but we're ignoring it?
+    //
+    // Regardless, this is currenlty the one that actually matches, regardless
+    // of host OS.
+    let sha2 = stub_checksums
+        .get("CIDL_SHA256_ILLUMOS")
+        .ok_or_else(|| anyhow!("Did not parse a SHA2"))?;
+
+    let tarball_file = "dendrite-stub.tar.gz";
+    let tarball_path = download_dir.join(tarball_file);
+    let repo = "oxidecomputer/dendrite";
+    const BUILDOMAT_URL: &'static str =
+        "https://buildomat.eng.oxide.computer/public/file";
+    let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
+
+    tokio::fs::create_dir_all(&download_dir).await?;
+    tokio::fs::create_dir_all(&destination_dir).await?;
+
+    download_file_and_verify(
+        &tarball_path,
+        &format!("{url_base}/{tarball_file}"),
+        ChecksumAlgorithm::Sha2,
+        sha2,
+    )
+    .await?;
+
+    // Unpack in the download directory, then copy everything into the
+    // destination directory.
+    unpack_tarball(&tarball_path, &download_dir).await?;
+
+    let _ = tokio::fs::remove_dir_all(&destination_dir).await;
+    tokio::fs::create_dir_all(&destination_dir).await?;
+    let destination_root = destination_dir.join("root");
+    tokio::fs::create_dir_all(&destination_root).await?;
+    copy_dir_all(&download_dir.join("root"), &destination_root)?;
+
+    let bin_dir = destination_dir.join("root/opt/oxide/dendrite/bin");
+
+    // Symbolic links for backwards compatibility with existing setups
+    std::os::unix::fs::symlink(
+        bin_dir.canonicalize()?,
+        destination_dir.canonicalize()?.join("bin"),
+    )
+    .context("Failed to create a symlink to dendrite's bin directory")?;
+
+    match os_name()? {
+        Os::Linux => {
+            let base_url = format!("{BUILDOMAT_URL}/{repo}/linux-bin/{commit}");
+            let filename = "dpd";
+            let path = download_dir.join(filename);
+            download_file_and_verify(
+                &path,
+                &format!("{base_url}/{filename}"),
+                ChecksumAlgorithm::Sha2,
+                dpd_sha2,
+            )
+            .await?;
+            set_permissions(&path, 0o755).await?;
+            tokio::fs::copy(path, bin_dir.join(filename)).await?;
+
+            let filename = "swadm";
+            let path = download_dir.join(filename);
+            download_file_and_verify(
+                &path,
+                &format!("{base_url}/{filename}"),
+                ChecksumAlgorithm::Sha2,
+                swadm_sha2,
+            )
+            .await?;
+            set_permissions(&path, 0o755).await?;
+            tokio::fs::copy(path, bin_dir.join(filename)).await?;
+        }
+        Os::Illumos => {}
+        Os::Mac => {
+            eprintln!("WARNING: Dendrite not available for Mac");
+            eprintln!("Network APIs will be unavailable");
+
+            let path = bin_dir.join("dpd");
+            tokio::fs::write(&path, "echo 'unsupported os' && exit 1").await?;
+            set_permissions(&path, 0o755).await?;
+        }
+    }
+
+    Ok(())
+}
