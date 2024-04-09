@@ -449,11 +449,7 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("failed to get zone bundle")?
                 .into_inner();
-            let mut f = tokio::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&output)
+            let mut f = tokio::fs::File::create(&output)
                 .await
                 .context("failed to open output file")?;
             let mut stream = bundle.into_inner();
@@ -654,11 +650,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             // Open megabundle output file.
-            let f = tokio::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&output)
+            let f = tokio::fs::File::create(&output)
                 .await
                 .context("failed to open output file")?
                 .into_std()
