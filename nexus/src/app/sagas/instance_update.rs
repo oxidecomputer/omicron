@@ -31,10 +31,16 @@ pub(crate) struct Params {
 declare_saga_actions! {
     instance_update;
 
+    // Read the target Instance from CRDB and join with its active VMM and
+    // migration target VMM records if they exist, and then acquire the
+    // "instance updater" lock with this saga's ID if no other saga is currently
+    // updating the instance.
     LOOKUP_AND_LOCK_INSTANCE -> "instance_and_vmms" {
         + siu_lookup_and_lock_instance
         - siu_lookup_and_lock_instance_undo
     }
+
+    //
 }
 
 const SAGA_INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
