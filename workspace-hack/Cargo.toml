@@ -16,7 +16,7 @@ publish = false
 [dependencies]
 ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
-anyhow = { version = "1.0.79", features = ["backtrace"] }
+anyhow = { version = "1.0.81", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.0" }
 bit-set = { version = "0.5.3" }
@@ -124,7 +124,7 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 [build-dependencies]
 ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
-anyhow = { version = "1.0.79", features = ["backtrace"] }
+anyhow = { version = "1.0.81", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.0" }
 bit-set = { version = "0.5.3" }
