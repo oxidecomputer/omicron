@@ -6,6 +6,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::identity::Resource;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -22,9 +23,11 @@ declare_saga_actions! {
     snapshot_delete;
     DELETE_SNAPSHOT_RECORD -> "no_result1" {
         + ssd_delete_snapshot_record
+        - ssd_delete_snapshot_record_undo
     }
     SPACE_ACCOUNT -> "no_result2" {
         + ssd_account_space
+        - ssd_account_space_undo
     }
     NOOP -> "no_result3" {
         + ssd_noop
@@ -132,6 +135,21 @@ async fn ssd_delete_snapshot_record(
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn ssd_delete_snapshot_record_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    osagactx
+        .datastore()
+        .project_undelete_snapshot_set_faulted_no_auth(&params.snapshot.id())
+        .await?;
+
     Ok(())
 }
 
@@ -154,6 +172,27 @@ async fn ssd_account_space(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn ssd_account_space_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_snapshot(
+            &opctx,
+            params.authz_snapshot.id(),
+            params.snapshot.project_id,
+            params.snapshot.size,
+        )
+        .await?;
     Ok(())
 }
 
