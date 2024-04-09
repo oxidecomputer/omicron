@@ -201,11 +201,16 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-# These variables are used by softnpu_init, so export them.
-export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
-
 pfexec zpool create -f scratch c1t1d0 c2t1d0
-VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+ptime -m \
+    pfexec ./target/release/xtask virtual-hardware \
+    --vdev-dir /scratch \
+    create \
+    --gateway-ip "$GATEWAY_IP" \
+    --gateway-mac "$GATEWAY_MAC" \
+    --pxa-start "$PXA_START" \
+    --pxa-end "$PXA_END"
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
