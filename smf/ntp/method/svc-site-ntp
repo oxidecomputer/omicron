@@ -108,8 +108,8 @@ function update_logadm {
 
 case $action in
 	start)
-		generate_config_file
-		update_logadm
+	#	generate_config_file
+	#	update_logadm
 		start_daemon
 		;;
 	refresh)

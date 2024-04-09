@@ -294,6 +294,7 @@ service_name = "ntp"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
+  "chrony-setup.tar.gz",
   "ntp-svc.tar.gz",
   "opte-interface-setup.tar.gz",
   "zone-setup.tar.gz",
@@ -307,8 +308,20 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },
-  { from = "smf/ntp/method", to = "/var/svc/method" },
-  { from = "smf/ntp/etc", to = "/etc" },
+ # TODO: Removeme
+ # { from = "smf/ntp/method", to = "/var/svc/method" },
+ # { from = "smf/ntp/etc", to = "/etc" },
+]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.chrony-setup]
+service_name = "chrony-setup"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "smf/chrony-setup/manifest.xml", to = "/var/svc/manifest/site/chrony-setup/manifest.xml" },
+  { from = "smf/chrony-setup/etc", to = "/etc" },
 ]
 output.intermediate_only = true
 output.type = "zone"

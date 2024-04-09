@@ -27,6 +27,8 @@ pub const BOUNDARY_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.boundary";
 
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
+pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
+// TODO: Removeme before merging
 pub const NTP_CMD: &str = "ntp";
 pub const NTP_START_CMD: &str = "start";
 
@@ -156,10 +158,40 @@ async fn do_run() -> Result<(), CmdError> {
                 ),
         )
         .subcommand(
+            Command::new(CHRONY_SETUP_CMD)
+                .about("Sets up Chrony configuration for NTP zone") 
+                .arg(
+                    arg!(-f --file <String> "Chrony configuration file")
+                    .default_value(CHRONY_CONFIG_FILE)
+            .value_parser(parse_chrony_conf)
+                )
+            .arg(
+                arg!(-b --boundary <bool> "Whether this is a boundary or internal NTP zone")
+                .required(true)
+        .value_parser(parse_boundary),
+            )
+            .arg(
+                Arg::new("servers")
+                .short('s')
+                .long("servers")
+                .num_args(1..)
+                .value_delimiter(' ')
+                .value_parser(value_parser!(String))
+                .help("List of NTP servers separated by a space")
+                .required(true)
+                // TODO: Add some parsing to this?
+            )
+            .arg(
+                arg!(-a --allow <String> "Allowed IPv6 range")                       
+                .value_parser(parse_allow),
+            ),
+        )
+        // TODO: Removeme before merging
+        .subcommand(
             Command::new(NTP_CMD)
                 .about("Start (set up), refresh and stop methods for NTP zone")
                 .subcommand(
-                    Command::new("start")
+                    Command::new(NTP_START_CMD)
                         .about("NTP zone setup and start chronyd daemon") 
                         .arg(
                             arg!(-f --file <String> "Chrony configuration file")
@@ -201,6 +233,8 @@ async fn do_run() -> Result<(), CmdError> {
     if let Some(matches) = matches.subcommand_matches(NTP_CMD) {
         ntp_smf_methods(matches, log.clone()).await?;
     }
+
+    // TODO: Match on chrony setup
 
     Ok(())
 }

@@ -2021,11 +2021,18 @@ impl ServiceManager {
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(
                         ServiceInstanceBuilder::new("default")
+                          //  .add_property_group(ntp_config),
+                    );
+
+                let chrony_setup_service = ServiceBuilder::new("oxide/chrony-setup")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
                             .add_property_group(ntp_config),
                     );
 
                 let mut profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
+                    .add_service(chrony_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)

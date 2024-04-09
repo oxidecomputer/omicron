@@ -39,6 +39,11 @@
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
+  <dependency name='chrony-setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
   <!-- 
     Only Boundary NTP needs the opte interface.
   -->
@@ -59,30 +64,34 @@
   -->
 
 <!-- TODO: Check what the /etc/logadm.d/chrony.logadm.conf file says in the previous one -->  
-  <exec_method type="method" name="start"
-    exec='/opt/oxide/zone-setup-cli/bin/zone-setup ntp start -b %{config/boundary} -s %{config/server} -a %{config/allow}'
-    timeout_seconds="60">
+  <exec_method type="method" name="start" 
+    exec='/usr/sbin/chronyd -d &amp;' 
+    timeout_seconds="600">
   <method_context security_flags="aslr">
   <method_credential user="root" group="root"
     privileges="basic,!file_link_any,!proc_info,!proc_session,file_chown_self,file_dac_search,file_dac_write,net_privaddr,proc_lock_memory,proc_priocntl,proc_setid,sys_time" />
   </method_context>
   </exec_method>
 
+<!--
   <exec_method type="method" name="refresh"
     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}" timeout_seconds="60">
   </exec_method>
+-->
 
   <exec_method type="method" name="stop"
-    exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
+    exec=":kill"
     timeout_seconds="60" />
 
+  <!--
   <property_group name="config" type="application">
-  <!-- TODO: Why is this even being set as a property instead of direclty on the method?? -->
+   TODO: Why is this even being set as a property instead of direclty on the method?? 
     <propval name="file" type="astring" value="/etc/inet/chrony.conf" />
     <propval name="boundary" type="boolean" value="false" />
     <propval name="server" type="astring" value="" />
     <propval name="allow" type="astring" value="" />
   </property_group>
+-->
 
   <stability value="Unstable" />
 
