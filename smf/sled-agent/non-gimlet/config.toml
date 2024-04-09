@@ -24,7 +24,7 @@ skip_timesync = false
 # # truncate -s 10GB <name>.vdev
 #
 # Note that you'll need to create one such file for each disk below.
-# The `create_virtual_hardware.sh` script does this for you.
+# `cargo xtask virtual-hardware create` does this for you.
 #
 # These paths have the prefix of either "u2" or "m2", followed by an underscore,
 # followed by a string that is embedded into their fake serial values.

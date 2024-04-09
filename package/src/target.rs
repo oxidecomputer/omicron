@@ -32,7 +32,7 @@ pub enum Machine {
     /// Use sled agent configuration for a device emulating a Gimlet
     ///
     /// Note that this configuration can actually work on real gimlets,
-    /// it just relies on the "./tools/create_virtual_hardware.sh" script.
+    /// it just relies on "cargo xtask virtual-hardware create".
     NonGimlet,
 }
 

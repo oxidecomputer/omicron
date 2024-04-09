@@ -1152,6 +1152,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
 ) WHERE
     time_deleted IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk (
+    volume_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -3191,17 +3196,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
  * `bp_sled_omicron_zones`, `bp_omicron_zone`, and `bp_omicron_zone_nic` are
  * nearly identical to their `inv_*` counterparts, and record the
  * `OmicronZonesConfig` for each sled.
- *
- * `bp_omicron_zones_not_in_service` stores a list of Omicron zones (present in
- * `bp_omicron_zone`) that are NOT in service; e.g., should not appear in
- * internal DNS. Nexus's in-memory `Blueprint` representation stores the set of
- * zones that ARE in service. We invert that logic at this layer because we
- * expect most blueprints to have a relatively large number of omicron zones,
- * almost all of which will be in service. This is a minor and perhaps
- * unnecessary optimization at the database layer, but it's also relatively
- * simple and hidden by the relevant read and insert queries in
- * `nexus-db-queries`.
  */
+
+CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
+    'in_service',
+    'quiesced',
+    'expunged'
+);
 
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
@@ -3332,6 +3333,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- Zone disposition
+    disposition omicron.public.bp_zone_disposition NOT NULL,
+
     PRIMARY KEY (blueprint_id, id)
 );
 
@@ -3347,20 +3351,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     slot INT2 NOT NULL,
 
     PRIMARY KEY (blueprint_id, id)
-);
-
--- list of omicron zones that are considered NOT in-service for a blueprint
---
--- In Rust code, we generally want to deal with "zones in service", which means
--- they should appear in DNS. However, almost all zones in almost all blueprints
--- will be in service, so we can induce considerably less database work by
--- storing the zones _not_ in service. Our DB wrapper layer handles this
--- inversion, so the rest of our Rust code can ignore it.
-CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zones_not_in_service (
-    blueprint_id UUID NOT NULL,
-    bp_omicron_zone_id UUID NOT NULL,
-
-    PRIMARY KEY (blueprint_id, bp_omicron_zone_id)
 );
 
 /*******************************************************************/
@@ -3770,7 +3760,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '49.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '51.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
