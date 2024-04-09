@@ -2283,7 +2283,7 @@ dependencies = [
  "russh-keys",
  "serde",
  "serde_json",
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "tokio",
  "toml 0.8.12",
  "trust-dns-resolver",
@@ -2758,7 +2758,7 @@ dependencies = [
  "serde",
  "serde-big-array 0.5.1",
  "slog",
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "string_cache",
  "thiserror",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
@@ -3308,7 +3308,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "tokio",
  "tower-service",
  "tracing",
@@ -3411,7 +3411,7 @@ dependencies = [
  "http-body 1.0.0",
  "hyper 1.1.0",
  "pin-project-lite",
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "tokio",
  "tower",
  "tower-service",
@@ -3788,7 +3788,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f"
 dependencies = [
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "widestring",
  "windows-sys 0.48.0",
  "winreg",
@@ -8959,12 +8959,12 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5fac59a5cb5dd637972e5fca70daf0523c9067fcdc4842f053dae04a18f8e9"
+checksum = "05ffd9c0a93b7543e062e759284fcf5f5e3b098501104bfbdde4d404db792871"
 dependencies = [
  "libc",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9736,7 +9736,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "tokio-macros",
  "windows-sys 0.48.0",
 ]
@@ -9782,7 +9782,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.8.5",
- "socket2 0.5.5",
+ "socket2 0.5.6",
  "tokio",
  "tokio-util",
  "whoami",

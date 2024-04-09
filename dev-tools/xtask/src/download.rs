@@ -127,25 +127,25 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::All => {
                         bail!("We should have already filtered this 'All' target out?");
                     }
-                    Target::Clickhouse => downloader.download_clickhouse().await?,
-                    Target::Cockroach => downloader.download_cockroach().await?,
-                    Target::Console => downloader.download_console().await?,
+                    Target::Clickhouse => downloader.download_clickhouse().await,
+                    Target::Cockroach => downloader.download_cockroach().await,
+                    Target::Console => downloader.download_console().await,
                     Target::DendriteOpenapi => {
-                        downloader.download_dendrite_openapi().await?
+                        downloader.download_dendrite_openapi().await
                     }
-                    Target::DendriteStub => downloader.download_dendrite_stub().await?,
-                    Target::MaghemiteMgd => downloader.download_maghemite_mgd().await?,
+                    Target::DendriteStub => downloader.download_dendrite_stub().await,
+                    Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::MaghemiteOpenapi => {
-                        downloader.download_maghemite_openapi().await?
+                        downloader.download_maghemite_openapi().await
                     }
-                    Target::Softnpu => downloader.download_softnpu().await?,
+                    Target::Softnpu => downloader.download_softnpu().await,
                     Target::Thundermuffin => {
-                        downloader.download_thundermuffin().await?
+                        downloader.download_thundermuffin().await
                     }
                     Target::TransceiverControl => {
-                        downloader.download_transceiver_control().await?
+                        downloader.download_transceiver_control().await
                     }
-                };
+                }.context("Failed to download {target:?}")?;
                 Ok(())
             }
         })
@@ -329,24 +329,6 @@ async fn unpack_gzip(
     task.await?
 }
 
-async fn remove_quarantine(binary: &Utf8Path) -> Result<()> {
-    let mut cmd = Command::new("xattr");
-    cmd.arg("-d");
-    cmd.arg("com.apple.quarantine");
-    cmd.arg(&binary);
-
-    let output = cmd
-        .output()
-        .await
-        .context(format!("Failed to remove quarantine from {binary}"))?;
-    if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("xattr failed: {} (stderr: {stderr})", output.status);
-    }
-    Ok(())
-}
-
 async fn clickhouse_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
     let mut cmd = Command::new(binary);
     cmd.args(["server", "--version"]);
@@ -499,12 +481,6 @@ impl<'a> Downloader<'a> {
 
         unpack_tarball(&self.log, &tarball_path, &destination_dir).await?;
         let clickhouse_binary = destination_dir.join("clickhouse");
-
-        // on macOS, we need to take the binary out of quarantine after download
-        // https://github.com/ClickHouse/clickhouse-docs/blob/08d7a329d/knowledgebase/fix-developer-verification-error-in-macos.md
-        if matches!(os, Os::Mac) {
-            remove_quarantine(&clickhouse_binary).await?;
-        }
 
         info!(self.log, "Checking that binary works");
         clickhouse_confirm_binary_works(&clickhouse_binary).await?;
