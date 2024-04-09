@@ -4,7 +4,7 @@
 
 //! Subcommand: cargo xtask download
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use clap::ValueEnum;
@@ -19,6 +19,9 @@ use tar::Archive;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+
+const BUILDOMAT_URL: &'static str =
+    "https://buildomat.eng.oxide.computer/public/file";
 
 /// What is being downloaded?
 #[derive(
@@ -52,8 +55,10 @@ enum Target {
     /// Downloads a "Stub" Dendrite binary tarball
     DendriteStub,
 
+    /// Downloads the Maghemite mgd binary
     MaghemiteMgd,
 
+    /// Downloads the Maghemite OpenAPI spec
     MaghemiteOpenapi,
 
     MaghemiteMachinery,
@@ -118,6 +123,14 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                 download_dendrite_stub(&args.output_dir, &args.versions_dir)
                     .await?
             }
+            Target::MaghemiteMgd => {
+                download_maghemite_mgd(&args.output_dir, &args.versions_dir)
+                    .await?
+            }
+            Target::MaghemiteOpenapi => {
+                download_maghemite_openapi(&args.output_dir, &args.versions_dir)
+                    .await?
+            }
             _ => todo!("Not yet implemented"),
         }
     }
@@ -157,13 +170,19 @@ fn os_name() -> Result<Os> {
 /// KEY1="value1"
 /// KEY2="value2"
 /// ```
-async fn get_values_from_file<Keys: Into<BTreeSet<String>>>(
-    keys: Keys,
+///
+/// And returns an array of the values in the same order as keys.
+async fn get_values_from_file<const N: usize>(
+    keys: [&str; N],
     path: &Utf8Path,
-) -> Result<HashMap<String, String>> {
-    let keys: BTreeSet<String> = keys.into();
+) -> Result<[String; N]> {
+    // Map of "key" => "Position in output".
+    let mut keys: HashMap<&str, usize> =
+        keys.into_iter().enumerate().map(|(i, s)| (s, i)).collect();
 
-    let mut map = HashMap::new();
+    const EMPTY_STRING: String = String::new();
+    let mut values = [EMPTY_STRING; N];
+
     let content = tokio::fs::read_to_string(&path)
         .await
         .context("Failed to read {path}")?;
@@ -173,29 +192,14 @@ async fn get_values_from_file<Keys: Into<BTreeSet<String>>>(
             continue;
         };
         let value = value.trim_matches('"');
-        if keys.contains(key) {
-            map.insert(key.to_string(), value.to_string());
+        if let Some(i) = keys.remove(key) {
+            values[i] = value.to_string();
         }
     }
-
-    if keys.len() != map.len() {
-        bail!("Not all keys found in {path}");
+    if !keys.is_empty() {
+        bail!("Could not find keys: {:?}", keys.keys().collect::<Vec<_>>(),);
     }
-    Ok(map)
-}
-
-async fn get_value_from_lines(key: &str, path: &Utf8Path) -> Result<String> {
-    let content = tokio::fs::read_to_string(&path)
-        .await
-        .context("Failed to read {path}")?;
-    let key = format!("{key}=");
-    for line in content.lines() {
-        if let Some(value) = line.strip_prefix(&key) {
-            let value = value.trim_matches('"');
-            return Ok(value.to_string());
-        }
-    }
-    bail!("Key {key} not found in {path}")
+    Ok(values)
 }
 
 /// Send a GET request to `url`, downloading the contents to `path`.
@@ -396,8 +400,8 @@ async fn download_clickhouse(
     let destination_dir = output_dir.join("clickhouse");
 
     let checksums_path = versions_dir.join("clickhouse_checksums");
-    let checksum = get_value_from_lines(
-        &format!("CIDL_MD5_{}", os.env_name()),
+    let [checksum] = get_values_from_file(
+        [&format!("CIDL_MD5_{}", os.env_name())],
         &checksums_path,
     )
     .await?;
@@ -460,8 +464,8 @@ async fn download_cockroach(
     let destination_dir = output_dir.join("cockroachdb");
 
     let checksums_path = versions_dir.join("cockroachdb_checksums");
-    let checksum = get_value_from_lines(
-        &format!("CIDL_SHA256_{}", os.env_name()),
+    let [checksum] = get_values_from_file(
+        [&format!("CIDL_SHA256_{}", os.env_name())],
         &checksums_path,
     )
     .await?;
@@ -545,8 +549,8 @@ async fn download_console(
     let tarball_path = download_dir.join("console.tar.gz");
 
     let checksums_path = versions_dir.join("console_version");
-    let commit = get_value_from_lines("COMMIT", &checksums_path).await?;
-    let checksum = get_value_from_lines("SHA2", &checksums_path).await?;
+    let [commit, checksum] =
+        get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
     tokio::fs::create_dir_all(&download_dir).await?;
     let tarball_url =
@@ -575,10 +579,12 @@ async fn download_dendrite_openapi(
     let download_dir = output_dir.join("downloads");
 
     let checksums_path = versions_dir.join("dendrite_openapi_version");
-    let commit = get_value_from_lines("COMMIT", &checksums_path).await?;
-    let checksum = get_value_from_lines("SHA2", &checksums_path).await?;
+    let [commit, checksum] =
+        get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
-    let url = format!("https://buildomat.eng.oxide.computer/public/file/oxidecomputer/dendrite/openapi/{commit}/dpd.json");
+    let url = format!(
+        "{BUILDOMAT_URL}/oxidecomputer/dendrite/openapi/{commit}/dpd.json"
+    );
     let path = download_dir.join(format!("dpd-{commit}.json"));
 
     tokio::fs::create_dir_all(&download_dir).await?;
@@ -596,46 +602,28 @@ async fn download_dendrite_stub(
     let destination_dir = output_dir.join("dendrite-stub");
 
     let stub_checksums_path = versions_dir.join("dendrite_stub_checksums");
-    let stub_checksums = get_values_from_file(
-        [
-            "CIDL_SHA256_ILLUMOS".to_string(),
-            "CIDL_SHA256_LINUX_DPD".to_string(),
-            "CIDL_SHA256_LINUX_SWADM".to_string(),
-        ],
-        &stub_checksums_path,
-    )
-    .await?;
 
-    let dpd_sha2 = stub_checksums
-        .get("CIDL_SHA256_LINUX_DPD")
-        .ok_or_else(|| anyhow!("Did not parse CIDL_SHA256_LINUX_DPD"))?;
-    let swadm_sha2 = stub_checksums
-        .get("CIDL_SHA256_LINUX_SWADM")
-        .ok_or_else(|| anyhow!("Did not parse CIDL_SHA256_LINUX_SWADM"))?;
-
-    let checksums_path = versions_dir.join("dendrite_openapi_version");
-    let version_info = get_values_from_file(
-        ["COMMIT".to_string(), "SHA2".to_string()],
-        &checksums_path,
-    )
-    .await?;
-    let commit = version_info
-        .get("COMMIT")
-        .ok_or_else(|| anyhow!("Did not parse a COMMIT"))?;
     // NOTE: This seems odd to me -- the "dendrite_openapi_version" file also
     // contains a SHA2, but we're ignoring it?
     //
     // Regardless, this is currenlty the one that actually matches, regardless
     // of host OS.
-    let sha2 = stub_checksums
-        .get("CIDL_SHA256_ILLUMOS")
-        .ok_or_else(|| anyhow!("Did not parse a SHA2"))?;
+    let [sha2, dpd_sha2, swadm_sha2] = get_values_from_file(
+        [
+            "CIDL_SHA256_ILLUMOS",
+            "CIDL_SHA256_LINUX_DPD",
+            "CIDL_SHA256_LINUX_SWADM",
+        ],
+        &stub_checksums_path,
+    )
+    .await?;
+    let checksums_path = versions_dir.join("dendrite_openapi_version");
+    let [commit, _sha2] =
+        get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
     let tarball_file = "dendrite-stub.tar.gz";
     let tarball_path = download_dir.join(tarball_file);
     let repo = "oxidecomputer/dendrite";
-    const BUILDOMAT_URL: &'static str =
-        "https://buildomat.eng.oxide.computer/public/file";
     let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
 
     tokio::fs::create_dir_all(&download_dir).await?;
@@ -645,7 +633,7 @@ async fn download_dendrite_stub(
         &tarball_path,
         &format!("{url_base}/{tarball_file}"),
         ChecksumAlgorithm::Sha2,
-        sha2,
+        &sha2,
     )
     .await?;
 
@@ -677,7 +665,7 @@ async fn download_dendrite_stub(
                 &path,
                 &format!("{base_url}/{filename}"),
                 ChecksumAlgorithm::Sha2,
-                dpd_sha2,
+                &dpd_sha2,
             )
             .await?;
             set_permissions(&path, 0o755).await?;
@@ -689,7 +677,7 @@ async fn download_dendrite_stub(
                 &path,
                 &format!("{base_url}/{filename}"),
                 ChecksumAlgorithm::Sha2,
-                swadm_sha2,
+                &swadm_sha2,
             )
             .await?;
             set_permissions(&path, 0o755).await?;
@@ -705,6 +693,107 @@ async fn download_dendrite_stub(
             set_permissions(&path, 0o755).await?;
         }
     }
+
+    Ok(())
+}
+
+async fn download_maghemite_mgd(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let download_dir = output_dir.join("downloads");
+    tokio::fs::create_dir_all(&download_dir).await?;
+
+    let checksums_path = versions_dir.join("maghemite_mgd_checksums");
+    let [mgd_sha2, mgd_linux_sha2] = get_values_from_file(
+        ["CIDL_SHA256", "MGD_LINUX_SHA256"],
+        &checksums_path,
+    )
+    .await?;
+    let commit_path = versions_dir.join("maghemite_mg_openapi_version");
+    let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+
+    let repo = "oxidecomputer/maghemite";
+    let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
+
+    let filename = "mgd.tar.gz";
+    let tarball_path = download_dir.join(filename);
+    download_file_and_verify(
+        &tarball_path,
+        &format!("{base_url}/{filename}"),
+        ChecksumAlgorithm::Sha2,
+        &mgd_sha2,
+    )
+    .await?;
+    unpack_tarball(&tarball_path, &download_dir).await?;
+
+    let destination_dir = output_dir.join("mgd");
+    let _ = tokio::fs::remove_dir_all(&destination_dir).await;
+    tokio::fs::create_dir_all(&destination_dir).await?;
+    copy_dir_all(&download_dir.join("root"), &destination_dir.join("root"))?;
+
+    let binary_dir = destination_dir.join("root/opt/oxide/mgd/bin");
+
+    match os_name()? {
+        Os::Linux => {
+            let filename = "mgd";
+            let path = download_dir.join(filename);
+            download_file_and_verify(
+                &path,
+                &format!("{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"),
+                ChecksumAlgorithm::Sha2,
+                &mgd_linux_sha2,
+            )
+            .await?;
+            set_permissions(&path, 0o755).await?;
+            tokio::fs::copy(path, binary_dir.join(filename)).await?;
+        }
+        _ => (),
+    }
+
+    Ok(())
+}
+
+async fn download_maghemite_openapi(
+    output_dir: &Utf8Path,
+    versions_dir: &Utf8Path,
+) -> Result<()> {
+    let download_dir = output_dir.join("downloads");
+    tokio::fs::create_dir_all(&download_dir).await?;
+
+    let [commit, sha2] = get_values_from_file(
+        ["COMMIT", "SHA2"],
+        &versions_dir.join("maghemite_ddm_openapi_version"),
+    )
+    .await?;
+    let base_url =
+        format!("{BUILDOMAT_URL}/oxidecomputer/maghemite/openapi/{commit}");
+    let filename = "ddm-admin.json";
+    let tarball_path = download_dir.join(filename);
+    download_file_and_verify(
+        &tarball_path,
+        &format!("{base_url}/{filename}"),
+        ChecksumAlgorithm::Sha2,
+        &sha2,
+    )
+    .await?;
+
+    let [commit, sha2] = get_values_from_file(
+        ["COMMIT", "SHA2"],
+        &versions_dir.join("maghemite_mg_openapi_version"),
+    )
+    .await?;
+    let base_url =
+        format!("{BUILDOMAT_URL}/oxidecomputer/maghemite/openapi/{commit}");
+    let filename = "mg-admin.json";
+    let tarball_path = download_dir.join(filename);
+    download_file_and_verify(
+        &tarball_path,
+        &format!("{base_url}/{filename}"),
+        ChecksumAlgorithm::Sha2,
+        &sha2,
+    )
+    .await?;
 
     Ok(())
 }
