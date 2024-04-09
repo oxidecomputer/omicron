@@ -259,7 +259,7 @@ it, which will be used if no configuration file is given or present in the curre
 The server also accepts command-line flags for overriding the values of the configuration
 parameters.
 
-The packages downloaded by `ci_download_clickhouse` include a `config.xml` file with them.
+The packages downloaded by `cargo xtask download clickhouse` include a `config.xml` file with them.
 You should probably run ClickHouse via the `omicron-dev` tool, but if you decide to run it
 manually, you can start the server with:
 

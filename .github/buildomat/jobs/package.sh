@@ -41,7 +41,7 @@ VERSION="7.0.0-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m ./tools/ci_download_softnpu_machinery
+ptime -m cargo xtask download softnpu
 
 # Build the test target
 export CARGO_INCREMENTAL=0

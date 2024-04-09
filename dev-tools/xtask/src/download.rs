@@ -868,7 +868,7 @@ impl<'a> Downloader<'a> {
 
         // TODO: This should probably live in a separate file, but
         // at the moment we're just building parity with
-        // "ci_download_softnpu_machinery".
+        // the old download scripts.
         let commit = "dbab082dfa89da5db5ca2325c257089d2f130092";
 
         let filename = "npuzone";
