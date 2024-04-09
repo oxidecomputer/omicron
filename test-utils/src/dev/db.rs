@@ -873,7 +873,7 @@ fn make_pg_config(
 
     let unsupported_values =
         check_unsupported.into_iter().flatten().collect::<Vec<&'static str>>();
-    if unsupported_values.len() > 0 {
+    if !unsupported_values.is_empty() {
         bail!(
             "unsupported PostgreSQL listen URL \
             (did not expect any of these fields: {}): {:?}",

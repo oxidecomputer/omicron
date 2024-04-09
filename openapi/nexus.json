@@ -3089,7 +3089,8 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Access metrics data",
+        "summary": "View metrics",
+        "description": "View CPU, memory, or storage utilization metrics at the silo or project level.",
         "operationId": "silo_metric",
         "parameters": [
           {
@@ -5954,7 +5955,8 @@
         "tags": [
           "system/metrics"
         ],
-        "summary": "Access metrics data",
+        "summary": "View metrics",
+        "description": "View CPU, memory, or storage utilization metrics at the fleet or silo level.",
         "operationId": "system_metric",
         "parameters": [
           {
@@ -7934,7 +7936,8 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Run a timeseries query, written OxQL.",
+        "summary": "Run timeseries query",
+        "description": "Queries are written in OxQL.",
         "operationId": "timeseries_query",
         "requestBody": {
           "content": {
@@ -7975,7 +7978,7 @@
         "tags": [
           "metrics"
         ],
-        "summary": "List available timeseries schema.",
+        "summary": "List timeseries schemas",
         "operationId": "timeseries_schema_list",
         "parameters": [
           {

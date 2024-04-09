@@ -45,18 +45,46 @@ function ensure_vdevs {
 }
 
 function try_destroy_zpools {
+    # Grab the list of all files used for swap
+    SWAP_LIST=$( swap -l | tail -n +2 | cut -d' ' -f1 )
+    ZVOL_ROOT="/dev/zvol/dsk"
+
     ZPOOL_TYPES=('oxp_' 'oxi_')
     for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
         readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
         for ZPOOL in "${ZPOOLS[@]}"; do
-            VDEV_FILE="${VDEV_DIR:-/var/tmp}/$VDEV"
+            # If this zpool contains a volume for swap, remove it.
+            readarray -t SWAP_PATHS < <(echo "$SWAP_LIST" | grep "$ZVOL_ROOT/$ZPOOL")
+            for SWAP_PATH in "${SWAP_PATHS[@]}"; do
+                swap -d "$SWAP_PATH" || \
+                    fail "Failed to remove swap for $SWAP_PATH"
+
+                success "Removed swap at $SWAP_PATH"
+            done
+
+            # After dealing with swap, try to unmount the zpool and destroy it
             zfs destroy -r "$ZPOOL" && \
                     (zfs unmount "$ZPOOL" || true) && \
-                    zpool destroy "$ZPOOL" && \
-                    rm -f "$VDEV_FILE" || \
-                    warn "Failed to remove ZFS pool and vdev: $ZPOOL"
+                    zpool destroy "$ZPOOL" || \
+                    fail "Failed to remove ZFS pool: $ZPOOL"
 
-            success "Verified ZFS pool and vdev $ZPOOL does not exist"
+            success "Verified ZFS pool $ZPOOL does not exist"
+        done
+    done
+
+    VDEV_TYPES=('m2_' 'u2_')
+    for VDEV_TYPE in "${VDEV_TYPES[@]}"; do
+        readarray -t VDEVS < <( \
+                grep "\"$VDEV_TYPE" "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
+                sed 's/[ ",]//g' \
+            )
+        for VDEV in "${VDEVS[@]}"; do
+            echo "Device: [$VDEV]"
+            VDEV_PATH="${VDEV_DIR:-/var/tmp}/$VDEV"
+            if [[ -f "$VDEV_PATH" ]]; then
+                rm -f "$VDEV_PATH"
+                success "vdev $VDEV_PATH removed"
+            fi
         done
     done
 }

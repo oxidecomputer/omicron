@@ -513,6 +513,11 @@ where
         self.bins.iter()
     }
 
+    /// Get the bin at the given index.
+    pub fn get(&self, index: usize) -> Option<&Bin<T>> {
+        self.bins.get(index)
+    }
+
     /// Generate paired arrays with the left bin edges and the counts, for each bin.
     ///
     /// The returned edges are always left-inclusive, by construction of the histogram.
@@ -993,9 +998,9 @@ mod tests {
         let mut hist = Histogram::with_bins(&[(0..1).into()]).unwrap();
         assert!(hist.sample(i64::MIN).is_ok());
         assert!(hist.sample(i64::MAX).is_ok());
-        assert_eq!(hist.iter().nth(0).unwrap().count, 1);
-        assert_eq!(hist.iter().nth(1).unwrap().count, 0);
-        assert_eq!(hist.iter().nth(2).unwrap().count, 1);
+        assert_eq!(hist.get(0).unwrap().count, 1);
+        assert_eq!(hist.get(1).unwrap().count, 0);
+        assert_eq!(hist.get(2).unwrap().count, 1);
 
         let mut hist = Histogram::with_bins(&[(0.0..1.0).into()]).unwrap();
         assert!(hist.sample(f64::MIN).is_ok());
