@@ -706,11 +706,15 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
-            .filter(|(_, zone)| zone.id != out_of_service_id)
+            .all_omicron_zones(BlueprintZoneFilter::InternalDns)
             .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
+
+        // Check to see that the quiesced zone was actually excluded
+        assert!(omicron_zones_by_ip
+            .values()
+            .all(|id| *id != out_of_service_id));
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.
