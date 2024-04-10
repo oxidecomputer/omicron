@@ -1604,9 +1604,9 @@ checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
 name = "datatest-stable"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89ee5ef93235f39066e9fbd304b19fd876ec89570e4d7894b3e28ec749400fa"
+checksum = "0d08bd225143f03456cf3dc42ecd1254c623c0f6e47f2033c32a0a1236876a13"
 dependencies = [
  "camino",
  "libtest-mimic",
@@ -4097,9 +4097,9 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.7.0"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f0f4c6f44ecfd52e8b443f2ad18f2b996540135771561283c2352ce56a1c70b"
+checksum = "fefdf21230d6143476a28adbee3d930e2b68a3d56443c777cae3fe9340eebff9"
 dependencies = [
  "clap 4.5.4",
  "escape8259",
