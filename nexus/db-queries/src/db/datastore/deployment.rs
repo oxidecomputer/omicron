@@ -1385,8 +1385,6 @@ mod tests {
         };
         let new_sled_zpools =
             &planning_input.sled_resources(&new_sled_id).unwrap().zpools;
-        // TODO-cleanup use `TypedUuid` everywhere
-        let new_sled_id = *new_sled_id.as_untyped_uuid();
 
         // Create a builder for a child blueprint.
         let mut builder = BlueprintBuilder::new_based_on(

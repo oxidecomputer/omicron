@@ -403,7 +403,7 @@ enum Commands {
 #[derive(Debug, Args)]
 struct SledAddArgs {
     /// id of the new sled
-    sled_id: Option<Uuid>,
+    sled_id: Option<TypedUuid<SledKind>>,
 }
 
 #[derive(Debug, Args)]
@@ -451,7 +451,7 @@ enum BlueprintEditCommands {
     /// add a Nexus instance to a particular sled
     AddNexus {
         /// sled on which to deploy the new instance
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
     },
 }
 
@@ -1178,7 +1178,7 @@ fn cmd_load(
         );
 
         let result = sim.system.sled_full(
-            *sled_id.as_untyped_uuid(),
+            sled_id,
             sled_details.policy,
             sled_details.resources.clone(),
             inventory_sp,
