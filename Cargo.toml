@@ -202,7 +202,7 @@ crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", re
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "4661c23b248da18862012cf55af21b17b79a468e" }
 csv = "1.3.0"
 curve25519-dalek = "4"
-datatest-stable = "0.2.5"
+datatest-stable = "0.2.6"
 display-error-chain = "0.2.0"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
