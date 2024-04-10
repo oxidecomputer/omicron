@@ -10250,6 +10250,7 @@ checksum = "4a90726108dab678edab76459751e1cc7c597c3484a6384d6423191255fa641b"
 name = "typed-rng"
 version = "0.1.0"
 dependencies = [
+ "newtype-uuid",
  "omicron-workspace-hack",
  "rand 0.8.5",
  "rand_core 0.6.4",
