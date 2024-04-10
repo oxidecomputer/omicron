@@ -149,11 +149,8 @@ impl Blueprint {
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
-            z.zones.iter().filter_map(move |z| {
-                z.disposition.matches(filter).then_some((*sled_id, &z.config))
-            })
-        })
+        self.all_blueprint_zones(filter)
+            .map(|(sled_id, z)| (sled_id, &z.config))
     }
 
     /// Iterate over the ids of all sleds in the blueprint
@@ -470,7 +467,7 @@ pub enum BlueprintZoneFilter {
     /// All zones.
     All,
 
-    // Zones that are desired to be in the RUNNING state
+    /// Zones that are desired to be in the RUNNING state
     ShouldBeRunning,
 
     /// Filter by zones that should have external IP and DNS resources.
