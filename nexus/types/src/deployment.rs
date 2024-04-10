@@ -246,7 +246,8 @@ impl Blueprint {
         BlueprintDisplay { blueprint: self }
     }
 
-    /// Temporary method that returns `self.blueprint_zones` with TypedUuid<SledKind>.
+    /// Temporary method that returns `self.blueprint_zones`, except the keys
+    /// are `TypedUuid<SledKind>`.
     ///
     /// TODO-cleanup use `TypedUuid` everywhere
     pub fn typed_blueprint_zones(
