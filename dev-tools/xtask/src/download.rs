@@ -59,9 +59,6 @@ enum Target {
     /// Maghemite mgd binary
     MaghemiteMgd,
 
-    /// Maghemite OpenAPI spec
-    MaghemiteOpenapi,
-
     /// SoftNPU, an admin program (scadm) and a pre-compiled P4 program.
     Softnpu,
 
@@ -135,9 +132,6 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     }
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
-                    Target::MaghemiteOpenapi => {
-                        downloader.download_maghemite_openapi().await
-                    }
                     Target::Softnpu => downloader.download_softnpu().await,
                     Target::Thundermuffin => {
                         downloader.download_thundermuffin().await
@@ -791,49 +785,6 @@ impl<'a> Downloader<'a> {
             }
             _ => (),
         }
-
-        Ok(())
-    }
-
-    async fn download_maghemite_openapi(&self) -> Result<()> {
-        let download_dir = self.output_dir.join("downloads");
-        tokio::fs::create_dir_all(&download_dir).await?;
-
-        let [commit, sha2] = get_values_from_file(
-            ["COMMIT", "SHA2"],
-            &self.versions_dir.join("maghemite_ddm_openapi_version"),
-        )
-        .await?;
-        let base_url =
-            format!("{BUILDOMAT_URL}/oxidecomputer/maghemite/openapi/{commit}");
-        let filename = "ddm-admin.json";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
-
-        let [commit, sha2] = get_values_from_file(
-            ["COMMIT", "SHA2"],
-            &self.versions_dir.join("maghemite_mg_openapi_version"),
-        )
-        .await?;
-        let base_url =
-            format!("{BUILDOMAT_URL}/oxidecomputer/maghemite/openapi/{commit}");
-        let filename = "mg-admin.json";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
 
         Ok(())
     }
