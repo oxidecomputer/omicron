@@ -4891,6 +4891,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openssl",
  "parse-display",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",
@@ -4899,6 +4900,7 @@ dependencies = [
  "steno",
  "strum",
  "tabled",
+ "test-strategy",
  "thiserror",
  "uuid 1.8.0",
 ]
