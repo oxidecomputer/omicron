@@ -109,16 +109,16 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
     let log = Logger::root(drain, o!());
 
     let mut all_downloads = targets
-        .iter()
+        .into_iter()
         .map(|target| {
-            let log = log.clone();
+            let log = log.new(o!("target" => format!("{target:?}")));
             let output_dir = args.output_dir.clone();
             let versions_dir = args.versions_dir.clone();
-            async move {
-                info!(&log, "Download target: {target:?}");
+            tokio::task::spawn(async move {
+                info!(&log, "Starting download");
 
                 let downloader = Downloader::new(
-                    log.new(o!("target" => format!("{target:?}"))),
+                    log.clone(),
                     &output_dir,
                     &versions_dir,
                 );
@@ -146,13 +146,15 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                         downloader.download_transceiver_control().await
                     }
                 }.context("Failed to download {target:?}")?;
+
+                info!(&log, "Download complete");
                 Ok(())
-            }
+            })
         })
         .collect::<futures::stream::FuturesUnordered<_>>();
 
     while let Some(result) = all_downloads.next().await {
-        result?;
+        result??;
     }
 
     Ok(())
@@ -256,7 +258,7 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
 
 /// Returns the hex, lowercase md5 checksum of a file at `path`.
 async fn md5_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = [0u8; 65536];
+    let mut buf = vec![0u8; 65536];
     let mut file = tokio::fs::File::open(path).await?;
     let mut ctx = md5::Context::new();
     loop {
@@ -273,7 +275,7 @@ async fn md5_checksum(path: &Utf8Path) -> Result<String> {
 
 /// Returns the hex, lowercase sha2 checksum of a file at `path`.
 async fn sha2_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = [0u8; 65536];
+    let mut buf = vec![0u8; 65536];
     let mut file = tokio::fs::File::open(path).await?;
     let mut ctx = sha2::Sha256::new();
     loop {
@@ -420,7 +422,7 @@ async fn download_file_and_verify(
     };
 
     if do_download {
-        info!(log, "Downloading...");
+        info!(log, "Downloading {path}");
         streaming_download(&url, &path).await?;
     }
 
@@ -909,12 +911,12 @@ impl<'a> Downloader<'a> {
         match os_name()? {
             Os::Illumos => (),
             _ => {
-                warn!(self.log, "Unsupported OS for thundermuffin");
                 let binary_dir =
                     destination_dir.join("root/opt/oxide/thundermuffin/bin");
                 tokio::fs::create_dir_all(&binary_dir).await?;
 
                 let path = binary_dir.join("thundermuffin");
+                warn!(self.log, "Unsupported OS for thundermuffin - Creating stub"; "path" => %path);
                 tokio::fs::write(&path, "echo 'unsupported os' && exit 1")
                     .await?;
                 set_permissions(&path, 0o755).await?;
@@ -966,11 +968,11 @@ impl<'a> Downloader<'a> {
         match os_name()? {
             Os::Illumos => (),
             _ => {
-                warn!(self.log, "Unsupported OS for transceiver-control");
                 let binary_dir = destination_dir.join("opt/oxide/bin");
                 tokio::fs::create_dir_all(&binary_dir).await?;
 
                 let path = binary_dir.join(filename);
+                warn!(self.log, "Unsupported OS for transceiver-control - Creating stub"; "path" => %path);
                 tokio::fs::write(&path, "echo 'unsupported os' && exit 1")
                     .await?;
                 set_permissions(&path, 0o755).await?;
