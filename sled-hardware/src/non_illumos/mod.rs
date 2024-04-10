@@ -30,7 +30,11 @@ pub enum NvmeFormattingError {
 pub struct HardwareManager {}
 
 impl HardwareManager {
-    pub fn new(_log: &Logger, _sled_mode: SledMode) -> Result<Self, String> {
+    pub fn new(
+        _log: &Logger,
+        _sled_mode: SledMode,
+        _nongimlet_observed_disks: Vec<UnparsedDisk>,
+    ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 

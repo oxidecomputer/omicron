@@ -15,6 +15,7 @@ use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::is_gimlet;
+use sled_hardware::UnparsedDisk;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -66,6 +67,10 @@ pub struct Config {
     pub vlan: Option<VlanID>,
     /// Optional list of virtual devices to be used as "discovered disks".
     pub vdevs: Option<Vec<Utf8PathBuf>>,
+    /// Optional list of real devices to be injected as observed disks during
+    /// device polling.
+    #[serde(default)]
+    pub nongimlet_observed_disks: Option<Vec<UnparsedDisk>>,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 
