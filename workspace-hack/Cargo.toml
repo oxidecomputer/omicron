@@ -29,8 +29,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.6.0", features = ["serde"] }
 chrono = { version = "0.4.37", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.1", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.1", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.4", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
@@ -96,7 +96,6 @@ serde_json = { version = "1.0.115", features = ["raw_value", "unbounded_depth"] 
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.4.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -137,8 +136,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.6.0", features = ["serde"] }
 chrono = { version = "0.4.37", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.1", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.1", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.4", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
@@ -204,7 +203,6 @@ serde_json = { version = "1.0.115", features = ["raw_value", "unbounded_depth"] 
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.4.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
