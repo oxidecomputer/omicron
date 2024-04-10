@@ -203,15 +203,69 @@ async fn chrony_setup(
         servers, file, allow, is_boundary
     );
 
-    // TODO: Extract gen_config_file function here?
+    generate_chrony_config(&log, is_boundary, allow, file, servers).await?;
+
+    // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
+    // be added to the system's /etc/logadm.conf. Unfortunately, the service which
+    // does this - system/logadm-upgrade - only processes files with mode 444 and
+    // root:sys ownership so we need to adjust things here (until omicron package
+    // supports including ownership and permissions in the generated tar files).
+    info!(&log, "Setting mode 444 and root:sys ownership to logadm fragment file"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    set_permissions_for_logadm_config().await?;
+
+    info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    Svcadm::refresh_logadm_upgrade()
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    Ok(())
+}
+
+async fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
+    let mut perms = metadata(LOGADM_CONFIG_FILE)
+        .map_err(|err| {
+            CmdError::Failure(anyhow!(
+        "Could not retrieve chrony logadm configuration file {} metadata: {}",
+        LOGADM_CONFIG_FILE,
+        err
+    ))
+        })?
+        .permissions();
+    perms.set_readonly(true);
+    set_permissions(LOGADM_CONFIG_FILE, perms).map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not set 444 permissions on chrony logadm configuration file {}: {}",
+                LOGADM_CONFIG_FILE,
+                err
+            ))
+        })?;
+
+    chown(LOGADM_CONFIG_FILE, Some(0), Some(3)).map_err(|err| {
+        CmdError::Failure(anyhow!(
+            "Could not set ownership of logadm configuration file {}: {}",
+            LOGADM_CONFIG_FILE,
+            err
+        ))
+    })?;
+
+    Ok(())
+}
+
+async fn generate_chrony_config(
+    log: &Logger,
+    is_boundary: &bool,
+    allow: Option<&String>,
+    file: &String,
+    servers: Vec<&String>,
+) -> Result<(), CmdError> {
     let template = if *is_boundary {
         BOUNDARY_NTP_CONFIG_TPL
     } else {
         INTERNAL_NTP_CONFIG_TPL
     };
-    info!(&log, "Generating chrony configuration file"; "configuration file" => ?file, "configuration template" => ?template, "allowed IPs" => ?allow, "servers" => ?servers, "is boundary" => ?is_boundary);
+    info!(&log, "Generating chrony configuration file"; 
+    "configuration file" => ?file, "configuration template" => ?template, 
+    "allowed IPs" => ?allow, "servers" => ?servers, "is boundary" => ?is_boundary);
 
-    // Generate config file
     let mut contents = read_to_string(template).map_err(|err| {
         CmdError::Failure(anyhow!(
             "Could not read chrony configuration template {}: {}",
@@ -273,46 +327,9 @@ async fn chrony_setup(
     })?;
 
     if old_file.clone().is_some_and(|f| f != new_config) {
-        info!(&log, "Chrony configuration file has changed"; "old configuration file" => ?old_file);
+        info!(&log, "Chrony configuration file has changed"; 
+        "old configuration file" => ?old_file);
     }
-    // End gen_config_file here
-
-    // Update logadm
-    //
-    // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
-    // be added to the system's /etc/logadm.conf. Unfortunately, the service which
-    // does this - system/logadm-upgrade - only processes files with mode 444 and
-    // root:sys ownership so we need to adjust things here (until omicron package
-    // supports including ownership and permissions in the generated tar files).
-    let mut perms = metadata(LOGADM_CONFIG_FILE)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-            "Could not retrieve chrony logadm configuration file {} metadata: {}",
-            LOGADM_CONFIG_FILE,
-            err
-        ))
-        })?
-        .permissions();
-    perms.set_readonly(true);
-    set_permissions(LOGADM_CONFIG_FILE, perms).map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not set 444 permissions on chrony logadm configuration file {}: {}",
-                    LOGADM_CONFIG_FILE,
-                    err
-                ))
-            })?;
-
-    chown(LOGADM_CONFIG_FILE, Some(0), Some(3)).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not set ownership of logadm configuration file {}: {}",
-            LOGADM_CONFIG_FILE,
-            err
-        ))
-    })?;
-
-    info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
-    Svcadm::refresh_logadm_upgrade()
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
