@@ -1534,9 +1534,9 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.1"
+version = "4.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89b8c6a2e4b1f45971ad09761aafb85514a84744b67a95e32c3cc1352d1f65c"
+checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -5800,6 +5800,7 @@ dependencies = [
  "proc-macro2",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "rand_core 0.5.1",
  "regex",
  "regex-automata 0.4.5",
  "regex-syntax 0.8.2",
@@ -7325,7 +7326,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf2890aaef0aa82719a50e808de264f9484b74b442e1a3a0e5ee38243ac40bdb"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core 0.5.1",
 ]
 
 [[package]]
