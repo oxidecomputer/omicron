@@ -26,7 +26,6 @@ use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
-use sled_storage::disk::RawDisk;
 use sled_storage::disk::RawSyntheticDisk;
 use sled_storage::manager::{StorageHandle, StorageManager};
 use slog::{info, Logger};
@@ -86,9 +85,6 @@ pub async fn spawn_all_longrunning_tasks(
 
     // Add some synthetic disks if necessary.
     upsert_synthetic_disks_if_needed(&log, &storage_manager, &config).await;
-
-    // Add user supplied unparsed disks if necessary.
-    upsert_unparsed_disks_if_needed(&log, &storage_manager, &config).await;
 
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
@@ -242,30 +238,6 @@ async fn upsert_synthetic_disks_if_needed(
                 .expect("Failed to parse synthetic disk")
                 .into();
             storage_manager.detected_raw_disk(disk).await.await.unwrap();
-        }
-    }
-}
-
-async fn upsert_unparsed_disks_if_needed(
-    log: &Logger,
-    storage_manager: &StorageHandle,
-    config: &Config,
-) {
-    if let Some(supplied_unparsed_disks) = &config.supplied_unparsed_disks {
-        for supplied_unparsed_disk in supplied_unparsed_disks {
-            info!(
-                log,
-                "Upserting supplied unparsed disk to Storage Manager";
-                "supplied_unparsed_disk" => format!("{supplied_unparsed_disk:?}"),
-            );
-
-            storage_manager
-                .detected_raw_disk(RawDisk::Real(
-                    supplied_unparsed_disk.clone(),
-                ))
-                .await
-                .await
-                .unwrap();
         }
     }
 }
