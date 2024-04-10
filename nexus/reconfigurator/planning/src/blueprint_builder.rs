@@ -22,6 +22,7 @@ use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::ZoneExpungeReason;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::inventory::Collection;
 use omicron_common::address::get_internal_dns_server_addresses;
@@ -39,12 +40,14 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::TypedUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use slog::o;
 use slog::Logger;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -60,7 +63,7 @@ use uuid::Uuid;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("sled {sled_id}: ran out of available addresses for sled")]
-    OutOfAddresses { sled_id: Uuid },
+    OutOfAddresses { sled_id: TypedUuid<SledKind> },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
     #[error("no external service IP addresses are available")]
@@ -117,7 +120,7 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields are used to allocate resources from sleds.
     input: &'a PlanningInput,
-    sled_ip_allocators: BTreeMap<Uuid, IpAllocator>,
+    sled_ip_allocators: BTreeMap<TypedUuid<SledKind>, IpAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -217,7 +220,8 @@ impl<'a> BlueprintBuilder<'a> {
                     })?;
 
                 Ok((
-                    *sled_id.as_untyped_uuid(),
+                    // TODO-cleanup use `TypedUuid` everywhere
+                    sled_id.into_untyped_uuid(),
                     BlueprintZonesConfig::initial_from_collection(&zones),
                 ))
             })
@@ -283,6 +287,15 @@ impl<'a> BlueprintBuilder<'a> {
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
+
+        // Note: this is all omicron zones, including expunged ones. For now,
+        // we don't unassign an IP from an expunged sled/zone and reassign it
+        // to a different zone in the same blueprint. (This can happen across
+        // successive blueprints, though.)
+        //
+        // Note however that we likely do want to reuse external IPs for
+        // external DNS zones, but we're not solving that problem at the
+        // moment.
 
         for (_, z) in parent_blueprint.all_omicron_zones() {
             let zone_type = &z.zone_type;
@@ -403,9 +416,87 @@ impl<'a> BlueprintBuilder<'a> {
         self.comments.push(String::from(comment));
     }
 
+    /// Builds a list of zones that are:
+    ///
+    /// * not *currently* expunged from the given sled
+    /// * but *need to be expunged* from this sled
+    ///
+    /// without actually performing the expungement.
+    ///
+    /// This method does not check whether the sled actually should be expunged
+    /// -- that is the responsibility of higher-level code.
+    pub fn build_pending_expunge_for_sled(
+        &self,
+        sled_id: TypedUuid<SledKind>,
+        reason: ZoneExpungeReason,
+    ) -> Option<PendingExpunge> {
+        let mut zones_to_expunge = Vec::new();
+        let sled_zones = self.zones.current_sled_zones(sled_id);
+        for z in sled_zones {
+            // What has previously been expunged?
+            match z.disposition {
+                BlueprintZoneDisposition::InService
+                | BlueprintZoneDisposition::Quiesced => {
+                    // This zone is not expunged, but it needs to be.
+                    zones_to_expunge
+                        // TODO-cleanup use `TypedUuid` everywhere
+                        .push(TypedUuid::from_untyped_uuid(z.config.id));
+                }
+                BlueprintZoneDisposition::Expunged => {
+                    // This zone is already expunged, so nothing needs to be
+                    // done.
+                }
+            }
+        }
+
+        if !zones_to_expunge.is_empty() {
+            Some(PendingExpunge { sled_id, reason, zones_to_expunge })
+        } else {
+            None
+        }
+    }
+
+    /// Takes a [`PendingExpunge`], applying it to `self`'s internal state.
+    ///
+    /// Returns an error if the data in the pending expunge didn't match up
+    /// with `self`.
+    pub fn apply_pending_expunge(
+        &mut self,
+        pending_expunge: PendingExpunge,
+    ) -> Result<(), Error> {
+        // Ensure the sled is known.
+        self.sled_resources(pending_expunge.sled_id)?;
+
+        let change = self.zones.change_sled_zones(pending_expunge.sled_id);
+        for zone_id in &pending_expunge.zones_to_expunge {
+            // A linear search for each zone is fine, each sled has a pretty
+            // small number of zones.
+            //
+            // TODO-cleanup use `TypedUuid` everywhere
+            let zone_id = zone_id.into_untyped_uuid();
+            let zone = change
+                .zones
+                .iter_mut()
+                .find(|z| z.config.id == zone_id)
+                .ok_or_else(|| {
+                    Error::Planner(anyhow!(
+                        "for sled {}, attempted to expunge zone \
+                         that doesn't exist: {}",
+                        pending_expunge.sled_id,
+                        zone_id
+                    ))
+                })?;
+            zone.disposition = BlueprintZoneDisposition::Expunged;
+        }
+
+        self.comment(pending_expunge.to_comment());
+
+        Ok(())
+    }
+
     pub fn sled_ensure_zone_ntp(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
     ) -> Result<Ensure, Error> {
         // If there's already an NTP zone on this sled, do nothing.
         let has_ntp = self
@@ -469,7 +560,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn sled_ensure_zone_crucible(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         pool_name: ZpoolName,
     ) -> Result<Ensure, Error> {
         // If this sled already has a Crucible zone on this pool, do nothing.
@@ -520,7 +611,7 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// This value may change before a blueprint is actually generated if
     /// further changes are made to the builder.
-    pub fn sled_num_nexus_zones(&self, sled_id: Uuid) -> usize {
+    pub fn sled_num_nexus_zones(&self, sled_id: TypedUuid<SledKind>) -> usize {
         self.zones
             .current_sled_zones(sled_id)
             .filter(|z| z.config.zone_type.is_nexus())
@@ -529,7 +620,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn sled_ensure_zone_multiple_nexus(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         desired_zone_count: usize,
     ) -> Result<EnsureMultiple, Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
@@ -565,7 +656,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn sled_ensure_zone_multiple_nexus_with_config(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         desired_zone_count: usize,
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
@@ -653,7 +744,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     fn sled_add_zone(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         zone: BlueprintZoneConfig,
     ) -> Result<(), Error> {
         // Check the sled id and return an appropriate error if it's invalid.
@@ -674,7 +765,10 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Returns a newly-allocated underlay address suitable for use by Omicron
     /// zones
-    fn sled_alloc_ip(&mut self, sled_id: Uuid) -> Result<Ipv6Addr, Error> {
+    fn sled_alloc_ip(
+        &mut self,
+        sled_id: TypedUuid<SledKind>,
+    ) -> Result<Ipv6Addr, Error> {
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
         let allocator =
             self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
@@ -711,15 +805,41 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
-    fn sled_resources(&self, sled_id: Uuid) -> Result<&SledResources, Error> {
-        // TODO-cleanup use `TypedUuid` everywhere
-        let sled_id = TypedUuid::from_untyped_uuid(sled_id);
+    fn sled_resources(
+        &self,
+        sled_id: TypedUuid<SledKind>,
+    ) -> Result<&SledResources, Error> {
         self.input.sled_resources(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
-                "attempted to use sled that is not in service: {}",
+                "attempted to use sled that is not currently known: {}",
                 sled_id
             ))
         })
+    }
+}
+
+/// Represents the resources allocated to a sled that is expunged, and needs to
+/// be cleaned up as a result.
+#[derive(Debug)]
+pub struct PendingExpunge {
+    sled_id: TypedUuid<SledKind>,
+    reason: ZoneExpungeReason,
+    zones_to_expunge: Vec<TypedUuid<OmicronZoneKind>>,
+}
+
+impl PendingExpunge {
+    fn to_comment(&self) -> String {
+        let reason = match self.reason {
+            ZoneExpungeReason::SledDecommissioned => {
+                "sled state is decommissioned"
+            }
+            ZoneExpungeReason::SledExpunged => "sled policy is expunged",
+        };
+        format!(
+            "sled {} ({reason}): {} zones expunged",
+            self.sled_id,
+            self.zones_to_expunge.len(),
+        )
     }
 }
 
@@ -767,15 +887,18 @@ impl BlueprintBuilderRng {
 /// that we've changed and a _reference_ to the parent blueprint's zones.  This
 /// struct makes it easy for callers iterate over the right set of zones.
 struct BlueprintZonesBuilder<'a> {
-    changed_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
-    parent_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
+    changed_zones: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+    // Temporarily make a clone of the parent blueprint's zones so we can use
+    // typed UUIDs everywhere. Once we're done migrating, this `Cow` can be
+    // removed.
+    parent_zones: Cow<'a, BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>>,
 }
 
 impl<'a> BlueprintZonesBuilder<'a> {
     pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZonesBuilder {
         BlueprintZonesBuilder {
             changed_zones: BTreeMap::new(),
-            parent_zones: &parent_blueprint.blueprint_zones,
+            parent_zones: Cow::Owned(parent_blueprint.typed_blueprint_zones()),
         }
     }
 
@@ -785,7 +908,7 @@ impl<'a> BlueprintZonesBuilder<'a> {
     /// do that if no changes are being made.
     pub fn change_sled_zones(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
     ) -> &mut BlueprintZonesConfig {
         self.changed_zones.entry(sled_id).or_insert_with(|| {
             if let Some(old_sled_zones) = self.parent_zones.get(&sled_id) {
@@ -809,7 +932,7 @@ impl<'a> BlueprintZonesBuilder<'a> {
     /// sled in the blueprint that's being built
     pub fn current_sled_zones(
         &self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
     ) -> Box<dyn Iterator<Item = &BlueprintZoneConfig> + '_> {
         if let Some(sled_zones) = self
             .changed_zones
@@ -829,8 +952,6 @@ impl<'a> BlueprintZonesBuilder<'a> {
     ) -> BTreeMap<Uuid, BlueprintZonesConfig> {
         sled_ids
             .map(|sled_id| {
-                // TODO-cleanup use `TypedUuid` everywhere
-                let sled_id = *sled_id.as_untyped_uuid();
                 // Start with self.changed_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
                 let mut zones = self
@@ -849,7 +970,8 @@ impl<'a> BlueprintZonesBuilder<'a> {
 
                 zones.sort();
 
-                (sled_id, zones)
+                // TODO-cleanup use `TypedUuid` everywhere
+                (sled_id.into_untyped_uuid(), zones)
             })
             .collect()
     }
@@ -969,12 +1091,10 @@ pub mod test {
         for (sled_id, sled_resources) in
             example.input.all_sled_resources(SledFilter::All)
         {
-            // TODO-cleanup use `TypedUuid` everywhere
-            let sled_id = sled_id.as_untyped_uuid();
-            builder.sled_ensure_zone_ntp(*sled_id).unwrap();
+            builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_name in &sled_resources.zpools {
                 builder
-                    .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
+                    .sled_ensure_zone_crucible(sled_id, pool_name.clone())
                     .unwrap();
             }
         }
@@ -1004,9 +1124,7 @@ pub mod test {
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         // TODO-cleanup use `TypedUuid` everywhere
-        let new_sled_resources = input
-            .sled_resources(&TypedUuid::from_untyped_uuid(new_sled_id))
-            .unwrap();
+        let new_sled_resources = input.sled_resources(&new_sled_id).unwrap();
         for pool_name in &new_sled_resources.zpools {
             builder
                 .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
@@ -1121,7 +1239,7 @@ pub mod test {
                     .omicron_zones
                     .keys()
                     .next()
-                    .copied()
+                    .map(|sled_id| TypedUuid::from_untyped_uuid(*sled_id))
                     .expect("no sleds present"),
                 1,
             )
@@ -1161,7 +1279,10 @@ pub mod test {
                     break;
                 }
             }
-            selected_sled_id.expect("found no sleds with Nexus zone")
+            let sled_id =
+                selected_sled_id.expect("found no sleds with Nexus zone");
+            // TODO-cleanup use `TypedUuid` everywhere
+            TypedUuid::from_untyped_uuid(sled_id)
         };
 
         let parent = BlueprintBuilder::build_initial_from_collection_seeded(

@@ -278,6 +278,32 @@ pub struct SledDetails {
     pub resources: SledResources,
 }
 
+impl SledDetails {
+    /// Returns `Some(reason)` if the sled needs its zones to be expunged,
+    /// based on the policy and state.
+    pub fn needs_zone_expungement(&self) -> Option<ZoneExpungeReason> {
+        match self.state {
+            SledState::Active => {}
+            SledState::Decommissioned => {
+                // A decommissioned sled that still has resources attached to
+                // it is an illegal state, but representable. If we see a sled
+                return Some(ZoneExpungeReason::SledDecommissioned);
+            }
+        }
+
+        match self.policy {
+            SledPolicy::InService { .. } => None,
+            SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ZoneExpungeReason {
+    SledDecommissioned,
+    SledExpunged,
+}
+
 impl PlanningInput {
     pub fn internal_dns_version(&self) -> Generation {
         self.internal_dns_version

@@ -20,7 +20,10 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use newtype_uuid::GenericUuid;
+use newtype_uuid::TypedUuid;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::SledKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -44,6 +47,7 @@ pub use planning_input::ServiceNetworkInterface;
 pub use planning_input::SledDetails;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
+pub use planning_input::ZoneExpungeReason;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -153,9 +157,24 @@ impl Blueprint {
         })
     }
 
+    // Temporary method that provides the list of Omicron zones using
+    // `TypedUuid`.
+    //
+    // In the future, `all_omicron_zones` will return `TypedUuid<SledKind>`,
+    // and this method will go away.
+    pub fn all_omicron_zones_typed(
+        &self,
+    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &OmicronZoneConfig)> {
+        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
+            z.zones.iter().map(move |z| {
+                (TypedUuid::from_untyped_uuid(*sled_id), &z.config)
+            })
+        })
+    }
+
     /// Iterate over the ids of all sleds in the blueprint
-    pub fn sleds(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.blueprint_zones.keys().copied()
+    pub fn sleds(&self) -> impl Iterator<Item = TypedUuid<SledKind>> + '_ {
+        self.blueprint_zones.keys().copied().map(TypedUuid::from_untyped_uuid)
     }
 
     /// Summarize the difference between sleds and zones between two
@@ -170,9 +189,9 @@ impl Blueprint {
     ) -> Result<BlueprintDiff, BlueprintDiffError> {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            before.blueprint_zones.clone(),
+            before.typed_blueprint_zones(),
             self.metadata(),
-            self.blueprint_zones.clone(),
+            self.typed_blueprint_zones(),
         )
     }
 
@@ -210,7 +229,7 @@ impl Blueprint {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                (*sled_id, zones)
+                (TypedUuid::from_untyped_uuid(*sled_id), zones)
             })
             .collect();
 
@@ -218,7 +237,7 @@ impl Blueprint {
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.metadata(),
-            self.blueprint_zones.clone(),
+            self.typed_blueprint_zones(),
         )
     }
 
@@ -226,6 +245,21 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    /// Temporary method that returns `self.blueprint_zones`, except the keys
+    /// are `TypedUuid<SledKind>`.
+    ///
+    /// TODO-cleanup use `TypedUuid` everywhere
+    pub fn typed_blueprint_zones(
+        &self,
+    ) -> BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig> {
+        self.blueprint_zones
+            .iter()
+            .map(|(sled_id, zones)| {
+                (TypedUuid::from_untyped_uuid(*sled_id), zones.clone())
+            })
+            .collect()
     }
 }
 
@@ -536,9 +570,9 @@ impl BlueprintDiff {
     /// data is valid.
     fn new(
         before_meta: DiffBeforeMetadata,
-        before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        before_zones: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
         after_meta: BlueprintMetadata,
-        after_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        after_zones: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
     ) -> Result<Self, BlueprintDiffError> {
         let mut errors = Vec::new();
 
@@ -568,14 +602,18 @@ impl BlueprintDiff {
     /// Iterate over sleds only present in the second blueprint of a diff
     pub fn sleds_added(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl ExactSizeIterator<
+        Item = (TypedUuid<SledKind>, &BlueprintZonesConfig),
+    > + '_ {
         self.sleds.added.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
     /// Iterate over sleds only present in the first blueprint of a diff
     pub fn sleds_removed(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl ExactSizeIterator<
+        Item = (TypedUuid<SledKind>, &BlueprintZonesConfig),
+    > + '_ {
         self.sleds.removed.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -583,7 +621,8 @@ impl BlueprintDiff {
     /// changes.
     pub fn sleds_modified(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &DiffSledModified)> + '_ {
+    ) -> impl ExactSizeIterator<Item = (TypedUuid<SledKind>, &DiffSledModified)> + '_
+    {
         self.sleds.modified.iter().map(|(sled_id, sled)| (*sled_id, sled))
     }
 
@@ -591,7 +630,8 @@ impl BlueprintDiff {
     /// changes.
     pub fn sleds_unchanged(
         &self,
-    ) -> impl Iterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &BlueprintZonesConfig)> + '_
+    {
         self.sleds.unchanged.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -603,10 +643,10 @@ impl BlueprintDiff {
 
 #[derive(Debug)]
 struct DiffSleds {
-    added: BTreeMap<Uuid, BlueprintZonesConfig>,
-    removed: BTreeMap<Uuid, BlueprintZonesConfig>,
-    modified: BTreeMap<Uuid, DiffSledModified>,
-    unchanged: BTreeMap<Uuid, BlueprintZonesConfig>,
+    added: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+    removed: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+    modified: BTreeMap<TypedUuid<SledKind>, DiffSledModified>,
+    unchanged: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
 }
 
 impl DiffSleds {
@@ -616,8 +656,8 @@ impl DiffSleds {
     /// The return value only contains the sleds that are present in both
     /// blueprints.
     fn new(
-        before: BTreeMap<Uuid, BlueprintZonesConfig>,
-        mut after: BTreeMap<Uuid, BlueprintZonesConfig>,
+        before: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+        mut after: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
         let mut removed = BTreeMap::new();
@@ -730,7 +770,7 @@ pub enum BlueprintDiffSingleError {
     ///
     /// For a particular zone, the type should never change.
     ZoneTypeChanged {
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         zone_id: Uuid,
         before: ZoneKind,
         after: ZoneKind,
@@ -776,7 +816,7 @@ impl DiffBeforeMetadata {
 #[derive(Clone, Debug)]
 pub struct DiffSledModified {
     /// id of the sled
-    pub sled_id: Uuid,
+    pub sled_id: TypedUuid<SledKind>,
     /// generation of the "zones" configuration on the left side
     pub generation_before: Generation,
     /// generation of the "zones" configuration on the right side
@@ -788,7 +828,7 @@ pub struct DiffSledModified {
 
 impl DiffSledModified {
     fn new(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         before: BlueprintZonesConfig,
         after: BlueprintZonesConfig,
         errors: &mut Vec<BlueprintDiffSingleError>,
@@ -1210,7 +1250,7 @@ mod table_display {
     }
 
     fn add_whole_sled_records(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         sled_zones: &BlueprintZonesConfig,
         kind: WholeSledKind,
         section: &mut StSectionBuilder,
@@ -1247,7 +1287,7 @@ mod table_display {
     }
 
     fn add_modified_sled_records(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         modified: &DiffSledModified,
         section: &mut StSectionBuilder,
     ) {
