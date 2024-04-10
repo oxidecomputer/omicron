@@ -403,8 +403,8 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::Crucible => true,
-                BlueprintZoneFilter::External => true,
+                BlueprintZoneFilter::CrucibleDatasets => true,
+                BlueprintZoneFilter::ExternallyReachable => true,
                 BlueprintZoneFilter::InternalDns => true,
                 BlueprintZoneFilter::SledAgentPut => true,
                 BlueprintZoneFilter::VpcFirewall => true,
@@ -413,11 +413,11 @@ impl BlueprintZoneDisposition {
                 BlueprintZoneFilter::All => true,
 
                 // Quiesced Crucible zones are still around.
-                BlueprintZoneFilter::Crucible => true,
+                BlueprintZoneFilter::CrucibleDatasets => true,
 
                 // Quiesced zones should not have external resources -- we do
                 // not want traffic to be directed to them.
-                BlueprintZoneFilter::External => false,
+                BlueprintZoneFilter::ExternallyReachable => false,
 
                 // Quiesced zones should not be exposed in DNS.
                 BlueprintZoneFilter::InternalDns => false,
@@ -430,8 +430,8 @@ impl BlueprintZoneDisposition {
             },
             Self::Expunged => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::Crucible => false,
-                BlueprintZoneFilter::External => false,
+                BlueprintZoneFilter::CrucibleDatasets => false,
+                BlueprintZoneFilter::ExternallyReachable => false,
                 BlueprintZoneFilter::InternalDns => false,
                 BlueprintZoneFilter::SledAgentPut => false,
                 BlueprintZoneFilter::VpcFirewall => false,
@@ -476,10 +476,10 @@ pub enum BlueprintZoneFilter {
     All,
 
     /// Filter by zones that should have Crucible dataset records.
-    Crucible,
+    CrucibleDatasets,
 
     /// Filter by zones that should have external IP and DNS resources.
-    External,
+    ExternallyReachable,
 
     /// Filter by zones that should be in internal DNS.
     InternalDns,

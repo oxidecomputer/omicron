@@ -694,7 +694,7 @@ struct ServiceInfo {
     disposition: BlueprintZoneDisposition,
 }
 
-/// Helper function to look up the kind of the service with the given ID.
+/// Helper function to look up the service with the given ID.
 ///
 /// Requires the caller to first have fetched the current target blueprint, so
 /// we can find services that have been added by Reconfigurator.

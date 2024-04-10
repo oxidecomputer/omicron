@@ -474,7 +474,7 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
 /// Return the Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones(BlueprintZoneFilter::External)
+        .all_omicron_zones(BlueprintZoneFilter::ExternallyReachable)
         .filter_map(|(_, z)| match z.zone_type {
             OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
             _ => None,
