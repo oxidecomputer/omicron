@@ -111,7 +111,7 @@ where
         &opctx,
         datastore,
         blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ExternallyReachable)
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
             .map(|(_sled_id, zone)| zone),
     )
     .await
@@ -155,7 +155,7 @@ where
         &opctx,
         datastore,
         blueprint
-            .all_omicron_zones(BlueprintZoneFilter::CrucibleDatasets)
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .map(|(_sled_id, zone)| zone),
     )
     .await

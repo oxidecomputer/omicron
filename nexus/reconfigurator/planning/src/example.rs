@@ -155,7 +155,7 @@ impl ExampleSystem {
                     "fake sled agent",
                     sled_id,
                     zones.to_omicron_zones_config(
-                        BlueprintZoneFilter::SledAgentPut,
+                        BlueprintZoneFilter::ShouldBeRunning,
                     ),
                 )
                 .unwrap();

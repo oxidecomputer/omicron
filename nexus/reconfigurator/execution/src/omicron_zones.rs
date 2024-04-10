@@ -41,7 +41,7 @@ pub(crate) async fn deploy_zones(
                 &opctx.log,
             );
             let omicron_zones = config
-                .to_omicron_zones_config(BlueprintZoneFilter::SledAgentPut);
+                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning);
             let result = client
                 .omicron_zones_put(&omicron_zones)
                 .await

@@ -275,8 +275,8 @@ pub fn blueprint_internal_dns_config(
             .map(|addr| addr.port())
     }
 
-    for (_, zone) in
-        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+    for (_, zone) in blueprint
+        .all_blueprint_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
         let context = || {
             format!(
@@ -474,7 +474,7 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
 /// Return the Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones(BlueprintZoneFilter::ExternallyReachable)
+        .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
         .filter_map(|(_, z)| match z.zone_type {
             OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
             _ => None,
@@ -706,7 +706,7 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::InternalDns)
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
             .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);

@@ -403,38 +403,33 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::CrucibleDatasets => true,
-                BlueprintZoneFilter::ExternallyReachable => true,
-                BlueprintZoneFilter::InternalDns => true,
-                BlueprintZoneFilter::SledAgentPut => true,
-                BlueprintZoneFilter::VpcFirewall => true,
+                BlueprintZoneFilter::ShouldBeRunning => true,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => true,
+                BlueprintZoneFilter::ShouldBeInInternalDns => true,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
 
-                // Quiesced Crucible zones are still around.
-                BlueprintZoneFilter::CrucibleDatasets => true,
+                // Quiesced zones are still running.
+                BlueprintZoneFilter::ShouldBeRunning => true,
 
                 // Quiesced zones should not have external resources -- we do
                 // not want traffic to be directed to them.
-                BlueprintZoneFilter::ExternallyReachable => false,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
 
                 // Quiesced zones should not be exposed in DNS.
-                BlueprintZoneFilter::InternalDns => false,
-
-                // Quiesced zones are expected to be deployed by sled-agent.
-                BlueprintZoneFilter::SledAgentPut => true,
+                BlueprintZoneFilter::ShouldBeInInternalDns => false,
 
                 // Quiesced zones should get firewall rules.
-                BlueprintZoneFilter::VpcFirewall => true,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
             },
             Self::Expunged => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::CrucibleDatasets => false,
-                BlueprintZoneFilter::ExternallyReachable => false,
-                BlueprintZoneFilter::InternalDns => false,
-                BlueprintZoneFilter::SledAgentPut => false,
-                BlueprintZoneFilter::VpcFirewall => false,
+                BlueprintZoneFilter::ShouldBeRunning => false,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
+                BlueprintZoneFilter::ShouldBeInInternalDns => false,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => false,
             },
         }
     }
@@ -475,20 +470,17 @@ pub enum BlueprintZoneFilter {
     /// All zones.
     All,
 
-    /// Filter by zones that should have Crucible dataset records.
-    CrucibleDatasets,
+    // Zones that are desired to be in the RUNNING state
+    ShouldBeRunning,
 
     /// Filter by zones that should have external IP and DNS resources.
-    ExternallyReachable,
+    ShouldBeExternallyReachable,
 
     /// Filter by zones that should be in internal DNS.
-    InternalDns,
-
-    /// Filter by zones that we should tell sled-agent to deploy.
-    SledAgentPut,
+    ShouldBeInInternalDns,
 
     /// Filter by zones that should be sent VPC firewall rules.
-    VpcFirewall,
+    ShouldDeployVpcFirewallRules,
 }
 
 /// Describe high-level metadata about a blueprint

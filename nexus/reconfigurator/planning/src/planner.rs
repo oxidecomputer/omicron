@@ -481,7 +481,7 @@ mod test {
                         .get(&new_sled_id)
                         .expect("blueprint should contain zones for new sled")
                         .to_omicron_zones_config(
-                            BlueprintZoneFilter::SledAgentPut
+                            BlueprintZoneFilter::ShouldBeRunning
                         )
                 }
             )
