@@ -256,17 +256,17 @@ impl<'a> BlueprintBuilder<'a> {
         // need to allocate new resources to that zone. However, allocation at
         // this point is entirely optimistic and theoretical: our caller may
         // discard the blueprint we create without ever making it the new
-        // target, or it might be an arbitrarily long time before it becomes the
-        // target. We need to be able to make allocation decisions that we
+        // target, or it might be an arbitrarily long time before it becomes
+        // the target. We need to be able to make allocation decisions that we
         // expect the blueprint executor to be able to realize successfully if
         // and when we become the target, but we cannot _actually_ perform
         // resource allocation.
         //
         // To do this, we look at our parent blueprint's used resources, and
-        // then choose new resources that aren't already in use (if possible; if
-        // we need to allocate a new resource and the parent blueprint appears
-        // to be using all the resources of that kind, our blueprint generation
-        // will fail).
+        // then choose new resources that aren't already in use (if possible;
+        // if we need to allocate a new resource and the parent blueprint
+        // appears to be using all the resources of that kind, our blueprint
+        // generation will fail).
         //
         // For example, RSS assigns Nexus NIC IPs by stepping through a list of
         // addresses based on `NEXUS_OPTE_IPVx_SUBNET` (as in the iterators
@@ -277,25 +277,25 @@ impl<'a> BlueprintBuilder<'a> {
         // Note that by building these iterators up front based on
         // `parent_blueprint`, we cannot reuse resources in a case where we
         // remove a zone that used a resource and then add another zone that
-        // wants the same kind of resource. We don't support zone removal yet,
-        // but expect this to be okay: we don't anticipate removal and addition
-        // to frequently be combined into the exact same blueprint, particularly
-        // in a way that expects the addition to reuse resources from the
-        // removal; we won't want to attempt to reuse resources from a zone
-        // until we know it's been fully removed.
+        // wants the same kind of resource. That is mostly fine, but see
+        // the comment immediately below this block.
+
         let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        // Note: this is all omicron zones, including expunged ones. For now,
-        // we don't unassign an IP from an expunged sled/zone and reassign it
-        // to a different zone in the same blueprint. (This can happen across
-        // successive blueprints, though.)
+        // XXX: the below comment is wrong, be more careful here. Need separate
+        // filters for internal and external IPs! Also need a test for this.
         //
-        // Note however that we likely do want to reuse external IPs for
-        // external DNS zones, but we're not solving that problem at the
-        // moment.
+        // Note: we're iterating over *all* omicron zones here, including
+        // expunged ones. For now, we don't unassign a resource from an
+        // expunged sled/zone and reassign it to a different zone in the same
+        // blueprint. (This can happen across successive blueprints, though.)
+        //
+        // Note, however, that we may want to reassign external IPs for
+        // external DNS zones within a single blueprint, but we're not solving
+        // that problem at the moment.
 
         for (_, z) in parent_blueprint.all_omicron_zones() {
             let zone_type = &z.zone_type;
