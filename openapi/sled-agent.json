@@ -3654,12 +3654,10 @@
                 "type": "object",
                 "properties": {
                   "expected": {
-                    "type": "string",
-                    "format": "uuid"
+                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
                   },
                   "observed": {
-                    "type": "string",
-                    "format": "uuid"
+                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
                   }
                 },
                 "required": [
@@ -5533,8 +5531,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
           },
           "total_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -6003,8 +6000,7 @@
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
           }
         },
         "required": [
@@ -7055,6 +7051,10 @@
           "sync"
         ]
       },
+      "TypedUuidForZpoolKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UpdateArtifactId": {
         "description": "An identifier for a single update artifact.",
         "type": "object",
@@ -7470,8 +7470,7 @@
             "$ref": "#/components/schemas/DiskType"
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
           }
         },
         "required": [

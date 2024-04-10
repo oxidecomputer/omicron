@@ -15,6 +15,7 @@ illumos-utils.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
