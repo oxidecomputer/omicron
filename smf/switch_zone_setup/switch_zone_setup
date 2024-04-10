@@ -6,9 +6,9 @@ set -ex -o pipefail
 
 # set up the users required for wicket and support.
 USERS=(
-    (user=wicket group=wicket gecos='Wicket User' nopasswd=1)
-    (user=support group=support gecos='Oxide Support'
-        profiles=('Primary Administrator')
+    (user=wicket group=wicket gecos='Wicket User' nopasswd=1 shell='/bin/sh')
+    (user=support group=support gecos='Oxide Support' homedir='/home/support'
+        shell='/bin/bash' profiles=('Primary Administrator')
     )
 )
 
@@ -18,8 +18,9 @@ for i in "${!USERS[@]}"; do
     # Add a new group for the user.
     getent group "${u.group}" >/dev/null 2>&1 || groupadd "${u.group}"
     # Add the user.
-    getent passwd "${u.user}" >/dev/null 2>&1 \
-        || useradd -m -g "${u.group}" -c "${u.gecos}" "${u.user}"
+    getent passwd "${u.user}" >/dev/null 2>&1 || \
+        useradd -m -s "${u.shell}" -g "${u.group}" -c "${u.gecos}" \
+        "${u.user}"
 
     # Either enable passwordless login (wicket) or disable password-based logins
     # completely (support, which logs in via ssh key).
@@ -34,6 +35,14 @@ for i in "${!USERS[@]}"; do
         usermod -P"$(printf '%s,' "${u.profiles[@]}")" "${u.user}"
     else
         usermod -P '' "${u.user}"
+    fi
+
+    if [[ -n "${u.homedir}" ]]; then
+        mkdir -p "${u.homedir}"
+        for f in .bashrc .profile; do
+            cp "/root/$f" "${u.homedir}/$f"
+        done
+        chown -R "${u.user}" "${u.homedir}"
     fi
 done
 
