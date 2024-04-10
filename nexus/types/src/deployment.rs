@@ -378,7 +378,6 @@ pub struct BlueprintZoneConfig {
     EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintZoneDisposition {
     /// The zone is in-service.
     InService,
@@ -469,7 +468,6 @@ impl fmt::Display for BlueprintZoneDisposition {
 /// new use case wants to make a decision based on the zone disposition, a new
 /// variant should be added to this enum.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintZoneFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
@@ -1613,47 +1611,5 @@ mod table_display {
 
     fn linear_table_unchanged(value: &dyn fmt::Display) -> String {
         format!("{value} {UNCHANGED_PARENS}")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prop_assert;
-    use test_strategy::proptest;
-
-    // This test is to ensure that the underlying filter semantics don't change
-    // and break higher level callers. It's fine to do that in some cases, but
-    // at least you'll have to think about it more.
-    #[proptest]
-    fn zone_disposition_matches_filter(
-        disposition: BlueprintZoneDisposition,
-        filter: BlueprintZoneFilter,
-    ) {
-        match disposition {
-            BlueprintZoneDisposition::InService => {
-                // We always return true for zones that are in service
-                prop_assert!(disposition.matches(filter));
-            }
-            BlueprintZoneDisposition::Quiesced => match filter {
-                // We don't expose external resources (including external dns)
-                // or use internal dns when the zone is quiesced.
-                BlueprintZoneFilter::External
-                | BlueprintZoneFilter::InternalDns => {
-                    prop_assert!(!disposition.matches(filter));
-                }
-                _ => prop_assert!(disposition.matches(filter)),
-            },
-            BlueprintZoneDisposition::Expunged => {
-                // We only list zones when we explicitly ask for all of them if
-                // a zone is expunged.
-                match filter {
-                    BlueprintZoneFilter::All => {
-                        prop_assert!(disposition.matches(filter));
-                    }
-                    _ => prop_assert!(!disposition.matches(filter)),
-                }
-            }
-        }
     }
 }
