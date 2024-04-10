@@ -63,7 +63,6 @@
     regardless of whether it was linked with -zaslr
   -->
 
-<!-- TODO: Check what the /etc/logadm.d/chrony.logadm.conf file says in the previous one -->  
   <exec_method type="method" name="start" 
     exec='/usr/sbin/chronyd -d &amp;' 
     timeout_seconds="600">
@@ -73,25 +72,9 @@
   </method_context>
   </exec_method>
 
-<!--
-  <exec_method type="method" name="refresh"
-    exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}" timeout_seconds="60">
-  </exec_method>
--->
-
   <exec_method type="method" name="stop"
     exec=":kill"
     timeout_seconds="60" />
-
-  <!--
-  <property_group name="config" type="application">
-   TODO: Why is this even being set as a property instead of direclty on the method?? 
-    <propval name="file" type="astring" value="/etc/inet/chrony.conf" />
-    <propval name="boundary" type="boolean" value="false" />
-    <propval name="server" type="astring" value="" />
-    <propval name="allow" type="astring" value="" />
-  </property_group>
--->
 
   <stability value="Unstable" />
 

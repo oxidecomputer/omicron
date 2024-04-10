@@ -308,9 +308,6 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },
- # TODO: Removeme
- # { from = "smf/ntp/method", to = "/var/svc/method" },
- # { from = "smf/ntp/etc", to = "/etc" },
 ]
 output.intermediate_only = true
 output.type = "zone"
