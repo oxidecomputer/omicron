@@ -274,6 +274,10 @@ task: "region_replacement"
     detects if a region requires replacing and begins the process
 
 
+task: "region_replacement_driver"
+    drive region replacements forward to completion
+
+
 task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
 
@@ -429,6 +433,14 @@ task: "region_replacement"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
+
+task: "region_replacement_driver"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacement drive sagas started ok: 0
+    errors querying, or number of region replacement drive saga start errors: 0
 
 task: "service_zone_nat_tracker"
   configured period: every 30s

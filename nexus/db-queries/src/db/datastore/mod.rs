@@ -76,6 +76,7 @@ pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
+mod region_replacement;
 mod region_snapshot;
 mod role;
 mod saga;
@@ -114,6 +115,7 @@ pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
 pub use volume::VolumeCheckoutReason;
+pub use volume::VolumeReplacementParams;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

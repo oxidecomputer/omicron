@@ -58,6 +58,9 @@ impl Region {
         }
     }
 
+    pub fn id(&self) -> Uuid {
+        self.identity.id
+    }
     pub fn volume_id(&self) -> Uuid {
         self.volume_id
     }

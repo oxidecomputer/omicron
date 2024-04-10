@@ -20,6 +20,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::Vmm;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -1534,7 +1535,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let client = self
+        let (_, client) = self
             .propolis_client_for_instance(
                 opctx,
                 instance_lookup,
@@ -1575,7 +1576,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
-        let client_addr = match self
+        let (_, client_addr) = match self
             .propolis_addr_for_instance(
                 opctx,
                 instance_lookup,
@@ -1630,12 +1631,14 @@ impl super::Nexus {
         }
     }
 
+    /// Return a propolis address for the instance, along with the VMM identity
+    /// that it's for.
     async fn propolis_addr_for_instance(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<SocketAddr, Error> {
+    ) -> Result<(Vmm, SocketAddr), Error> {
         let (.., authz_instance) = instance_lookup.lookup_for(action).await?;
 
         let state = self
@@ -1650,7 +1653,7 @@ impl super::Nexus {
                 | InstanceState::Rebooting
                 | InstanceState::Migrating
                 | InstanceState::Repairing => {
-                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
+                    Ok((vmm.clone(), SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into())))
                 }
                 InstanceState::Creating
                 | InstanceState::Starting
@@ -1675,16 +1678,21 @@ impl super::Nexus {
         }
     }
 
-    async fn propolis_client_for_instance(
+    /// Return a propolis client for the instance, along with the VMM identity
+    /// that it's for.
+    pub(crate) async fn propolis_client_for_instance(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<propolis_client::Client, Error> {
-        let client_addr = self
+    ) -> Result<(Vmm, propolis_client::Client), Error> {
+        let (vmm, client_addr) = self
             .propolis_addr_for_instance(opctx, instance_lookup, action)
             .await?;
-        Ok(propolis_client::Client::new(&format!("http://{}", client_addr)))
+        Ok((
+            vmm,
+            propolis_client::Client::new(&format!("http://{}", client_addr)),
+        ))
     }
 
     async fn proxy_instance_serial_ws(

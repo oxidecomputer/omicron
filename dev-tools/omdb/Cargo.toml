@@ -52,6 +52,7 @@ uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
 multimap.workspace = true
+indicatif.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

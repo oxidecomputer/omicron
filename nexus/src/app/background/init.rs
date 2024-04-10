@@ -18,6 +18,7 @@ use super::nat_cleanup;
 use super::phantom_disks;
 use super::physical_disk_adoption;
 use super::region_replacement;
+use super::region_replacement_driver;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
@@ -90,6 +91,9 @@ pub struct BackgroundTasks {
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
+
+    /// task handle for the task that drives region replacements forward
+    pub task_region_replacement_driver: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -325,7 +329,7 @@ impl BackgroundTasks {
         // process
         let task_region_replacement = {
             let detector = region_replacement::RegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
                 saga_request.clone(),
             );
 
@@ -333,6 +337,26 @@ impl BackgroundTasks {
                 String::from("region_replacement"),
                 String::from("detects if a region requires replacing and begins the process"),
                 config.region_replacement.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
+        // Background task: drive region replacements forward to completion
+        let task_region_replacement_driver = {
+            let detector =
+                region_replacement_driver::RegionReplacementDriver::new(
+                    datastore,
+                    saga_request.clone(),
+                );
+
+            let task = driver.register(
+                String::from("region_replacement_driver"),
+                String::from("drive region replacements forward to completion"),
+                config.region_replacement_driver.period_secs,
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -360,6 +384,7 @@ impl BackgroundTasks {
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_region_replacement,
+            task_region_replacement_driver,
         }
     }
 

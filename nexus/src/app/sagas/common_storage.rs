@@ -9,7 +9,7 @@ use super::*;
 use crate::Nexus;
 use anyhow::anyhow;
 use crucible_agent_client::{
-    types::{CreateRegion, RegionId, State as RegionState},
+    types::{CreateRegion, Region, RegionId, State as RegionState},
     Client as CrucibleAgentClient,
 };
 use futures::StreamExt;
@@ -17,7 +17,6 @@ use internal_dns::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
@@ -829,4 +828,41 @@ pub(crate) async fn call_pantry_detach_for_disk(
     })?;
 
     Ok(())
+}
+
+/// Get a Crucible Agent's Region
+pub(crate) async fn get_region_from_agent(
+    agent_address: &SocketAddrV6,
+    region_id: Uuid,
+) -> Result<Region, Error> {
+    let url = format!("http://{}", agent_address);
+    let client = CrucibleAgentClient::new(&url);
+
+    let result = client.region_get(&RegionId(region_id.to_string())).await;
+
+    match result {
+        Ok(v) => Ok(v.into_inner()),
+
+        Err(e) => match e {
+            crucible_agent_client::Error::ErrorResponse(rv) => {
+                match rv.status() {
+                    http::StatusCode::NOT_FOUND => {
+                        Err(Error::non_resourcetype_not_found(format!(
+                            "{region_id} not found"
+                        )))
+                    }
+
+                    status if status.is_client_error() => {
+                        Err(Error::invalid_request(&rv.message))
+                    }
+
+                    _ => Err(Error::internal_error(&rv.message)),
+                }
+            }
+
+            _ => Err(Error::internal_error(
+                "unexpected failure during `region_get`",
+            )),
+        },
+    }
 }

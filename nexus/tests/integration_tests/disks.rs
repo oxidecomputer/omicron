@@ -27,9 +27,9 @@ use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
-use nexus_types::identity::Asset;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -2456,6 +2456,60 @@ async fn test_region_allocation_after_delete(
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+}
+
+#[nexus_test]
+async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let _disk_test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert disk has three allocated regions
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+
+    // Expunge the sled
+    let int_client = &cptestctx.internal_client;
+    int_client
+        .make_request(
+            Method::POST,
+            "/sleds/expunge",
+            Some(params::SledSelector {
+                sled: SLED_AGENT_UUID.parse().unwrap(),
+            }),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+
+    // All three regions should be returned
+    let expunged_regions = datastore
+        .find_regions_on_expunged_physical_disks(&opctx)
+        .await
+        .unwrap();
+
+    assert_eq!(expunged_regions.len(), 3);
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

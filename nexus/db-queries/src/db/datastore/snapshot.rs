@@ -31,6 +31,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -303,5 +304,22 @@ impl DataStore {
                 }
             }
         }
+    }
+
+    pub async fn find_snapshot_by_destination_volume_id(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Snapshot>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::snapshot::dsl;
+        dsl::snapshot
+            .filter(dsl::destination_volume_id.eq(volume_id))
+            .select(Snapshot::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

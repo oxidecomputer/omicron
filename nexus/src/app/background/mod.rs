@@ -20,6 +20,7 @@ mod networking;
 mod phantom_disks;
 mod physical_disk_adoption;
 mod region_replacement;
+mod region_replacement_driver;
 mod status;
 mod sync_service_zone_nat;
 mod sync_switch_configuration;
