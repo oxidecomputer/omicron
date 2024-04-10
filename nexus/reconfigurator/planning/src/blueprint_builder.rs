@@ -720,7 +720,6 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         sled_id: TypedUuid<SledKind>,
     ) -> Result<&SledResources, Error> {
-        // TODO-cleanup use `TypedUuid` everywhere
         self.input.sled_resources(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "attempted to use sled that is not in service: {}",
