@@ -33,7 +33,7 @@ impl HardwareManager {
     pub fn new(
         _log: &Logger,
         _sled_mode: SledMode,
-        _supplied_unparsed_disks: Vec<UnparsedDisk>,
+        _nongimlet_observed_disks: Vec<UnparsedDisk>,
     ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }

@@ -67,10 +67,10 @@ pub struct Config {
     pub vlan: Option<VlanID>,
     /// Optional list of virtual devices to be used as "discovered disks".
     pub vdevs: Option<Vec<Utf8PathBuf>>,
-    /// Optional list of real devices to be used as "discovered disks" (for use
-    /// with non-gimlets).
+    /// Optional list of real devices to be injected as observed disks during
+    /// device polling.
     #[serde(default)]
-    pub supplied_unparsed_disks: Option<Vec<UnparsedDisk>>,
+    pub nongimlet_observed_disks: Option<Vec<UnparsedDisk>>,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 

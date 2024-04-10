@@ -509,7 +509,7 @@ fn poll_blkdev_node(
 fn poll_device_tree(
     log: &Logger,
     inner: &Arc<Mutex<HardwareView>>,
-    supplied_unparsed_disks: &[UnparsedDisk],
+    nongimlet_observed_disks: &[UnparsedDisk],
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
@@ -545,9 +545,9 @@ fn poll_device_tree(
                 // functionality, sled-agent can be supplied a fixed list of
                 // UnparsedDisks. Add those to the HardwareSnapshot here if they
                 // are missing (which they will be for non-gimlets).
-                for unparsed_disk in supplied_unparsed_disks {
-                    if !inner.disks.contains(unparsed_disk) {
-                        inner.disks.insert(unparsed_disk.clone());
+                for observed_disk in nongimlet_observed_disks {
+                    if !inner.disks.contains(observed_disk) {
+                        inner.disks.insert(observed_disk.clone());
                     }
                 }
             }
@@ -581,11 +581,11 @@ fn poll_device_tree(
 async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
-    supplied_unparsed_disks: Vec<UnparsedDisk>,
+    nongimlet_observed_disks: Vec<UnparsedDisk>,
     tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
-        match poll_device_tree(&log, &inner, &supplied_unparsed_disks, &tx) {
+        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
             // We've already warned about `NotAGimlet` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAGimlet(_)) => (),
@@ -614,10 +614,12 @@ impl HardwareManager {
     ///
     /// Arguments:
     /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
+    /// - `nongimlet_observed_disks`: For non-gimlets, inject these disks into
+    ///    HardwareSnapshot objects.
     pub fn new(
         log: &Logger,
         sled_mode: SledMode,
-        supplied_unparsed_disks: Vec<UnparsedDisk>,
+        nongimlet_observed_disks: Vec<UnparsedDisk>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
@@ -664,7 +666,7 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &inner, &supplied_unparsed_disks, &tx) {
+        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
             Ok(_) => (),
             // Allow non-gimlet devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -680,7 +682,7 @@ impl HardwareManager {
         let inner2 = inner.clone();
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            hardware_tracking_task(log2, inner2, supplied_unparsed_disks, tx2)
+            hardware_tracking_task(log2, inner2, nongimlet_observed_disks, tx2)
                 .await
         });
 
