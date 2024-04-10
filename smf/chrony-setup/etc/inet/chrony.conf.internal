@@ -3,9 +3,6 @@
 # boundary NTP servers within the rack.
 #
 
-# TODO: Removeme once svc-site-ntp file is gone
-# server @SERVER@ iburst minpoll 0 maxpoll 4
-
 driftfile /var/lib/chrony/drift
 ntsdumpdir /var/lib/chrony
 dumpdir /var/lib/chrony

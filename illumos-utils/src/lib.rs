@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use cfg_if::cfg_if;
 
 pub mod addrobj;
-pub mod chronyd;
 pub mod coreadm;
 pub mod destructor;
 pub mod dkio;

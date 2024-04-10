@@ -1995,7 +1995,7 @@ impl ServiceManager {
                     Self::dns_install(info, Some(dns_servers.to_vec()), domain)
                         .await?;
 
-                let mut ntp_config = PropertyGroupBuilder::new("config")
+                let mut chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
                     .add_property(
                         "boundary",
@@ -2004,7 +2004,7 @@ impl ServiceManager {
                     );
 
                 for s in ntp_servers {
-                    ntp_config = ntp_config.add_property(
+                    chrony_config = chrony_config.add_property(
                         "server",
                         "astring",
                         &s.to_string(),
@@ -2019,15 +2019,12 @@ impl ServiceManager {
                 }
 
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
-                    .add_instance(
-                        ServiceInstanceBuilder::new("default")
-                          //  .add_property_group(ntp_config),
-                    );
+                    .add_instance(ServiceInstanceBuilder::new("default"));
 
-                let chrony_setup_service = ServiceBuilder::new("oxide/chrony-setup")
-                    .add_instance(
+                let chrony_setup_service =
+                    ServiceBuilder::new("oxide/chrony-setup").add_instance(
                         ServiceInstanceBuilder::new("default")
-                            .add_property_group(ntp_config),
+                            .add_property_group(chrony_config),
                     );
 
                 let mut profile = ProfileBuilder::new("omicron")

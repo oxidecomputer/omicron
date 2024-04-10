@@ -6,8 +6,6 @@
 
 use anyhow::anyhow;
 use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
-// TODO: Removeme
-// use illumos_utils::chronyd::Chronyd;
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
@@ -29,9 +27,6 @@ pub const BOUNDARY_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.boundary";
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
 pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
-// TODO: Removeme before merging
-pub const NTP_CMD: &str = "ntp";
-pub const NTP_START_CMD: &str = "start";
 
 fn parse_ip(s: &str) -> anyhow::Result<IpAddr> {
     if s == "unknown" {
@@ -68,20 +63,11 @@ fn parse_opte_iface(s: &str) -> anyhow::Result<String> {
     s.parse().map_err(|_| anyhow!("ERROR: Invalid OPTE interface"))
 }
 
-fn parse_allow(s: &str) -> anyhow::Result<String> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing allowed address range"));
-    };
-
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid allowed address range"))
-}
-
 fn parse_chrony_conf(s: &str) -> anyhow::Result<String> {
-    if s == "unknown" {
+    if s == "" {
         return Err(anyhow!("ERROR: Missing chrony configuration file"));
     };
 
-    // TODO: actually check the format of the string ends with "chrony.conf"
     s.parse().map_err(|_| anyhow!("ERROR: Invalid chrony configuration file"))
 }
 
@@ -180,46 +166,10 @@ async fn do_run() -> Result<(), CmdError> {
                 .value_parser(value_parser!(String))
                 .help("List of NTP servers separated by a space")
                 .required(true)
-                // TODO: Add some parsing to this?
             )
             .arg(
                 arg!(-a --allow <String> "Allowed IPv6 range")                       
-                .value_parser(parse_allow),
             ),
-        )
-        // TODO: Removeme before merging
-        .subcommand(
-            Command::new(NTP_CMD)
-                .about("Start (set up), refresh and stop methods for NTP zone")
-                .subcommand(
-                    Command::new(NTP_START_CMD)
-                        .about("NTP zone setup and start chronyd daemon") 
-                        .arg(
-                            arg!(-f --file <String> "Chrony configuration file")
-                            .default_value(CHRONY_CONFIG_FILE)
-                    .value_parser(parse_chrony_conf)
-                        )
-                    .arg(
-                        arg!(-b --boundary <bool> "Whether this is a boundary or internal NTP zone")
-                        .required(true)
-                .value_parser(parse_boundary),
-                    )
-                    .arg(
-                        Arg::new("servers")
-                        .short('s')
-                        .long("servers")
-                        .num_args(1..)
-                        .value_delimiter(' ')
-                        .value_parser(value_parser!(String))
-                        .help("List of NTP servers separated by a space")
-                        .required(true)
-                        // TODO: Add some parsing to this?
-                    )
-                    .arg(
-                        arg!(-a --allow <String> "Allowed IPv6 range")                       
-                        .value_parser(parse_allow),
-                    ),
-                ),
         )
         .get_matches();
 
@@ -231,27 +181,10 @@ async fn do_run() -> Result<(), CmdError> {
         opte_interface_set_up(matches, log.clone()).await?;
     }
 
-    // TODO: Removeme
-    if let Some(matches) = matches.subcommand_matches(NTP_CMD) {
-        ntp_smf_methods(matches, log.clone()).await?;
-    }
-
     if let Some(matches) = matches.subcommand_matches(CHRONY_SETUP_CMD) {
         chrony_setup(matches, log.clone()).await?;
     }
 
-    Ok(())
-}
-
-async fn ntp_smf_methods(
-    matches: &ArgMatches,
-    log: Logger,
-) -> Result<(), CmdError> {
-    if let Some(matches) = matches.subcommand_matches(NTP_START_CMD) {
-        chrony_setup(matches, log.clone()).await?;
-    }
-
-    // TODO: Add refresh and stop
     Ok(())
 }
 
@@ -380,10 +313,7 @@ async fn chrony_setup(
     info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
     Svcadm::refresh_logadm_upgrade()
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
- // TODO: Removeme
- //   info!(&log, "Starting chronyd daemon"; "chrony config" => ?file);
- //   Chronyd::start_daemon(file)
- //       .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
     Ok(())
 }
 
