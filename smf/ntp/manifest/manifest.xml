@@ -39,7 +39,7 @@
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
-  <dependency name='chrony-setup' grouping='require_all' restart_on='none'
+  <dependency name='chrony-setup' grouping='require_all' restart_on='refresh'
     type='service'>
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
