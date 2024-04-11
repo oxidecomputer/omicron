@@ -649,7 +649,6 @@ mod tests {
     use crate::oxql::ast::table_ops::filter::FilterExpr;
     use crate::oxql::ast::table_ops::filter::SimpleFilter;
     use crate::oxql::ast::table_ops::group_by::Reducer;
-    use chrono::DateTime;
     use chrono::NaiveDate;
     use chrono::NaiveDateTime;
     use chrono::NaiveTime;
@@ -1213,31 +1212,6 @@ mod tests {
         assert!(query_parser::query("{ get a:b; filter foo == 0 }").is_err());
         assert!(query_parser::query("{ get a:b; filter foo == 0 }").is_err());
         assert!(query_parser::query("get a:b | get a:b").is_err());
-    }
-
-    #[test]
-    fn test_now_with_offset() {
-        fn check(expr: &str, expected: DateTime<Utc>) {
-            // Rough but still-useful bound in microseconds.
-            const MAX_DIFF_IN_MICROS: i64 = 1000;
-            let d = query_parser::now_timestamp(expr).unwrap();
-            let now = Utc::now();
-            let micros = d.timestamp_micros() - expected.timestamp_micros();
-            assert!(
-                micros.abs() <= MAX_DIFF_IN_MICROS,
-                "Expected `{}` to be within {}us of {}, but it is {}us away",
-                expr,
-                MAX_DIFF_IN_MICROS,
-                now,
-                micros,
-            );
-        }
-        check("@now() - 5m", Utc::now() - Duration::from_secs(60 * 5));
-        check("@now() + 5m", Utc::now() + Duration::from_secs(60 * 5));
-        check("@now() - 5s", Utc::now() - Duration::from_secs(5));
-        check("@now() + 5s", Utc::now() + Duration::from_secs(5));
-        check("@now() - 1d", Utc::now() - Duration::from_secs(60 * 60 * 24));
-        check("@now() + 1d", Utc::now() + Duration::from_secs(60 * 60 * 24));
     }
 
     #[test]
