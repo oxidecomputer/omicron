@@ -16,9 +16,8 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
 use sled_agent_client::types::OmicronZonesConfig;
 use typed_rng::TypedUuidRng;
 use uuid::Uuid;
@@ -128,8 +127,7 @@ impl ExampleSystem {
                 continue;
             };
             for zone in zones.zones.iter().map(|z| &z.config) {
-                let service_id =
-                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                let service_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
                 if let Ok(Some(ip)) = zone.zone_type.external_ip() {
                     input_builder
                         .add_omicron_zone_external_ip(
@@ -159,7 +157,7 @@ impl ExampleSystem {
                     // TODO-cleanup use `TypedUuid` everywhere
                     sled_id.into_untyped_uuid(),
                     zones.to_omicron_zones_config(
-                        BlueprintZoneFilter::SledAgentPut,
+                        BlueprintZoneFilter::ShouldBeRunning,
                     ),
                 )
                 .unwrap();

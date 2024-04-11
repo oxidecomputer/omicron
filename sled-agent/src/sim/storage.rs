@@ -20,6 +20,8 @@ use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use sled_hardware::DiskVariant;
 use sled_storage::resources::DiskManagementStatus;
@@ -479,14 +481,14 @@ pub(crate) struct PhysicalDisk {
 }
 
 pub(crate) struct Zpool {
-    id: Uuid,
+    id: ZpoolUuid,
     physical_disk_id: Uuid,
     total_size: u64,
     datasets: HashMap<Uuid, CrucibleServer>,
 }
 
 impl Zpool {
-    fn new(id: Uuid, physical_disk_id: Uuid, total_size: u64) -> Self {
+    fn new(id: ZpoolUuid, physical_disk_id: Uuid, total_size: u64) -> Self {
         Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
     }
 
@@ -547,7 +549,7 @@ pub struct Storage {
     config: Option<OmicronPhysicalDisksConfig>,
     physical_disks: HashMap<Uuid, PhysicalDisk>,
     next_disk_slot: i64,
-    zpools: HashMap<Uuid, Zpool>,
+    zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
 }
@@ -625,7 +627,7 @@ impl Storage {
     /// Adds a Zpool to the sled's simulated storage.
     pub async fn insert_zpool(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         disk_id: Uuid,
         size: u64,
     ) {
@@ -634,13 +636,13 @@ impl Storage {
     }
 
     /// Returns an immutable reference to all zpools
-    pub fn zpools(&self) -> &HashMap<Uuid, Zpool> {
+    pub fn zpools(&self) -> &HashMap<ZpoolUuid, Zpool> {
         &self.zpools
     }
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         // Update our local data
@@ -691,14 +693,17 @@ impl Storage {
         self.zpools
             .values()
             .map(|pool| nexus_client::types::ZpoolPutRequest {
-                id: pool.id,
+                id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
                 physical_disk_id: pool.physical_disk_id,
             })
             .collect()
     }
 
-    pub fn get_all_datasets(&self, zpool_id: Uuid) -> Vec<(Uuid, SocketAddr)> {
+    pub fn get_all_datasets(
+        &self,
+        zpool_id: ZpoolUuid,
+    ) -> Vec<(Uuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
@@ -710,7 +715,7 @@ impl Storage {
 
     pub async fn get_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.zpools

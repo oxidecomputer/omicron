@@ -16,7 +16,7 @@ publish = false
 [dependencies]
 ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
-anyhow = { version = "1.0.81", features = ["backtrace"] }
+anyhow = { version = "1.0.82", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.0" }
 bit-set = { version = "0.5.3" }
@@ -81,7 +81,7 @@ petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
-proc-macro2 = { version = "1.0.78" }
+proc-macro2 = { version = "1.0.79" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.4" }
@@ -100,7 +100,7 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.52", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.58", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.34", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.37.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -123,7 +123,7 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 [build-dependencies]
 ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
-anyhow = { version = "1.0.81", features = ["backtrace"] }
+anyhow = { version = "1.0.82", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.0" }
 bit-set = { version = "0.5.3" }
@@ -188,7 +188,7 @@ petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
-proc-macro2 = { version = "1.0.78" }
+proc-macro2 = { version = "1.0.79" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.4" }
@@ -207,7 +207,7 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.52", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.58", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.34", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.17", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.37.0", features = ["full", "test-util"] }

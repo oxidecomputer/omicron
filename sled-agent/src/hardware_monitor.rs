@@ -258,10 +258,13 @@ impl HardwareMonitor {
         } else {
             None
         };
+
         info!(
             self.log, "Checking current full hardware snapshot";
             "underlay_network_info" => ?underlay_network,
+            "disks" => ?self.hardware_manager.disks(),
         );
+
         if self.hardware_manager.is_scrimlet_driver_loaded() {
             self.activate_switch().await;
         } else {
