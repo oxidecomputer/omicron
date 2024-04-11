@@ -956,6 +956,7 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZonesConfig;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
@@ -970,6 +971,8 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::TypedUuid;
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -1241,13 +1244,22 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(SledBuilder::new().id(sled1.id()))
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled1.id())),
+            )
             .expect("failed to add sled1")
-            .sled(SledBuilder::new().id(sled2.id()))
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled2.id())),
+            )
             .expect("failed to add sled2")
-            .sled(SledBuilder::new().id(sled3.id()))
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled3.id())),
+            )
             .expect("failed to add sled3");
-        let policy = system.to_policy().expect("failed to make policy");
+        let planning_input = system
+            .to_planning_input_builder()
+            .expect("failed to make planning input")
+            .build();
         let mut inventory_builder = system
             .to_collection_builder()
             .expect("failed to make collection builder");
@@ -1439,7 +1451,7 @@ mod test {
             &inventory_builder.build(),
             *Generation::new(),
             *Generation::new(),
-            &policy,
+            planning_input.all_sled_ids(SledFilter::All),
             "test suite",
             (test_name, "initial blueprint"),
         )
@@ -1572,9 +1584,14 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(SledBuilder::new().id(sled.id()))
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
+            )
             .expect("failed to add sled");
-        let policy = system.to_policy().expect("failed to make policy");
+        let planning_input = system
+            .to_planning_input_builder()
+            .expect("failed to make planning input")
+            .build();
         let mut inventory_builder = system
             .to_collection_builder()
             .expect("failed to make collection builder");
@@ -1681,7 +1698,7 @@ mod test {
             &inventory_builder.build(),
             *Generation::new(),
             *Generation::new(),
-            &policy,
+            planning_input.all_sled_ids(SledFilter::All),
             "test suite",
             (test_name, "initial blueprint"),
         )
@@ -1813,9 +1830,14 @@ mod test {
 
         let mut system = SystemDescription::new();
         system
-            .sled(SledBuilder::new().id(sled.id()))
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
+            )
             .expect("failed to add sled");
-        let policy = system.to_policy().expect("failed to make policy");
+        let planning_input = system
+            .to_planning_input_builder()
+            .expect("failed to make planning input")
+            .build();
         let mut inventory_builder = system
             .to_collection_builder()
             .expect("failed to make collection builder");
@@ -1866,7 +1888,7 @@ mod test {
             &inventory_builder.build(),
             *Generation::new(),
             *Generation::new(),
-            &policy,
+            planning_input.all_sled_ids(SledFilter::All),
             "test suite",
             (test_name, "initial blueprint"),
         )
@@ -1906,9 +1928,14 @@ mod test {
         let mut system = SystemDescription::new();
         system
             .service_ip_pool_ranges(service_ip_pool_ranges.clone())
-            .sled(SledBuilder::new().id(sled.id()))
+            .sled(
+                SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
+            )
             .expect("failed to add sled");
-        let policy = system.to_policy().expect("failed to make policy");
+        let planning_input = system
+            .to_planning_input_builder()
+            .expect("failed to make planning input")
+            .build();
         let mut inventory_builder = system
             .to_collection_builder()
             .expect("failed to make collection builder");
@@ -1992,7 +2019,7 @@ mod test {
             &inventory_builder.build(),
             *Generation::new(),
             *Generation::new(),
-            &policy,
+            planning_input.all_sled_ids(SledFilter::All),
             "test suite",
             (test_name, "initial blueprint"),
         )

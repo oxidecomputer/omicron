@@ -1231,8 +1231,6 @@ mod tests {
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
-    use async_bb8_diesel::AsyncConnection;
-    use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SledUpdate;
     use nexus_test_utils::db::test_setup_database;
@@ -1807,7 +1805,7 @@ mod tests {
         datastore
             .service_create_network_interface_raw(
                 &opctx,
-                harness.db_services().nth(4).unwrap().1,
+                harness.db_nics().nth(4).unwrap(),
             )
             .await
             .expect("failed to insert service VNIC");
@@ -1879,35 +1877,6 @@ mod tests {
             .await
             .expect("failed to undo ineligible sleds");
 
-        // Clear out the service table entirely so we're only testing
-        // blueprints. (The services table is going to go away soon so this is
-        // an easy workaround for now.)
-        {
-            use db::schema::service::dsl;
-
-            let conn = datastore
-                .pool_connection_authorized(&opctx)
-                .await
-                .expect("getting a connection succeeded");
-            conn.transaction_async(|conn| async move {
-                // Need to do a full table scan for a full delete.
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .expect("allowing full table scan succeeded");
-
-                diesel::delete(dsl::service)
-                    .execute_async(&conn)
-                    .await
-                    .expect("failed to delete services");
-
-                Ok::<_, DieselError>(())
-            })
-            .await
-            .expect("transaction succeed");
-        }
-
         // Make a new blueprint marking one of the zones as quiesced and one as
         // expunged. Ensure that the sled with *quiesced* zone is returned by
         // vpc_resolve_to_sleds, but the sled with the *expunged* zone is not.
@@ -1926,6 +1895,15 @@ mod tests {
                     zones: vec![zone_config],
                 },
             );
+
+            // We never created a vNIC record for sled 1; do so now.
+            datastore
+                .service_create_network_interface_raw(
+                    &opctx,
+                    harness.db_nics().nth(1).unwrap(),
+                )
+                .await
+                .expect("failed to insert service VNIC");
 
             // Sled index 2's zone is quiesced (should be included).
             let (sled_id, mut zone_config) = iter.next().unwrap();
