@@ -1756,7 +1756,7 @@ mod test {
             observed_external_ips[&observed_zones[0].id].ip.ip(),
             if let OmicronZoneType::Nexus { external_ip, .. } = &blueprint
                 .all_omicron_zones(BlueprintZoneFilter::All)
-                .nth(0)
+                .next()
                 .unwrap()
                 .1
                 .zone_type
