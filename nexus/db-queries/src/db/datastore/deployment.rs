@@ -540,8 +540,7 @@ impl DataStore {
                                 d.id, d.sled_id
                             ))
                         })?;
-                    let disk = d.into_blueprint_disk_config();
-                    sled_disks.disks.push(disk);
+                    sled_disks.disks.push(d.into());
                 }
             }
         }

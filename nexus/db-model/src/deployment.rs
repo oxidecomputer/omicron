@@ -152,16 +152,18 @@ impl BpOmicronPhysicalDisk {
             pool_id: disk_config.pool_id,
         }
     }
+}
 
-    pub fn into_blueprint_disk_config(self) -> BlueprintPhysicalDiskConfig {
-        BlueprintPhysicalDiskConfig {
+impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
+    fn from(disk: BpOmicronPhysicalDisk) -> Self {
+        Self {
             identity: DiskIdentity {
-                vendor: self.vendor,
-                serial: self.serial,
-                model: self.model,
+                vendor: disk.vendor,
+                serial: disk.serial,
+                model: disk.model,
             },
-            id: self.id,
-            pool_id: self.pool_id,
+            id: disk.id,
+            pool_id: disk.pool_id,
         }
     }
 }
