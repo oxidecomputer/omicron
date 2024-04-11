@@ -742,8 +742,8 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
-            physical_disk_adoption.period_secs = 30
             phantom_disks.period_secs = 30
+            physical_disk_adoption.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
