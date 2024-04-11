@@ -6,7 +6,7 @@
 
 //! A registry for UUID kinds used in Omicron and related projects.
 //!
-//! See this crate's `README.md` for more information.
+//! See this crate's `README.adoc` for more information.
 
 // Export these types so that other users don't have to pull in newtype-uuid.
 #[doc(no_inline)]
