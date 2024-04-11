@@ -2570,6 +2570,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_disks": {
+            "description": "A map of sled id -> disks in use on each sled.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+            }
+          },
           "blueprint_zones": {
             "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
             "type": "object",
@@ -2619,6 +2626,7 @@
           }
         },
         "required": [
+          "blueprint_disks",
           "blueprint_zones",
           "comment",
           "creator",
@@ -3610,6 +3618,26 @@
           "histogram_u64",
           "histogram_f32",
           "histogram_f64"
+        ]
+      },
+      "DiskIdentity": {
+        "description": "Uniquely identifies a disk.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "vendor"
         ]
       },
       "DiskRuntimeState": {
@@ -5503,6 +5531,52 @@
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
+      },
+      "OmicronPhysicalDiskConfig": {
+        "description": "OmicronPhysicalDiskConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"identity\", \"pool_id\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"identity\": { \"$ref\": \"#/components/schemas/DiskIdentity\" }, \"pool_id\": { \"type\": \"string\", \"format\": \"uuid\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "pool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "identity",
+          "pool_id"
+        ]
+      },
+      "OmicronPhysicalDisksConfig": {
+        "description": "OmicronPhysicalDisksConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"disks\", \"generation\" ], \"properties\": { \"disks\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/OmicronPhysicalDiskConfig\" } }, \"generation\": { \"description\": \"generation number of this configuration\\n\\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\\n\\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Generation\" } ] } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
+          },
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disks",
+          "generation"
+        ]
       },
       "OmicronZoneConfig": {
         "description": "Describes one Omicron-managed zone running on a sled\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes one Omicron-managed zone running on a sled\", \"type\": \"object\", \"required\": [ \"id\", \"underlay_address\", \"zone_type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"underlay_address\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"zone_type\": { \"$ref\": \"#/components/schemas/OmicronZoneType\" } } } ``` </details>",
