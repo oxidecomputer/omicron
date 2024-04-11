@@ -66,7 +66,9 @@ pub enum Partition {
     ZfsPool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
 pub struct DiskPaths {
     // Full path to the disk under "/devices".
     // Should NOT end with a ":partition_letter".
@@ -137,7 +139,9 @@ impl DiskPaths {
 /// This exists as a distinct entity from `Disk` in `sled-storage` because it
 /// may be desirable to monitor for hardware in one context, and conform disks
 /// to partition layouts in a different context.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
 pub struct UnparsedDisk {
     paths: DiskPaths,
     slot: i64,

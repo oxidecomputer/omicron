@@ -531,8 +531,10 @@ impl StorageResources {
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) {
         info!(self.log, "Removing disk"; "identity" => ?id);
         let Some(entry) = self.disks.values.get(id) else {
+            info!(self.log, "Disk not found by id, exiting"; "identity" => ?id);
             return;
         };
+
         let synthetic = match entry {
             ManagedDisk::ExplicitlyManaged(disk)
             | ManagedDisk::ImplicitlyManaged(disk) => disk.is_synthetic(),
@@ -548,6 +550,7 @@ impl StorageResources {
                 // In production, we disallow removal of synthetic disks as they
                 // are only added once.
                 if synthetic {
+                    info!(self.log, "Not removing synthetic disk"; "identity" => ?id);
                     return;
                 }
             }
