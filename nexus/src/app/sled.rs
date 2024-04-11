@@ -246,7 +246,7 @@ impl super::Nexus {
             request.sled_id,
             request.physical_disk_id,
         );
-        self.db_datastore.zpool_upsert(&opctx, zpool).await?;
+        self.db_datastore.zpool_insert(&opctx, zpool).await?;
         Ok(())
     }
 

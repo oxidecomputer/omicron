@@ -1069,7 +1069,7 @@ impl<'a> BlueprintDisksBuilder<'a> {
                         generation: Generation::new(),
                         disks: vec![],
                     });
-                disks.disks.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+                disks.disks.sort_unstable_by_key(|d| d.id);
 
                 (sled_id, disks)
             })

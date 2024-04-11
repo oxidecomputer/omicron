@@ -750,7 +750,7 @@ impl DataStore {
                     info!(log, "Inserted physical disks");
 
                     for zpool in zpools {
-                        Self::zpool_upsert_on_connection(&conn, &opctx, zpool).await.map_err(
+                        Self::zpool_insert_on_connection(&conn, &opctx, zpool).await.map_err(
                             |e| {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
                                 err.set(RackInitError::ZpoolInsert(e)).unwrap();

@@ -469,7 +469,7 @@ impl DataStore {
                             // impossible and reflects either a bug or database
                             // corruption.
                             Error::internal_error(&format!(
-                                "zone {:?}: unknown sled: {:?}",
+                                "zone {}: unknown sled: {}",
                                 z.id, z.sled_id
                             ))
                         })?;
@@ -494,6 +494,12 @@ impl DataStore {
         for (_, zones_config) in blueprint_zones.iter_mut() {
             zones_config.sort();
         }
+
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
 
         // Load all the physical disks for each sled.
         {
@@ -530,7 +536,7 @@ impl DataStore {
                             // impossible and reflects either a bug or database
                             // corruption.
                             Error::internal_error(&format!(
-                                "disk {:?}: unknown sled: {:?}",
+                                "disk {}: unknown sled: {}",
                                 d.id, d.sled_id
                             ))
                         })?;
@@ -540,16 +546,10 @@ impl DataStore {
             }
         }
 
-        // Sort all zones to match what blueprint builders do.
+        // Sort all disks to match what blueprint builders do.
         for (_, disks_config) in blueprint_disks.iter_mut() {
-            disks_config.disks.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+            disks_config.disks.sort_unstable_by_key(|d| d.id);
         }
-
-        bail_unless!(
-            omicron_zone_nics.is_empty(),
-            "found extra Omicron zone NICs: {:?}",
-            omicron_zone_nics.keys()
-        );
 
         Ok(Blueprint {
             id: blueprint_id,

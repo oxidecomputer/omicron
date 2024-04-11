@@ -33,17 +33,17 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn zpool_upsert(
+    pub async fn zpool_insert(
         &self,
         opctx: &OpContext,
         zpool: Zpool,
     ) -> CreateResult<Zpool> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        Self::zpool_upsert_on_connection(&conn, opctx, zpool).await
+        Self::zpool_insert_on_connection(&conn, opctx, zpool).await
     }
 
     /// Stores a new zpool in the database.
-    pub async fn zpool_upsert_on_connection(
+    pub async fn zpool_insert_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         zpool: Zpool,

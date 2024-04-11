@@ -12,19 +12,20 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_sled_policy;
+use crate::db::model::ApplySledFilterExt;
 use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskKind;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
+use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -35,6 +36,46 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
+    /// Inserts a physical disk and zpool together in a transaction
+    pub async fn physical_disk_and_zpool_insert(
+        &self,
+        opctx: &OpContext,
+        disk: PhysicalDisk,
+        zpool: Zpool,
+    ) -> Result<(), Error> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("physical_disk_adoption")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let disk = disk.clone();
+                let zpool = zpool.clone();
+                async move {
+                    // TODO: These functions need to retry diesel errors
+                    // in order to actually propagate retry errors
+
+                    Self::physical_disk_insert_on_connection(
+                        &conn, opctx, disk,
+                    )
+                    .await
+                    .map_err(|e| err.bail(e))?;
+                    Self::zpool_insert_on_connection(&conn, opctx, zpool)
+                        .await
+                        .map_err(|e| err.bail(e))?;
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+        Ok(())
+    }
+
     /// Stores a new physical disk in the database.
     ///
     /// - If the Vendor, Serial, and Model fields are the same as an existing
@@ -70,9 +111,13 @@ impl DataStore {
                 type_name: ResourceType::Sled,
                 lookup_type: LookupType::ById(sled_id),
             },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::PhysicalDisk,
+                    &disk.id().to_string(),
+                ),
+            ),
         })?;
 
         Ok(disk_in_db)
@@ -135,27 +180,9 @@ impl DataStore {
         use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::sled::dsl as sled_dsl;
 
-        // This is kind of frustrating - we'd like to be able to apply this
-        // condition to all "in service" sleds, regardless of provisionability,
-        // but the sled policy crate explicitly avoids exporting that type.
-        //
-        // As a workaround, we must create the corresponding external types
-        // and manually convert them back into the database types.
-        let in_service = to_db_sled_policy(SledPolicy::InService {
-            provision_policy: SledProvisionPolicy::Provisionable,
-        });
-        let in_service_non_provisionable =
-            to_db_sled_policy(SledPolicy::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            });
-
         sled_dsl::sled
             // If the sled is not in-service, drop the list immediately.
-            .filter(
-                sled_dsl::sled_policy
-                    .eq(in_service)
-                    .or(sled_dsl::sled_policy.eq(in_service_non_provisionable)),
-            )
+            .sled_filter(SledFilter::InService)
             // Look up all inventory physical disks that could match this sled
             .inner_join(
                 inv_physical_disk_dsl::inv_physical_disk.on(

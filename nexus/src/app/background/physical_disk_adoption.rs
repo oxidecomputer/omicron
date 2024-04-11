@@ -15,6 +15,7 @@ use super::common::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::PhysicalDisk;
+use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::inventory::Collection;
@@ -57,12 +58,12 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 return json!({ "error": "no inventory" });
             };
 
-            for (id, _) in collection.sled_agents {
+            for (sled_id, _) in collection.sled_agents {
                 // TODO: Make sure "not found" doesn't stop execution
                 let result = self.datastore.physical_disk_uninitialized_list(
                     opctx,
                     collection.id,
-                    id,
+                    sled_id,
                 ).await;
 
                 let uninitialized = match result {
@@ -87,15 +88,27 @@ impl BackgroundTask for PhysicalDiskAdoption {
                         inv_disk.sled_id,
                     );
 
-                    let result = self.datastore.physical_disk_insert(opctx, disk).await;
+                    let zpool = Zpool::new(
+                        Uuid::new_v4(),
+                        sled_id,
+                        disk.id()
+                    );
+
+                    let result = self.datastore.physical_disk_and_zpool_insert(
+                        opctx,
+                        disk,
+                        zpool
+                    ).await;
+
                     if let Err(err) = result {
                         warn!(
                             &opctx.log,
-                            "Physical Disk Adoption: failed to insert new disk";
-                            "err" => %err,
+                            "Physical Disk Adoption: failed to insert new disk and zpool";
+                            "err" => %err
                         );
-                        return json!({ "error": format!("failed to insert into database: {:#}", err) });
+                        return json!({ "error": format!("failed to insert disk/zpool: {:#}", err) });
                     }
+
                     disks_added += 1;
                 }
             }
