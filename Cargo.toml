@@ -627,9 +627,9 @@ opt-level = 3
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #propolis-mock-server = { path = "../propolis/bin/mock-server" }
 #[patch."https://github.com/oxidecomputer/crucible"]
-#crucible-agent-client = { path = "../dsdrop/agent-client" }
-#crucible-pantry-client = { path = "../dsdrop/pantry-client" }
-#crucible-smf = { path = "../dsdrop/smf" }
+#crucible-agent-client = { path = "../crucible/agent-client" }
+#crucible-pantry-client = { path = "../crucible/pantry-client" }
+#crucible-smf = { path = "../crucible/smf" }
 #[patch.crates-io]
 #diesel = { path = "../../diesel/diesel" }
 #[patch."https://github.com/oxidecomputer/diesel-dtrace"]
