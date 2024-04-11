@@ -7,8 +7,8 @@ The virtual hardware making up SoftNPU is depicted in the diagram below.
 
 image::plumbing.png[]
 
-The `softnpu` zone will be configured and launched during the
-`create_virtual_hardware.sh` script.
+The `softnpu` zone will be configured and launched during
+`cargo xtask virtual-hardware create`.
 
 Once the control plane is running, `softnpu` can be configured via `dendrite`
 using the `swadm` binary located in the `oxz_switch` zone. This is not necessary

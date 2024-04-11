@@ -340,3 +340,67 @@ impl SledReservationConstraintBuilder {
         self.constraints
     }
 }
+
+mod diesel_util {
+    use crate::{
+        schema::sled::{sled_policy, sled_state},
+        sled_policy::DbSledPolicy,
+        to_db_sled_policy,
+    };
+    use diesel::{
+        helper_types::{And, EqAny},
+        prelude::*,
+        query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::{
+        deployment::SledFilter,
+        external_api::views::{SledPolicy, SledState},
+    };
+
+    /// An extension trait to apply a [`SledFilter`] to a Diesel expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the `sled`
+    /// table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbSledPolicy` type which is private to this crate.
+    pub trait ApplySledFilterExt {
+        type Output;
+
+        /// Applies a [`SledFilter`] to a Diesel expression.
+        fn sled_filter(self, filter: SledFilter) -> Self::Output;
+    }
+
+    impl<E> ApplySledFilterExt for E
+    where
+        E: FilterDsl<SledFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn sled_filter(self, filter: SledFilter) -> Self::Output {
+            use crate::schema::sled::dsl as sled_dsl;
+
+            // These are only boxed for ease of reference above.
+            let all_matching_policies: BoxedIterator<DbSledPolicy> = Box::new(
+                SledPolicy::all_matching(filter).map(to_db_sled_policy),
+            );
+            let all_matching_states: BoxedIterator<crate::SledState> =
+                Box::new(SledState::all_matching(filter).map(Into::into));
+
+            FilterDsl::filter(
+                self,
+                sled_dsl::sled_policy
+                    .eq_any(all_matching_policies)
+                    .and(sled_dsl::sled_state.eq_any(all_matching_states)),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type SledFilterQuery = And<
+        EqAny<sled_policy, BoxedIterator<DbSledPolicy>>,
+        EqAny<sled_state, BoxedIterator<crate::SledState>>,
+    >;
+}
+
+pub use diesel_util::ApplySledFilterExt;

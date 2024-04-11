@@ -10,7 +10,9 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledResources;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -28,6 +30,10 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
@@ -42,8 +48,8 @@ impl<T> SubnetIterator for T where
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
-/// From this description, you can extract a `Policy` or inventory `Collection`.
-/// There are a few intended purposes here:
+/// From this description, you can extract a `PlanningInput` or inventory
+/// `Collection`. There are a few intended purposes here:
 ///
 /// 1. to easily construct fake racks in automated tests for the Planner and
 ///    other parts of Reconfigurator
@@ -59,12 +65,14 @@ impl<T> SubnetIterator for T where
 #[derive(Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: IndexMap<Uuid, Sled>,
+    sleds: IndexMap<TypedUuid<SledKind>, Sled>,
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
+    internal_dns_version: Generation,
+    external_dns_version: Generation,
 }
 
 impl SystemDescription {
@@ -124,6 +132,8 @@ impl SystemDescription {
             available_scrimlet_slots,
             target_nexus_zone_count,
             service_ip_pool_ranges,
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
         }
     }
 
@@ -171,7 +181,7 @@ impl SystemDescription {
 
     /// Add a sled to the system, as described by a SledBuilder
     pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
-        let sled_id = sled.id.unwrap_or_else(Uuid::new_v4);
+        let sled_id = sled.id.unwrap_or_else(TypedUuid::new_v4);
         ensure!(
             !self.sleds.contains_key(&sled_id),
             "attempted to add sled with the same id as an existing one: {}",
@@ -222,7 +232,8 @@ impl SystemDescription {
     /// database of an existing system
     pub fn sled_full(
         &mut self,
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
+        sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inventory_sled_agent: &nexus_types::inventory::SledAgent,
@@ -236,6 +247,7 @@ impl SystemDescription {
             sled_id,
             Sled::new_full(
                 sled_id,
+                sled_policy,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
@@ -275,26 +287,36 @@ impl SystemDescription {
         Ok(builder)
     }
 
-    pub fn to_policy(&self) -> anyhow::Result<Policy> {
-        let sleds = self
-            .sleds
-            .values()
-            .map(|sled| {
-                let sled_resources = SledResources {
-                    policy: sled.policy,
-                    state: SledState::Active,
-                    zpools: sled.zpools.iter().cloned().collect(),
-                    subnet: sled.sled_subnet,
-                };
-                (sled.sled_id, sled_resources)
-            })
-            .collect();
-
-        Ok(Policy {
-            sleds,
+    /// Construct a [`PlanningInputBuilder`] primed with all this system's sleds
+    ///
+    /// Does not populate extra information like Omicron zone external IPs or
+    /// NICs.
+    pub fn to_planning_input_builder(
+        &self,
+    ) -> anyhow::Result<PlanningInputBuilder> {
+        let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
-        })
+        };
+        let mut builder = PlanningInputBuilder::new(
+            policy,
+            self.internal_dns_version,
+            self.external_dns_version,
+        );
+
+        for sled in self.sleds.values() {
+            let sled_details = SledDetails {
+                policy: sled.policy,
+                state: SledState::Active,
+                resources: SledResources {
+                    zpools: sled.zpools.iter().cloned().collect(),
+                    subnet: sled.sled_subnet,
+                },
+            };
+            builder.add_sled(sled.sled_id, sled_details)?;
+        }
+
+        Ok(builder)
     }
 }
 
@@ -308,7 +330,7 @@ pub enum SledHardware {
 
 #[derive(Clone, Debug)]
 pub struct SledBuilder {
-    id: Option<Uuid>,
+    id: Option<TypedUuid<SledKind>>,
     unique: Option<String>,
     hardware: SledHardware,
     hardware_slot: Option<u16>,
@@ -332,7 +354,7 @@ impl SledBuilder {
     /// Set the id of the sled
     ///
     /// Default: randomly generated
-    pub fn id(mut self, id: Uuid) -> Self {
+    pub fn id(mut self, id: TypedUuid<SledKind>) -> Self {
         self.id = Some(id);
         self
     }
@@ -391,10 +413,11 @@ pub struct SledHwInventory<'a> {
 
 /// Our abstract description of a `Sled`
 ///
-/// This needs to be rich enough to generate a Policy and inventory Collection.
+/// This needs to be rich enough to generate a PlanningInput and inventory
+/// Collection.
 #[derive(Clone, Debug)]
 struct Sled {
-    sled_id: Uuid,
+    sled_id: TypedUuid<SledKind>,
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
@@ -405,7 +428,7 @@ struct Sled {
 impl Sled {
     /// Create a `Sled` using faked-up information based on a `SledBuilder`
     fn new_simulated(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_role: SledRole,
         unique: Option<String>,
@@ -472,7 +495,7 @@ impl Sled {
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
-                sled_id,
+                sled_id: sled_id.into_untyped_uuid(),
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
                 disks: vec![],
@@ -495,7 +518,8 @@ impl Sled {
     /// Create a `Sled` based on real information from another `Policy` and
     /// inventory `Collection`
     fn new_full(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
+        sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inv_sled_agent: &nexus_types::inventory::SledAgent,
@@ -555,7 +579,7 @@ impl Sled {
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address.to_string(),
-            sled_id,
+            sled_id: sled_id.into_untyped_uuid(),
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             disks: vec![],
@@ -568,7 +592,7 @@ impl Sled {
             zpools: sled_resources.zpools.into_iter().collect(),
             inventory_sp,
             inventory_sled_agent,
-            policy: sled_resources.policy,
+            policy: sled_policy,
         }
     }
 

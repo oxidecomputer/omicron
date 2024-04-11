@@ -407,7 +407,7 @@ impl DataStore {
 
         let detached_label = api::external::DiskState::Detached.label();
         let ok_to_detach_disk_states =
-            vec![api::external::DiskState::Attached(authz_instance.id())];
+            [api::external::DiskState::Attached(authz_instance.id())];
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 

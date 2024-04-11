@@ -9,6 +9,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -1375,7 +1376,13 @@ async fn test_volume_remove_read_only_parent_base(
 
     // Go and get the volume from the database, verify it no longer
     // has a read only parent.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1394,7 +1401,13 @@ async fn test_volume_remove_read_only_parent_base(
     }
 
     // Verify the t_vid now has a ROP.
-    let new_vol = datastore.volume_checkout(t_vid).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            t_vid,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1421,7 +1434,13 @@ async fn test_volume_remove_read_only_parent_base(
     // We want to verify we can call volume_remove_rop twice and the second
     // time through it won't change what it did the first time. This is
     // critical to supporting replay of the saga, should it be needed.
-    let new_vol = datastore.volume_checkout(t_vid).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            t_vid,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1570,7 +1589,13 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1628,7 +1653,13 @@ async fn test_volume_remove_rop_saga_twice(
         .unwrap();
 
     println!("first returns {:?}", res);
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1762,7 +1793,13 @@ async fn test_volume_remove_rop_saga_deleted_volume(
         .await
         .unwrap();
 
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1811,11 +1848,23 @@ async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
 
     // The first time back, we get 1 but internally the generation number goes
     // to 2.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(1)]);
 
     // Request again, we should get 2 now.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(2)]);
 }
 
@@ -1853,9 +1902,21 @@ async fn test_volume_checkout_updates_nothing(
         .unwrap();
 
     // Verify nothing happens to our non generation number volume.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![None]);
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![None]);
 }
 
@@ -1894,15 +1955,33 @@ async fn test_volume_checkout_updates_multiple_gen(
 
     // The first time back, we get our original values, but internally the
     // generation number goes up.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(3), Some(8)]);
 
     // Request again, we should see the incremented values now..
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(4), Some(9)]);
 
     // Request one more, because why not.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(5), Some(10)]);
 }
 
@@ -1947,11 +2026,23 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
 
     // The first time back, we get our original values, but internally the
     // generation number goes up.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![None, Some(7), Some(9)]);
 
     // Request again, we should see the incremented values now..
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![None, Some(8), Some(10)]);
 }
 
@@ -1996,11 +2087,23 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
 
     // The first time back, we get our original values, but internally the
     // generation number goes up.
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(7), None, Some(9)]);
 
     // Request again, we should see the incremented values now..
-    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    let new_vol = datastore
+        .volume_checkout(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await
+        .unwrap();
     volume_match_gen(new_vol, vec![Some(8), None, Some(10)]);
 }
 
@@ -2038,7 +2141,12 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
         .unwrap();
 
     // volume_checkout_randomize_ids should fail
-    let r = datastore.volume_checkout_randomize_ids(volume_id).await;
+    let r = datastore
+        .volume_checkout_randomize_ids(
+            volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
+        .await;
     assert!(r.is_err());
 }
 

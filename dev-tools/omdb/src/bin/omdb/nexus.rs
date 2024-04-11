@@ -9,6 +9,7 @@ use crate::db::DbUrlOptions;
 use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -23,6 +24,7 @@ use nexus_client::types::LastResult;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::BaseboardId;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
@@ -94,6 +96,8 @@ enum BlueprintsCommands {
     GenerateFromCollection(CollectionIdArgs),
     /// Generate a new blueprint
     Regenerate,
+    /// Import a blueprint
+    Import(BlueprintImportArgs),
 }
 
 #[derive(Debug, Args)]
@@ -154,6 +158,12 @@ enum BlueprintTargetSetEnabled {
     Disabled,
     /// use the enabled setting from the parent blueprint
     Inherit,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintImportArgs {
+    /// path to a file containing a JSON-serialized blueprint
+    input: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -300,6 +310,12 @@ impl NexusArgs {
                     &client, args, token,
                 )
                 .await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::Import(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_import(&client, token, args).await
             }
 
             NexusCommands::Sleds(SledsArgs {
@@ -573,7 +589,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
                 let server_results = &details.server_results;
 
-                if server_results.len() != 0 {
+                if !server_results.is_empty() {
                     let rows = server_results.iter().map(|(addr, result)| {
                         DnsPropRow {
                             dns_server_addr: addr,
@@ -697,7 +713,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
                 println!("");
                 println!("    TLS certificates: {}", tls_cert_rows.len());
-                if tls_cert_rows.len() > 0 {
+                if !tls_cert_rows.is_empty() {
                     let table = tabled::Table::new(tls_cert_rows)
                         .with(tabled::settings::Style::empty())
                         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -1088,6 +1104,24 @@ async fn cmd_nexus_blueprints_regenerate(
     let blueprint =
         client.blueprint_regenerate().await.context("generating blueprint")?;
     eprintln!("generated new blueprint {}", blueprint.id);
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_import(
+    client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
+    args: &BlueprintImportArgs,
+) -> Result<(), anyhow::Error> {
+    let input_path = &args.input;
+    let contents = std::fs::read_to_string(input_path)
+        .with_context(|| format!("open {:?}", input_path))?;
+    let blueprint: Blueprint = serde_json::from_str(&contents)
+        .with_context(|| format!("read {:?}", input_path))?;
+    client
+        .blueprint_import(&blueprint)
+        .await
+        .with_context(|| format!("upload {:?}", input_path))?;
+    eprintln!("uploaded new blueprint {}", blueprint.id);
     Ok(())
 }
 

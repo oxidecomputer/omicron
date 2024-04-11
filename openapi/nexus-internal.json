@@ -489,6 +489,34 @@
         }
       }
     },
+    "/deployment/blueprints/import": {
+      "post": {
+        "summary": "Imports a client-provided blueprint",
+        "description": "This is intended for development and support, not end users or operators.",
+        "operationId": "blueprint_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Blueprint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/blueprints/regenerate": {
       "post": {
         "summary": "Generates a new blueprint for the current system, re-evaluating anything",
@@ -2758,6 +2786,13 @@
             "type": "string",
             "enum": [
               "quiesced"
+            ]
+          },
+          {
+            "description": "The zone is permanently gone.",
+            "type": "string",
+            "enum": [
+              "expunged"
             ]
           }
         ]

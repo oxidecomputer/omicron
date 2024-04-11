@@ -113,10 +113,11 @@ pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
+pub use volume::VolumeCheckoutReason;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
-pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
@@ -945,7 +946,7 @@ mod test {
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -1038,7 +1039,7 @@ mod test {
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -1125,7 +1126,7 @@ mod test {
             let volume_id = Uuid::new_v4();
 
             let err = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -1170,7 +1171,7 @@ mod test {
         );
         let volume_id = Uuid::new_v4();
         let mut dataset_and_regions1 = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume_id,
                 &params.disk_source,
@@ -1183,7 +1184,7 @@ mod test {
         // Use a different allocation ordering to ensure we're idempotent even
         // if the shuffle changes.
         let mut dataset_and_regions2 = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume_id,
                 &params.disk_source,
@@ -1278,7 +1279,7 @@ mod test {
         );
         let volume1_id = Uuid::new_v4();
         let err = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,
@@ -1301,7 +1302,7 @@ mod test {
             add_test_zpool_to_inventory(&datastore, zpool_id, sled_id).await;
         }
         datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,
@@ -1377,7 +1378,7 @@ mod test {
         );
         let volume1_id = Uuid::new_v4();
         let err = datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,
@@ -1487,7 +1488,7 @@ mod test {
                 .unwrap();
 
             let result = datastore
-                .region_allocate(
+                .disk_region_allocate(
                     &opctx,
                     volume_id,
                     &params.disk_source,
@@ -1536,7 +1537,7 @@ mod test {
         let volume1_id = Uuid::new_v4();
 
         assert!(datastore
-            .region_allocate(
+            .disk_region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,

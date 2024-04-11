@@ -15,10 +15,15 @@ use indexmap::IndexMap;
 use nexus_reconfigurator_execution::blueprint_external_dns_config;
 use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
@@ -26,9 +31,13 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneKind, TypedUuid};
 use reedline::{Reedline, Signal};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::BufRead;
+use std::net::IpAddr;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -49,6 +58,14 @@ struct ReconfiguratorSim {
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
 
+    /// external IPs allocated to services
+    ///
+    /// In the real system, external IPs have IDs, but those IDs only live in
+    /// CRDB - they're not part of the zone config sent from Reconfigurator to
+    /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
+    /// we need.
+    external_ips: RefCell<IndexMap<IpAddr, Uuid>>,
+
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
     /// external DNS configurations
@@ -66,6 +83,100 @@ struct ReconfiguratorSim {
     num_nexus: Option<u16>,
 
     log: slog::Logger,
+}
+
+impl ReconfiguratorSim {
+    fn blueprint_lookup(&self, id: Uuid) -> Result<&Blueprint, anyhow::Error> {
+        self.blueprints
+            .get(&id)
+            .ok_or_else(|| anyhow!("no such blueprint: {}", id))
+    }
+
+    fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
+        let previous = self.blueprints.insert(blueprint.id, blueprint);
+        assert!(previous.is_none());
+    }
+
+    fn blueprint_insert_loaded(
+        &mut self,
+        blueprint: Blueprint,
+    ) -> Result<(), anyhow::Error> {
+        let entry = self.blueprints.entry(blueprint.id);
+        if let indexmap::map::Entry::Occupied(_) = &entry {
+            return Err(anyhow!("blueprint already exists: {}", blueprint.id));
+        }
+        let _ = entry.or_insert(blueprint);
+        Ok(())
+    }
+
+    fn planning_input(
+        &self,
+        parent_blueprint: &Blueprint,
+    ) -> anyhow::Result<PlanningInput> {
+        let mut builder = self
+            .system
+            .to_planning_input_builder()
+            .context("generating planning input builder")?;
+
+        // The internal and external DNS numbers that go here are supposed to be
+        // the _current_ internal and external DNS generations at the point
+        // when planning happened.  This is racy (these generations can change
+        // immediately after they're fetched from the database) but correctness
+        // only requires that the values here be *no newer* than the real
+        // values so it's okay if the real values get changed.
+        //
+        // The problem is we have no real system here to fetch these values
+        // from.  What should the value be?
+        //
+        // - If we assume that the parent blueprint here was successfully
+        //   executed immediately before generating this plan, then the values
+        //   here should come from the generation number produced by executing
+        //   the parent blueprint.
+        //
+        // - If the parent blueprint was never executed, or execution is still
+        //   in progress, or if other blueprints have been executed in the
+        //   meantime that changed DNS, then the values here could be different
+        //   (older if the blueprint was never executed or is currently
+        //   executing and newer if other blueprints have changed DNS in the
+        //   meantime).
+        //
+        // But in this CLI, there's no execution at all.  As a result, there's
+        // no way to really choose between these -- and it doesn't really
+        // matter, either.  We'll just pick the parent blueprint's.
+        builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
+        builder.set_external_dns_version(parent_blueprint.external_dns_version);
+
+        for (_, zone) in parent_blueprint.all_omicron_zones() {
+            let zone_id =
+                TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+            if let Ok(Some(ip)) = zone.zone_type.external_ip() {
+                let external_ip = ExternalIp {
+                    id: *self
+                        .external_ips
+                        .borrow_mut()
+                        .entry(ip)
+                        .or_insert_with(Uuid::new_v4),
+                    ip: ip.into(),
+                };
+                builder
+                    .add_omicron_zone_external_ip(zone_id, external_ip)
+                    .context("adding omicron zone external IP")?;
+            }
+            if let Some(nic) = zone.zone_type.service_vnic() {
+                let nic = ServiceNetworkInterface {
+                    id: nic.id,
+                    mac: nic.mac,
+                    ip: nic.ip.into(),
+                    slot: nic.slot,
+                    primary: nic.primary,
+                };
+                builder
+                    .add_omicron_zone_nic(zone_id, nic)
+                    .context("adding omicron zone NIC")?;
+            }
+        }
+        Ok(builder.build())
+    }
 }
 
 /// interactive REPL for exploring the planner
@@ -89,6 +200,7 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
+        external_ips: RefCell::new(IndexMap::new()),
         internal_dns: BTreeMap::new(),
         external_dns: BTreeMap::new(),
         log,
@@ -200,6 +312,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintFromInventory(args) => {
             cmd_blueprint_from_inventory(sim, args)
         }
+        Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
@@ -207,6 +320,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintDiffInventory(args) => {
             cmd_blueprint_diff_inventory(sim, args)
         }
+        Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
@@ -259,6 +373,8 @@ enum Commands {
     BlueprintFromInventory(InventoryArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
+    /// edit contents of a blueprint directly
+    BlueprintEdit(BlueprintEditArgs),
     /// show details about a blueprint
     BlueprintShow(BlueprintArgs),
     /// show differences between two blueprints
@@ -267,6 +383,8 @@ enum Commands {
     BlueprintDiffDns(BlueprintDiffDnsArgs),
     /// show differences between a blueprint and an inventory collection
     BlueprintDiffInventory(BlueprintDiffInventoryArgs),
+    /// write one blueprint to a file
+    BlueprintSave(BlueprintSaveArgs),
 
     /// show system properties
     Show,
@@ -285,13 +403,13 @@ enum Commands {
 #[derive(Debug, Args)]
 struct SledAddArgs {
     /// id of the new sled
-    sled_id: Option<Uuid>,
+    sled_id: Option<TypedUuid<SledKind>>,
 }
 
 #[derive(Debug, Args)]
 struct SledArgs {
     /// id of the sled
-    sled_id: Uuid,
+    sled_id: TypedUuid<SledKind>,
 }
 
 #[derive(Debug, Args)]
@@ -312,6 +430,29 @@ struct BlueprintPlanArgs {
     parent_blueprint_id: Uuid,
     /// id of the inventory collection to use in planning
     collection_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintEditArgs {
+    /// id of the blueprint to edit
+    blueprint_id: Uuid,
+    /// "creator" field for the new blueprint
+    #[arg(long)]
+    creator: Option<String>,
+    /// "comment" field for the new blueprint
+    #[arg(long)]
+    comment: Option<String>,
+    #[command(subcommand)]
+    edit_command: BlueprintEditCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintEditCommands {
+    /// add a Nexus instance to a particular sled
+    AddNexus {
+        /// sled on which to deploy the new instance
+        sled_id: TypedUuid<SledKind>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -342,6 +483,14 @@ struct BlueprintDiffInventoryArgs {
     collection_id: Uuid,
     /// id of the blueprint
     blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintSaveArgs {
+    /// id of the blueprint
+    blueprint_id: Uuid,
+    /// output file
+    filename: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -424,17 +573,23 @@ fn cmd_sled_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
-        id: Uuid,
+        id: TypedUuid<SledKind>,
         nzpools: usize,
         subnet: String,
     }
 
-    let policy = sim.system.to_policy().context("failed to generate policy")?;
-    let rows = policy.sleds.iter().map(|(sled_id, sled_resources)| Sled {
-        id: *sled_id,
-        subnet: sled_resources.subnet.net().to_string(),
-        nzpools: sled_resources.zpools.len(),
-    });
+    let planning_input = sim
+        .system
+        .to_planning_input_builder()
+        .context("failed to generate planning input")?
+        .build();
+    let rows = planning_input.all_sled_resources(SledFilter::All).map(
+        |(sled_id, sled_resources)| Sled {
+            id: sled_id,
+            subnet: sled_resources.subnet.net().to_string(),
+            nzpools: sled_resources.zpools.len(),
+        },
+    );
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -459,12 +614,15 @@ fn cmd_sled_show(
     sim: &mut ReconfiguratorSim,
     args: SledArgs,
 ) -> anyhow::Result<Option<String>> {
-    let policy = sim.system.to_policy().context("failed to generate policy")?;
+    let planning_input = sim
+        .system
+        .to_planning_input_builder()
+        .context("failed to generate planning_input builder")?
+        .build();
     let sled_id = args.sled_id;
-    let sled_resources = policy
-        .sleds
-        .get(&sled_id)
-        .ok_or_else(|| anyhow!("no sled with id {:?}", sled_id))?;
+    let sled_resources = planning_input
+        .sled_resources(&sled_id)
+        .ok_or_else(|| anyhow!("no sled with id {sled_id}"))?;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
@@ -511,12 +669,13 @@ fn cmd_inventory_generate(
         sim.system.to_collection_builder().context("generating inventory")?;
     // For an inventory we just generated from thin air, pretend like each sled
     // has no zones on it.
-    let sled_ids = sim.system.to_policy().unwrap().sleds.into_keys();
-    for sled_id in sled_ids {
+    let planning_input =
+        sim.system.to_planning_input_builder().unwrap().build();
+    for sled_id in planning_input.all_sled_ids(SledFilter::All) {
         builder
             .found_sled_omicron_zones(
                 "fake sled agent",
-                sled_id,
+                *sled_id.as_untyped_uuid(),
                 OmicronZonesConfig {
                     generation: Generation::new(),
                     zones: vec![],
@@ -563,13 +722,17 @@ fn cmd_blueprint_from_inventory(
         .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
     let dns_version = Generation::new();
-    let policy = sim.system.to_policy().context("generating policy")?;
+    let planning_input = sim
+        .system
+        .to_planning_input_builder()
+        .context("generating planning_input builder")?
+        .build();
     let creator = "reconfigurator-sim";
     let blueprint = BlueprintBuilder::build_initial_from_collection(
         collection,
         dns_version,
         dns_version,
-        &policy,
+        planning_input.all_sled_ids(SledFilter::All),
         creator,
     )
     .context("building collection")?;
@@ -577,7 +740,7 @@ fn cmd_blueprint_from_inventory(
         "generated blueprint {} from inventory collection {}",
         blueprint.id, collection_id
     );
-    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.blueprint_insert_new(blueprint);
     Ok(Some(rv))
 }
 
@@ -587,48 +750,17 @@ fn cmd_blueprint_plan(
 ) -> anyhow::Result<Option<String>> {
     let parent_blueprint_id = args.parent_blueprint_id;
     let collection_id = args.collection_id;
-    let parent_blueprint = sim
-        .blueprints
-        .get(&parent_blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", parent_blueprint_id))?;
+    let parent_blueprint = sim.blueprint_lookup(parent_blueprint_id)?;
     let collection = sim
         .collections
         .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-    let policy = sim.system.to_policy().context("generating policy")?;
     let creator = "reconfigurator-sim";
-
+    let planning_input = sim.planning_input(parent_blueprint)?;
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
-        // The internal and external DNS numbers that go here are supposed to be
-        // the _current_ internal and external DNS generations at the point
-        // when planning happened.  This is racy (these generations can change
-        // immediately after they're fetched from the database) but correctness
-        // only requires that the values here be *no newer* than the real
-        // values so it's okay if the real values get changed.
-        //
-        // The problem is we have no real system here to fetch these values
-        // from.  What should the value be?
-        //
-        // - If we assume that the parent blueprint here was successfully
-        //   executed immediately before generating this plan, then the values
-        //   here should come from the generation number produced by executing
-        //   the parent blueprint.
-        //
-        // - If the parent blueprint was never executed, or execution is still
-        //   in progress, or if other blueprints have been executed in the
-        //   meantime that changed DNS, then the values here could be different
-        //   (older if the blueprint was never executed or is currently
-        //   executing and newer if other blueprints have changed DNS in the
-        //   meantime).
-        //
-        // But in this CLI, there's no execution at all.  As a result, there's
-        // no way to really choose between these -- and it doesn't really
-        // matter, either.  We'll just pick the parent blueprint's.
-        parent_blueprint.internal_dns_version,
-        parent_blueprint.external_dns_version,
-        &policy,
+        &planning_input,
         creator,
         collection,
     )
@@ -638,7 +770,47 @@ fn cmd_blueprint_plan(
         "generated blueprint {} based on parent blueprint {}",
         blueprint.id, parent_blueprint_id,
     );
-    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.blueprint_insert_new(blueprint);
+    Ok(Some(rv))
+}
+
+fn cmd_blueprint_edit(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintEditArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+    let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
+    let planning_input = sim.planning_input(blueprint)?;
+    let mut builder = BlueprintBuilder::new_based_on(
+        &sim.log,
+        blueprint,
+        &planning_input,
+        creator,
+    )
+    .context("creating blueprint builder")?;
+
+    if let Some(comment) = args.comment {
+        builder.comment(comment);
+    }
+
+    let label = match args.edit_command {
+        BlueprintEditCommands::AddNexus { sled_id } => {
+            let current = builder.sled_num_nexus_zones(sled_id);
+            let added = builder
+                .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
+                .context("failed to add Nexus zone")?;
+            assert_matches::assert_matches!(added, EnsureMultiple::Added(1));
+            format!("added Nexus zone to sled {}", sled_id)
+        }
+    };
+
+    let new_blueprint = builder.build();
+    let rv = format!(
+        "blueprint {} created from blueprint {}: {}",
+        new_blueprint.id, blueprint_id, label
+    );
+    sim.blueprint_insert_new(new_blueprint);
     Ok(Some(rv))
 }
 
@@ -646,10 +818,7 @@ fn cmd_blueprint_show(
     sim: &mut ReconfiguratorSim,
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
-    let blueprint = sim
-        .blueprints
-        .get(&args.blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", args.blueprint_id))?;
+    let blueprint = sim.blueprint_lookup(args.blueprint_id)?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -660,14 +829,8 @@ fn cmd_blueprint_diff(
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
     let blueprint2_id = args.blueprint2_id;
-    let blueprint1 = sim
-        .blueprints
-        .get(&blueprint1_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
-    let blueprint2 = sim
-        .blueprints
-        .get(&blueprint2_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
+    let blueprint1 = sim.blueprint_lookup(blueprint1_id)?;
+    let blueprint2 = sim.blueprint_lookup(blueprint2_id)?;
 
     let sled_diff = blueprint2
         .diff_since_blueprint(&blueprint1)
@@ -742,10 +905,7 @@ fn cmd_blueprint_diff_dns(
     let dns_group = args.dns_group;
     let dns_version = Generation::from(args.dns_version);
     let blueprint_id = args.blueprint_id;
-    let blueprint = sim
-        .blueprints
-        .get(&blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
 
     let existing_dns_config = match dns_group {
         CliDnsGroup::Internal => sim.internal_dns.get(&dns_version),
@@ -792,24 +952,39 @@ fn cmd_blueprint_diff_inventory(
     let collection = sim.collections.get(&collection_id).ok_or_else(|| {
         anyhow!("no such inventory collection: {}", collection_id)
     })?;
-    let blueprint = sim
-        .blueprints
-        .get(&blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
-
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let diff = blueprint
         .diff_since_collection(&collection)
         .context("failed to diff blueprint from inventory collection")?;
     Ok(Some(diff.display().to_string()))
 }
 
+fn cmd_blueprint_save(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintSaveArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let output_path = &args.filename;
+    let output_str = serde_json::to_string_pretty(&blueprint)
+        .context("serializing blueprint")?;
+    std::fs::write(&output_path, &output_str)
+        .with_context(|| format!("write {:?}", output_path))?;
+    Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
+}
+
 fn cmd_save(
     sim: &mut ReconfiguratorSim,
     args: SaveArgs,
 ) -> anyhow::Result<Option<String>> {
-    let policy = sim.system.to_policy().context("creating policy")?;
+    let planning_input = sim
+        .system
+        .to_planning_input_builder()
+        .context("creating planning input builder")?
+        .build();
     let saved = UnstableReconfiguratorState {
-        policy,
+        planning_input,
         collections: sim.collections.values().cloned().collect(),
         blueprints: sim.blueprints.values().cloned().collect(),
         internal_dns: sim.internal_dns.clone(),
@@ -819,16 +994,12 @@ fn cmd_save(
     };
 
     let output_path = &args.filename;
-    let outfile = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(output_path)
-        .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&outfile, &saved)
-        .with_context(|| format!("writing to {:?}", output_path))
-        .unwrap_or_else(|e| panic!("{:#}", e));
+    let output_str =
+        serde_json::to_string_pretty(&saved).context("serializing state")?;
+    std::fs::write(&output_path, &output_str)
+        .with_context(|| format!("write {:?}", output_path))?;
     Ok(Some(format!(
-        "saved policy, collections, and blueprints to {:?}",
+        "saved planning input, collections, and blueprints to {:?}",
         output_path
     )))
 }
@@ -907,7 +1078,8 @@ fn read_file(
 ) -> anyhow::Result<UnstableReconfiguratorState> {
     let file = std::fs::File::open(input_path)
         .with_context(|| format!("open {:?}", input_path))?;
-    serde_json::from_reader(file)
+    let bufread = std::io::BufReader::new(file);
+    serde_json::from_reader(bufread)
         .with_context(|| format!("read {:?}", input_path))
 }
 
@@ -958,9 +1130,15 @@ fn cmd_load(
             },
         )?;
 
-    let current_policy = sim.system.to_policy().context("generating policy")?;
-    for (sled_id, sled_resources) in loaded.policy.sleds {
-        if current_policy.sleds.contains_key(&sled_id) {
+    let current_planning_input = sim
+        .system
+        .to_planning_input_builder()
+        .context("generating planning input")?
+        .build();
+    for (sled_id, sled_details) in
+        loaded.planning_input.all_sleds(SledFilter::All)
+    {
+        if current_planning_input.sled_resources(&sled_id).is_some() {
             swriteln!(
                 s,
                 "sled {}: skipped (one with \
@@ -971,7 +1149,7 @@ fn cmd_load(
         }
 
         let Some(inventory_sled_agent) =
-            primary_collection.sled_agents.get(&sled_id)
+            primary_collection.sled_agents.get(sled_id.as_untyped_uuid())
         else {
             swriteln!(
                 s,
@@ -983,34 +1161,26 @@ fn cmd_load(
             continue;
         };
 
-        let inventory_sp = match &inventory_sled_agent.baseboard_id {
-            Some(baseboard_id) => {
-                let inv_sp = primary_collection
-                    .sps
-                    .get(baseboard_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "error: load sled {}: missing SP inventory",
-                            sled_id
-                        )
-                    })?;
-                let inv_rot = primary_collection
-                    .rots
-                    .get(baseboard_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "error: load sled {}: missing RoT inventory",
-                            sled_id
-                        )
-                    })?;
-                Some(SledHwInventory { baseboard_id, sp: inv_sp, rot: inv_rot })
-            }
-            None => None,
-        };
+        let inventory_sp = inventory_sled_agent.baseboard_id.as_ref().and_then(
+            |baseboard_id| {
+                let inv_sp = primary_collection.sps.get(baseboard_id);
+                let inv_rot = primary_collection.rots.get(baseboard_id);
+                if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
+                    Some(SledHwInventory {
+                        baseboard_id: &baseboard_id,
+                        sp: inv_sp,
+                        rot: inv_rot,
+                    })
+                } else {
+                    None
+                }
+            },
+        );
 
         let result = sim.system.sled_full(
             sled_id,
-            sled_resources,
+            sled_details.policy,
+            sled_details.resources.clone(),
             inventory_sp,
             inventory_sled_agent,
         );
@@ -1038,18 +1208,30 @@ fn cmd_load(
     }
 
     for blueprint in loaded.blueprints {
-        if sim.blueprints.contains_key(&blueprint.id) {
-            swriteln!(
-                s,
-                "blueprint {}: skipped (one with the \
-                same id is already loaded)",
-                blueprint.id
-            );
-        } else {
-            swriteln!(s, "blueprint {} loaded", blueprint.id);
-            sim.blueprints.insert(blueprint.id, blueprint);
+        let blueprint_id = blueprint.id;
+        match sim.blueprint_insert_loaded(blueprint) {
+            Ok(_) => {
+                swriteln!(s, "blueprint {} loaded", blueprint_id);
+            }
+            Err(error) => {
+                swriteln!(
+                    s,
+                    "blueprint {}: skipped ({:#})",
+                    blueprint_id,
+                    error
+                );
+            }
         }
     }
+
+    sim.system.service_ip_pool_ranges(
+        loaded.planning_input.service_ip_pool_ranges().to_vec(),
+    );
+    swriteln!(
+        s,
+        "loaded service IP pool ranges: {:?}",
+        loaded.planning_input.service_ip_pool_ranges()
+    );
 
     sim.internal_dns = loaded.internal_dns;
     sim.external_dns = loaded.external_dns;
@@ -1078,7 +1260,9 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
 
     let mut s = String::new();
 
-    for (sled_id, sled_resources) in loaded.policy.sleds {
+    for (sled_id, sled_resources) in
+        loaded.planning_input.all_sled_resources(SledFilter::All)
+    {
         swriteln!(
             s,
             "sled: {} (subnet: {}, zpools: {})",

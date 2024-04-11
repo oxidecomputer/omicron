@@ -8,12 +8,13 @@
 //! sure you're only breaking what you intend.
 
 use expectorate::assert_contents;
-use nexus_db_queries::context::OpContext;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
-use omicron_test_utils::dev::test_cmds::redact_variable;
+use omicron_test_utils::dev::test_cmds::redact_extra;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::ExtraRedactions;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::path::Path;
@@ -56,7 +57,7 @@ async fn test_omdb_usage_errors() {
     ];
 
     for args in invocations {
-        do_run(&mut output, |exec| exec, &cmd_path, args, &[]).await;
+        do_run(&mut output, |exec| exec, &cmd_path, args).await;
     }
 
     assert_contents("tests/usage_errors.out", &output);
@@ -64,22 +65,6 @@ async fn test_omdb_usage_errors() {
 
 #[nexus_test]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
-    // We want to test showing a blueprint, but that means we need the ID of the
-    // blueprint set up by the test context.
-    let blueprint_id = {
-        let nexus = &cptestctx.server.apictx().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-        datastore
-            .blueprint_target_get_current(&opctx)
-            .await
-            .expect("no target blueprint")
-            .target_id
-    };
-
     let gwtestctx = gateway_test_utils::setup::test_setup(
         "test_omdb_success_case",
         gateway_messages::SpPort::One,
@@ -93,8 +78,10 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let tmpdir = camino_tempfile::tempdir()
         .expect("failed to create temporary directory");
     let tmppath = tmpdir.path().join("reconfigurator-save.out");
-    let blueprint_id = blueprint_id.to_string();
+    let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
+
     let mut output = String::new();
+
     let invocations: &[&[&str]] = &[
         &["db", "disks", "list"],
         &["db", "dns", "show"],
@@ -106,7 +93,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
-        &["nexus", "blueprints", "show", &blueprint_id],
+        &["nexus", "blueprints", "list"],
+        &["nexus", "blueprints", "show", &initial_blueprint_id],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
@@ -117,7 +105,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         let p = postgres_url.to_string();
         let u = nexus_internal_url.clone();
         let g = mgs_url.clone();
-        do_run(
+        do_run_extra(
             &mut output,
             move |exec| {
                 exec.env("OMDB_DB_URL", &p)
@@ -126,7 +114,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             },
             &cmd_path,
             args,
-            &[tmppath.as_str()],
+            ExtraRedactions::new()
+                .variable_length("tmp_path", tmppath.as_str())
+                .fixed_length("blueprint_id", &initial_blueprint_id),
         )
         .await;
     }
@@ -152,8 +142,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
                 InlineErrorChain::new(&error),
             )
         });
-    assert!(parsed.policy.sleds.len() > 0);
-    assert!(parsed.collections.len() > 0);
+    // Did we find at least one sled in the planning input, and at least one
+    // collection?
+    assert!(parsed
+        .planning_input
+        .all_sled_ids(SledFilter::All)
+        .next()
+        .is_some());
+    assert!(!parsed.collections.is_empty());
 
     gwtestctx.teardown().await;
 }
@@ -179,7 +175,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     // Database URL
     // Case 1: specified on the command line
     let args = &["db", "--db-url", &postgres_url, "sleds"];
-    do_run(&mut output, |exec| exec, &cmd_path, args, &[]).await;
+    do_run(&mut output, |exec| exec, &cmd_path, args).await;
 
     // Case 2: specified in multiple places (command-line argument wins)
     let args = &["db", "--db-url", "junk", "sleds"];
@@ -189,7 +185,6 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         move |exec| exec.env("OMDB_DB_URL", &p),
         &cmd_path,
         args,
-        &[],
     )
     .await;
 
@@ -202,7 +197,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         "background-tasks",
         "doc",
     ];
-    do_run(&mut output, |exec| exec, &cmd_path.clone(), args, &[]).await;
+    do_run(&mut output, |exec| exec, &cmd_path.clone(), args).await;
 
     // Case 2: specified in multiple places (command-line argument wins)
     let args =
@@ -213,7 +208,6 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         move |exec| exec.env("OMDB_NEXUS_URL", &n),
         &cmd_path,
         args,
-        &[],
     )
     .await;
 
@@ -226,7 +220,6 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         move |exec| exec.env("OMDB_DNS_SERVER", dns_sockaddr.to_string()),
         &cmd_path,
         args,
-        &[],
     )
     .await;
 
@@ -237,7 +230,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         "background-tasks",
         "doc",
     ];
-    do_run(&mut output, move |exec| exec, &cmd_path, args, &[]).await;
+    do_run(&mut output, move |exec| exec, &cmd_path, args).await;
 
     let args = &["db", "sleds"];
     do_run(
@@ -245,12 +238,11 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         move |exec| exec.env("OMDB_DNS_SERVER", dns_sockaddr.to_string()),
         &cmd_path,
         args,
-        &[],
     )
     .await;
 
     let args = &["--dns-server", &dns_sockaddr.to_string(), "db", "sleds"];
-    do_run(&mut output, move |exec| exec, &cmd_path, args, &[]).await;
+    do_run(&mut output, move |exec| exec, &cmd_path, args).await;
 
     assert_contents("tests/env.out", &output);
 }
@@ -260,7 +252,19 @@ async fn do_run<F>(
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
-    extra_redactions: &[&str],
+) where
+    F: FnOnce(Exec) -> Exec + Send + 'static,
+{
+    do_run_extra(output, modexec, cmd_path, args, &ExtraRedactions::new())
+        .await;
+}
+
+async fn do_run_extra<F>(
+    output: &mut String,
+    modexec: F,
+    cmd_path: &Path,
+    args: &[&str],
+    extra_redactions: &ExtraRedactions<'_>,
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
@@ -270,7 +274,7 @@ async fn do_run<F>(
         "EXECUTING COMMAND: {} {:?}\n",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
         args.iter()
-            .map(|r| redact_variable(r, extra_redactions))
+            .map(|r| redact_extra(r, extra_redactions))
             .collect::<Vec<_>>(),
     )
     .unwrap();
@@ -303,9 +307,9 @@ async fn do_run<F>(
     write!(output, "termination: {:?}\n", exit_status).unwrap();
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stdout:\n").unwrap();
-    output.push_str(&redact_variable(&stdout_text, extra_redactions));
+    output.push_str(&redact_extra(&stdout_text, extra_redactions));
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stderr:\n").unwrap();
-    output.push_str(&redact_variable(&stderr_text, extra_redactions));
+    output.push_str(&redact_extra(&stderr_text, extra_redactions));
     write!(output, "=============================================\n").unwrap();
 }

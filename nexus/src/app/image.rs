@@ -121,7 +121,10 @@ impl super::Nexus {
 
                 let image_volume = self
                     .db_datastore
-                    .volume_checkout_randomize_ids(db_snapshot.volume_id)
+                    .volume_checkout_randomize_ids(
+                        db_snapshot.volume_id,
+                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                    )
                     .await?;
 
                 db::model::Image {

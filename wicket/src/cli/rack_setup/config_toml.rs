@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::fmt;
 use toml_edit::Array;
-use toml_edit::Document;
+use toml_edit::DocumentMut;
 use toml_edit::Formatted;
 use toml_edit::InlineTable;
 use toml_edit::Item;
@@ -28,12 +28,12 @@ static TEMPLATE: &str = include_str!("config_template.toml");
 const ARRAY_SEP: &str = "\n    ";
 
 pub(super) struct TomlTemplate {
-    doc: Document,
+    doc: DocumentMut,
 }
 
 impl TomlTemplate {
     pub(crate) fn populate(config: &CurrentRssUserConfigInsensitive) -> Self {
-        let mut doc = TEMPLATE.parse::<Document>().unwrap();
+        let mut doc = TEMPLATE.parse::<DocumentMut>().unwrap();
 
         *doc.get_mut("external_dns_zone_name")
             .unwrap()

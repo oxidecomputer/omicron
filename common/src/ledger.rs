@@ -311,7 +311,7 @@ mod test {
         let log = &logctx.log;
 
         // Create the ledger, initialize contents.
-        let config_dirs = vec![
+        let config_dirs = [
             camino_tempfile::Utf8TempDir::new().unwrap(),
             camino_tempfile::Utf8TempDir::new().unwrap(),
         ];

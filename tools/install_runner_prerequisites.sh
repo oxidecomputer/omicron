@@ -153,7 +153,7 @@ if [[ "${HOST_OS}" == "SunOS" ]]; then
 
     # Grab the SoftNPU machinery (ASIC simulator, scadm, P4 program, etc.)
     #
-    # create_virtual_hardware.sh will use those to setup the softnpu zone
+    # "cargo xtask virtual-hardware create" will use those to setup the softnpu zone
     retry ./tools/ci_download_softnpu_machinery
 fi
 

@@ -500,7 +500,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_reconfigurator_preparation::policy_from_db;
+    use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
@@ -509,13 +509,11 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
-    use nexus_types::deployment::Policy;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -531,6 +529,8 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::TypedUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -548,16 +548,11 @@ mod test {
     fn blueprint_empty() -> Blueprint {
         let builder = CollectionBuilder::new("test-suite");
         let collection = builder.build();
-        let policy = Policy {
-            sleds: BTreeMap::new(),
-            service_ip_pool_ranges: vec![],
-            target_nexus_zone_count: 3,
-        };
         BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
             Generation::new(),
-            &policy,
+            std::iter::empty(),
             "test-suite",
         )
         .expect("failed to generate empty blueprint")
@@ -612,8 +607,6 @@ mod test {
             .zip(possible_sled_subnets)
             .map(|(sled_id, subnet)| {
                 let sled_resources = SledResources {
-                    policy: SledPolicy::provisionable(),
-                    state: SledState::Active,
                     zpools: BTreeSet::from([ZpoolName::from_str(&format!(
                         "oxp_{}",
                         Uuid::new_v4()
@@ -623,13 +616,8 @@ mod test {
                 };
                 (*sled_id, sled_resources)
             })
-            .collect();
+            .collect::<BTreeMap<_, _>>();
 
-        let policy = Policy {
-            sleds: policy_sleds,
-            service_ip_pool_ranges: vec![],
-            target_nexus_zone_count: 3,
-        };
         let dns_empty = dns_config_empty();
         let initial_dns_generation =
             Generation::from(u32::try_from(dns_empty.generation).unwrap());
@@ -637,7 +625,10 @@ mod test {
             &collection,
             initial_dns_generation,
             Generation::new(),
-            &policy,
+            policy_sleds.keys().map(|sled_id| {
+                // TODO-cleanup use `TypedUuid` everywhere
+                TypedUuid::from_untyped_uuid(*sled_id)
+            }),
             "test-suite",
         )
         .expect("failed to build initial blueprint");
@@ -667,8 +658,7 @@ mod test {
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.
-        let sleds_by_id = policy
-            .sleds
+        let sleds_by_id = policy_sleds
             .iter()
             .enumerate()
             .map(|(i, (sled_id, sled_resources))| {
@@ -728,7 +718,7 @@ mod test {
             .iter()
             .filter_map(|(sled_id, sled)| {
                 if sled.is_scrimlet {
-                    let sled_subnet = policy.sleds.get(sled_id).unwrap().subnet;
+                    let sled_subnet = policy_sleds.get(sled_id).unwrap().subnet;
                     let switch_zone_ip = get_switch_zone_address(sled_subnet);
                     Some((switch_zone_ip, *sled_id))
                 } else {
@@ -864,13 +854,13 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, policy) = example(&logctx.log, TEST_NAME, 5);
+        let (collection, input) = example(&logctx.log, TEST_NAME, 5);
         let initial_external_dns_generation = Generation::new();
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
             initial_external_dns_generation,
-            &policy,
+            input.all_sled_ids(SledFilter::All),
             "test suite",
         )
         .expect("failed to generate initial blueprint");
@@ -1148,7 +1138,7 @@ mod test {
             .blueprint_target_get_current_full(&opctx)
             .await
             .expect("failed to read current target blueprint");
-        eprintln!("blueprint: {:?}", blueprint);
+        eprintln!("blueprint: {}", blueprint.display());
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
@@ -1201,29 +1191,42 @@ mod test {
                 .await
                 .unwrap()
         };
-        let mut policy = policy_from_db(
-            &sled_rows,
-            &zpool_rows,
-            &ip_pool_range_rows,
-            // This is not used because we're not actually going through the
-            // planner.
-            NEXUS_REDUNDANCY,
-        )
-        .unwrap();
-        // We'll need another (fake) external IP for this new Nexus.
-        policy
-            .service_ip_pool_ranges
-            .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        let planning_input = {
+            let mut builder = PlanningInputFromDb {
+                sled_rows: &sled_rows,
+                zpool_rows: &zpool_rows,
+                ip_pool_range_rows: &ip_pool_range_rows,
+                internal_dns_version: Generation::from(
+                    u32::try_from(dns_initial_internal.generation).unwrap(),
+                )
+                .into(),
+                external_dns_version: Generation::from(
+                    u32::try_from(dns_latest_external.generation).unwrap(),
+                )
+                .into(),
+                // These are not used because we're not actually going through
+                // the planner.
+                external_ip_rows: &[],
+                service_nic_rows: &[],
+                target_nexus_zone_count: NEXUS_REDUNDANCY,
+                log,
+            }
+            .build()
+            .unwrap()
+            .into_builder();
+
+            // We'll need another (fake) external IP for this new Nexus.
+            builder
+                .policy_mut()
+                .service_ip_pool_ranges
+                .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+
+            builder.build()
+        };
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
-            Generation::from(
-                u32::try_from(dns_initial_internal.generation).unwrap(),
-            ),
-            Generation::from(
-                u32::try_from(dns_latest_external.generation).unwrap(),
-            ),
-            &policy,
+            &planning_input,
             "test suite",
         )
         .unwrap();
@@ -1235,7 +1238,7 @@ mod test {
             .unwrap();
         assert_eq!(rv, EnsureMultiple::Added(1));
         let blueprint2 = builder.build();
-        eprintln!("blueprint2: {:?}", blueprint2);
+        eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
             .all_omicron_zones()

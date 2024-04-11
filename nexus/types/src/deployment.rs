@@ -12,8 +12,6 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledPolicy;
-use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
@@ -22,16 +20,15 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
-use omicron_common::address::IpRange;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use newtype_uuid::GenericUuid;
+use newtype_uuid::TypedUuid;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::SledKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::ZoneKind;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
@@ -39,67 +36,17 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Fleet-wide deployment policy
-///
-/// The **policy** represents the deployment controls that people (operators and
-/// support engineers) can modify directly under normal operation.  In the
-/// limit, this would include things like: which sleds are supposed to be part
-/// of the system, how many CockroachDB nodes should be part of the cluster,
-/// what system version the system should be running, etc.  It would _not_
-/// include things like which services should be running on which sleds or which
-/// host OS version should be on each sled because that's up to the control
-/// plane to decide.  (To be clear, the intent is that for extenuating
-/// circumstances, people could exercise control over such things, but that
-/// would not be part of normal operation.)
-///
-/// The current policy is pretty limited.  It's aimed primarily at supporting
-/// the add/remove sled use case.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Policy {
-    /// set of sleds that are supposed to be part of the control plane, along
-    /// with information about resources available to the planner
-    pub sleds: BTreeMap<Uuid, SledResources>,
+mod planning_input;
 
-    /// ranges specified by the IP pool for externally-visible control plane
-    /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub service_ip_pool_ranges: Vec<IpRange>,
-
-    /// desired total number of deployed Nexus zones
-    pub target_nexus_zone_count: usize,
-}
-
-/// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SledResources {
-    /// current sled policy
-    pub policy: SledPolicy,
-
-    /// current sled state
-    pub state: SledState,
-
-    /// zpools on this sled
-    ///
-    /// (used to allocate storage for control plane zones with persistent
-    /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
-
-    /// the IPv6 subnet of this sled on the underlay network
-    ///
-    /// (implicitly specifies the whole range of addresses that the planner can
-    /// use for control plane components)
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
-}
-
-impl SledResources {
-    /// Returns true if the sled can have services provisioned on it that
-    /// aren't required to be on every sled.
-    ///
-    /// For example, NTP must exist on every sled, but Nexus does not have to.
-    pub fn is_eligible_for_discretionary_services(&self) -> bool {
-        self.policy.is_provisionable()
-            && self.state.is_eligible_for_discretionary_services()
-    }
-}
+pub use planning_input::ExternalIp;
+pub use planning_input::PlanningInput;
+pub use planning_input::PlanningInputBuildError;
+pub use planning_input::PlanningInputBuilder;
+pub use planning_input::Policy;
+pub use planning_input::ServiceNetworkInterface;
+pub use planning_input::SledDetails;
+pub use planning_input::SledFilter;
+pub use planning_input::SledResources;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -209,9 +156,24 @@ impl Blueprint {
         })
     }
 
+    // Temporary method that provides the list of Omicron zones using
+    // `TypedUuid`.
+    //
+    // In the future, `all_omicron_zones` will return `TypedUuid<SledKind>`,
+    // and this method will go away.
+    pub fn all_omicron_zones_typed(
+        &self,
+    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &OmicronZoneConfig)> {
+        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
+            z.zones.iter().map(move |z| {
+                (TypedUuid::from_untyped_uuid(*sled_id), &z.config)
+            })
+        })
+    }
+
     /// Iterate over the ids of all sleds in the blueprint
-    pub fn sleds(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.blueprint_zones.keys().copied()
+    pub fn sleds(&self) -> impl Iterator<Item = TypedUuid<SledKind>> + '_ {
+        self.blueprint_zones.keys().copied().map(TypedUuid::from_untyped_uuid)
     }
 
     /// Summarize the difference between sleds and zones between two
@@ -226,9 +188,9 @@ impl Blueprint {
     ) -> Result<BlueprintDiff, BlueprintDiffError> {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            before.blueprint_zones.clone(),
+            before.typed_blueprint_zones(),
             self.metadata(),
-            self.blueprint_zones.clone(),
+            self.typed_blueprint_zones(),
         )
     }
 
@@ -266,7 +228,7 @@ impl Blueprint {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                (*sled_id, zones)
+                (TypedUuid::from_untyped_uuid(*sled_id), zones)
             })
             .collect();
 
@@ -274,7 +236,7 @@ impl Blueprint {
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.metadata(),
-            self.blueprint_zones.clone(),
+            self.typed_blueprint_zones(),
         )
     }
 
@@ -282,6 +244,21 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    /// Temporary method that returns `self.blueprint_zones`, except the keys
+    /// are `TypedUuid<SledKind>`.
+    ///
+    /// TODO-cleanup use `TypedUuid` everywhere
+    pub fn typed_blueprint_zones(
+        &self,
+    ) -> BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig> {
+        self.blueprint_zones
+            .iter()
+            .map(|(sled_id, zones)| {
+                (TypedUuid::from_untyped_uuid(*sled_id), zones.clone())
+            })
+            .collect()
     }
 }
 
@@ -437,6 +414,9 @@ pub enum BlueprintZoneDisposition {
 
     /// The zone is not in service.
     Quiesced,
+
+    /// The zone is permanently gone.
+    Expunged,
 }
 
 impl BlueprintZoneDisposition {
@@ -469,6 +449,12 @@ impl BlueprintZoneDisposition {
                 // Quiesced zones should get firewall rules.
                 BlueprintZoneFilter::VpcFirewall => true,
             },
+            Self::Expunged => match filter {
+                BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::InternalDns => false,
+                BlueprintZoneFilter::SledAgentPut => false,
+                BlueprintZoneFilter::VpcFirewall => false,
+            },
         }
     }
 
@@ -487,6 +473,7 @@ impl fmt::Display for BlueprintZoneDisposition {
             // and alignment (used above), but this does.
             BlueprintZoneDisposition::InService => "in service".fmt(f),
             BlueprintZoneDisposition::Quiesced => "quiesced".fmt(f),
+            BlueprintZoneDisposition::Expunged => "expunged".fmt(f),
         }
     }
 }
@@ -582,9 +569,9 @@ impl BlueprintDiff {
     /// data is valid.
     fn new(
         before_meta: DiffBeforeMetadata,
-        before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        before_zones: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
         after_meta: BlueprintMetadata,
-        after_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        after_zones: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
     ) -> Result<Self, BlueprintDiffError> {
         let mut errors = Vec::new();
 
@@ -614,14 +601,18 @@ impl BlueprintDiff {
     /// Iterate over sleds only present in the second blueprint of a diff
     pub fn sleds_added(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl ExactSizeIterator<
+        Item = (TypedUuid<SledKind>, &BlueprintZonesConfig),
+    > + '_ {
         self.sleds.added.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
     /// Iterate over sleds only present in the first blueprint of a diff
     pub fn sleds_removed(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl ExactSizeIterator<
+        Item = (TypedUuid<SledKind>, &BlueprintZonesConfig),
+    > + '_ {
         self.sleds.removed.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -629,7 +620,8 @@ impl BlueprintDiff {
     /// changes.
     pub fn sleds_modified(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &DiffSledModified)> + '_ {
+    ) -> impl ExactSizeIterator<Item = (TypedUuid<SledKind>, &DiffSledModified)> + '_
+    {
         self.sleds.modified.iter().map(|(sled_id, sled)| (*sled_id, sled))
     }
 
@@ -637,7 +629,8 @@ impl BlueprintDiff {
     /// changes.
     pub fn sleds_unchanged(
         &self,
-    ) -> impl Iterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &BlueprintZonesConfig)> + '_
+    {
         self.sleds.unchanged.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -649,10 +642,10 @@ impl BlueprintDiff {
 
 #[derive(Debug)]
 struct DiffSleds {
-    added: BTreeMap<Uuid, BlueprintZonesConfig>,
-    removed: BTreeMap<Uuid, BlueprintZonesConfig>,
-    modified: BTreeMap<Uuid, DiffSledModified>,
-    unchanged: BTreeMap<Uuid, BlueprintZonesConfig>,
+    added: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+    removed: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+    modified: BTreeMap<TypedUuid<SledKind>, DiffSledModified>,
+    unchanged: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
 }
 
 impl DiffSleds {
@@ -662,8 +655,8 @@ impl DiffSleds {
     /// The return value only contains the sleds that are present in both
     /// blueprints.
     fn new(
-        before: BTreeMap<Uuid, BlueprintZonesConfig>,
-        mut after: BTreeMap<Uuid, BlueprintZonesConfig>,
+        before: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
+        mut after: BTreeMap<TypedUuid<SledKind>, BlueprintZonesConfig>,
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
         let mut removed = BTreeMap::new();
@@ -776,7 +769,7 @@ pub enum BlueprintDiffSingleError {
     ///
     /// For a particular zone, the type should never change.
     ZoneTypeChanged {
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         zone_id: Uuid,
         before: ZoneKind,
         after: ZoneKind,
@@ -822,7 +815,7 @@ impl DiffBeforeMetadata {
 #[derive(Clone, Debug)]
 pub struct DiffSledModified {
     /// id of the sled
-    pub sled_id: Uuid,
+    pub sled_id: TypedUuid<SledKind>,
     /// generation of the "zones" configuration on the left side
     pub generation_before: Generation,
     /// generation of the "zones" configuration on the right side
@@ -834,7 +827,7 @@ pub struct DiffSledModified {
 
 impl DiffSledModified {
     fn new(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         before: BlueprintZonesConfig,
         after: BlueprintZonesConfig,
         errors: &mut Vec<BlueprintDiffSingleError>,
@@ -978,7 +971,7 @@ impl DiffZoneCommon {
 /// backwards-compatibility guarantees.**
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
-    pub policy: Policy,
+    pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -1256,7 +1249,7 @@ mod table_display {
     }
 
     fn add_whole_sled_records(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         sled_zones: &BlueprintZonesConfig,
         kind: WholeSledKind,
         section: &mut StSectionBuilder,
@@ -1293,7 +1286,7 @@ mod table_display {
     }
 
     fn add_modified_sled_records(
-        sled_id: Uuid,
+        sled_id: TypedUuid<SledKind>,
         modified: &DiffSledModified,
         section: &mut StSectionBuilder,
     ) {

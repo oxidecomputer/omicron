@@ -614,13 +614,25 @@ impl SledAgent {
             retry_policy_internal_service_aggressive(),
             || async {
                 // Load as many services as we can, and don't exit immediately
-                // upon failure...
+                // upon failure.
                 let load_services_result =
                     self.inner.services.load_services().await.map_err(|err| {
                         BackoffError::transient(Error::from(err))
                     });
 
-                // ... and request firewall rule updates for as many services as
+                // If there wasn't any work to do, we're done immediately.
+                if matches!(
+                    load_services_result,
+                    Ok(services::LoadServicesResult::NoServicesToLoad)
+                ) {
+                    info!(
+                        self.log,
+                        "load_services exiting early; no services to be loaded"
+                    );
+                    return Ok(());
+                }
+
+                // Otherwise, request firewall rule updates for as many services as
                 // we can. Note that we still make this request even if we only
                 // partially load some services.
                 let firewall_result = self
