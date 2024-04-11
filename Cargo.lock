@@ -3511,6 +3511,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "opte-ioctl",
  "oxide-vpc",
@@ -4857,6 +4858,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter",
  "oximeter-collector",
@@ -5630,6 +5632,7 @@ dependencies = [
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
@@ -5720,6 +5723,7 @@ name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
  "newtype-uuid",
+ "paste",
  "schemars",
 ]
 
@@ -8642,6 +8646,7 @@ dependencies = [
  "chrono",
  "ipnetwork",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
  "regress",
@@ -8669,6 +8674,7 @@ dependencies = [
  "macaddr",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
  "schemars",
@@ -8712,6 +8718,7 @@ dependencies = [
  "key-manager",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
  "schemars",

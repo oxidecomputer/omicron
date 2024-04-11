@@ -29,6 +29,7 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -353,7 +354,7 @@ impl Plan {
                 .map(|disk| OmicronPhysicalDiskConfig {
                     identity: disk.identity.clone(),
                     id: Uuid::new_v4(),
-                    pool_id: Uuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
                 })
                 .collect();
             sled_info.request.disks = OmicronPhysicalDisksConfig {

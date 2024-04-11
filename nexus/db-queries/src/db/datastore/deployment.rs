@@ -1093,6 +1093,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
@@ -1144,7 +1145,8 @@ mod tests {
         use illumos_utils::zpool::ZpoolName;
         let zpools = (0..4)
             .map(|_| {
-                let name = ZpoolName::new_external(Uuid::new_v4()).to_string();
+                let name =
+                    ZpoolName::new_external(ZpoolUuid::new_v4()).to_string();
                 name.parse().unwrap()
             })
             .collect();

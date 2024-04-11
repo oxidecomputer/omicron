@@ -34,6 +34,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -77,8 +78,9 @@ impl PlanningInputFromDb<'_> {
                 // It's unfortunate that Nexus knows how Sled Agent
                 // constructs zpool names, but there's not currently an
                 // alternative.
+                let id = ZpoolUuid::from_untyped_uuid(z.id());
                 let zpool_name_generated =
-                    illumos_utils::zpool::ZpoolName::new_external(z.id())
+                    illumos_utils::zpool::ZpoolName::new_external(id)
                         .to_string();
                 let zpool_name = ZpoolName::from_str(&zpool_name_generated)
                     .map_err(|e| {

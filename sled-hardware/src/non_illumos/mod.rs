@@ -7,6 +7,7 @@ use crate::disk::{
 };
 use crate::SledMode;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use std::collections::HashSet;
@@ -72,7 +73,7 @@ pub fn ensure_partition_layout(
     _paths: &DiskPaths,
     _variant: DiskVariant,
     _identity: &DiskIdentity,
-    _zpool_id: Option<uuid::Uuid>,
+    _zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
