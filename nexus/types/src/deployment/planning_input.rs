@@ -15,9 +15,8 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::TypedUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
@@ -261,11 +260,10 @@ pub struct PlanningInput {
     sleds: BTreeMap<SledUuid, SledDetails>,
 
     /// external IPs allocated to Omicron zones
-    omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, ExternalIp>,
 
     /// vNICs allocated to Omicron zones
-    omicron_zone_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -350,13 +348,10 @@ pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
-    DuplicateOmicronZoneExternalIp {
-        zone_id: TypedUuid<OmicronZoneKind>,
-        ip: ExternalIp,
-    },
+    DuplicateOmicronZoneExternalIp { zone_id: OmicronZoneUuid, ip: ExternalIp },
     #[error("Omicron zone {zone_id} already has a NIC ({nic:?})")]
     DuplicateOmicronZoneNic {
-        zone_id: TypedUuid<OmicronZoneKind>,
+        zone_id: OmicronZoneUuid,
         nic: ServiceNetworkInterface,
     },
 }
@@ -368,9 +363,8 @@ pub struct PlanningInputBuilder {
     internal_dns_version: Generation,
     external_dns_version: Generation,
     sleds: BTreeMap<SledUuid, SledDetails>,
-    omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
-    omicron_zone_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, ExternalIp>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
 }
 
 impl PlanningInputBuilder {
@@ -421,7 +415,7 @@ impl PlanningInputBuilder {
 
     pub fn add_omicron_zone_external_ip(
         &mut self,
-        zone_id: TypedUuid<OmicronZoneKind>,
+        zone_id: OmicronZoneUuid,
         ip: ExternalIp,
     ) -> Result<(), PlanningInputBuildError> {
         match self.omicron_zone_external_ips.entry(zone_id) {
@@ -440,7 +434,7 @@ impl PlanningInputBuilder {
 
     pub fn add_omicron_zone_nic(
         &mut self,
-        zone_id: TypedUuid<OmicronZoneKind>,
+        zone_id: OmicronZoneUuid,
         nic: ServiceNetworkInterface,
     ) -> Result<(), PlanningInputBuildError> {
         match self.omicron_zone_nics.entry(zone_id) {

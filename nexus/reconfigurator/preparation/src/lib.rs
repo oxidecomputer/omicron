@@ -33,8 +33,8 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
 use slog::Logger;
@@ -128,7 +128,7 @@ impl PlanningInputFromDb<'_> {
                 );
                 continue;
             };
-            let zone_id = TypedUuid::from_untyped_uuid(zone_id);
+            let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
             builder
                 .add_omicron_zone_external_ip(
                     zone_id,
