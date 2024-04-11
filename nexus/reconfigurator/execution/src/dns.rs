@@ -530,7 +530,7 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -627,7 +627,7 @@ mod test {
             Generation::new(),
             policy_sleds.keys().map(|sled_id| {
                 // TODO-cleanup use `TypedUuid` everywhere
-                TypedUuid::from_untyped_uuid(*sled_id)
+                SledUuid::from_untyped_uuid(*sled_id)
             }),
             "test-suite",
         )
