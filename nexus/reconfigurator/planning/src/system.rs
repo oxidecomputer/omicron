@@ -13,7 +13,10 @@ use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
+use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::external_api::views::SledState;
@@ -22,7 +25,6 @@ use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SledRole;
 use nexus_types::inventory::SpType;
-use nexus_types::inventory::ZpoolName;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
@@ -31,9 +33,13 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolKind;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
@@ -309,7 +315,7 @@ impl SystemDescription {
                 policy: sled.policy,
                 state: SledState::Active,
                 resources: SledResources {
-                    zpools: sled.zpools.iter().cloned().collect(),
+                    zpools: sled.zpools.clone(),
                     subnet: sled.sled_subnet,
                 },
             };
@@ -421,7 +427,7 @@ struct Sled {
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
-    zpools: Vec<ZpoolName>,
+    zpools: BTreeMap<TypedUuid<ZpoolKind>, SledDisk>,
     policy: SledPolicy,
 }
 
@@ -441,7 +447,20 @@ impl Sled {
         let serial = format!("serial{}", unique);
         let revision = 0;
         let zpools = (0..nzpools)
-            .map(|_| format!("oxp_{}", Uuid::new_v4()).parse().unwrap())
+            .map(|i| {
+                let zpool = format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
+                let disk = SledDisk {
+                    disk_identity: DiskIdentity {
+                        vendor: String::from("fake-vendor"),
+                        serial: format!("serial-{sled_id}-{i}"),
+                        model: String::from("fake-model"),
+                    },
+                    disk_id: TypedUuid::<PhysicalDiskKind>::new_v4(),
+                    policy: PhysicalDiskPolicy::InService,
+                    state: PhysicalDiskState::Active,
+                };
+                (zpool, disk)
+            })
             .collect();
         let inventory_sp = match hardware {
             SledHardware::Empty => None,

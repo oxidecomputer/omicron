@@ -412,6 +412,7 @@ impl DataStore {
         Ok(Blueprint {
             id: blueprint_id,
             blueprint_zones,
+            blueprint_disks: BTreeMap::new(), // XXX
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
@@ -1083,16 +1084,22 @@ mod tests {
     use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledDetails;
+    use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskKind;
     use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::ZpoolKind;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
@@ -1141,11 +1148,21 @@ mod tests {
     // Create a fake set of `SledDetails`, either with a subnet matching
     // `ip` or with an arbitrary one.
     fn fake_sled_details(ip: Option<Ipv6Addr>) -> SledDetails {
-        use illumos_utils::zpool::ZpoolName;
         let zpools = (0..4)
-            .map(|_| {
-                let name = ZpoolName::new_external(Uuid::new_v4()).to_string();
-                name.parse().unwrap()
+            .map(|i| {
+                (
+                    TypedUuid::<ZpoolKind>::new_v4(),
+                    SledDisk {
+                        disk_identity: DiskIdentity {
+                            vendor: String::from("v"),
+                            serial: format!("s-{i}"),
+                            model: String::from("m"),
+                        },
+                        disk_id: TypedUuid::<PhysicalDiskKind>::new_v4(),
+                        policy: PhysicalDiskPolicy::InService,
+                        state: PhysicalDiskState::Active,
+                    },
+                )
             })
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
@@ -1400,10 +1417,10 @@ mod tests {
             builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
             Ensure::Added
         );
-        for zpool_name in new_sled_zpools {
+        for zpool_id in new_sled_zpools.keys() {
             assert_eq!(
                 builder
-                    .sled_ensure_zone_crucible(new_sled_id, zpool_name.clone())
+                    .sled_ensure_zone_crucible(new_sled_id, zpool_id.clone())
                     .unwrap(),
                 Ensure::Added
             );

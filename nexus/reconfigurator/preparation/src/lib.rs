@@ -20,9 +20,9 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
+use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
@@ -32,20 +32,23 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use slog::error;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::str::FromStr;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
 pub struct PlanningInputFromDb<'a> {
     pub sled_rows: &'a [nexus_db_model::Sled],
-    pub zpool_rows: &'a [nexus_db_model::Zpool],
+    pub zpool_rows:
+        &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
     pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
@@ -71,24 +74,25 @@ impl PlanningInputFromDb<'_> {
 
         let mut zpools_by_sled_id = {
             let mut zpools = BTreeMap::new();
-            for z in self.zpool_rows {
+            for (zpool, disk) in self.zpool_rows {
                 let sled_zpool_names =
-                    zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
-                // It's unfortunate that Nexus knows how Sled Agent
-                // constructs zpool names, but there's not currently an
-                // alternative.
-                let zpool_name_generated =
-                    illumos_utils::zpool::ZpoolName::new_external(z.id())
-                        .to_string();
-                let zpool_name = ZpoolName::from_str(&zpool_name_generated)
-                    .map_err(|e| {
-                        Error::internal_error(&format!(
-                            "unexpectedly failed to parse generated \
-                         zpool name: {}: {}",
-                            zpool_name_generated, e
-                        ))
-                    })?;
-                sled_zpool_names.insert(zpool_name);
+                    zpools.entry(zpool.sled_id).or_insert_with(BTreeMap::new);
+                let zpool_id =
+                    TypedUuid::<ZpoolKind>::from_untyped_uuid(zpool.id());
+                let disk = SledDisk {
+                    disk_identity: DiskIdentity {
+                        vendor: disk.vendor.clone(),
+                        serial: disk.serial.clone(),
+                        model: disk.model.clone(),
+                    },
+                    disk_id: TypedUuid::<PhysicalDiskKind>::from_untyped_uuid(
+                        disk.id(),
+                    ),
+                    policy: disk.disk_policy.into(),
+                    state: disk.disk_state.into(),
+                };
+
+                sled_zpool_names.insert(zpool_id, disk);
             }
             zpools
         };
@@ -98,7 +102,7 @@ impl PlanningInputFromDb<'_> {
             let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
             let zpools = zpools_by_sled_id
                 .remove(&sled_id)
-                .unwrap_or_else(BTreeSet::new);
+                .unwrap_or_else(BTreeMap::new);
             let sled_details = SledDetails {
                 policy: sled_row.policy(),
                 state: sled_row.state().into(),

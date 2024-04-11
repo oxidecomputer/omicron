@@ -16,6 +16,7 @@ use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::physical_disk_adoption;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
@@ -67,6 +68,9 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
+
+    /// task handle for the task that collects inventory
+    pub task_physical_disk_adoption: common::TaskHandle,
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
@@ -245,7 +249,7 @@ impl BackgroundTasks {
         // because the blueprint executor might also depend indirectly on the
         // inventory collector.  In that case, we may need to do something more
         // complicated.  But for now, this works.
-        let task_inventory_collection = {
+        let (task_inventory_collection, inventory_watcher) = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
                 resolver.clone(),
@@ -253,6 +257,7 @@ impl BackgroundTasks {
                 config.inventory.nkeep,
                 config.inventory.disable,
             );
+            let inventory_watcher = collector.watcher();
             let task = driver.register(
                 String::from("inventory_collection"),
                 String::from(
@@ -265,7 +270,22 @@ impl BackgroundTasks {
                 vec![Box::new(rx_blueprint_exec)],
             );
 
-            task
+            (task, inventory_watcher)
+        };
+
+        let task_physical_disk_adoption = {
+            driver.register(
+                "physical_disk_adoption".to_string(),
+                "ensure new physical disks are automatically marked in-service"
+                    .to_string(),
+                config.physical_disk_adoption.period_secs,
+                Box::new(physical_disk_adoption::PhysicalDiskAdoption::new(
+                    datastore.clone(),
+                    inventory_watcher.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(inventory_watcher)],
+            )
         };
 
         let task_service_zone_nat_tracker = {
@@ -330,6 +350,7 @@ impl BackgroundTasks {
             nat_cleanup,
             bfd_manager,
             task_inventory_collection,
+            task_physical_disk_adoption,
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,

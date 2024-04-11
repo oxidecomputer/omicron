@@ -222,7 +222,7 @@ impl super::Nexus {
             request.variant.into(),
             request.sled_id,
         );
-        self.db_datastore.physical_disk_upsert(&opctx, disk).await?;
+        self.db_datastore.physical_disk_insert(&opctx, disk).await?;
         Ok(())
     }
 

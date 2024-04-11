@@ -1079,11 +1079,11 @@ mod test {
         );
 
         datastore
-            .physical_disk_upsert(&opctx, disk1.clone())
+            .physical_disk_insert(&opctx, disk1.clone())
             .await
             .expect("Failed to upsert physical disk");
         datastore
-            .physical_disk_upsert(&opctx, disk2.clone())
+            .physical_disk_insert(&opctx, disk2.clone())
             .await
             .expect("Failed to upsert physical disk");
 

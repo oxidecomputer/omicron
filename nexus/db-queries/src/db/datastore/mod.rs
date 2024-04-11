@@ -653,7 +653,7 @@ mod test {
             sled_id,
         );
         datastore
-            .physical_disk_upsert(opctx, physical_disk.clone())
+            .physical_disk_insert(opctx, physical_disk.clone())
             .await
             .expect("Failed to upsert physical disk");
         physical_disk.id()

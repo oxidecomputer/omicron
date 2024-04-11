@@ -3263,6 +3263,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_disks (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
 -- description of omicron zones specified in a blueprint
 --
 -- This is currently identical to `inv_omicron_zone`, except that the foreign

@@ -12,15 +12,19 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_sled_policy;
+use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskKind;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use diesel::prelude::*;
-use diesel::upsert::{excluded, on_constraint};
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -34,22 +38,19 @@ impl DataStore {
     /// Stores a new physical disk in the database.
     ///
     /// - If the Vendor, Serial, and Model fields are the same as an existing
-    /// row in the table, the following fields may be updated:
-    ///   - Sled ID
-    ///   - Time Deleted
-    ///   - Time Modified
+    /// row in the table, an error is thrown.
     /// - If the primary key (ID) is the same as an existing row in the table,
     /// an error is thrown.
-    pub async fn physical_disk_upsert(
+    pub async fn physical_disk_insert(
         &self,
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> CreateResult<PhysicalDisk> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        Self::physical_disk_upsert_on_connection(&conn, opctx, disk).await
+        Self::physical_disk_insert_on_connection(&conn, opctx, disk).await
     }
 
-    pub async fn physical_disk_upsert_on_connection(
+    pub async fn physical_disk_insert_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         disk: PhysicalDisk,
@@ -57,19 +58,10 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
-        let now = Utc::now();
         let sled_id = disk.sled_id;
         let disk_in_db = Sled::insert_resource(
             sled_id,
-            diesel::insert_into(dsl::physical_disk)
-                .values(disk.clone())
-                .on_conflict(on_constraint("vendor_serial_model_unique"))
-                .do_update()
-                .set((
-                    dsl::sled_id.eq(excluded(dsl::sled_id)),
-                    dsl::time_deleted.eq(Option::<DateTime<Utc>>::None),
-                    dsl::time_modified.eq(now),
-                )),
+            diesel::insert_into(dsl::physical_disk).values(disk.clone()),
         )
         .insert_and_get_result_async(conn)
         .await
@@ -124,6 +116,82 @@ impl DataStore {
                 public_error_from_diesel(err, ErrorHandler::Server)
             })?;
         Ok(())
+    }
+
+    /// Returns all physical disks which:
+    ///
+    /// - Appear on in-service sleds
+    /// - Appear in inventory
+    /// - Do not have any records of expungement
+    pub async fn physical_disk_uninitialized_list(
+        &self,
+        opctx: &OpContext,
+        inventory_collection_id: Uuid,
+        sled_id: Uuid,
+    ) -> ListResultVec<InvPhysicalDisk> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use db::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::sled::dsl as sled_dsl;
+
+        // This is kind of frustrating - we'd like to be able to apply this
+        // condition to all "in service" sleds, regardless of provisionability,
+        // but the sled policy crate explicitly avoids exporting that type.
+        //
+        // As a workaround, we must create the corresponding external types
+        // and manually convert them back into the database types.
+        let in_service = to_db_sled_policy(SledPolicy::InService {
+            provision_policy: SledProvisionPolicy::Provisionable,
+        });
+        let in_service_non_provisionable =
+            to_db_sled_policy(SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            });
+
+        sled_dsl::sled
+            // If the sled is not in-service, drop the list immediately.
+            .filter(
+                sled_dsl::sled_policy
+                    .eq(in_service)
+                    .or(sled_dsl::sled_policy.eq(in_service_non_provisionable)),
+            )
+            // Look up all inventory physical disks that could match this sled
+            .inner_join(
+                inv_physical_disk_dsl::inv_physical_disk.on(
+                    inv_physical_disk_dsl::inv_collection_id
+                        .eq(inventory_collection_id)
+                        .and(inv_physical_disk_dsl::sled_id.eq(sled_id))
+                        .and(
+                            inv_physical_disk_dsl::variant
+                                .eq(PhysicalDiskKind::U2),
+                        ),
+                ),
+            )
+            // Filter out any disks in the inventory for which we have ever had
+            // a control plane disk.
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                physical_disk_dsl::physical_disk
+                    .select(0.into_sql::<diesel::sql_types::Integer>())
+                    .filter(physical_disk_dsl::sled_id.eq(sled_id))
+                    .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2))
+                    .filter(
+                        physical_disk_dsl::vendor
+                            .eq(inv_physical_disk_dsl::vendor),
+                    )
+                    .filter(
+                        physical_disk_dsl::model
+                            .eq(inv_physical_disk_dsl::model),
+                    )
+                    .filter(
+                        physical_disk_dsl::serial
+                            .eq(inv_physical_disk_dsl::serial),
+                    ),
+            )))
+            .select(InvPhysicalDisk::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn physical_disk_list(
@@ -240,9 +308,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn physical_disk_upsert_different_uuid_idempotent() {
+    async fn physical_disk_insert_different_uuid_idempotent() {
         let logctx = dev::test_setup_log(
-            "physical_disk_upsert_different_uuid_idempotent",
+            "physical_disk_insert_different_uuid_idempotent",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
@@ -260,7 +328,7 @@ mod test {
             sled_id,
         );
         let first_observed_disk = datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         assert_eq!(disk.id(), first_observed_disk.id());
@@ -286,7 +354,7 @@ mod test {
             sled_id,
         );
         let second_observed_disk = datastore
-            .physical_disk_upsert(&opctx, disk_again.clone())
+            .physical_disk_insert(&opctx, disk_again.clone())
             .await
             .expect("Failed second upsert of physical disk");
         // This check is pretty important - note that we return the original
@@ -316,9 +384,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn physical_disk_upsert_same_uuid_idempotent() {
+    async fn physical_disk_insert_same_uuid_idempotent() {
         let logctx =
-            dev::test_setup_log("physical_disk_upsert_same_uuid_idempotent");
+            dev::test_setup_log("physical_disk_insert_same_uuid_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -335,14 +403,14 @@ mod test {
             sled_id,
         );
         let first_observed_disk = datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         assert_eq!(disk.id(), first_observed_disk.id());
 
         // Insert a disk with an identical UUID
         let second_observed_disk = datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Should have succeeded upserting disk");
         assert_eq!(disk.id(), second_observed_disk.id());
@@ -367,9 +435,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn physical_disk_upsert_different_disks() {
+    async fn physical_disk_insert_different_disks() {
         let logctx =
-            dev::test_setup_log("physical_disk_upsert_different_disks");
+            dev::test_setup_log("physical_disk_insert_different_disks");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -386,7 +454,7 @@ mod test {
             sled_id,
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
 
@@ -400,7 +468,7 @@ mod test {
             sled_id,
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
 
@@ -433,7 +501,7 @@ mod test {
             sled.id(),
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         let pagparams = list_disk_params();
@@ -482,9 +550,9 @@ mod test {
     // - Disk is detached from Sled A (and the detach is reported to Nexus)
     // - Disk is attached into Sled B
     #[tokio::test]
-    async fn physical_disk_upsert_delete_reupsert_new_sled() {
+    async fn physical_disk_insert_delete_reupsert_new_sled() {
         let logctx = dev::test_setup_log(
-            "physical_disk_upsert_delete_reupsert_new_sled",
+            "physical_disk_insert_delete_reupsert_new_sled",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
@@ -502,7 +570,7 @@ mod test {
             sled_a.id(),
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         let pagparams = list_disk_params();
@@ -549,7 +617,7 @@ mod test {
             sled_b.id(),
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed second attempt at upserting disk");
 
@@ -576,9 +644,9 @@ mod test {
     // notification to Nexus).
     // - Disk is attached into Sled B
     #[tokio::test]
-    async fn physical_disk_upsert_reupsert_new_sled() {
+    async fn physical_disk_insert_reupsert_new_sled() {
         let logctx =
-            dev::test_setup_log("physical_disk_upsert_reupsert_new_sled");
+            dev::test_setup_log("physical_disk_insert_reupsert_new_sled");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -595,7 +663,7 @@ mod test {
             sled_a.id(),
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         let pagparams = list_disk_params();
@@ -620,7 +688,7 @@ mod test {
             sled_b.id(),
         );
         datastore
-            .physical_disk_upsert(&opctx, disk.clone())
+            .physical_disk_insert(&opctx, disk.clone())
             .await
             .expect("Failed second attempt at upserting disk");
 

@@ -49,9 +49,11 @@ impl_typed_uuid_kind! {
     DownstairsRegionKind => "downstairs_region",
     LoopbackAddressKind => "loopback_address",
     OmicronZoneKind => "service",
+    PhysicalDiskKind => "physical_disk",
     SledKind => "sled",
     TufRepoKind => "tuf_repo",
     UpstairsKind => "upstairs",
     UpstairsRepairKind => "upstairs_repair",
     UpstairsSessionKind => "upstairs_session",
+    ZpoolKind => "zpool",
 }

@@ -121,7 +121,7 @@ async fn test_physical_disk_create_list_delete(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let _disk_id = datastore
-        .physical_disk_upsert(&opctx, physical_disk.clone())
+        .physical_disk_insert(&opctx, physical_disk.clone())
         .await
         .expect("Failed to upsert physical disk");
 

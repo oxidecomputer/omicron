@@ -1684,6 +1684,7 @@ mod tests {
         let bp1 = Blueprint {
             id: bp1_id,
             blueprint_zones: bp1_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1735,6 +1736,7 @@ mod tests {
         let bp2 = Blueprint {
             id: bp2_id,
             blueprint_zones: BTreeMap::new(),
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp1_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1795,6 +1797,7 @@ mod tests {
         let bp3 = Blueprint {
             id: bp3_id,
             blueprint_zones: bp3_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp2_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1858,6 +1861,7 @@ mod tests {
         let bp4 = Blueprint {
             id: bp4_id,
             blueprint_zones: bp4_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp3_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1986,6 +1990,7 @@ mod tests {
         let bp5 = Blueprint {
             id: bp5_id,
             blueprint_zones: bp5_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp4_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

@@ -4780,6 +4780,7 @@ dependencies = [
  "chrono",
  "expectorate",
  "gateway-client",
+ "illumos-utils",
  "indexmap 2.2.6",
  "internal-dns",
  "ipnet",

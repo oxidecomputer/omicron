@@ -737,7 +737,7 @@ impl DataStore {
                     info!(log, "Inserted services");
 
                     for physical_disk in physical_disks {
-                        Self::physical_disk_upsert_on_connection(&conn, &opctx, physical_disk)
+                        Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
                             .await
                             .map_err(|e| {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
@@ -988,6 +988,7 @@ mod test {
                 blueprint: Blueprint {
                     id: Uuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
+                    blueprint_disks: BTreeMap::new(),
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),

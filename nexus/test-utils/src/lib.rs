@@ -827,6 +827,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Blueprint {
                 id: Uuid::new_v4(),
                 blueprint_zones,
+                blueprint_disks: BTreeMap::new(), // XXX
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation

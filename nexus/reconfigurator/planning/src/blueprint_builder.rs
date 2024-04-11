@@ -13,9 +13,12 @@ use ipnet::IpAdd;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
@@ -39,8 +42,10 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use slog::o;
@@ -53,6 +58,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::str::FromStr;
 use thiserror::Error;
 use typed_rng::UuidRng;
 use uuid::Uuid;
@@ -94,6 +100,19 @@ pub enum EnsureMultiple {
     NotNeeded,
 }
 
+fn zpool_id_to_external_name(
+    zpool_id: TypedUuid<ZpoolKind>,
+) -> anyhow::Result<ZpoolName> {
+    let pool_name_generated = illumos_utils::zpool::ZpoolName::new_external(
+        zpool_id.into_untyped_uuid(),
+    )
+    .to_string();
+    let pool_name = ZpoolName::from_str(&pool_name_generated).map_err(|e| {
+        anyhow!("Failed to create zpool name from {zpool_id}: {e}")
+    })?;
+    Ok(pool_name)
+}
+
 /// Helper for assembling a blueprint
 ///
 /// There are two basic ways to assemble a new blueprint:
@@ -123,6 +142,8 @@ pub struct BlueprintBuilder<'a> {
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
     zones: BlueprintZonesBuilder<'a>,
+    disks: BlueprintDisksBuilder<'a>,
+
     creator: String,
     comments: Vec<String>,
 
@@ -227,6 +248,14 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
+            // TODO: I'd like to populate this from inventory,
+            // but we aren't yet plumbing "managed" disk information
+            // through the inventory subsystem. That makes this a little tricky,
+            // because although we can see disks, we don't know if they're
+            // part of the control plane.
+            //
+            // This info might need to be supplied as an argument?
+            blueprint_disks: BTreeMap::new(), // XXX
             parent_blueprint_id: None,
             internal_dns_version,
             external_dns_version,
@@ -357,6 +386,7 @@ impl<'a> BlueprintBuilder<'a> {
             input,
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZonesBuilder::new(parent_blueprint),
+            disks: BlueprintDisksBuilder::new(parent_blueprint),
             creator: creator.to_owned(),
             comments: Vec::new(),
             nexus_v4_ips,
@@ -373,9 +403,12 @@ impl<'a> BlueprintBuilder<'a> {
         // are no longer in service and need expungement work.
         let blueprint_zones =
             self.zones.into_zones_map(self.input.all_sled_ids(SledFilter::All));
+        let blueprint_disks =
+            self.disks.into_disks_map(self.input.all_sled_ids(SledFilter::All));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
+            blueprint_disks,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
@@ -403,6 +436,89 @@ impl<'a> BlueprintBuilder<'a> {
         String: From<S>,
     {
         self.comments.push(String::from(comment));
+    }
+
+    /// Ensures that the blueprint contains disks for a sled which already
+    /// exists in the database.
+    ///
+    /// This operation must perform the following:
+    /// - Ensure that any disks / zpools that exist in the database
+    ///   are propagated into the blueprint.
+    /// - Ensure that any disks that are expunged from the database are
+    ///   removed from the blueprint.
+    pub fn sled_ensure_disks(
+        &mut self,
+        sled_id: TypedUuid<SledKind>,
+        resources: &SledResources,
+    ) -> Result<Ensure, Error> {
+        let (mut additions, removals) = {
+            // These are the disks known to our (last?) blueprint
+            let blueprint_disks: BTreeMap<_, _> = self
+                .disks
+                .current_sled_disks(sled_id)
+                .map(|disk| {
+                    (
+                        TypedUuid::<PhysicalDiskKind>::from_untyped_uuid(
+                            disk.id,
+                        ),
+                        disk,
+                    )
+                })
+                .collect();
+
+            // These are the in-service disks as we observed them in the database,
+            // during the planning phase
+            let database_disks: BTreeMap<_, _> = resources
+                .all_disks(DiskFilter::InService)
+                .map(|(zpool, disk)| (disk.disk_id, (zpool, disk)))
+                .collect();
+
+            // Add any disks that appear in the database, but not the blueprint
+            let additions = database_disks
+                .iter()
+                .filter_map(|(disk_id, (zpool, disk))| {
+                    if !blueprint_disks.contains_key(disk_id) {
+                        Some(BlueprintPhysicalDiskConfig {
+                            identity: disk.disk_identity.clone(),
+                            id: disk_id.into_untyped_uuid(),
+                            pool_id: zpool.into_untyped_uuid(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<BlueprintPhysicalDiskConfig>>();
+
+            // Remove any disks that appear in the blueprint, but not the database
+            let removals: HashSet<TypedUuid<PhysicalDiskKind>> =
+                blueprint_disks
+                    .keys()
+                    .filter_map(|disk_id| {
+                        if !database_disks.contains_key(disk_id) {
+                            Some(disk_id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+            (additions, removals)
+        };
+
+        if additions.is_empty() && removals.is_empty() {
+            return Ok(Ensure::NotNeeded);
+        }
+
+        let disks = &mut self.disks.change_sled_disks(sled_id).disks;
+
+        disks.append(&mut additions);
+        disks.retain(|config| {
+            !removals.contains(
+                &TypedUuid::<PhysicalDiskKind>::from_untyped_uuid(config.id),
+            )
+        });
+
+        Ok(Ensure::Added)
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -472,8 +588,10 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_ensure_zone_crucible(
         &mut self,
         sled_id: TypedUuid<SledKind>,
-        pool_name: ZpoolName,
+        zpool_id: TypedUuid<ZpoolKind>,
     ) -> Result<Ensure, Error> {
+        let pool_name = zpool_id_to_external_name(zpool_id)?;
+
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
             self.zones.current_sled_zones(sled_id).any(|z| {
@@ -488,7 +606,7 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         let sled_info = self.sled_resources(sled_id)?;
-        if !sled_info.zpools.contains(&pool_name) {
+        if !sled_info.zpools.contains_key(&zpool_id) {
             return Err(Error::Planner(anyhow!(
                 "adding crucible zone for sled {:?}: \
                 attempted to use unknown zpool {:?}",
@@ -863,6 +981,102 @@ impl<'a> BlueprintZonesBuilder<'a> {
     }
 }
 
+/// Helper for working with sets of disks on each sled
+///
+/// Tracking the set of disks is slightly non-trivial because we need to bump
+/// the per-sled generation number iff the disks are changed.  So we need to
+/// keep track of whether we've changed the disksrelative to the parent
+/// blueprint.  We do this by keeping a copy of any [`BlueprintDisksConfig`]
+/// that we've changed and a _reference_ to the parent blueprint's disks.  This
+/// struct makes it easy for callers iterate over the right set of disks.
+struct BlueprintDisksBuilder<'a> {
+    changed_disks: BTreeMap<TypedUuid<SledKind>, BlueprintPhysicalDisksConfig>,
+    parent_disks:
+        &'a BTreeMap<TypedUuid<SledKind>, BlueprintPhysicalDisksConfig>,
+}
+
+impl<'a> BlueprintDisksBuilder<'a> {
+    pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintDisksBuilder {
+        BlueprintDisksBuilder {
+            changed_disks: BTreeMap::new(),
+            parent_disks: &parent_blueprint.blueprint_disks,
+        }
+    }
+
+    /// Returns a mutable reference to a sled's Omicron disks *because* we're
+    /// going to change them.  It's essential that the caller _does_ change them
+    /// because we will have bumped the generation number and we don't want to
+    /// do that if no changes are being made.
+    pub fn change_sled_disks(
+        &mut self,
+        sled_id: TypedUuid<SledKind>,
+    ) -> &mut BlueprintPhysicalDisksConfig {
+        self.changed_disks.entry(sled_id).or_insert_with(|| {
+            if let Some(old_sled_disks) = self.parent_disks.get(&sled_id) {
+                BlueprintPhysicalDisksConfig {
+                    generation: old_sled_disks.generation.next(),
+                    disks: old_sled_disks.disks.clone(),
+                }
+            } else {
+                // TODO: Check these semantics?
+                //
+                // The first generation is reserved to mean the one containing
+                // no disks.
+                BlueprintPhysicalDisksConfig {
+                    generation: Generation::new().next(),
+                    disks: vec![],
+                }
+            }
+        })
+    }
+
+    /// Iterates over the list of Omicron disks currently configured for this
+    /// sled in the blueprint that's being built
+    pub fn current_sled_disks(
+        &self,
+        sled_id: TypedUuid<SledKind>,
+    ) -> Box<dyn Iterator<Item = &BlueprintPhysicalDiskConfig> + '_> {
+        if let Some(sled_disks) = self
+            .changed_disks
+            .get(&sled_id)
+            .or_else(|| self.parent_disks.get(&sled_id))
+        {
+            Box::new(sled_disks.disks.iter())
+        } else {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    /// Produces an owned map of disks for the requested sleds
+    pub fn into_disks_map(
+        mut self,
+        sled_ids: impl Iterator<Item = TypedUuid<SledKind>>,
+    ) -> BTreeMap<TypedUuid<SledKind>, BlueprintPhysicalDisksConfig> {
+        sled_ids
+            .map(|sled_id| {
+                // Start with self.changed_disks, which contains entries for any
+                // sled whose disks config is changing in this blueprint.
+                let mut disks = self
+                    .changed_disks
+                    .remove(&sled_id)
+                    // If it's not there, use the config from the parent
+                    // blueprint.
+                    .or_else(|| self.parent_disks.get(&sled_id).cloned())
+                    // If it's not there either, then this must be a new sled
+                    // and we haven't added any disks to it yet.  Use the
+                    // standard initial config.
+                    .unwrap_or_else(|| BlueprintPhysicalDisksConfig {
+                        generation: Generation::new(),
+                        disks: vec![],
+                    });
+                disks.disks.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+
+                (sled_id, disks)
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
@@ -978,7 +1192,7 @@ pub mod test {
             example.input.all_sled_resources(SledFilter::All)
         {
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
-            for pool_name in &sled_resources.zpools {
+            for pool_name in sled_resources.zpools.keys() {
                 builder
                     .sled_ensure_zone_crucible(sled_id, pool_name.clone())
                     .unwrap();
@@ -1011,7 +1225,7 @@ pub mod test {
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         // TODO-cleanup use `TypedUuid` everywhere
         let new_sled_resources = input.sled_resources(&new_sled_id).unwrap();
-        for pool_name in &new_sled_resources.zpools {
+        for pool_name in new_sled_resources.zpools.keys() {
             builder
                 .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
                 .unwrap();
@@ -1074,7 +1288,14 @@ pub mod test {
                 }
             })
             .collect::<BTreeSet<_>>();
-        assert_eq!(crucible_pool_names, new_sled_resources.zpools);
+        assert_eq!(
+            crucible_pool_names,
+            new_sled_resources
+                .zpools
+                .keys()
+                .map(|id| { zpool_id_to_external_name(*id).unwrap() })
+                .collect()
+        );
 
         logctx.cleanup_successful();
     }

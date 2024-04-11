@@ -14,6 +14,7 @@ use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
+use crate::db::model::PhysicalDisk;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
@@ -85,7 +86,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Zpool> {
+    ) -> ListResultVec<(Zpool, PhysicalDisk)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::physical_disk::dsl as dsl_physical_disk;
@@ -99,7 +100,7 @@ impl DataStore {
                     ),
                 ),
             )
-            .select(Zpool::as_select())
+            .select((Zpool::as_select(), PhysicalDisk::as_select()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -114,7 +115,7 @@ impl DataStore {
     pub async fn zpool_list_all_external_batched(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<Zpool> {
+    ) -> ListResultVec<(Zpool, PhysicalDisk)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
         let mut zpools = Vec::new();
@@ -123,8 +124,7 @@ impl DataStore {
             let batch = self
                 .zpool_list_all_external(opctx, &p.current_pagparams())
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
+            paginator = p.found_batch(&batch, &|(z, _)| z.id());
             zpools.extend(batch);
         }
 
