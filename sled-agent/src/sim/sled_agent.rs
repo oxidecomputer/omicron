@@ -36,6 +36,7 @@ use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
@@ -547,7 +548,7 @@ impl SledAgent {
 
     pub async fn get_datasets(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
     ) -> Vec<(Uuid, SocketAddr)> {
         self.storage.lock().await.get_all_datasets(zpool_id)
     }
@@ -555,7 +556,7 @@ impl SledAgent {
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(
         &self,
-        id: Uuid,
+        id: ZpoolUuid,
         physical_disk_id: Uuid,
         size: u64,
     ) {
@@ -569,7 +570,7 @@ impl SledAgent {
     /// Adds a Crucible Dataset within a zpool.
     pub async fn create_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
@@ -578,7 +579,7 @@ impl SledAgent {
     /// Returns a crucible dataset within a particular zpool.
     pub async fn get_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await

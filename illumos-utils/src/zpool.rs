@@ -6,11 +6,11 @@
 
 use crate::{execute, ExecutionError, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
-use uuid::Uuid;
 
 pub const ZPOOL_EXTERNAL_PREFIX: &str = "oxp_";
 pub const ZPOOL_INTERNAL_PREFIX: &str = "oxi_";
@@ -319,7 +319,7 @@ pub enum ZpoolKind {
 /// when reading the structure, and validate that the UUID can be utilized.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ZpoolName {
-    id: Uuid,
+    id: ZpoolUuid,
     kind: ZpoolKind,
 }
 
@@ -357,15 +357,15 @@ impl JsonSchema for ZpoolName {
 }
 
 impl ZpoolName {
-    pub fn new_internal(id: Uuid) -> Self {
+    pub fn new_internal(id: ZpoolUuid) -> Self {
         Self { id, kind: ZpoolKind::Internal }
     }
 
-    pub fn new_external(id: Uuid) -> Self {
+    pub fn new_external(id: ZpoolUuid) -> Self {
         Self { id, kind: ZpoolKind::External }
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> ZpoolUuid {
         self.id
     }
 
@@ -418,10 +418,10 @@ impl FromStr for ZpoolName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(s) = s.strip_prefix(ZPOOL_EXTERNAL_PREFIX) {
-            let id = Uuid::from_str(s).map_err(|e| e.to_string())?;
+            let id = ZpoolUuid::from_str(s).map_err(|e| e.to_string())?;
             Ok(ZpoolName::new_external(id))
         } else if let Some(s) = s.strip_prefix(ZPOOL_INTERNAL_PREFIX) {
-            let id = Uuid::from_str(s).map_err(|e| e.to_string())?;
+            let id = ZpoolUuid::from_str(s).map_err(|e| e.to_string())?;
             Ok(ZpoolName::new_internal(id))
         } else {
             Err(format!(
@@ -525,7 +525,7 @@ mod test {
 
     #[test]
     fn test_parse_external_zpool_name() {
-        let uuid: Uuid =
+        let uuid: ZpoolUuid =
             "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
         let good_name = format!("{}{}", ZPOOL_EXTERNAL_PREFIX, uuid);
 
@@ -536,7 +536,7 @@ mod test {
 
     #[test]
     fn test_parse_internal_zpool_name() {
-        let uuid: Uuid =
+        let uuid: ZpoolUuid =
             "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
         let good_name = format!("{}{}", ZPOOL_INTERNAL_PREFIX, uuid);
 

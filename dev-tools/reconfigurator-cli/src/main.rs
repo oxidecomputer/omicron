@@ -32,7 +32,7 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneKind, TypedUuid};
 use reedline::{Reedline, Signal};
 use std::cell::RefCell;
@@ -406,13 +406,13 @@ enum Commands {
 #[derive(Debug, Args)]
 struct SledAddArgs {
     /// id of the new sled
-    sled_id: Option<TypedUuid<SledKind>>,
+    sled_id: Option<SledUuid>,
 }
 
 #[derive(Debug, Args)]
 struct SledArgs {
     /// id of the sled
-    sled_id: TypedUuid<SledKind>,
+    sled_id: SledUuid,
 }
 
 #[derive(Debug, Args)]
@@ -454,7 +454,7 @@ enum BlueprintEditCommands {
     /// add a Nexus instance to a particular sled
     AddNexus {
         /// sled on which to deploy the new instance
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
     },
 }
 
@@ -576,7 +576,7 @@ fn cmd_sled_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
-        id: TypedUuid<SledKind>,
+        id: SledUuid,
         nzpools: usize,
         subnet: String,
     }

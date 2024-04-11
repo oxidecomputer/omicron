@@ -33,7 +33,9 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -77,8 +79,9 @@ impl PlanningInputFromDb<'_> {
                 // It's unfortunate that Nexus knows how Sled Agent
                 // constructs zpool names, but there's not currently an
                 // alternative.
+                let id = ZpoolUuid::from_untyped_uuid(z.id());
                 let zpool_name_generated =
-                    illumos_utils::zpool::ZpoolName::new_external(z.id())
+                    illumos_utils::zpool::ZpoolName::new_external(id)
                         .to_string();
                 let zpool_name = ZpoolName::from_str(&zpool_name_generated)
                     .map_err(|e| {
@@ -105,7 +108,7 @@ impl PlanningInputFromDb<'_> {
                 resources: SledResources { subnet, zpools },
             };
             // TODO-cleanup use `TypedUuid` everywhere
-            let sled_id = TypedUuid::from_untyped_uuid(sled_id);
+            let sled_id = SledUuid::from_untyped_uuid(sled_id);
             builder.add_sled(sled_id, sled_details).map_err(|e| {
                 Error::internal_error(&format!(
                     "unexpectedly failed to add sled to planning input: {e}"

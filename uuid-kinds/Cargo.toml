@@ -11,6 +11,7 @@ license = "MPL-2.0"
 [dependencies]
 newtype-uuid.workspace = true
 schemars = { workspace = true, optional = true }
+paste.workspace = true
 
 [features]
 default = ["std"]

@@ -339,8 +339,7 @@
           "$ref": "#/definitions/DiskIdentity"
         },
         "pool_id": {
-          "type": "string",
-          "format": "uuid"
+          "$ref": "#/definitions/TypedUuidForZpoolKind"
         }
       }
     },
@@ -831,6 +830,10 @@
           "minimum": 0.0
         }
       }
+    },
+    "TypedUuidForZpoolKind": {
+      "type": "string",
+      "format": "uuid"
     },
     "Vni": {
       "description": "A Geneve Virtual Network Identifier",
