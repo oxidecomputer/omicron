@@ -243,6 +243,7 @@ impl DataStore {
             .filter(dsl::serial.eq(serial))
             .filter(dsl::model.eq(model))
             .filter(dsl::sled_id.eq(sled_id))
+            .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -292,101 +293,10 @@ mod test {
         }
     }
 
-    // Only checking some fields:
-    // - The UUID of the disk may actually not be the same as the upserted one;
-    // the "vendor/serial/model" value is the more critical unique identifier.
-    // NOTE: Could we derive a UUID from the VSM values?
-    // - The 'time' field precision can be modified slightly when inserted into
-    // the DB.
-    fn assert_disks_equal_ignore_uuid(lhs: &PhysicalDisk, rhs: &PhysicalDisk) {
-        assert_eq!(lhs.time_deleted().is_some(), rhs.time_deleted().is_some());
-        assert_eq!(lhs.vendor, rhs.vendor);
-        assert_eq!(lhs.serial, rhs.serial);
-        assert_eq!(lhs.model, rhs.model);
-        assert_eq!(lhs.variant, rhs.variant);
-        assert_eq!(lhs.sled_id, rhs.sled_id);
-    }
-
     #[tokio::test]
-    async fn physical_disk_insert_different_uuid_idempotent() {
-        let logctx = dev::test_setup_log(
-            "physical_disk_insert_different_uuid_idempotent",
-        );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        let sled = create_test_sled(&datastore).await;
-        let sled_id = sled.id();
-
-        // Insert a disk
-        let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
-            String::from("Oxide"),
-            String::from("123"),
-            String::from("FakeDisk"),
-            PhysicalDiskKind::U2,
-            sled_id,
-        );
-        let first_observed_disk = datastore
-            .physical_disk_insert(&opctx, disk.clone())
-            .await
-            .expect("Failed first attempt at upserting disk");
-        assert_eq!(disk.id(), first_observed_disk.id());
-        assert_disks_equal_ignore_uuid(&disk, &first_observed_disk);
-
-        // Observe the inserted disk
-        let pagparams = list_disk_params();
-        let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_id, &pagparams)
-            .await
-            .expect("Failed to list physical disks");
-        assert_eq!(disks.len(), 1);
-        assert_eq!(disk.id(), disks[0].id());
-        assert_disks_equal_ignore_uuid(&disk, &disks[0]);
-
-        // Insert the same disk, with a different UUID primary key
-        let disk_again = PhysicalDisk::new(
-            Uuid::new_v4(),
-            String::from("Oxide"),
-            String::from("123"),
-            String::from("FakeDisk"),
-            PhysicalDiskKind::U2,
-            sled_id,
-        );
-        let second_observed_disk = datastore
-            .physical_disk_insert(&opctx, disk_again.clone())
-            .await
-            .expect("Failed second upsert of physical disk");
-        // This check is pretty important - note that we return the original
-        // UUID, not the new one.
-        assert_eq!(disk.id(), second_observed_disk.id());
-        assert_ne!(disk_again.id(), second_observed_disk.id());
-        assert_disks_equal_ignore_uuid(&disk_again, &second_observed_disk);
-        assert!(
-            first_observed_disk.time_modified()
-                <= second_observed_disk.time_modified()
-        );
-
-        let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_id, &pagparams)
-            .await
-            .expect("Failed to re-list physical disks");
-
-        // We'll use the old primary key
-        assert_eq!(disks.len(), 1);
-        assert_eq!(disk.id(), disks[0].id());
-        assert_ne!(disk_again.id(), disks[0].id());
-        assert_disks_equal_ignore_uuid(&disk, &disks[0]);
-        assert_disks_equal_ignore_uuid(&disk_again, &disks[0]);
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn physical_disk_insert_same_uuid_idempotent() {
+    async fn physical_disk_insert_same_uuid_collides() {
         let logctx =
-            dev::test_setup_log("physical_disk_insert_same_uuid_idempotent");
+            dev::test_setup_log("physical_disk_insert_same_uuid_collides");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -409,26 +319,16 @@ mod test {
         assert_eq!(disk.id(), first_observed_disk.id());
 
         // Insert a disk with an identical UUID
-        let second_observed_disk = datastore
+        let err = datastore
             .physical_disk_insert(&opctx, disk.clone())
             .await
-            .expect("Should have succeeded upserting disk");
-        assert_eq!(disk.id(), second_observed_disk.id());
-        assert!(
-            first_observed_disk.time_modified()
-                <= second_observed_disk.time_modified()
-        );
-        assert_disks_equal_ignore_uuid(
-            &first_observed_disk,
-            &second_observed_disk,
-        );
+            .expect_err("Should have failed upserting disk");
 
-        let pagparams = list_disk_params();
-        let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_id, &pagparams)
-            .await
-            .expect("Failed to list physical disks");
-        assert_eq!(disks.len(), 1);
+        assert!(
+            err.to_string()
+                .contains("duplicate key value violates unique constraint"),
+            "{err}"
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -607,7 +507,7 @@ mod test {
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
 
-        // "Report the disk" from the second sled
+        // Attach the disk to the second sled
         let disk = PhysicalDisk::new(
             Uuid::new_v4(),
             String::from("Oxide"),
@@ -677,6 +577,18 @@ mod test {
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
+
+        // Remove the disk from the first sled
+        datastore
+            .physical_disk_delete(
+                &opctx,
+                disk.vendor.clone(),
+                disk.serial.clone(),
+                disk.model.clone(),
+                disk.sled_id,
+            )
+            .await
+            .expect("Failed to delete disk");
 
         // "Report the disk" from the second sled
         let disk = PhysicalDisk::new(

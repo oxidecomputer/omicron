@@ -383,14 +383,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT vendor_serial_model_unique UNIQUE (
-      vendor, serial, model
-    )
+    disk_state omicron.public.physical_disk_state NOT NULL
 );
+
+-- This constraint only needs to be upheld for disks that are not deleted
+-- nor decommissioned.
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_serial_model_unique on omicron.public.physical_disk (
+  vendor, serial, model
+) WHERE time_deleted IS NULL AND disk_state != 'decommissioned';
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.public.physical_disk (
     variant,

@@ -175,7 +175,7 @@ impl<'a> Planner<'a> {
             for zpool_id in sled_resources.zpools.keys() {
                 if self
                     .blueprint
-                    .sled_ensure_zone_crucible(sled_id, zpool_id.clone())?
+                    .sled_ensure_zone_crucible(sled_id, *zpool_id)?
                     == Ensure::Added
                 {
                     info!(

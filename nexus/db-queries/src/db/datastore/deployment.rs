@@ -1562,7 +1562,7 @@ mod tests {
         for zpool_id in new_sled_zpools.keys() {
             assert_eq!(
                 builder
-                    .sled_ensure_zone_crucible(new_sled_id, zpool_id.clone())
+                    .sled_ensure_zone_crucible(new_sled_id, *zpool_id)
                     .unwrap(),
                 Ensure::Added
             );

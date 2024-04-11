@@ -495,7 +495,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .keys()
                     .filter_map(|disk_id| {
                         if !database_disks.contains_key(disk_id) {
-                            Some(disk_id.clone())
+                            Some(*disk_id)
                         } else {
                             None
                         }
@@ -1192,10 +1192,8 @@ pub mod test {
             example.input.all_sled_resources(SledFilter::All)
         {
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
-            for pool_name in sled_resources.zpools.keys() {
-                builder
-                    .sled_ensure_zone_crucible(sled_id, pool_name.clone())
-                    .unwrap();
+            for pool_id in sled_resources.zpools.keys() {
+                builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
             }
         }
 
@@ -1225,10 +1223,8 @@ pub mod test {
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         // TODO-cleanup use `TypedUuid` everywhere
         let new_sled_resources = input.sled_resources(&new_sled_id).unwrap();
-        for pool_name in new_sled_resources.zpools.keys() {
-            builder
-                .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
-                .unwrap();
+        for pool_id in new_sled_resources.zpools.keys() {
+            builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
 
         let blueprint3 = builder.build();
