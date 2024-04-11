@@ -35,12 +35,15 @@ use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
+use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
+use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::DataPageParams;
@@ -49,6 +52,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -104,6 +110,30 @@ impl DataStore {
         let row_blueprint = DbBlueprint::from(blueprint);
         let blueprint_id = row_blueprint.id;
 
+        let sled_omicron_physical_disks = blueprint
+            .blueprint_disks
+            .iter()
+            .map(|(sled_id, disks_config)| {
+                BpSledOmicronPhysicalDisks::new(
+                    blueprint_id,
+                    sled_id.into_untyped_uuid(),
+                    disks_config,
+                )
+            })
+            .collect::<Vec<_>>();
+        let omicron_physical_disks = blueprint
+            .blueprint_disks
+            .iter()
+            .flat_map(|(sled_id, disks_config)| {
+                disks_config.disks.iter().map(move |disk| {
+                    BpOmicronPhysicalDisk::new(
+                        blueprint_id,
+                        sled_id.into_untyped_uuid(),
+                        disk,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
         let sled_omicron_zones = blueprint
             .blueprint_zones
             .iter()
@@ -154,6 +184,24 @@ impl DataStore {
                 use db::schema::blueprint::dsl;
                 let _: usize = diesel::insert_into(dsl::blueprint)
                     .values(row_blueprint)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert all physical disks for this blueprint.
+
+            {
+                use db::schema::bp_sled_omicron_physical_disks::dsl as sled_disks;
+                let _ = diesel::insert_into(sled_disks::bp_sled_omicron_physical_disks)
+                    .values(sled_omicron_physical_disks)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            {
+                use db::schema::bp_omicron_physical_disk::dsl as omicron_disk;
+                let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
+                    .values(omicron_physical_disks)
                     .execute_async(&conn)
                     .await?;
             }
@@ -287,6 +335,50 @@ impl DataStore {
             blueprint_zones
         };
 
+        // Do the same thing we just did for zones, but for physical disks too.
+        let mut blueprint_disks: BTreeMap<
+            TypedUuid<SledKind>,
+            BlueprintPhysicalDisksConfig,
+        > = {
+            use db::schema::bp_sled_omicron_physical_disks::dsl;
+
+            let mut blueprint_physical_disks = BTreeMap::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_sled_omicron_physical_disks,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpSledOmicronPhysicalDisks::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|s| s.sled_id);
+
+                for s in batch {
+                    let old = blueprint_physical_disks.insert(
+                        TypedUuid::<SledKind>::from_untyped_uuid(s.sled_id),
+                        BlueprintPhysicalDisksConfig {
+                            generation: *s.generation,
+                            disks: Vec::new(),
+                        },
+                    );
+                    bail_unless!(
+                        old.is_none(),
+                        "found duplicate sled ID in bp_sled_omicron_physical_disks: {}",
+                        s.sled_id
+                    );
+                }
+            }
+
+            blueprint_physical_disks
+        };
+
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items
         // from this set.  That way we can tell if the same NIC was used twice
@@ -403,6 +495,56 @@ impl DataStore {
             zones_config.sort();
         }
 
+        // Load all the physical disks for each sled.
+        {
+            use db::schema::bp_omicron_physical_disk::dsl;
+
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                // `paginated` implicitly orders by our `id`, which is also
+                // handy for testing: the physical disks are always consistently ordered
+                let batch = paginated(
+                    dsl::bp_omicron_physical_disk,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpOmicronPhysicalDisk::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.id);
+
+                for d in batch {
+                    let sled_disks = blueprint_disks
+                        .get_mut(&TypedUuid::<SledKind>::from_untyped_uuid(
+                            d.sled_id,
+                        ))
+                        .ok_or_else(|| {
+                            // This error means that we found a row in
+                            // bp_omicron_physical_disk with no associated record in
+                            // bp_sled_omicron_physical_disks.  This should be
+                            // impossible and reflects either a bug or database
+                            // corruption.
+                            Error::internal_error(&format!(
+                                "disk {:?}: unknown sled: {:?}",
+                                d.id, d.sled_id
+                            ))
+                        })?;
+                    let disk = d.into_blueprint_disk_config();
+                    sled_disks.disks.push(disk);
+                }
+            }
+        }
+
+        // Sort all zones to match what blueprint builders do.
+        for (_, disks_config) in blueprint_disks.iter_mut() {
+            disks_config.disks.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+        }
+
         bail_unless!(
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
@@ -412,7 +554,7 @@ impl DataStore {
         Ok(Blueprint {
             id: blueprint_id,
             blueprint_zones,
-            blueprint_disks: BTreeMap::new(), // XXX
+            blueprint_disks,
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,

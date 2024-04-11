@@ -1474,6 +1474,29 @@ table! {
 }
 
 table! {
+    bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_physical_disk (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        id -> Uuid,
+        pool_id -> Uuid,
+    }
+}
+
+table! {
     bp_sled_omicron_zones (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
