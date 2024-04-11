@@ -32,7 +32,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
@@ -65,7 +65,7 @@ impl<T> SubnetIterator for T where
 #[derive(Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: IndexMap<TypedUuid<SledKind>, Sled>,
+    sleds: IndexMap<SledUuid, Sled>,
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
@@ -232,7 +232,7 @@ impl SystemDescription {
     /// database of an existing system
     pub fn sled_full(
         &mut self,
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
@@ -330,7 +330,7 @@ pub enum SledHardware {
 
 #[derive(Clone, Debug)]
 pub struct SledBuilder {
-    id: Option<TypedUuid<SledKind>>,
+    id: Option<SledUuid>,
     unique: Option<String>,
     hardware: SledHardware,
     hardware_slot: Option<u16>,
@@ -354,7 +354,7 @@ impl SledBuilder {
     /// Set the id of the sled
     ///
     /// Default: randomly generated
-    pub fn id(mut self, id: TypedUuid<SledKind>) -> Self {
+    pub fn id(mut self, id: SledUuid) -> Self {
         self.id = Some(id);
         self
     }
@@ -417,7 +417,7 @@ pub struct SledHwInventory<'a> {
 /// Collection.
 #[derive(Clone, Debug)]
 struct Sled {
-    sled_id: TypedUuid<SledKind>,
+    sled_id: SledUuid,
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
@@ -428,7 +428,7 @@ struct Sled {
 impl Sled {
     /// Create a `Sled` using faked-up information based on a `SledBuilder`
     fn new_simulated(
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_role: SledRole,
         unique: Option<String>,
@@ -518,7 +518,7 @@ impl Sled {
     /// Create a `Sled` based on real information from another `Policy` and
     /// inventory `Collection`
     fn new_full(
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
