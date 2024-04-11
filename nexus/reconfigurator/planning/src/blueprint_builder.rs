@@ -15,6 +15,7 @@ use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
@@ -286,7 +287,9 @@ impl<'a> BlueprintBuilder<'a> {
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for (_, z) in parent_blueprint.all_omicron_zones() {
+        for (_, z) in
+            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        {
             let zone_type = &z.zone_type;
             if let OmicronZoneType::Nexus { nic, .. } = zone_type {
                 match nic.ip {
@@ -440,7 +443,7 @@ impl<'a> BlueprintBuilder<'a> {
         // currently exist.
         let ntp_servers = self
             .parent_blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
                     Some(Host::for_zone(z.id, ZoneVariant::Other).fqdn())
@@ -547,7 +550,7 @@ impl<'a> BlueprintBuilder<'a> {
         // settings should be part of `Policy` instead?
         let (external_tls, external_dns_servers) = self
             .parent_blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .find_map(|(_, z)| match &z.zone_type {
                 OmicronZoneType::Nexus {
                     external_tls,
@@ -870,6 +873,7 @@ pub mod test {
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
+    use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_client::types::{OmicronZoneConfig, OmicronZoneType};
@@ -881,7 +885,7 @@ pub mod test {
     pub fn verify_blueprint(blueprint: &Blueprint) {
         let mut underlay_ips: BTreeMap<Ipv6Addr, &OmicronZoneConfig> =
             BTreeMap::new();
-        for (_, zone) in blueprint.all_omicron_zones() {
+        for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
             if let Some(previous) =
                 underlay_ips.insert(zone.underlay_address, zone)
             {
@@ -1221,7 +1225,7 @@ pub mod test {
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in parent.all_omicron_zones() {
+            for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
                 if let Some(ip) = z
                     .zone_type
                     .external_ip()

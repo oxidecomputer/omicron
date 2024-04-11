@@ -150,10 +150,10 @@ impl Blueprint {
     /// along with the associated sled id.
     pub fn all_omicron_zones(
         &self,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
-            z.zones.iter().map(|z| (*sled_id, &z.config))
-        })
+        self.all_blueprint_zones(filter)
+            .map(|(sled_id, z)| (sled_id, &z.config))
     }
 
     // Temporary method that provides the list of Omicron zones using
@@ -433,27 +433,33 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::SledAgentPut => true,
-                BlueprintZoneFilter::InternalDns => true,
-                BlueprintZoneFilter::VpcFirewall => true,
+                BlueprintZoneFilter::ShouldBeRunning => true,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => true,
+                BlueprintZoneFilter::ShouldBeInInternalDns => true,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
 
-                // Quiesced zones should not be exposed in DNS.
-                BlueprintZoneFilter::InternalDns => false,
+                // Quiesced zones are still running.
+                BlueprintZoneFilter::ShouldBeRunning => true,
 
-                // Quiesced zones are expected to be deployed by sled-agent.
-                BlueprintZoneFilter::SledAgentPut => true,
+                // Quiesced zones should not have external resources -- we do
+                // not want traffic to be directed to them.
+                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
+
+                // Quiesced zones should not be exposed in DNS.
+                BlueprintZoneFilter::ShouldBeInInternalDns => false,
 
                 // Quiesced zones should get firewall rules.
-                BlueprintZoneFilter::VpcFirewall => true,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
             },
             Self::Expunged => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::InternalDns => false,
-                BlueprintZoneFilter::SledAgentPut => false,
-                BlueprintZoneFilter::VpcFirewall => false,
+                BlueprintZoneFilter::ShouldBeRunning => false,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
+                BlueprintZoneFilter::ShouldBeInInternalDns => false,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => false,
             },
         }
     }
@@ -494,14 +500,17 @@ pub enum BlueprintZoneFilter {
     /// All zones.
     All,
 
-    /// Filter by zones that should be in internal DNS.
-    InternalDns,
+    /// Zones that are desired to be in the RUNNING state
+    ShouldBeRunning,
 
-    /// Filter by zones that we should tell sled-agent to deploy.
-    SledAgentPut,
+    /// Filter by zones that should have external IP and DNS resources.
+    ShouldBeExternallyReachable,
+
+    /// Filter by zones that should be in internal DNS.
+    ShouldBeInInternalDns,
 
     /// Filter by zones that should be sent VPC firewall rules.
-    VpcFirewall,
+    ShouldDeployVpcFirewallRules,
 }
 
 /// Describe high-level metadata about a blueprint
