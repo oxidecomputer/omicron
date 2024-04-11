@@ -581,7 +581,14 @@ impl DataStore {
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let (nblueprints, nsled_agent_zones, nzones, nnics) = conn
+        let (
+            nblueprints,
+            nsled_physical_disks,
+            nphysical_disks,
+            nsled_agent_zones,
+            nzones,
+            nnics,
+        ) = conn
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
@@ -617,6 +624,26 @@ impl DataStore {
                     ));
                 }
 
+                // Remove rows associated with Omicron physical disks
+                let nsled_physical_disks = {
+                    use db::schema::bp_sled_omicron_physical_disks::dsl;
+                    diesel::delete(
+                        dsl::bp_sled_omicron_physical_disks
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+                let nphysical_disks = {
+                    use db::schema::bp_omicron_physical_disk::dsl;
+                    diesel::delete(
+                        dsl::bp_omicron_physical_disk
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows associated with Omicron zones
                 let nsled_agent_zones = {
                     use db::schema::bp_sled_omicron_zones::dsl;
@@ -648,7 +675,14 @@ impl DataStore {
                     .await?
                 };
 
-                Ok((nblueprints, nsled_agent_zones, nzones, nnics))
+                Ok((
+                    nblueprints,
+                    nsled_physical_disks,
+                    nphysical_disks,
+                    nsled_agent_zones,
+                    nzones,
+                    nnics,
+                ))
             })
             .await
             .map_err(|error| match error {
@@ -661,6 +695,8 @@ impl DataStore {
         info!(&opctx.log, "removed blueprint";
             "blueprint_id" => blueprint_id.to_string(),
             "nblueprints" => nblueprints,
+            "nsled_physical_disks" => nsled_physical_disks,
+            "nphysical_disks" => nphysical_disks,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
