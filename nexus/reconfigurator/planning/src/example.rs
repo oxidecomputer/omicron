@@ -159,7 +159,7 @@ impl ExampleSystem {
                     // TODO-cleanup use `TypedUuid` everywhere
                     sled_id.into_untyped_uuid(),
                     zones.to_omicron_zones_config(
-                        BlueprintZoneFilter::SledAgentPut,
+                        BlueprintZoneFilter::ShouldBeRunning,
                     ),
                 )
                 .unwrap();

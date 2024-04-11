@@ -1339,7 +1339,7 @@ mod tests {
             collection.omicron_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count(),
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
@@ -1425,8 +1425,9 @@ mod tests {
             blueprint2.blueprint_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count() + num_new_sled_zones,
-            blueprint2.all_omicron_zones().count()
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count()
+                + num_new_sled_zones,
+            blueprint2.all_omicron_zones(BlueprintZoneFilter::All).count()
         );
 
         // All zones should be in service.

@@ -275,8 +275,8 @@ pub fn blueprint_internal_dns_config(
             .map(|addr| addr.port())
     }
 
-    for (_, zone) in
-        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+    for (_, zone) in blueprint
+        .all_blueprint_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
         let context = || {
             format!(
@@ -474,7 +474,7 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
 /// Return the Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones()
+        .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
         .filter_map(|(_, z)| match z.zone_type {
             OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
             _ => None,
@@ -706,11 +706,15 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones()
-            .filter(|(_, zone)| zone.id != out_of_service_id)
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
             .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
+
+        // Check to see that the quiesced zone was actually excluded
+        assert!(omicron_zones_by_ip
+            .values()
+            .all(|id| *id != out_of_service_id));
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.
@@ -856,7 +860,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input) = example(&logctx.log, TEST_NAME, 5);
         let initial_external_dns_generation = Generation::new();
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
+        let mut blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
             initial_external_dns_generation,
@@ -902,18 +906,24 @@ mod test {
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
 
+        // Helper for converting dns records for a given silo to IpAddrs
+        let records_to_ips = |silo_records: &Vec<_>| {
+            let mut ips: Vec<_> = silo_records
+                .into_iter()
+                .map(|record| match record {
+                    DnsRecord::A(v) => IpAddr::V4(*v),
+                    DnsRecord::Aaaa(v) => IpAddr::V6(*v),
+                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                })
+                .collect();
+            ips.sort();
+            ips
+        };
+
         // Here we're hardcoding the contents of the example blueprint.  It
         // currently puts one Nexus zone on each sled.  If we change the example
         // blueprint, change the expected set of IPs here.
-        let mut silo_record_ips: Vec<_> = silo_records
-            .into_iter()
-            .map(|record| match record {
-                DnsRecord::A(v) => IpAddr::V4(*v),
-                DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                DnsRecord::Srv(_) => panic!("unexpected SRV record"),
-            })
-            .collect();
-        silo_record_ips.sort();
+        let silo_record_ips: Vec<_> = records_to_ips(silo_records);
         assert_eq!(
             silo_record_ips,
             &[
@@ -924,6 +934,42 @@ mod test {
                 "192.0.2.6".parse::<IpAddr>().unwrap(),
             ]
         );
+
+        // Change the zone disposition to quiesced for the nexus zone on the
+        // first sled. This should ensure we don't get an external DNS record
+        // back for that sled.
+        let (_, bp_zones_config) =
+            blueprint.blueprint_zones.iter_mut().next().unwrap();
+        let nexus_zone = bp_zones_config
+            .zones
+            .iter_mut()
+            .find(|z| z.config.zone_type.is_nexus())
+            .unwrap();
+        nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+
+        // Retrieve the DNS config based on the modified blueprint
+        let external_dns_zone = blueprint_external_dns_config(
+            &blueprint,
+            std::slice::from_ref(my_silo.name()),
+            String::from("oxide.test"),
+        );
+        let silo_records = &external_dns_zone
+            .records
+            .get(&silo_dns_name(my_silo.name()))
+            .expect("missing silo DNS records");
+        let silo_record_ips: Vec<_> = records_to_ips(silo_records);
+
+        // We shouldn't see the excluded Nexus address
+        assert_eq!(
+            silo_record_ips,
+            &[
+                "192.0.2.3".parse::<IpAddr>().unwrap(),
+                "192.0.2.4".parse::<IpAddr>().unwrap(),
+                "192.0.2.5".parse::<IpAddr>().unwrap(),
+                "192.0.2.6".parse::<IpAddr>().unwrap(),
+            ]
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1241,11 +1287,11 @@ mod test {
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();

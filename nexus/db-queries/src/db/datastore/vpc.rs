@@ -704,7 +704,9 @@ impl DataStore {
             )
             // Filter out services that are expunged and shouldn't be resolved
             // here.
-            .blueprint_zone_filter(BlueprintZoneFilter::VpcFirewall)
+            .blueprint_zone_filter(
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules,
+            )
             .filter(service_network_interface::vpc_id.eq(vpc_id))
             .filter(service_network_interface::time_deleted.is_null())
             .select(Sled::as_select());

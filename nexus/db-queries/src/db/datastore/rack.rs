@@ -43,6 +43,7 @@ use nexus_db_model::SiloUserPasswordHash;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::external_api::params as external_params;
@@ -743,7 +744,7 @@ impl DataStore {
                     })?;
 
                     // Allocate networking records for all services.
-                    for (_, zone_config) in blueprint.all_omicron_zones() {
+                    for (_, zone_config) in blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning) {
                         self.rack_populate_service_networking_records(
                             &conn,
                             &log,
@@ -1730,8 +1731,10 @@ mod test {
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see both of the Nexus services we provisioned.
-        let mut observed_zones: Vec<_> =
-            observed_blueprint.all_omicron_zones().map(|(_, z)| z).collect();
+        let mut observed_zones: Vec<_> = observed_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .map(|(_, z)| z)
+            .collect();
         observed_zones.sort_by_key(|z| z.id);
         assert_eq!(observed_zones.len(), 2);
 
@@ -1751,8 +1754,12 @@ mod test {
         // The address allocated for the service should match the input.
         assert_eq!(
             observed_external_ips[&observed_zones[0].id].ip.ip(),
-            if let OmicronZoneType::Nexus { external_ip, .. } =
-                &blueprint.all_omicron_zones().nth(0).unwrap().1.zone_type
+            if let OmicronZoneType::Nexus { external_ip, .. } = &blueprint
+                .all_omicron_zones(BlueprintZoneFilter::All)
+                .nth(0)
+                .unwrap()
+                .1
+                .zone_type
             {
                 *external_ip
             } else {
@@ -1761,8 +1768,12 @@ mod test {
         );
         assert_eq!(
             observed_external_ips[&observed_zones[1].id].ip.ip(),
-            if let OmicronZoneType::Nexus { external_ip, .. } =
-                &blueprint.all_omicron_zones().nth(1).unwrap().1.zone_type
+            if let OmicronZoneType::Nexus { external_ip, .. } = &blueprint
+                .all_omicron_zones(BlueprintZoneFilter::All)
+                .nth(1)
+                .unwrap()
+                .1
+                .zone_type
             {
                 *external_ip
             } else {

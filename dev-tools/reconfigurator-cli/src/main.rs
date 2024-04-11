@@ -20,6 +20,7 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::ExternalIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::ServiceNetworkInterface;
@@ -146,7 +147,9 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
-        for (_, zone) in parent_blueprint.all_omicron_zones() {
+        for (_, zone) in
+            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        {
             let zone_id =
                 TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
             if let Ok(Some(ip)) = zone.zone_type.external_ip() {

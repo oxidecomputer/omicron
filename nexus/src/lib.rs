@@ -28,6 +28,7 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::{
@@ -269,7 +270,7 @@ impl nexus_test_interface::NexusServer for Server {
         // file.  Whatever it is, we fake up an IP pool range for use by system
         // services that includes solely this IP.
         let internal_services_ip_pool_ranges = blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
             .filter_map(|(_, zc)| match &zc.zone_type {
                 OmicronZoneType::ExternalDns { dns_address, .. } => {
                     // Work around

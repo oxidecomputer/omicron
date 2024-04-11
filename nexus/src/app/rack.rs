@@ -20,6 +20,7 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_reconfigurator_execution::silo_dns_name;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -192,7 +193,7 @@ impl super::Nexus {
         let silo_name = &request.recovery_silo.silo_name;
         let dns_records = request
             .blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
             .filter_map(|(_, zc)| match zc.zone_type {
                 nexus_types::deployment::OmicronZoneType::Nexus {
                     external_ip,
