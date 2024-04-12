@@ -6,7 +6,6 @@
 
 use crate::overridables::Overridables;
 use crate::Sled;
-use anyhow::Context;
 use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
 use internal_dns::ServiceName;
@@ -16,9 +15,10 @@ use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
@@ -28,11 +28,11 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
@@ -61,13 +61,7 @@ pub(crate) async fn deploy_dns(
 
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_zone_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error constructing internal DNS config: {:#}",
-                    e
-                ))
-            })?;
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides);
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -257,7 +251,7 @@ pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
     overrides: &Overridables,
-) -> Result<DnsConfigZone, anyhow::Error> {
+) -> DnsConfigZone {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
     // Sled Agent's _internal_ `OmicronZoneConfig` (and friends), whereas we're
@@ -266,80 +260,56 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    // It's annoying that we have to parse this because it really should be
-    // valid already.  See oxidecomputer/omicron#4988.
-    fn parse_port(address: &str) -> Result<u16, anyhow::Error> {
-        address
-            .parse::<SocketAddrV6>()
-            .with_context(|| format!("parsing socket address {:?}", address))
-            .map(|addr| addr.port())
-    }
-
-    for (_, zone) in blueprint
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
+    for (_, zone) in
+        blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
-        let context = || {
-            format!(
-                "parsing {} zone with id {}",
-                zone.config.zone_type.kind(),
-                zone.config.id
-            )
-        };
-
-        let (service_name, port) = match &zone.config.zone_type {
-            OmicronZoneType::BoundaryNtp { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::BoundaryNtp, port)
-            }
-            OmicronZoneType::InternalNtp { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::InternalNtp, port)
-            }
-            OmicronZoneType::Clickhouse { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::Clickhouse, port)
-            }
-            OmicronZoneType::ClickhouseKeeper { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::ClickhouseKeeper, port)
-            }
-            OmicronZoneType::CockroachDb { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::Cockroach, port)
-            }
-            OmicronZoneType::Nexus { internal_address, .. } => {
-                let port =
-                    parse_port(internal_address).with_context(context)?;
-                (ServiceName::Nexus, port)
-            }
-            OmicronZoneType::Crucible { address, .. } => {
-                let port = parse_port(address).with_context(context)?;
-                (ServiceName::Crucible(zone.config.id), port)
-            }
-            OmicronZoneType::CruciblePantry { address } => {
-                let port = parse_port(address).with_context(context)?;
-                (ServiceName::CruciblePantry, port)
-            }
-            OmicronZoneType::Oximeter { address } => {
-                let port = parse_port(address).with_context(context)?;
-                (ServiceName::Oximeter, port)
-            }
-            OmicronZoneType::ExternalDns { http_address, .. } => {
-                let port = parse_port(http_address).with_context(context)?;
-                (ServiceName::ExternalDns, port)
-            }
-            OmicronZoneType::InternalDns { http_address, .. } => {
-                let port = parse_port(http_address).with_context(context)?;
-                (ServiceName::InternalDns, port)
-            }
+        let (service_name, port) = match &zone.zone_type {
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { address, .. },
+            ) => (ServiceName::BoundaryNtp, address.port()),
+            BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address, .. },
+            ) => (ServiceName::InternalNtp, address.port()),
+            BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { address, .. },
+            ) => (ServiceName::Clickhouse, address.port()),
+            BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { address, .. },
+            ) => (ServiceName::ClickhouseKeeper, address.port()),
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            ) => (ServiceName::Cockroach, address.port()),
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address,
+                ..
+            }) => (ServiceName::Nexus, internal_address.port()),
+            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address,
+                ..
+            }) => (
+                ServiceName::Crucible(zone.id.into_untyped_uuid()),
+                address.port(),
+            ),
+            BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            ) => (ServiceName::CruciblePantry, address.port()),
+            BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                address,
+            }) => (ServiceName::Oximeter, address.port()),
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { http_address, .. },
+            ) => (ServiceName::ExternalDns, http_address.port()),
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns { http_address, .. },
+            ) => (ServiceName::InternalDns, http_address.port()),
         };
 
         // This unwrap is safe because this function only fails if we provide
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                zone.config.id,
-                zone.config.underlay_address,
+                zone.id.into_untyped_uuid(),
+                zone.underlay_address,
                 service_name,
                 port,
             )
@@ -362,7 +332,7 @@ pub fn blueprint_internal_dns_config(
             .unwrap();
     }
 
-    Ok(dns_builder.build_zone())
+    dns_builder.build_zone()
 }
 
 pub fn blueprint_external_dns_config(
@@ -476,7 +446,10 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
         .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
         .filter_map(|(_, z)| match z.zone_type {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ip,
+                ..
+            }) => Some(external_ip),
             _ => None,
         })
         .collect()
@@ -507,8 +480,6 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::OmicronZoneConfig;
-    use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
@@ -530,6 +501,7 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -577,8 +549,7 @@ mod test {
             &blueprint,
             &BTreeMap::new(),
             &Default::default(),
-        )
-        .unwrap();
+        );
         assert!(blueprint_dns.records.is_empty());
     }
 
@@ -635,24 +606,23 @@ mod test {
 
         // To make things slightly more interesting, let's add a zone that's
         // not currently in service.
-        let out_of_service_id = Uuid::new_v4();
+        let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
         blueprint.blueprint_zones.values_mut().next().unwrap().zones.push(
             BlueprintZoneConfig {
-                config: OmicronZoneConfig {
-                    id: out_of_service_id,
-                    underlay_address: out_of_service_addr,
-                    zone_type: OmicronZoneType::Oximeter {
+                disposition: BlueprintZoneDisposition::Quiesced,
+                id: out_of_service_id,
+                underlay_address: out_of_service_addr,
+                zone_type: BlueprintZoneType::Oximeter(
+                    blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
                             out_of_service_addr,
                             12345,
                             0,
                             0,
-                        )
-                        .to_string(),
+                        ),
                     },
-                },
-                disposition: BlueprintZoneDisposition::Quiesced,
+                ),
             },
         );
 
@@ -677,8 +647,7 @@ mod test {
             &blueprint,
             &sleds_by_id,
             &Default::default(),
-        )
-        .unwrap();
+        );
         assert_eq!(blueprint_dns_zone.zone_name, DNS_ZONE);
 
         // Now, verify a few different properties about the generated DNS
@@ -943,7 +912,7 @@ mod test {
         let nexus_zone = bp_zones_config
             .zones
             .iter_mut()
-            .find(|z| z.config.zone_type.is_nexus())
+            .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
 
@@ -1346,7 +1315,7 @@ mod test {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
         let new_zone_host = internal_dns::config::Host::for_zone(
-            new_zone_id,
+            new_zone_id.into_untyped_uuid(),
             internal_dns::config::ZoneVariant::Other,
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));

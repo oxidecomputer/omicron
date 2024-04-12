@@ -814,12 +814,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             zones: zones
                                 .iter()
                                 .map(|z| {
-                                    BlueprintZoneConfig {
-                                        config: z.clone(),
-                                        // All initial zones are in-service
-                                        disposition:
-                                            BlueprintZoneDisposition::InService,
-                                    }
+                                    // All initial zones are in-service
+                                    BlueprintZoneConfig::from_omicron_zone_config(
+                                        z.clone(),
+                                        BlueprintZoneDisposition::InService,
+                                    ).unwrap()
                                 })
                                 .collect(),
                         },

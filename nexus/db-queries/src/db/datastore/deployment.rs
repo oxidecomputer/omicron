@@ -127,7 +127,7 @@ impl DataStore {
             .flat_map(|zones_config| {
                 zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
-                        .with_context(|| format!("zone {:?}", zone.config.id))
+                        .with_context(|| format!("zone {}", zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                         .transpose()
                 })

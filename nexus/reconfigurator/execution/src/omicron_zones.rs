@@ -85,15 +85,16 @@ mod test {
     use httptest::Expectation;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::OmicronZonesConfig;
+    use nexus_types::deployment::{
+        blueprint_zone_type, BlueprintZoneType, OmicronZonesConfig,
+    };
     use nexus_types::deployment::{
         Blueprint, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZonesConfig,
     };
-    use nexus_types::inventory::{
-        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-    };
+    use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -169,22 +170,22 @@ mod test {
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
-                    config: OmicronZoneConfig {
-                        id: Uuid::new_v4(),
-                        underlay_address: "::1".parse().unwrap(),
-                        zone_type: OmicronZoneType::InternalDns {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: OmicronZoneUuid::new_v4(),
+                    underlay_address: "::1".parse().unwrap(),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset {
                                 pool_name: format!("oxp_{}", Uuid::new_v4())
                                     .parse()
                                     .unwrap(),
                             },
-                            dns_address: "oh-hello-internal-dns".into(),
+                            dns_address: "[::1]:0".parse().unwrap(),
                             gz_address: "::1".parse().unwrap(),
                             gz_address_index: 0,
-                            http_address: "some-ipv6-address".into(),
+                            http_address: "[::1]:0".parse().unwrap(),
                         },
-                    },
-                    disposition: BlueprintZoneDisposition::InService,
+                    ),
                 }],
             }
         }
@@ -275,17 +276,17 @@ mod test {
             disposition: BlueprintZoneDisposition,
         ) {
             zones.zones.push(BlueprintZoneConfig {
-                config: OmicronZoneConfig {
-                    id: Uuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::InternalNtp {
-                        address: "::1".into(),
+                disposition,
+                id: OmicronZoneUuid::new_v4(),
+                underlay_address: "::1".parse().unwrap(),
+                zone_type: BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp {
+                        address: "[::1]:0".parse().unwrap(),
                         dns_servers: vec!["::1".parse().unwrap()],
                         domain: None,
                         ntp_servers: vec!["some-ntp-server-addr".into()],
                     },
-                },
-                disposition,
+                ),
             });
         }
 

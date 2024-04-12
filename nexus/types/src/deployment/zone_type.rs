@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::OmicronZoneType;
-pub use sled_agent_client::ZoneKind;
+use sled_agent_client::ZoneKind;
 use std::net::IpAddr;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
