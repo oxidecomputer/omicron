@@ -34,8 +34,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
 use slog::Logger;
@@ -106,7 +107,7 @@ impl PlanningInputFromDb<'_> {
                 resources: SledResources { subnet, zpools },
             };
             // TODO-cleanup use `TypedUuid` everywhere
-            let sled_id = TypedUuid::from_untyped_uuid(sled_id);
+            let sled_id = SledUuid::from_untyped_uuid(sled_id);
             builder.add_sled(sled_id, sled_details).map_err(|e| {
                 Error::internal_error(&format!(
                     "unexpectedly failed to add sled to planning input: {e}"
@@ -126,7 +127,7 @@ impl PlanningInputFromDb<'_> {
                 );
                 continue;
             };
-            let zone_id = TypedUuid::from_untyped_uuid(zone_id);
+            let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
             builder
                 .add_omicron_zone_external_ip(
                     zone_id,

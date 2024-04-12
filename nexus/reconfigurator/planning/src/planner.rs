@@ -15,8 +15,7 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -209,7 +208,7 @@ impl<'a> Planner<'a> {
 
     fn ensure_correct_number_of_nexus_zones(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<TypedUuid<SledKind>>,
+        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
     ) -> Result<(), Error> {
         // Count the number of Nexus zones on all in-service sleds. This will
         // include sleds that are in service but not eligible for new services,
@@ -240,7 +239,7 @@ impl<'a> Planner<'a> {
         // by their current Nexus zone count. Skip sleds with a policy/state
         // that should be eligible for Nexus but that don't yet have an NTP
         // zone.
-        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<TypedUuid<SledKind>>> =
+        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<SledUuid>> =
             BTreeMap::new();
         for sled_id in self
             .input
@@ -262,8 +261,7 @@ impl<'a> Planner<'a> {
         }
 
         // Build a map of sled -> new nexus zone count.
-        let mut sleds_to_change: BTreeMap<TypedUuid<SledKind>, usize> =
-            BTreeMap::new();
+        let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
         'outer: for _ in 0..nexus_to_add {
             // `sleds_by_num_nexus` is sorted by key already, and we want to

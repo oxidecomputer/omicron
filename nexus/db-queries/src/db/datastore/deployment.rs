@@ -1272,6 +1272,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
