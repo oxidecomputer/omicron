@@ -737,7 +737,35 @@ impl DataStore {
                     info!(log, "Inserted services");
 
                     for physical_disk in physical_disks {
-                        Self::physical_disk_upsert_on_connection(&conn, &opctx, physical_disk)
+                        // XXX This is wrong.
+                        //
+                        // Namely, calling this method on the datastore, instead
+                        // of re-using `conn`, checks out a new connection from
+                        // the connection pool and uses that. This new
+                        // connection is not participating in the transaction,
+                        // and does not benefit from transactional semantics.
+                        //
+                        // So, that's not right. But in:
+                        // https://github.com/oxidecomputer/omicron/pull/5172/commits/40a561e87d05d0938baf8f8023f26c0cbbffc8ff
+                        //
+                        // I noticed that this led to some weird behavior on
+                        // the "Helios / Deploy" bot, within Nexus:
+                        //
+                        // https://buildomat.eng.oxide.computer/wg/0/artefact/01HT109ZD24S4QN2SM2M6R1MRK/iYfvoiGwjJgVZtHc12zJnIn43InreqbbJsDzLiFzUHLPAVpZ/01HT10ATZSX64JZVT409C9WV44/01HT1CG9CV7BWPC1YY8STEQ2N2/oxide-nexus:default.log?format=x-bunyan
+                        //
+                        // (try looking for "Timed out in bb8").
+                        //
+                        // In particular, it looks like this request gets here,
+                        // and then possibly hangs? I'm not sure if it's
+                        // blocked, or what exactly, but it appears to be
+                        // causing OTHER connections in the pool to start
+                        // failing.
+                        //
+                        // I'm changing this behavior to be "intentionally
+                        // wrong" as a coarse repro case, though I'd like to
+                        // work towards a much smaller repro case to understand
+                        // what's happening here.
+                        self.physical_disk_upsert(&opctx, physical_disk)
                             .await
                             .map_err(|e| {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
