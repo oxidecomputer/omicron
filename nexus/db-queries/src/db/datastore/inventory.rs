@@ -135,11 +135,7 @@ impl DataStore {
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
                 sled_agent.disks.iter().map(|disk| {
-                    InvPhysicalDisk::new(
-                        collection_id,
-                        sled_id.into_untyped_uuid(),
-                        disk.clone(),
-                    )
+                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
                 })
             })
             .collect();
@@ -149,13 +145,10 @@ impl DataStore {
             .sled_agents
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
-                sled_agent.zpools.iter().map(|pool| {
-                    InvZpool::new(
-                        collection_id,
-                        sled_id.into_untyped_uuid(),
-                        pool,
-                    )
-                })
+                sled_agent
+                    .zpools
+                    .iter()
+                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
             })
             .collect();
 
@@ -189,7 +182,7 @@ impl DataStore {
                 found.zones.zones.iter().map(|found_zone| {
                     InvOmicronZone::new(
                         collection_id,
-                        found.sled_id.into_untyped_uuid(),
+                        found.sled_id,
                         found_zone,
                     )
                     .map_err(|e| Error::internal_error(&e.to_string()))
@@ -1517,7 +1510,10 @@ impl DataStore {
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
-                    disks.entry(disk.sled_id).or_default().push(disk.into());
+                    disks
+                        .entry(disk.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(disk.into());
                 }
             }
             disks
@@ -1545,7 +1541,10 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for zpool in batch {
-                    zpools.entry(zpool.sled_id).or_default().push(zpool.into());
+                    zpools
+                        .entry(zpool.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(zpool.into());
                 }
             }
             zpools
@@ -1884,7 +1883,7 @@ impl DataStore {
         // number.  We'll assemble these directly into the data structure we're
         // trying to build, which maps sled ids to objects describing the zones
         // found on each sled.
-        let mut omicron_zones: BTreeMap<_, _> = {
+        let mut omicron_zones: BTreeMap<SledUuid, _> = {
             use db::schema::inv_sled_omicron_zones::dsl;
 
             let mut zones = BTreeMap::new();
@@ -1906,7 +1905,7 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
-                        SledUuid::from_untyped_uuid(sled_zones_config.sled_id),
+                        sled_zones_config.sled_id.into(),
                         sled_zones_config.into_uninit_zones_found(),
                     )
                 }))
@@ -1995,9 +1994,8 @@ impl DataStore {
                     })
                 })
                 .transpose()?;
-            let map = omicron_zones
-                .get_mut(&SledUuid::from_untyped_uuid(z.sled_id))
-                .ok_or_else(|| {
+            let map =
+                omicron_zones.get_mut(&z.sled_id.into()).ok_or_else(|| {
                     // This error means that we found a row in inv_omicron_zone
                     // with no associated record in inv_sled_omicron_zones.
                     // This should be impossible and reflects either a bug or

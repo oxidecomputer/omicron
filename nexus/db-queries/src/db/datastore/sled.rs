@@ -737,6 +737,8 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use predicates::{prelude::*, BoxPredicate};
     use std::net::{Ipv6Addr, SocketAddrV6};
 
@@ -891,7 +893,7 @@ mod test {
         sled_set_state(
             &opctx,
             &datastore,
-            observed_sled.id(),
+            SledUuid::from_untyped_uuid(observed_sled.id()),
             SledState::Decommissioned,
             ValidateTransition::No,
             Expected::Ok(SledState::Active),
@@ -963,10 +965,16 @@ mod test {
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
 
         let ineligible_sleds = IneligibleSleds {
-            non_provisionable: non_provisionable_sled.id(),
-            expunged: expunged_sled.id(),
-            decommissioned: decommissioned_sled.id(),
-            illegal_decommissioned: illegal_decommissioned_sled.id(),
+            non_provisionable: SledUuid::from_untyped_uuid(
+                non_provisionable_sled.id(),
+            ),
+            expunged: SledUuid::from_untyped_uuid(expunged_sled.id()),
+            decommissioned: SledUuid::from_untyped_uuid(
+                decommissioned_sled.id(),
+            ),
+            illegal_decommissioned: SledUuid::from_untyped_uuid(
+                illegal_decommissioned_sled.id(),
+            ),
         };
         ineligible_sleds.setup(&opctx, &datastore).await.unwrap();
 
@@ -1104,7 +1112,7 @@ mod test {
         sled_set_policy(
             &opctx,
             &datastore,
-            sled_id,
+            SledUuid::from_untyped_uuid(sled_id),
             SledPolicy::Expunged,
             ValidateTransition::Yes,
             Expected::Ok(SledPolicy::provisionable()),
@@ -1229,7 +1237,7 @@ mod test {
             test_sled_state_transitions_once(
                 &opctx,
                 &datastore,
-                sled_id,
+                SledUuid::from_untyped_uuid(sled_id),
                 policy,
                 state,
                 after,
@@ -1252,7 +1260,7 @@ mod test {
     async fn test_sled_state_transitions_once(
         opctx: &OpContext,
         datastore: &DataStore,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         before_policy: SledPolicy,
         before_state: SledState,
         after: SledTransition,

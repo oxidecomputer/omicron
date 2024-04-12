@@ -11,6 +11,7 @@ use crate::schema::{
     blueprint, bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_zones,
     bp_target,
 };
+use crate::typed_uuid::DbTypedUuid;
 use crate::{
     impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
 };
@@ -21,6 +22,8 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -100,19 +103,19 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
 #[diesel(table_name = bp_sled_omicron_zones)]
 pub struct BpSledOmicronZones {
     pub blueprint_id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub generation: Generation,
 }
 
 impl BpSledOmicronZones {
     pub fn new(
         blueprint_id: Uuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zones_config: &BlueprintZonesConfig,
     ) -> Self {
         Self {
             blueprint_id,
-            sled_id,
+            sled_id: sled_id.into(),
             generation: Generation(zones_config.generation),
         }
     }
@@ -123,7 +126,7 @@ impl BpSledOmicronZones {
 #[diesel(table_name = bp_omicron_zone)]
 pub struct BpOmicronZone {
     pub blueprint_id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
@@ -150,13 +153,13 @@ pub struct BpOmicronZone {
 impl BpOmicronZone {
     pub fn new(
         blueprint_id: Uuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
         let zone = OmicronZone::new(sled_id, &blueprint_zone.config)?;
         Ok(Self {
             blueprint_id,
-            sled_id: zone.sled_id,
+            sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
             zone_type: zone.zone_type,
@@ -185,7 +188,7 @@ impl BpOmicronZone {
         nic_row: Option<BpOmicronZoneNic>,
     ) -> Result<BlueprintZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
-            sled_id: self.sled_id,
+            sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
             zone_type: self.zone_type,

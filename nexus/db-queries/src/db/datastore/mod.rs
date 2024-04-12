@@ -393,8 +393,8 @@ mod test {
     use futures::stream;
     use futures::StreamExt;
     use nexus_config::RegionAllocationStrategy;
-    use nexus_db_model::Generation;
     use nexus_db_model::IpAttachState;
+    use nexus_db_model::{to_db_typed_uuid, Generation};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external::DataPageParams;
@@ -402,6 +402,8 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -604,7 +606,7 @@ mod test {
     }
 
     // Creates a test sled, returns its UUID.
-    async fn create_test_sled(datastore: &DataStore) -> Uuid {
+    async fn create_test_sled(datastore: &DataStore) -> SledUuid {
         let bogus_addr = SocketAddrV6::new(
             Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
             8080,
@@ -612,10 +614,10 @@ mod test {
             0,
         );
         let rack_id = Uuid::new_v4();
-        let sled_id = Uuid::new_v4();
+        let sled_id = SledUuid::new_v4();
 
         let sled_update = SledUpdate::new(
-            sled_id,
+            sled_id.into_untyped_uuid(),
             bogus_addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
@@ -640,7 +642,7 @@ mod test {
     async fn create_test_physical_disk(
         datastore: &DataStore,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         kind: PhysicalDiskKind,
         serial: String,
     ) -> Uuid {
@@ -650,7 +652,7 @@ mod test {
             serial,
             TEST_MODEL.into(),
             kind,
-            sled_id,
+            sled_id.into_untyped_uuid(),
         );
         datastore
             .physical_disk_upsert(opctx, physical_disk.clone())
@@ -663,7 +665,7 @@ mod test {
     async fn create_test_zpool(
         datastore: &DataStore,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         physical_disk_id: Uuid,
     ) -> Uuid {
         let zpool_id = create_test_zpool_not_in_inventory(
@@ -685,11 +687,12 @@ mod test {
     async fn create_test_zpool_not_in_inventory(
         datastore: &DataStore,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         physical_disk_id: Uuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(zpool_id, sled_id, physical_disk_id);
+        let zpool =
+            Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
         datastore.zpool_upsert(opctx, zpool).await.unwrap();
         zpool_id
     }
@@ -699,7 +702,7 @@ mod test {
     async fn add_test_zpool_to_inventory(
         datastore: &DataStore,
         zpool_id: Uuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) {
         use db::schema::inv_zpool::dsl;
 
@@ -709,7 +712,7 @@ mod test {
             inv_collection_id,
             time_collected,
             id: zpool_id,
-            sled_id,
+            sled_id: to_db_typed_uuid(sled_id),
             total_size: test_zpool_size().into(),
         };
         diesel::insert_into(dsl::inv_zpool)
@@ -747,12 +750,12 @@ mod test {
         ineligible: SledToDatasetMap,
 
         // A map from eligible dataset IDs to their corresponding sled IDs.
-        eligible_dataset_ids: HashMap<Uuid, Uuid>,
+        eligible_dataset_ids: HashMap<Uuid, SledUuid>,
         ineligible_dataset_ids: HashMap<Uuid, IneligibleSledKind>,
     }
 
     // Map of sled IDs to dataset IDs.
-    type SledToDatasetMap = HashMap<Uuid, Vec<Uuid>>;
+    type SledToDatasetMap = HashMap<SledUuid, Vec<Uuid>>;
 
     impl TestDatasets {
         async fn create(
@@ -822,20 +825,20 @@ mod test {
             number_of_sleds: usize,
         ) -> SledToDatasetMap {
             // Create sleds...
-            let sled_ids: Vec<Uuid> = stream::iter(0..number_of_sleds)
+            let sled_ids: Vec<SledUuid> = stream::iter(0..number_of_sleds)
                 .then(|_| create_test_sled(&datastore))
                 .collect()
                 .await;
 
             struct PhysicalDisk {
-                sled_id: Uuid,
+                sled_id: SledUuid,
                 disk_id: Uuid,
             }
 
             // create 9 disks on each sled
             let physical_disks: Vec<PhysicalDisk> = stream::iter(sled_ids)
                 .map(|sled_id| {
-                    let sled_id_iter: Vec<Uuid> =
+                    let sled_id_iter: Vec<SledUuid> =
                         (0..9).map(|_| sled_id).collect();
                     stream::iter(sled_id_iter).enumerate().then(
                         |(i, sled_id)| {
@@ -859,7 +862,7 @@ mod test {
 
             #[derive(Copy, Clone)]
             struct Zpool {
-                sled_id: Uuid,
+                sled_id: SledUuid,
                 pool_id: Uuid,
             }
 
@@ -1749,7 +1752,7 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled on which the service should exist.
-        let sled_id = create_test_sled(&datastore).await;
+        let sled_id = create_test_sled(&datastore).await.into_untyped_uuid();
 
         // Create a few new service to exist on this sled.
         let service1_id =
