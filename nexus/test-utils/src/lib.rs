@@ -829,7 +829,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Blueprint {
                 id: Uuid::new_v4(),
                 blueprint_zones,
-                blueprint_disks: BTreeMap::new(), // XXX
+                // NOTE: We'll probably need to actually add disks here
+                // when the Blueprint contains "which disks back zones".
+                //
+                // However, for now, this isn't necessary.
+                blueprint_disks: BTreeMap::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation

@@ -282,6 +282,7 @@ impl BackgroundTasks {
                 Box::new(physical_disk_adoption::PhysicalDiskAdoption::new(
                     datastore.clone(),
                     inventory_watcher.clone(),
+                    config.physical_disk_adoption.disable,
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![Box::new(inventory_watcher)],

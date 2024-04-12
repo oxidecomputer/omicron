@@ -1585,6 +1585,15 @@ mod tests {
         )
         .expect("failed to create builder");
 
+        // Ensure disks on our sled
+        assert_eq!(
+            builder.sled_ensure_disks(
+                new_sled_id,
+                &planning_input.sled_resources(&new_sled_id).unwrap().clone(),
+            ).unwrap(),
+            Ensure::Added
+        );
+
         // Add zones to our new sled.
         assert_eq!(
             builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
@@ -1598,12 +1607,19 @@ mod tests {
                 Ensure::Added
             );
         }
-        let num_new_sled_zones = 1 + new_sled_zpools.len();
+
+        let num_new_ntp_zones = 1;
+        let num_new_crucible_zones = new_sled_zpools.len();
+        let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
         let blueprint2 = builder.build();
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
-        // Check that we added the new sled and its zones.
+        // Check that we added the new sled, as well as its disks and zones.
+        assert_eq!(
+            blueprint1.blueprint_disks.len() + new_sled_zpools.len(),
+            blueprint2.blueprint_disks.len(),
+        );
         assert_eq!(
             blueprint1.blueprint_zones.len() + 1,
             blueprint2.blueprint_zones.len()

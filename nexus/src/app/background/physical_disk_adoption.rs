@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 pub struct PhysicalDiskAdoption {
     datastore: Arc<DataStore>,
+    disable: bool,
     rx_inventory_collection: watch::Receiver<Option<Uuid>>,
 }
 
@@ -32,8 +33,9 @@ impl PhysicalDiskAdoption {
     pub fn new(
         datastore: Arc<DataStore>,
         rx_inventory_collection: watch::Receiver<Option<Uuid>>,
+        disable: bool,
     ) -> Self {
-        PhysicalDiskAdoption { datastore, rx_inventory_collection }
+        PhysicalDiskAdoption { datastore, disable, rx_inventory_collection }
     }
 }
 
@@ -43,6 +45,10 @@ impl BackgroundTask for PhysicalDiskAdoption {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
+            if self.disable {
+                return json!({ "error": "task disabled" });
+            }
+
             let mut disks_added = 0;
             let log = &opctx.log;
             warn!(&log, "physical disk adoption task started");
