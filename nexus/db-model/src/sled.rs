@@ -116,8 +116,8 @@ impl Sled {
         self.state
     }
 
-    pub fn time_modified(&self) -> &DateTime<Utc> {
-        &self.time_modified
+    pub fn time_modified(&self) -> DateTime<Utc> {
+        self.time_modified
     }
 }
 

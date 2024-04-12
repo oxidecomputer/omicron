@@ -56,7 +56,7 @@ impl DataStore {
         use diesel::query_dsl::methods::FilterDsl;
 
         let insertable_sled = sled_update.clone().into_insertable();
-        let now = insertable_sled.time_modified().clone();
+        let now_secs = insertable_sled.time_modified().timestamp();
 
         let sled = diesel::insert_into(dsl::sled)
             .values(insertable_sled)
@@ -88,7 +88,8 @@ impl DataStore {
                 )
             })?;
 
-        let was_modified = now == *sled.time_modified();
+        // We compare only seconds since the DB causes us to lose precision
+        let was_modified = now_secs == sled.time_modified().timestamp();
         Ok((sled, was_modified))
     }
 
