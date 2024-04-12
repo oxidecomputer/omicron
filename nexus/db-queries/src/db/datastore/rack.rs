@@ -737,26 +737,27 @@ impl DataStore {
                     info!(log, "Inserted services");
 
                     for physical_disk in physical_disks {
-                        Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
-                            .await
-                            .map_err(|e| {
+                        if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
+                            .await {
+                            if !matches!(e, Error::ObjectAlreadyExists { .. }) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
                                 err.set(RackInitError::PhysicalDiskInsert(e))
                                     .unwrap();
-                                DieselError::RollbackTransaction
-                            })?;
+                                return Err(DieselError::RollbackTransaction);
+                            }
+                        }
                     }
 
                     info!(log, "Inserted physical disks");
 
                     for zpool in zpools {
-                        Self::zpool_insert_on_connection(&conn, &opctx, zpool).await.map_err(
-                            |e| {
+                        if let Err(e) = Self::zpool_insert_on_connection(&conn, &opctx, zpool).await {
+                            if !matches!(e, Error::ObjectAlreadyExists { .. }) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
                                 err.set(RackInitError::ZpoolInsert(e)).unwrap();
-                                DieselError::RollbackTransaction
-                            },
-                        )?;
+                                return Err(DieselError::RollbackTransaction);
+                            }
+                        }
                     }
 
                     info!(log, "Inserted zpools");
