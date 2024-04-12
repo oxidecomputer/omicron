@@ -1275,6 +1275,57 @@ pub mod test {
     }
 
     #[test]
+    fn test_add_physical_disks() {
+        static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
+        let logctx = test_setup_log(TEST_NAME);
+        let (collection, input) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // We don't care about the DNS versions here.
+        let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
+            &collection,
+            internal_dns_version,
+            external_dns_version,
+            input.all_sled_ids(SledFilter::All),
+            "test",
+            TEST_NAME,
+        )
+        .expect("failed to create initial blueprint");
+
+        {
+            // We start empty, and can add a disk
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &parent,
+                &input,
+                "test",
+            )
+            .expect("failed to create builder");
+
+            assert!(builder.disks.changed_disks.is_empty());
+            assert!(builder.disks.parent_disks.is_empty());
+
+            for (sled_id, sled_resources) in
+                input.all_sled_resources(SledFilter::InService)
+            {
+                assert_eq!(
+                    builder
+                        .sled_ensure_disks(sled_id, &sled_resources)
+                        .unwrap(),
+                    Ensure::Added,
+                );
+            }
+
+            assert!(!builder.disks.changed_disks.is_empty());
+            assert!(builder.disks.parent_disks.is_empty());
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
     fn test_add_nexus_with_no_existing_nexus_zones() {
         static TEST_NAME: &str =
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
