@@ -16,11 +16,11 @@ use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::CollectionUuid;
 use serde_json::json;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// How many rows to request in each paginated database query
 const DB_PAGE_SIZE: u32 = 1024;
@@ -32,7 +32,7 @@ pub struct InventoryCollector {
     creator: String,
     nkeep: u32,
     disable: bool,
-    tx: watch::Sender<Option<Uuid>>,
+    tx: watch::Sender<Option<CollectionUuid>>,
 }
 
 impl InventoryCollector {
@@ -54,7 +54,7 @@ impl InventoryCollector {
         }
     }
 
-    pub fn watcher(&self) -> watch::Receiver<Option<Uuid>> {
+    pub fn watcher(&self) -> watch::Receiver<Option<CollectionUuid>> {
         self.tx.subscribe()
     }
 }

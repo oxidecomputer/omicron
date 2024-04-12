@@ -17,13 +17,12 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::BTreeMap;
-use uuid::Uuid;
 
 /// Idempotently ensure that the specified Omicron disks are deployed to the
 /// corresponding sleds
 pub(crate) async fn deploy_disks(
     opctx: &OpContext,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
@@ -33,7 +32,7 @@ pub(crate) async fn deploy_disks(
                 "generation" => config.generation.to_string(),
             ));
 
-            let db_sled = match sleds_by_id.get(&sled_id.into_untyped_uuid()) {
+            let db_sled = match sleds_by_id.get(&sled_id) {
                 Some(sled) => sled,
                 None => {
                     let err = anyhow!("sled not found in db list: {}", sled_id);
@@ -114,7 +113,6 @@ mod test {
     };
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
@@ -163,7 +161,7 @@ mod test {
         let mut s2 = httptest::Server::run();
         let sled_id1 = SledUuid::new_v4();
         let sled_id2 = SledUuid::new_v4();
-        let sleds_by_id: BTreeMap<Uuid, Sled> =
+        let sleds_by_id: BTreeMap<SledUuid, Sled> =
             [(sled_id1, &s1), (sled_id2, &s2)]
                 .into_iter()
                 .map(|(sled_id, server)| {
@@ -171,11 +169,11 @@ mod test {
                         panic!("Expected Ipv6 address. Got {}", server.addr());
                     };
                     let sled = Sled {
-                        id: sled_id.into_untyped_uuid(),
+                        id: sled_id,
                         sled_agent_address: addr,
                         is_scrimlet: false,
                     };
-                    (sled_id.into_untyped_uuid(), sled)
+                    (sled_id, sled)
                 })
                 .collect();
 

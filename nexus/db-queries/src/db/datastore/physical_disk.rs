@@ -33,6 +33,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -174,7 +176,7 @@ impl DataStore {
     pub async fn physical_disk_uninitialized_list(
         &self,
         opctx: &OpContext,
-        inventory_collection_id: Uuid,
+        inventory_collection_id: CollectionUuid,
     ) -> ListResultVec<InvPhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -190,7 +192,7 @@ impl DataStore {
             .inner_join(
                 inv_physical_disk_dsl::inv_physical_disk.on(
                     inv_physical_disk_dsl::inv_collection_id
-                        .eq(inventory_collection_id)
+                        .eq(inventory_collection_id.into_untyped_uuid())
                         .and(inv_physical_disk_dsl::sled_id.eq(sled_dsl::id))
                         .and(
                             inv_physical_disk_dsl::variant
@@ -725,7 +727,7 @@ mod test {
         let uninitialized_disks = datastore
             .physical_disk_uninitialized_list(
                 &opctx,
-                Uuid::new_v4(), // Collection that does not exist
+                CollectionUuid::new_v4(), // Collection that does not exist
             )
             .await
             .expect("Failed to look up uninitialized disks");

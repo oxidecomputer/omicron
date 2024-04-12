@@ -2855,8 +2855,7 @@
         "type": "object",
         "properties": {
           "collection_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForCollectionKind"
           }
         },
         "required": [
@@ -7525,6 +7524,10 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TypedUuidForCollectionKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForDownstairsRegionKind": {
         "type": "string",

@@ -32,6 +32,7 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -55,7 +56,7 @@ struct ReconfiguratorSim {
     system: SystemDescription,
 
     /// inventory collections created by the user
-    collections: IndexMap<Uuid, Collection>,
+    collections: IndexMap<CollectionUuid, Collection>,
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
@@ -424,7 +425,7 @@ struct SiloAddRemoveArgs {
 #[derive(Debug, Args)]
 struct InventoryArgs {
     /// id of the inventory collection to use in planning
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 #[derive(Debug, Args)]
@@ -432,7 +433,7 @@ struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based
     parent_blueprint_id: Uuid,
     /// id of the inventory collection to use in planning
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 #[derive(Debug, Args)]
@@ -483,7 +484,7 @@ enum CliDnsGroup {
 #[derive(Debug, Args)]
 struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     /// id of the blueprint
     blueprint_id: Uuid,
 }
@@ -519,7 +520,7 @@ struct LoadArgs {
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
-    collection_id: Option<Uuid>,
+    collection_id: Option<CollectionUuid>,
 }
 
 #[derive(Debug, Args)]
@@ -643,7 +644,7 @@ fn cmd_inventory_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct InventoryRow {
-        id: Uuid,
+        id: CollectionUuid,
         nerrors: usize,
         time_done: String,
     }
@@ -679,7 +680,7 @@ fn cmd_inventory_generate(
         builder
             .found_sled_omicron_zones(
                 "fake sled agent",
-                *sled_id.as_untyped_uuid(),
+                sled_id,
                 OmicronZonesConfig {
                     generation: Generation::new(),
                     zones: vec![],
@@ -878,8 +879,10 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     sim: &ReconfiguratorSim,
-) -> Result<BTreeMap<Uuid, nexus_reconfigurator_execution::Sled>, anyhow::Error>
-{
+) -> Result<
+    BTreeMap<SledUuid, nexus_reconfigurator_execution::Sled>,
+    anyhow::Error,
+> {
     let collection = sim
         .system
         .to_collection_builder()
@@ -1153,7 +1156,7 @@ fn cmd_load(
         }
 
         let Some(inventory_sled_agent) =
-            primary_collection.sled_agents.get(sled_id.as_untyped_uuid())
+            primary_collection.sled_agents.get(&sled_id)
         else {
             swriteln!(
                 s,

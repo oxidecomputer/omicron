@@ -18,6 +18,8 @@ use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -26,13 +28,13 @@ use uuid::Uuid;
 pub struct PhysicalDiskAdoption {
     datastore: Arc<DataStore>,
     disable: bool,
-    rx_inventory_collection: watch::Receiver<Option<Uuid>>,
+    rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
 }
 
 impl PhysicalDiskAdoption {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_inventory_collection: watch::Receiver<Option<Uuid>>,
+        rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
         disable: bool,
     ) -> Self {
         PhysicalDiskAdoption { datastore, disable, rx_inventory_collection }
@@ -87,12 +89,12 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     inv_disk.serial,
                     inv_disk.model,
                     inv_disk.variant,
-                    inv_disk.sled_id,
+                    inv_disk.sled_id.into_untyped_uuid(),
                 );
 
                 let zpool = Zpool::new(
                     Uuid::new_v4(),
-                    inv_disk.sled_id,
+                    inv_disk.sled_id.into_untyped_uuid(),
                     disk.id()
                 );
 

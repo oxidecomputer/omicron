@@ -1278,6 +1278,8 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use slog::info;
     use std::collections::BTreeMap;
     use std::net::IpAddr;
@@ -1503,7 +1505,7 @@ mod tests {
     #[derive(Debug)]
     struct Harness {
         rack_id: Uuid,
-        sled_ids: Vec<Uuid>,
+        sled_ids: Vec<SledUuid>,
         nexuses: Vec<HarnessNexus>,
     }
 
@@ -1518,7 +1520,7 @@ mod tests {
     impl Harness {
         fn new(num_sleds: usize) -> Self {
             let mut sled_ids =
-                (0..num_sleds).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+                (0..num_sleds).map(|_| SledUuid::new_v4()).collect::<Vec<_>>();
             sled_ids.sort();
 
             let mut nexus_ips = NEXUS_OPTE_IPV4_SUBNET
@@ -1540,7 +1542,7 @@ mod tests {
         fn db_sleds(&self) -> impl Iterator<Item = SledUpdate> + '_ {
             self.sled_ids.iter().copied().map(|sled_id| {
                 SledUpdate::new(
-                    sled_id,
+                    sled_id.into_untyped_uuid(),
                     "[::1]:0".parse().unwrap(),
                     sled_baseboard_for_test(),
                     sled_system_hardware_for_test(),
@@ -1558,7 +1560,7 @@ mod tests {
             self.sled_ids.iter().zip(&self.nexuses).map(|(sled_id, nexus)| {
                 let service = db::model::Service::new(
                     nexus.id,
-                    *sled_id,
+                    sled_id.into_untyped_uuid(),
                     Some(nexus.id),
                     "[::1]:0".parse().unwrap(),
                     db::model::ServiceKind::Nexus,
@@ -1637,7 +1639,7 @@ mod tests {
                 .await
                 .expect("failed to resolve to sleds")
                 .into_iter()
-                .map(|sled| sled.id())
+                .map(|sled| SledUuid::from_untyped_uuid(sled.id()))
                 .collect::<Vec<_>>();
             service_sled_ids.sort();
             service_sled_ids
@@ -1828,7 +1830,7 @@ mod tests {
             .expect("failed to set blueprint target");
         assert_eq!(
             &[harness.sled_ids[0], harness.sled_ids[1], harness.sled_ids[3]]
-                as &[Uuid],
+                as &[SledUuid],
             fetch_service_sled_ids().await
         );
 
