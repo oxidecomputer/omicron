@@ -734,14 +734,14 @@ mod test {
         // Create inventory disks for both sleds
         let mut builder = nexus_inventory::CollectionBuilder::new("test");
         let disks_a = vec![
-            create_inv_disk(format!("serial-001"), 1),
-            create_inv_disk(format!("serial-002"), 2),
-            create_inv_disk(format!("serial-003"), 3),
+            create_inv_disk("serial-001".to_string(), 1),
+            create_inv_disk("serial-002".to_string(), 2),
+            create_inv_disk("serial-003".to_string(), 3),
         ];
         let disks_b = vec![
-            create_inv_disk(format!("serial-101"), 1),
-            create_inv_disk(format!("serial-102"), 2),
-            create_inv_disk(format!("serial-103"), 3),
+            create_inv_disk("serial-101".to_string(), 1),
+            create_inv_disk("serial-102".to_string(), 2),
+            create_inv_disk("serial-103".to_string(), 3),
         ];
         add_sled_to_inventory(&mut builder, &sled_a, disks_a.clone());
         add_sled_to_inventory(&mut builder, &sled_b, disks_b.clone());

@@ -43,7 +43,6 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use uuid::Uuid;
 
 trait SubnetIterator: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug {}
 impl<T> SubnetIterator for T where
@@ -447,7 +446,7 @@ impl Sled {
         let revision = 0;
         let zpools = (0..nzpools)
             .map(|i| {
-                let zpool = format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
+                let zpool = ZpoolUuid::new_v4();
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: String::from("fake-vendor"),

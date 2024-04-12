@@ -14,6 +14,7 @@ use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
+use slog::o;
 use slog::warn;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -27,11 +28,16 @@ pub(crate) async fn deploy_disks(
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
+            let log = opctx.log.new(o!(
+                "sled_id" => sled_id.to_string(),
+                "generation" => config.generation.to_string(),
+            ));
+
             let db_sled = match sleds_by_id.get(&sled_id.into_untyped_uuid()) {
                 Some(sled) => sled,
                 None => {
                     let err = anyhow!("sled not found in db list: {}", sled_id);
-                    warn!(opctx.log, "{err:#}");
+                    warn!(log, "{err:#}");
                     return Some(err);
                 }
             };
@@ -39,7 +45,7 @@ pub(crate) async fn deploy_disks(
             let client = nexus_networking::sled_client_from_address(
                 sled_id.into_untyped_uuid(),
                 db_sled.sled_agent_address,
-                &opctx.log,
+                &log,
             );
             let result =
                 client.omicron_physical_disks_put(&config).await.with_context(
@@ -47,15 +53,36 @@ pub(crate) async fn deploy_disks(
                 );
             match result {
                 Err(error) => {
-                    warn!(opctx.log, "{error:#}");
+                    warn!(log, "{error:#}");
                     Some(error)
                 }
-                Ok(_) => {
+                Ok(result) => {
+                    let (errs, successes): (Vec<_>, Vec<_>) = result
+                        .into_inner()
+                        .status
+                        .into_iter()
+                        .partition(|status| status.err.is_some());
+
+                    if !errs.is_empty() {
+                        warn!(
+                            log,
+                            "Failed to deploy storage for sled agent";
+                            "successfully configured disks" => successes.len(),
+                            "failed disk configurations" => errs.len(),
+                        );
+                        for err in &errs {
+                            warn!(log, "{err:?}");
+                        }
+                        return Some(anyhow!(
+                            "failure deploying disks: {:?}",
+                            errs
+                        ));
+                    }
+
                     info!(
-                        opctx.log,
+                        log,
                         "Successfully deployed storage for sled agent";
-                        "sled_id" => %sled_id,
-                        "generation" => %config.generation,
+                        "successfully configured disks" => successes.len(),
                     );
                     None
                 }
@@ -76,6 +103,7 @@ mod test {
     use super::deploy_disks;
     use crate::Sled;
     use httptest::matchers::{all_of, json_decoded, request};
+    use httptest::responders::json_encoded;
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_queries::context::OpContext;
@@ -200,7 +228,11 @@ mod test {
                         }
                     ))
                 ])
-                .respond_with(status_code(204)),
+                .respond_with(json_encoded(
+                    sled_agent_client::types::DisksManagementResult {
+                        status: vec![],
+                    },
+                )),
             );
         }
 
@@ -219,7 +251,11 @@ mod test {
                     "PUT",
                     "/omicron-physical-disks",
                 ))
-                .respond_with(status_code(204)),
+                .respond_with(json_encoded(
+                    sled_agent_client::types::DisksManagementResult {
+                        status: vec![],
+                    },
+                )),
             );
         }
         deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
@@ -235,7 +271,11 @@ mod test {
                 "PUT",
                 "/omicron-physical-disks",
             ))
-            .respond_with(status_code(204)),
+            .respond_with(json_encoded(
+                sled_agent_client::types::DisksManagementResult {
+                    status: vec![],
+                },
+            )),
         );
         s2.expect(
             Expectation::matching(request::method_path(
@@ -255,6 +295,56 @@ mod test {
         assert!(errors[0]
             .to_string()
             .starts_with("Failed to put OmicronPhysicalDisksConfig"));
+        s1.verify_and_clear();
+        s2.verify_and_clear();
+
+        // We can also observe "partial failures", where the HTTP-evel response
+        // is successful, but it indicates that the disk provisioning ran into
+        // problems.
+        s1.expect(
+            Expectation::matching(request::method_path(
+                "PUT",
+                "/omicron-physical-disks",
+            ))
+            .respond_with(json_encoded(
+                sled_agent_client::types::DisksManagementResult {
+                    status: vec![],
+                },
+            )),
+        );
+        s2.expect(
+            Expectation::matching(request::method_path(
+                "PUT",
+                "/omicron-physical-disks",
+            ))
+            .respond_with(json_encoded(sled_agent_client::types::DisksManagementResult {
+                status: vec![
+                    sled_agent_client::types::DiskManagementStatus {
+                        identity: omicron_common::disk::DiskIdentity {
+                            vendor: "v".to_string(),
+                            serial: "s".to_string(),
+                            model: "m".to_string(),
+                        },
+
+                        // This error could occur if a disk is removed
+                        err: Some(sled_agent_client::types::DiskManagementError::NotFound),
+                    }
+                ]
+            })),
+        );
+
+        let errors =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect_err("unexpectedly succeeded in deploying disks");
+
+        println!("{:?}", errors);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].to_string().starts_with("failure deploying disks"),
+            "{}",
+            errors[0].to_string()
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
     }

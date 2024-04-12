@@ -47,7 +47,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
             let log = &opctx.log;
             warn!(&log, "physical disk adoption task started");
 
-            let collection_id = self.rx_inventory_collection.borrow().clone();
+            let collection_id = *self.rx_inventory_collection.borrow();
             let Some(collection_id) = collection_id else {
                 warn!(
                     &opctx.log,

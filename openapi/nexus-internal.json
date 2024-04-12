@@ -5533,7 +5533,7 @@
         "type": "string"
       },
       "OmicronPhysicalDiskConfig": {
-        "description": "OmicronPhysicalDiskConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"identity\", \"pool_id\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"identity\": { \"$ref\": \"#/components/schemas/DiskIdentity\" }, \"pool_id\": { \"type\": \"string\", \"format\": \"uuid\" } } } ``` </details>",
+        "description": "OmicronPhysicalDiskConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"identity\", \"pool_id\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"identity\": { \"$ref\": \"#/components/schemas/DiskIdentity\" }, \"pool_id\": { \"$ref\": \"#/components/schemas/TypedUuidForZpoolKind\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "id": {
@@ -5544,8 +5544,7 @@
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
           }
         },
         "required": [
@@ -7536,6 +7535,10 @@
         "format": "uuid"
       },
       "TypedUuidForUpstairsSessionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForZpoolKind": {
         "type": "string",
         "format": "uuid"
       },
