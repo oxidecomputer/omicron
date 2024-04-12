@@ -12,6 +12,8 @@ use crate::model;
 use crate::oxql;
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
+use crate::oxql::ast::table_ops::limit::Limit;
+use crate::oxql::ast::table_ops::limit::LimitKind;
 use crate::query::field_table_name;
 use crate::Error;
 use crate::Metric;
@@ -146,6 +148,7 @@ impl Client {
                 query_id,
                 parsed_query,
                 &mut total_rows_fetched,
+                None,
                 None,
             )
             .await;
@@ -285,6 +288,7 @@ impl Client {
         query: oxql::Query,
         total_rows_fetched: &mut u64,
         outer_predicates: Option<Filter>,
+        outer_limit: Option<Limit>,
     ) -> Result<OxqlResult, Error> {
         let split = query.split();
         if let oxql::ast::SplitQuery::Nested { subqueries, transformations } =
@@ -299,6 +303,7 @@ impl Client {
             // the transformation portion of this nested query.
             let new_outer_predicates =
                 query.coalesced_predicates(outer_predicates.clone());
+            let new_outer_limit = query.coalesced_limits(outer_limit);
 
             // Run each subquery recursively, and extend the results
             // accordingly.
@@ -313,6 +318,7 @@ impl Client {
                         subq,
                         total_rows_fetched,
                         new_outer_predicates.clone(),
+                        new_outer_limit,
                     )
                     .await?;
                 query_summaries.extend(res.query_summaries);
@@ -370,6 +376,13 @@ impl Client {
             "coalesced predicates from flat query";
             "outer_predicates" => ?&outer_predicates,
             "coalesced" => ?&preds,
+        );
+        let limit = query.coalesced_limits(outer_limit);
+        debug!(
+            query_log,
+            "coalesced limit operations from flat query";
+            "outer_limit" => ?&outer_limit,
+            "coalesced" => ?&limit,
         );
 
         // We generally run a few SQL queries for each OxQL query:
@@ -482,6 +495,7 @@ impl Client {
                 query_log,
                 &schema,
                 &consistent_key_groups,
+                limit,
                 total_rows_fetched,
             )
             .await?;
@@ -536,6 +550,7 @@ impl Client {
         query_log: &Logger,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
+        limit: Option<Limit>,
         total_rows_fetched: &mut u64,
     ) -> Result<
         (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql::Timeseries>),
@@ -560,6 +575,7 @@ impl Client {
             let measurements_query = self.measurements_query(
                 schema,
                 &key_group_chunk,
+                limit,
                 total_rows_fetched,
             )?;
             let (summary, body) =
@@ -645,6 +661,7 @@ impl Client {
         &self,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
+        limit: Option<Limit>,
         total_rows_fetched: &mut u64,
     ) -> Result<String, Error> {
         use std::fmt::Write;
@@ -722,13 +739,63 @@ impl Client {
         // - timestamp
         //
         // We care most about the timestamp ordering, since that is assumed (and
-        // asserted) by downstream table operations. We use the full sort order
-        // of the table, however, to make things the most efficient.
+        // asserted) by downstream table operations.
+        //
+        // Note that although the tables are sorted by start_time, we _omit_
+        // that if the query includes a limiting operation, like `first k`. This
+        // is an unfortunate interaction between the `LIMIT BY` clause that
+        // implements this in ClickHouse and the fact that the start times for
+        // some metrics are not monotonic. In particular, those metrics
+        // collected before a sled syncs with upstream NTP servers may have
+        // wildly inaccurate start times. Using the `LIMIT BY` clause in
+        // ClickHouse along with this sort order means we may end up taking the
+        // latest samples from a block of metrics with an early start time, even
+        // if there is a sample with a globally later, and accurate, timestamp,
+        // but with a start_time _after_ that previous block.
         query.push_str(" ORDER BY timeseries_key");
-        if schema.datum_type.is_cumulative() {
+        if schema.datum_type.is_cumulative() && limit.is_none() {
             query.push_str(", start_time");
         }
         query.push_str(", timestamp");
+
+        // If provided, push a `LIMIT BY` clause, which implements the `first`
+        // or `last` table operations directly in ClickHouse.
+        //
+        // This clause limits the number of rows _within each group_, which here
+        // is always the `timeseries_key`. Note that the clause is completely
+        // independent of the the traditional SQL `LIMIT` clause, pushed below
+        // to avoid selecting too many rows at once.
+        if let Some(limit) = limit {
+            // If this limit takes the _last_ samples, we need to invert the
+            // sorting by timestamp to be descending.
+            let is_last = matches!(limit.kind, LimitKind::Last);
+            if is_last {
+                query.push_str(" DESC");
+            }
+
+            // In either case, add the limit-by clause itself.
+            query.push_str(" LIMIT ");
+            write!(query, "{}", limit.count).unwrap();
+            query.push_str(" BY timeseries_key");
+
+            // Possibly invert the timestamp ordering again.
+            //
+            // To implement a `last k` operation, above we sort by descending
+            // timestamps and use the `LIMIT k BY timeseries_key` clause.
+            // However, this inverts the ordering by timestamp that we need for
+            // all downstream operations to work correctly.
+            //
+            // Restore that ordering here, by putting the now-complete query
+            // inside a CTE and selecting from that ordered by timestamp. Note
+            if is_last {
+                query = format!(
+                    "WITH another_sort_bites_the_dust \
+                    AS ({query}) \
+                    SELECT * FROM another_sort_bites_the_dust \
+                    ORDER BY timeseries_key, timestamp"
+                );
+            }
+        }
 
         // Push a limit clause, which restricts the number of records we could
         // return.
@@ -1526,5 +1593,53 @@ mod tests {
             "The second chunk of the consistent keys should be \
             the remaining 2 input keys",
         );
+    }
+
+    #[tokio::test]
+    async fn test_limit_operations() {
+        let ctx = setup_oxql_test("test_limit_operations").await;
+
+        // Specify exactly one timeseries we _want_ to fetch, by picking the
+        // first timeseries we inserted.
+        let ((expected_target, expected_foo), expected_samples) =
+            ctx.test_data.samples_by_timeseries.first_key_value().unwrap();
+        let query = format!(
+            "get some_target:some_metric | filter {} | first 1",
+            exact_filter_for(expected_target, *expected_foo)
+        );
+        let result = ctx
+            .client
+            .oxql_query(&query)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(
+            table.n_timeseries(),
+            1,
+            "Should have fetched exactly the target timeseries"
+        );
+        assert!(
+            table.iter().all(|t| t.points.len() == 1),
+            "Should have fetched exactly 1 point for this timeseries",
+        );
+
+        let expected_timeseries =
+            find_timeseries_in_table(&table, expected_target, expected_foo)
+                .expect("Table did not contain expected timeseries");
+        let measurements: Vec<_> = expected_samples
+            .iter()
+            .take(1)
+            .map(|s| s.measurement.clone())
+            .collect();
+        let expected_points = Points::delta_from_cumulative(&measurements)
+            .expect("failed to build expected points from measurements");
+        assert_eq!(
+            expected_points, expected_timeseries.points,
+            "Did not reconstruct the correct points for the one \
+            timeseries the query fetched"
+        );
+
+        ctx.cleanup_successful().await;
     }
 }
