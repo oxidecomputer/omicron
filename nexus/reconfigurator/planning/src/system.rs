@@ -444,7 +444,7 @@ impl Sled {
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
-        let zpools = (0..nzpools)
+        let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|i| {
                 let zpool = ZpoolUuid::new_v4();
                 let disk = SledDisk {
@@ -515,7 +515,18 @@ impl Sled {
                 sled_id: sled_id.into_untyped_uuid(),
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
-                disks: vec![],
+                // Populate disks, appearing like a real device.
+                disks: zpools
+                    .values()
+                    .enumerate()
+                    .map(|(i, d)| sled_agent_client::types::InventoryDisk {
+                        identity: d.disk_identity.clone(),
+                        variant: sled_agent_client::types::DiskVariant::U2,
+                        slot: i64::try_from(i).unwrap(),
+                    })
+                    .collect(),
+                // Zpools won't necessarily show up until our first request
+                // to provision storage, so we omit them.
                 zpools: vec![],
             }
         };
