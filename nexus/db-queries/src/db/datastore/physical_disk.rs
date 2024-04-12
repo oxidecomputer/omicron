@@ -707,11 +707,7 @@ mod test {
             sled_id,
         );
 
-        let zpool = Zpool::new(
-            Uuid::new_v4(),
-            sled_id,
-            disk.id()
-        );
+        let zpool = Zpool::new(Uuid::new_v4(), sled_id, disk.id());
         (disk, zpool)
     }
 
@@ -786,12 +782,24 @@ mod test {
         //
         // This creates disks for: 001, 002, and 101.
         // It leaves the following uninitialized: 003, 102, 103
-        let (disk_001, zpool) = create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
-        datastore.physical_disk_and_zpool_insert(&opctx, disk_001, zpool).await.unwrap();
-        let (disk_002, zpool) = create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
-        datastore.physical_disk_and_zpool_insert(&opctx, disk_002, zpool).await.unwrap();
-        let (disk_101, zpool) = create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
-        datastore.physical_disk_and_zpool_insert(&opctx, disk_101, zpool).await.unwrap();
+        let (disk_001, zpool) =
+            create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk_001, zpool)
+            .await
+            .unwrap();
+        let (disk_002, zpool) =
+            create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk_002, zpool)
+            .await
+            .unwrap();
+        let (disk_101, zpool) =
+            create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk_101, zpool)
+            .await
+            .unwrap();
 
         let uninitialized_disks = datastore
             .physical_disk_uninitialized_list(&opctx, collection_id)
@@ -821,12 +829,24 @@ mod test {
         // Create physical disks for all remaining devices.
         //
         // Observe no remaining uninitialized disks.
-        let (disk_003, zpool) = create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
-        datastore.physical_disk_and_zpool_insert(&opctx, disk_003.clone(), zpool).await.unwrap();
-        let (disk_102, zpool) = create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
-        datastore.physical_disk_and_zpool_insert(&opctx, disk_102.clone(), zpool).await.unwrap();
-        let (disk_103, zpool) = create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
-        datastore.physical_disk_and_zpool_insert(&opctx, disk_103.clone(), zpool).await.unwrap();
+        let (disk_003, zpool) =
+            create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk_003.clone(), zpool)
+            .await
+            .unwrap();
+        let (disk_102, zpool) =
+            create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk_102.clone(), zpool)
+            .await
+            .unwrap();
+        let (disk_103, zpool) =
+            create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk_103.clone(), zpool)
+            .await
+            .unwrap();
 
         let uninitialized_disks = datastore
             .physical_disk_uninitialized_list(&opctx, collection_id)
@@ -844,7 +864,9 @@ mod test {
             .filter(dsl::id.eq(disk_003.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
-            .execute_async(&*datastore.pool_connection_authorized(&opctx).await.unwrap())
+            .execute_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
             .await
             .unwrap();
 
@@ -853,7 +875,9 @@ mod test {
             .filter(dsl::id.eq(disk_102.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
-            .execute_async(&*datastore.pool_connection_authorized(&opctx).await.unwrap())
+            .execute_async(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
             .await
             .unwrap();
 

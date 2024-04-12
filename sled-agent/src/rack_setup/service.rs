@@ -103,6 +103,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::GenericUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -726,7 +727,7 @@ impl ServiceInner {
                     zone.dataset_name_and_address()
                 {
                     datasets.push(NexusTypes::DatasetCreateRequest {
-                        zpool_id: dataset_name.pool().id(),
+                        zpool_id: dataset_name.pool().id().into_untyped_uuid(),
                         dataset_id: zone.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: dataset_address.to_string(),
@@ -840,7 +841,7 @@ impl ServiceInner {
                 let sled_id = id_map.get(addr).expect("Missing sled");
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::ZpoolPutRequest {
-                        id: config.pool_id,
+                        id: config.pool_id.into_untyped_uuid(),
                         physical_disk_id: config.id,
                         sled_id: *sled_id,
                     }

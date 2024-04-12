@@ -31,6 +31,8 @@ use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -720,7 +722,7 @@ impl InvZpool {
         Self {
             inv_collection_id,
             time_collected: zpool.time_collected,
-            id: zpool.id,
+            id: zpool.id.into_untyped_uuid(),
             sled_id,
             total_size: zpool.total_size.into(),
         }
@@ -731,7 +733,7 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
     fn from(pool: InvZpool) -> Self {
         Self {
             time_collected: pool.time_collected,
-            id: pool.id,
+            id: ZpoolUuid::from_untyped_uuid(pool.id),
             total_size: *pool.total_size,
         }
     }

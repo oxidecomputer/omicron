@@ -53,8 +53,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -337,7 +336,7 @@ impl DataStore {
 
         // Do the same thing we just did for zones, but for physical disks too.
         let mut blueprint_disks: BTreeMap<
-            TypedUuid<SledKind>,
+            SledUuid,
             BlueprintPhysicalDisksConfig,
         > = {
             use db::schema::bp_sled_omicron_physical_disks::dsl;
@@ -362,7 +361,7 @@ impl DataStore {
 
                 for s in batch {
                     let old = blueprint_physical_disks.insert(
-                        TypedUuid::<SledKind>::from_untyped_uuid(s.sled_id),
+                        SledUuid::from_untyped_uuid(s.sled_id),
                         BlueprintPhysicalDisksConfig {
                             generation: *s.generation,
                             disks: Vec::new(),
@@ -526,9 +525,7 @@ impl DataStore {
 
                 for d in batch {
                     let sled_disks = blueprint_disks
-                        .get_mut(&TypedUuid::<SledKind>::from_untyped_uuid(
-                            d.sled_id,
-                        ))
+                        .get_mut(&SledUuid::from_untyped_uuid(d.sled_id))
                         .ok_or_else(|| {
                             // This error means that we found a row in
                             // bp_omicron_physical_disk with no associated record in
@@ -1274,9 +1271,8 @@ mod tests {
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::PhysicalDiskKind;
-    use omicron_uuid_kinds::TypedUuid;
-    use omicron_uuid_kinds::ZpoolKind;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
@@ -1328,14 +1324,14 @@ mod tests {
         let zpools = (0..4)
             .map(|i| {
                 (
-                    TypedUuid::<ZpoolKind>::new_v4(),
+                    ZpoolUuid::new_v4(),
                     SledDisk {
                         disk_identity: DiskIdentity {
                             vendor: String::from("v"),
                             serial: format!("s-{i}"),
                             model: String::from("m"),
                         },
-                        disk_id: TypedUuid::<PhysicalDiskKind>::new_v4(),
+                        disk_id: PhysicalDiskUuid::new_v4(),
                         policy: PhysicalDiskPolicy::InService,
                         state: PhysicalDiskState::Active,
                     },
@@ -1393,8 +1389,7 @@ mod tests {
                 Generation::new(),
             );
             for (sled_id, agent) in &collection.sled_agents {
-                // TODO-cleanup use `TypedUuid` everywhere
-                let sled_id = TypedUuid::from_untyped_uuid(*sled_id);
+                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 builder
                     .add_sled(
                         sled_id,
@@ -1527,7 +1522,7 @@ mod tests {
             collection.omicron_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count(),
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
@@ -1562,7 +1557,7 @@ mod tests {
         );
 
         // Add a new sled.
-        let new_sled_id = TypedUuid::new_v4();
+        let new_sled_id = SledUuid::new_v4();
 
         // While we're at it, use a different DNS version to test that that
         // works.
@@ -1613,8 +1608,9 @@ mod tests {
             blueprint2.blueprint_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count() + num_new_sled_zones,
-            blueprint2.all_omicron_zones().count()
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count()
+                + num_new_sled_zones,
+            blueprint2.all_omicron_zones(BlueprintZoneFilter::All).count()
         );
 
         // All zones should be in service.

@@ -34,9 +34,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::PhysicalDiskKind;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::TypedUuid;
-use omicron_uuid_kinds::ZpoolKind;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -77,17 +77,14 @@ impl PlanningInputFromDb<'_> {
             for (zpool, disk) in self.zpool_rows {
                 let sled_zpool_names =
                     zpools.entry(zpool.sled_id).or_insert_with(BTreeMap::new);
-                let zpool_id =
-                    TypedUuid::<ZpoolKind>::from_untyped_uuid(zpool.id());
+                let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: disk.vendor.clone(),
                         serial: disk.serial.clone(),
                         model: disk.model.clone(),
                     },
-                    disk_id: TypedUuid::<PhysicalDiskKind>::from_untyped_uuid(
-                        disk.id(),
-                    ),
+                    disk_id: PhysicalDiskUuid::from_untyped_uuid(disk.id()),
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };

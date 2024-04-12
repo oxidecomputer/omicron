@@ -55,6 +55,8 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
@@ -246,14 +248,14 @@ impl RackInitRequestBuilder {
     // - The internal DNS configuration for this service
     fn add_dataset(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
         address: SocketAddrV6,
         kind: DatasetKind,
         service_name: internal_dns::ServiceName,
     ) {
         self.datasets.push(DatasetCreateRequest {
-            zpool_id,
+            zpool_id: zpool_id.into_untyped_uuid(),
             dataset_id,
             request: DatasetPutRequest { address, kind },
         });
@@ -418,7 +420,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .parse::<std::net::SocketAddrV6>()
             .expect("Failed to parse port");
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
         eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
@@ -455,7 +457,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         .unwrap();
         let port = clickhouse.port();
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
         self.rack_init_builder.add_dataset(
@@ -1042,7 +1044,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_id,
         );
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
             .parse()
@@ -1089,7 +1091,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_id,
         );
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
             .parse()

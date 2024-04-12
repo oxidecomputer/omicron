@@ -24,6 +24,8 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -149,7 +151,7 @@ impl BpOmicronPhysicalDisk {
             serial: disk_config.identity.serial.clone(),
             model: disk_config.identity.model.clone(),
             id: disk_config.id,
-            pool_id: disk_config.pool_id,
+            pool_id: disk_config.pool_id.into_untyped_uuid(),
         }
     }
 }
@@ -163,7 +165,7 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
                 model: disk.model,
             },
             id: disk.id,
-            pool_id: disk.pool_id,
+            pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
         }
     }
 }

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Manges deployment of Omicron zones to Sled Agents
+//! Manages deployment of Omicron zones to Sled Agents
 
 use crate::Sled;
 use anyhow::anyhow;
@@ -41,7 +41,7 @@ pub(crate) async fn deploy_zones(
                 &opctx.log,
             );
             let omicron_zones = config
-                .to_omicron_zones_config(BlueprintZoneFilter::SledAgentPut);
+                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning);
             let result = client
                 .omicron_zones_put(&omicron_zones)
                 .await
@@ -275,7 +275,6 @@ mod test {
             zones: &mut BlueprintZonesConfig,
             disposition: BlueprintZoneDisposition,
         ) {
-            zones.generation = zones.generation.next();
             zones.zones.push(BlueprintZoneConfig {
                 config: OmicronZoneConfig {
                     id: Uuid::new_v4(),
@@ -293,9 +292,14 @@ mod test {
 
         // Both in-service and quiesced zones should be deployed.
         //
-        // TODO: add expunged zones to the test (should not be deployed).
+        // The expunged zone should not be deployed.
         append_zone(&mut zones1, BlueprintZoneDisposition::InService);
+        append_zone(&mut zones1, BlueprintZoneDisposition::Expunged);
         append_zone(&mut zones2, BlueprintZoneDisposition::Quiesced);
+        // Bump the generation for each config
+        zones1.generation = zones1.generation.next();
+        zones2.generation = zones2.generation.next();
+
         let (_, blueprint) = create_blueprint(BTreeMap::from([
             (sled_id1, zones1),
             (sled_id2, zones2),

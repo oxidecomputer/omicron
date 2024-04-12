@@ -12,8 +12,7 @@ use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -24,7 +23,7 @@ use uuid::Uuid;
 pub(crate) async fn deploy_disks(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
-    sled_configs: &BTreeMap<TypedUuid<SledKind>, BlueprintPhysicalDisksConfig>,
+    sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
@@ -88,8 +87,8 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::SledKind;
-    use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -98,10 +97,7 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn create_blueprint(
-        blueprint_disks: BTreeMap<
-            TypedUuid<SledKind>,
-            BlueprintPhysicalDisksConfig,
-        >,
+        blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -137,8 +133,8 @@ mod test {
         // sleds to CRDB.
         let mut s1 = httptest::Server::run();
         let mut s2 = httptest::Server::run();
-        let sled_id1 = TypedUuid::<SledKind>::new_v4();
-        let sled_id2 = TypedUuid::<SledKind>::new_v4();
+        let sled_id1 = SledUuid::new_v4();
+        let sled_id2 = SledUuid::new_v4();
         let sleds_by_id: BTreeMap<Uuid, Sled> =
             [(sled_id1, &s1), (sled_id2, &s2)]
                 .into_iter()
@@ -175,7 +171,7 @@ mod test {
                         model: "test-model".to_string(),
                     },
                     id: Uuid::new_v4(),
-                    pool_id: Uuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
                 }],
             }
         }

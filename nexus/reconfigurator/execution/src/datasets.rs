@@ -13,6 +13,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::GenericUuid;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -90,7 +91,12 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         };
 
         let pool_id = zpool_name.id();
-        let dataset = Dataset::new(id, pool_id, addr, DatasetKind::Crucible);
+        let dataset = Dataset::new(
+            id,
+            pool_id.into_untyped_uuid(),
+            addr,
+            DatasetKind::Crucible,
+        );
         let maybe_inserted = datastore
             .dataset_insert_if_not_exists(dataset)
             .await
@@ -144,6 +150,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::types::OmicronZoneDataset;
     use uuid::Uuid;
 
@@ -197,7 +204,7 @@ mod tests {
                 let zpool_name: ZpoolName =
                     dataset.pool_name.parse().expect("invalid zpool name");
                 let zpool = Zpool::new(
-                    zpool_name.id(),
+                    zpool_name.id().into_untyped_uuid(),
                     sled_id,
                     Uuid::new_v4(), // physical_disk_id
                 );
@@ -263,10 +270,10 @@ mod tests {
 
         // Create another zpool on one of the sleds, so we can add a new
         // crucible zone that uses it.
-        let new_zpool_id = Uuid::new_v4();
+        let new_zpool_id = ZpoolUuid::new_v4();
         for &sled_id in collection.omicron_zones.keys().take(1) {
             let zpool = Zpool::new(
-                new_zpool_id,
+                new_zpool_id.into_untyped_uuid(),
                 sled_id,
                 Uuid::new_v4(), // physical_disk_id
             );

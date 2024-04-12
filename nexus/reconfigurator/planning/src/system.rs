@@ -35,10 +35,9 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::PhysicalDiskKind;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
-use omicron_uuid_kinds::ZpoolKind;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
@@ -71,7 +70,7 @@ impl<T> SubnetIterator for T where
 #[derive(Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: IndexMap<TypedUuid<SledKind>, Sled>,
+    sleds: IndexMap<SledUuid, Sled>,
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
@@ -187,7 +186,7 @@ impl SystemDescription {
 
     /// Add a sled to the system, as described by a SledBuilder
     pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
-        let sled_id = sled.id.unwrap_or_else(TypedUuid::new_v4);
+        let sled_id = sled.id.unwrap_or_else(SledUuid::new_v4);
         ensure!(
             !self.sleds.contains_key(&sled_id),
             "attempted to add sled with the same id as an existing one: {}",
@@ -238,7 +237,7 @@ impl SystemDescription {
     /// database of an existing system
     pub fn sled_full(
         &mut self,
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
@@ -336,7 +335,7 @@ pub enum SledHardware {
 
 #[derive(Clone, Debug)]
 pub struct SledBuilder {
-    id: Option<TypedUuid<SledKind>>,
+    id: Option<SledUuid>,
     unique: Option<String>,
     hardware: SledHardware,
     hardware_slot: Option<u16>,
@@ -360,7 +359,7 @@ impl SledBuilder {
     /// Set the id of the sled
     ///
     /// Default: randomly generated
-    pub fn id(mut self, id: TypedUuid<SledKind>) -> Self {
+    pub fn id(mut self, id: SledUuid) -> Self {
         self.id = Some(id);
         self
     }
@@ -423,18 +422,18 @@ pub struct SledHwInventory<'a> {
 /// Collection.
 #[derive(Clone, Debug)]
 struct Sled {
-    sled_id: TypedUuid<SledKind>,
+    sled_id: SledUuid,
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
-    zpools: BTreeMap<TypedUuid<ZpoolKind>, SledDisk>,
+    zpools: BTreeMap<ZpoolUuid, SledDisk>,
     policy: SledPolicy,
 }
 
 impl Sled {
     /// Create a `Sled` using faked-up information based on a `SledBuilder`
     fn new_simulated(
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_role: SledRole,
         unique: Option<String>,
@@ -455,7 +454,7 @@ impl Sled {
                         serial: format!("serial-{sled_id}-{i}"),
                         model: String::from("fake-model"),
                     },
-                    disk_id: TypedUuid::<PhysicalDiskKind>::new_v4(),
+                    disk_id: PhysicalDiskUuid::new_v4(),
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
@@ -537,7 +536,7 @@ impl Sled {
     /// Create a `Sled` based on real information from another `Policy` and
     /// inventory `Collection`
     fn new_full(
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
