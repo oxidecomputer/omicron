@@ -224,6 +224,7 @@
             buildInputs = [
               glibc
               gcc-unwrapped
+              openssl.dev
             ];
 
             installPhase =
@@ -259,7 +260,7 @@
           # can't give Nix those hashes and must instead determine it ourselves.
           # this means that we will have to update this SHA if the clickhouse
           # version changes.
-          sha256 = "1lgxwh67apgl386ilpg0iy5xkyz12q4lgnz08zswjbxv88ra0qxj";
+          sha256 = "0wx8w9sdms5hsc9f835ivsissf15wjzdb9cvxr65xdi384i9pkzx";
           src = builtins.fetchurl
             {
               inherit sha256;
@@ -428,10 +429,3 @@
           };
     };
 }
-
-
-
-
-
-
-
