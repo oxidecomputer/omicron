@@ -1004,3 +1004,15 @@ async fn bootstore_status(
         .into();
     Ok(HttpResponseOk(status))
 }
+
+/// Get the status of a VMM
+#[endpoint {
+    method = GET,
+    path = "/vmm/{id}/sled-instance-state"
+}]
+async fn vmm_get_sled_instance_state(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = request_context.context();
+    todo!("eliza")
+}
