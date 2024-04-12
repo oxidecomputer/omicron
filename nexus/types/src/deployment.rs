@@ -163,11 +163,10 @@ impl Blueprint {
     // and this method will go away.
     pub fn all_omicron_zones_typed(
         &self,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (SledUuid, &OmicronZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
-            z.zones.iter().map(move |z| {
-                (SledUuid::from_untyped_uuid(*sled_id), &z.config)
-            })
+        self.all_blueprint_zones(filter).map(|(sled_id, z)| {
+            (SledUuid::from_untyped_uuid(sled_id), &z.config)
         })
     }
 
