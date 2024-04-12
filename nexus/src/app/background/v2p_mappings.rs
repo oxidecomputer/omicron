@@ -1,10 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use nexus_networking::{sled_client, sled_client_from_address};
-use nexus_types::{external_api::views::Sled, identity::Asset};
+use nexus_networking::sled_client_from_address;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
 use serde_json::json;
 
@@ -54,12 +54,11 @@ impl BackgroundTask for V2PManager {
                 })
                 .collect();
 
-            // sled_client_from_address(sled_id, address, log)
-
             // Get all active instance vnics
 
             // for each sled client, send set of expected v2p mappings
             json!({})
         }
+        .boxed()
     }
 }
