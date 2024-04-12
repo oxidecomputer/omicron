@@ -1092,7 +1092,8 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
@@ -1144,7 +1145,8 @@ mod tests {
         use illumos_utils::zpool::ZpoolName;
         let zpools = (0..4)
             .map(|_| {
-                let name = ZpoolName::new_external(Uuid::new_v4()).to_string();
+                let name =
+                    ZpoolName::new_external(ZpoolUuid::new_v4()).to_string();
                 name.parse().unwrap()
             })
             .collect();
@@ -1200,7 +1202,7 @@ mod tests {
             );
             for (sled_id, agent) in &collection.sled_agents {
                 // TODO-cleanup use `TypedUuid` everywhere
-                let sled_id = TypedUuid::from_untyped_uuid(*sled_id);
+                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 builder
                     .add_sled(
                         sled_id,
@@ -1333,7 +1335,7 @@ mod tests {
             collection.omicron_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count(),
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
@@ -1368,7 +1370,7 @@ mod tests {
         );
 
         // Add a new sled.
-        let new_sled_id = TypedUuid::new_v4();
+        let new_sled_id = SledUuid::new_v4();
 
         // While we're at it, use a different DNS version to test that that
         // works.
@@ -1385,8 +1387,6 @@ mod tests {
         };
         let new_sled_zpools =
             &planning_input.sled_resources(&new_sled_id).unwrap().zpools;
-        // TODO-cleanup use `TypedUuid` everywhere
-        let new_sled_id = *new_sled_id.as_untyped_uuid();
 
         // Create a builder for a child blueprint.
         let mut builder = BlueprintBuilder::new_based_on(
@@ -1421,8 +1421,9 @@ mod tests {
             blueprint2.blueprint_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count() + num_new_sled_zones,
-            blueprint2.all_omicron_zones().count()
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count()
+                + num_new_sled_zones,
+            blueprint2.all_omicron_zones(BlueprintZoneFilter::All).count()
         );
 
         // All zones should be in service.

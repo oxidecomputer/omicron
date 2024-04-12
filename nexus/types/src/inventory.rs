@@ -21,6 +21,7 @@ use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 pub use sled_agent_client::types::OmicronZoneConfig;
@@ -371,7 +372,7 @@ impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Zpool {
     pub time_collected: DateTime<Utc>,
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub total_size: ByteCount,
 }
 

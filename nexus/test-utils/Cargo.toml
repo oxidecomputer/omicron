@@ -30,6 +30,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 oximeter-collector.workspace = true
 oximeter-producer.workspace = true
