@@ -21,11 +21,12 @@ use nexus_types::inventory::OmicronZoneType;
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind,
 };
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub(crate) struct OmicronZone {
-    pub(crate) sled_id: Uuid,
+    pub(crate) sled_id: SledUuid,
     pub(crate) id: Uuid,
     pub(crate) underlay_address: ipv6::Ipv6Addr,
     pub(crate) zone_type: ZoneType,
@@ -49,7 +50,7 @@ pub(crate) struct OmicronZone {
 
 impl OmicronZone {
     pub(crate) fn new(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zone: &nexus_types::inventory::OmicronZoneConfig,
     ) -> anyhow::Result<Self> {
         let id = zone.id;
