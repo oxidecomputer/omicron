@@ -21,6 +21,7 @@ use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -56,7 +57,7 @@ use uuid::Uuid;
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Collection {
     /// unique identifier for this collection
-    pub id: Uuid,
+    pub id: CollectionUuid,
     /// errors encountered during collection
     pub errors: Vec<String>,
     /// time the collection started
