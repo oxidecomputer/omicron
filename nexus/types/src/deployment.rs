@@ -388,9 +388,6 @@ pub enum InvalidOmicronZoneType {
 
 /// Describes one Omicron-managed zone in a blueprint.
 ///
-/// This is a wrapper around an [`OmicronZoneConfig`] that also includes a
-/// [`BlueprintZoneDisposition`].
-///
 /// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintZoneConfig {
