@@ -692,7 +692,8 @@ mod test {
         physical_disk_id: Uuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
+        let zpool =
+            Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
         datastore.zpool_insert(opctx, zpool).await.unwrap();
         zpool_id
     }
