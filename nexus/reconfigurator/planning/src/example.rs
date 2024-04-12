@@ -60,12 +60,11 @@ impl ExampleSystem {
         // For each sled, have it report 0 zones in the initial inventory.
         // This will enable us to build a blueprint from the initial
         // inventory, which we can then use to build new blueprints.
-        for sled_id in &sled_ids {
+        for &sled_id in &sled_ids {
             inventory_builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     OmicronZonesConfig {
                         generation: Generation::new(),
                         zones: vec![],
@@ -154,8 +153,7 @@ impl ExampleSystem {
             builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     zones.to_omicron_zones_config(
                         BlueprintZoneFilter::ShouldBeRunning,
                     ),

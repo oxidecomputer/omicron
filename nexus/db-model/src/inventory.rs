@@ -12,6 +12,7 @@ use crate::schema::{
     inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
     sw_root_of_trust_page,
 };
+use crate::typed_uuid::DbTypedUuid;
 use crate::PhysicalDiskKind;
 use crate::{
     impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, ServiceKind,
@@ -32,6 +33,8 @@ use nexus_types::inventory::{
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -601,7 +604,7 @@ pub struct InvSledAgent {
     pub inv_collection_id: Uuid,
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub hw_baseboard_id: Option<Uuid>,
     pub sled_agent_ip: ipv6::Ipv6Addr,
     pub sled_agent_port: SqlU16,
@@ -638,7 +641,7 @@ impl InvSledAgent {
                 inv_collection_id: collection_id,
                 time_collected: sled_agent.time_collected,
                 source: sled_agent.source.clone(),
-                sled_id: sled_agent.sled_id,
+                sled_id: sled_agent.sled_id.into(),
                 hw_baseboard_id: None,
                 sled_agent_ip: ipv6::Ipv6Addr::from(
                     *sled_agent.sled_agent_address.ip(),
@@ -759,7 +762,7 @@ impl InvSledOmicronZones {
             inv_collection_id,
             time_collected: zones_found.time_collected,
             source: zones_found.source.clone(),
-            sled_id: zones_found.sled_id,
+            sled_id: zones_found.sled_id.into_untyped_uuid(),
             generation: Generation(zones_found.zones.generation),
         }
     }
@@ -770,7 +773,7 @@ impl InvSledOmicronZones {
         nexus_types::inventory::OmicronZonesFound {
             time_collected: self.time_collected,
             source: self.source,
-            sled_id: self.sled_id,
+            sled_id: SledUuid::from_untyped_uuid(self.sled_id),
             zones: nexus_types::inventory::OmicronZonesConfig {
                 generation: *self.generation,
                 zones: Vec::new(),

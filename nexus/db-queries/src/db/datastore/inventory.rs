@@ -62,6 +62,8 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -133,7 +135,11 @@ impl DataStore {
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
                 sled_agent.disks.iter().map(|disk| {
-                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
+                    InvPhysicalDisk::new(
+                        collection_id,
+                        sled_id.into_untyped_uuid(),
+                        disk.clone(),
+                    )
                 })
             })
             .collect();
@@ -143,10 +149,13 @@ impl DataStore {
             .sled_agents
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
-                sled_agent
-                    .zpools
-                    .iter()
-                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
+                sled_agent.zpools.iter().map(|pool| {
+                    InvZpool::new(
+                        collection_id,
+                        sled_id.into_untyped_uuid(),
+                        pool,
+                    )
+                })
             })
             .collect();
 
@@ -180,7 +189,7 @@ impl DataStore {
                 found.zones.zones.iter().map(|found_zone| {
                     InvOmicronZone::new(
                         collection_id,
-                        found.sled_id,
+                        found.sled_id.into_untyped_uuid(),
                         found_zone,
                     )
                     .map_err(|e| Error::internal_error(&e.to_string()))
@@ -726,8 +735,7 @@ impl DataStore {
                                 .source
                                 .clone()
                                 .into_sql::<diesel::sql_types::Text>(),
-                            sled_agent
-                                .sled_id
+                            (sled_agent.sled_id.into_untyped_uuid())
                                 .into_sql::<diesel::sql_types::Uuid>(),
                             baseboard_dsl::id.nullable(),
                             nexus_db_model::ipv6::Ipv6Addr::from(
@@ -1610,57 +1618,54 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let sled_agents: BTreeMap<_, _> =
-            sled_agent_rows
-                .into_iter()
-                .map(|s: InvSledAgent| {
-                    let sled_id = s.sled_id;
-                    let baseboard_id = s
-                        .hw_baseboard_id
-                        .map(|id| {
-                            baseboards_by_id.get(&id).cloned().ok_or_else(
-                                || {
-                                    Error::internal_error(
+        let sled_agents: BTreeMap<_, _> = sled_agent_rows
+            .into_iter()
+            .map(|s: InvSledAgent| {
+                let sled_id = SledUuid::from(s.sled_id);
+                let baseboard_id = s
+                    .hw_baseboard_id
+                    .map(|id| {
+                        baseboards_by_id.get(&id).cloned().ok_or_else(|| {
+                            Error::internal_error(
                                 "missing baseboard that we should have fetched",
                             )
-                                },
-                            )
                         })
-                        .transpose()?;
-                    let sled_agent = nexus_types::inventory::SledAgent {
-                        time_collected: s.time_collected,
-                        source: s.source,
-                        sled_id,
-                        baseboard_id,
-                        sled_agent_address: std::net::SocketAddrV6::new(
-                            std::net::Ipv6Addr::from(s.sled_agent_ip),
-                            u16::from(s.sled_agent_port),
-                            0,
-                            0,
-                        ),
-                        sled_role: nexus_types::inventory::SledRole::from(
-                            s.sled_role,
-                        ),
-                        usable_hardware_threads: u32::from(
-                            s.usable_hardware_threads,
-                        ),
-                        usable_physical_ram: s.usable_physical_ram.into(),
-                        reservoir_size: s.reservoir_size.into(),
-                        disks: physical_disks
-                            .get(&sled_id)
-                            .map(|disks| disks.to_vec())
-                            .unwrap_or_default(),
-                        zpools: zpools
-                            .get(&sled_id)
-                            .map(|zpools| zpools.to_vec())
-                            .unwrap_or_default(),
-                    };
-                    Ok((sled_id, sled_agent))
-                })
-                .collect::<Result<
-                    BTreeMap<Uuid, nexus_types::inventory::SledAgent>,
-                    Error,
-                >>()?;
+                    })
+                    .transpose()?;
+                let sled_agent = nexus_types::inventory::SledAgent {
+                    time_collected: s.time_collected,
+                    source: s.source,
+                    sled_id,
+                    baseboard_id,
+                    sled_agent_address: std::net::SocketAddrV6::new(
+                        std::net::Ipv6Addr::from(s.sled_agent_ip),
+                        u16::from(s.sled_agent_port),
+                        0,
+                        0,
+                    ),
+                    sled_role: nexus_types::inventory::SledRole::from(
+                        s.sled_role,
+                    ),
+                    usable_hardware_threads: u32::from(
+                        s.usable_hardware_threads,
+                    ),
+                    usable_physical_ram: s.usable_physical_ram.into(),
+                    reservoir_size: s.reservoir_size.into(),
+                    disks: physical_disks
+                        .get(sled_id.as_untyped_uuid())
+                        .map(|disks| disks.to_vec())
+                        .unwrap_or_default(),
+                    zpools: zpools
+                        .get(sled_id.as_untyped_uuid())
+                        .map(|zpools| zpools.to_vec())
+                        .unwrap_or_default(),
+                };
+                Ok((sled_id, sled_agent))
+            })
+            .collect::<Result<
+                BTreeMap<SledUuid, nexus_types::inventory::SledAgent>,
+                Error,
+            >>()?;
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -1901,7 +1906,7 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
-                        sled_zones_config.sled_id,
+                        SledUuid::from_untyped_uuid(sled_zones_config.sled_id),
                         sled_zones_config.into_uninit_zones_found(),
                     )
                 }))
@@ -1990,16 +1995,18 @@ impl DataStore {
                     })
                 })
                 .transpose()?;
-            let map = omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
-                // This error means that we found a row in inv_omicron_zone with
-                // no associated record in inv_sled_omicron_zones.  This should
-                // be impossible and reflects either a bug or database
-                // corruption.
-                Error::internal_error(&format!(
-                    "zone {:?}: unknown sled: {:?}",
-                    z.id, z.sled_id
-                ))
-            })?;
+            let map = omicron_zones
+                .get_mut(&SledUuid::from_untyped_uuid(z.sled_id))
+                .ok_or_else(|| {
+                    // This error means that we found a row in inv_omicron_zone
+                    // with no associated record in inv_sled_omicron_zones.
+                    // This should be impossible and reflects either a bug or
+                    // database corruption.
+                    Error::internal_error(&format!(
+                        "zone {:?}: unknown sled: {:?}",
+                        z.id, z.sled_id
+                    ))
+                })?;
             let zone_id = z.id;
             let zone = z
                 .into_omicron_zone_config(nic_row)

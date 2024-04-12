@@ -28,19 +28,20 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
     creator: String,
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
@@ -255,7 +256,7 @@ pub(crate) async fn deploy_dns_one(
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<DnsConfigZone, anyhow::Error> {
     // The DNS names configured here should match what RSS configures for the
@@ -353,7 +354,7 @@ pub fn blueprint_internal_dns_config(
         // unwrap(): see above.
         dns_builder
             .host_zone_switch(
-                scrimlet.id,
+                scrimlet.id.into_untyped_uuid(),
                 switch_zone_ip,
                 overrides.dendrite_port(scrimlet.id),
                 overrides.mgs_port(scrimlet.id),
@@ -529,9 +530,6 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::SledUuid;
-    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::net::IpAddr;
@@ -625,10 +623,7 @@ mod test {
             &collection,
             initial_dns_generation,
             Generation::new(),
-            policy_sleds.keys().map(|sled_id| {
-                // TODO-cleanup use `TypedUuid` everywhere
-                SledUuid::from_untyped_uuid(*sled_id)
-            }),
+            policy_sleds.keys().copied(),
             "test-suite",
         )
         .expect("failed to build initial blueprint");

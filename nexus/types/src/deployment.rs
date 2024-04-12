@@ -227,7 +227,7 @@ impl Blueprint {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                (SledUuid::from_untyped_uuid(*sled_id), zones)
+                (*sled_id, zones)
             })
             .collect();
 
