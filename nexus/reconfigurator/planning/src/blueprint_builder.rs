@@ -244,14 +244,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
-            // TODO: I'd like to populate this from inventory,
-            // but we aren't yet plumbing "managed" disk information
-            // through the inventory subsystem. That makes this a little tricky,
-            // because although we can see disks, we don't know if they're
-            // part of the control plane.
-            //
-            // This info might need to be supplied as an argument?
-            blueprint_disks: BTreeMap::new(), // XXX
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
             internal_dns_version,
             external_dns_version,
