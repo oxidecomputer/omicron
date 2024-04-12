@@ -141,7 +141,7 @@ impl Blueprint {
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
-    pub fn all_blueprint_zones(
+    pub fn all_omicron_zones(
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {

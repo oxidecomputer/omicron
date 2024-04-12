@@ -1793,7 +1793,7 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_blueprint_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter(|(_, z)| {
                 z.disposition != BlueprintZoneDisposition::InService
             })

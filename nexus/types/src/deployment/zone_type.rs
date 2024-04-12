@@ -8,11 +8,13 @@
 //! internal API, but include additional information needed by Reconfigurator
 //! that is not needed by sled-agent.
 
+use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::OmicronZoneType;
 pub use sled_agent_client::ZoneKind;
+use std::net::IpAddr;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -28,6 +30,91 @@ pub enum BlueprintZoneType {
     InternalNtp(blueprint_zone_type::InternalNtp),
     Nexus(blueprint_zone_type::Nexus),
     Oximeter(blueprint_zone_type::Oximeter),
+}
+
+impl BlueprintZoneType {
+    pub fn external_ip(&self) -> Option<IpAddr> {
+        match self {
+            BlueprintZoneType::Nexus(nexus) => Some(nexus.external_ip),
+            BlueprintZoneType::ExternalDns(dns) => Some(dns.dns_address.ip()),
+            BlueprintZoneType::BoundaryNtp(ntp) => Some(ntp.snat_cfg.ip),
+            BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Oximeter(_) => None,
+        }
+    }
+
+    pub fn opte_vnic(&self) -> Option<&NetworkInterface> {
+        match self {
+            BlueprintZoneType::Nexus(nexus) => Some(&nexus.nic),
+            BlueprintZoneType::ExternalDns(dns) => Some(&dns.nic),
+            BlueprintZoneType::BoundaryNtp(ntp) => Some(&ntp.nic),
+            BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Oximeter(_) => None,
+        }
+    }
+
+    /// Identifies whether this is an NTP zone (any flavor)
+    pub fn is_ntp(&self) -> bool {
+        match self {
+            BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::BoundaryNtp(_) => true,
+            BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::ExternalDns(_)
+            | BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
+
+    /// Identifies whether this is a Nexus zone
+    pub fn is_nexus(&self) -> bool {
+        match self {
+            BlueprintZoneType::Nexus(_) => true,
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::ExternalDns(_)
+            | BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
+
+    /// Identifies whether this a Crucible (not Crucible pantry) zone
+    pub fn is_crucible(&self) -> bool {
+        match self {
+            BlueprintZoneType::Crucible(_) => true,
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::ExternalDns(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
 }
 
 impl From<BlueprintZoneType> for OmicronZoneType {

@@ -732,7 +732,7 @@ async fn lookup_service_info(
     };
 
     let Some(zone_config) = blueprint
-        .all_blueprint_zones(BlueprintZoneFilter::All)
+        .all_omicron_zones(BlueprintZoneFilter::All)
         .find_map(|(_sled_id, zone_config)| {
             if zone_config.config.id == service_id {
                 Some(zone_config)

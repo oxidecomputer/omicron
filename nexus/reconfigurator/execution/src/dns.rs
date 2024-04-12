@@ -276,7 +276,7 @@ pub fn blueprint_internal_dns_config(
     }
 
     for (_, zone) in blueprint
-        .all_blueprint_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
+        .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
         let context = || {
             format!(

@@ -12,14 +12,15 @@ use internal_dns::config::ZoneVariant;
 use ipnet::IpAdd;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
-use nexus_types::deployment::OmicronZoneConfig;
+use nexus_types::deployment::InvalidOmicronZoneType;
 use nexus_types::deployment::OmicronZoneDataset;
-use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -40,6 +41,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::SledUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -54,6 +56,7 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
+use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
 use uuid::Uuid;
 
@@ -72,6 +75,8 @@ pub enum Error {
     ExhaustedNexusIps,
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
+    #[error("invalid OmicronZoneType in collection")]
+    InvalidOmicronZoneType(#[from] InvalidOmicronZoneType),
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -216,11 +221,13 @@ impl<'a> BlueprintBuilder<'a> {
                             sled_id
                         ))
                     })?;
+                let config =
+                    BlueprintZonesConfig::initial_from_collection(&zones)?;
 
                 Ok((
                     // TODO-cleanup use `TypedUuid` everywhere
                     sled_id.into_untyped_uuid(),
-                    BlueprintZonesConfig::initial_from_collection(&zones),
+                    config,
                 ))
             })
             .collect::<Result<_, Error>>()?;
@@ -290,8 +297,8 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
             let zone_type = &z.zone_type;
-            if let OmicronZoneType::Nexus { nic, .. } = zone_type {
-                match nic.ip {
+            if let BlueprintZoneType::Nexus(nexus) = zone_type {
+                match nexus.nic.ip {
                     IpAddr::V4(ip) => {
                         if !existing_nexus_v4_ips.insert(ip) {
                             bail!("duplicate Nexus NIC IP: {ip}");
@@ -305,7 +312,7 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
 
-            if let Some(external_ip) = zone_type.external_ip()? {
+            if let Some(external_ip) = zone_type.external_ip() {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
@@ -315,7 +322,7 @@ impl<'a> BlueprintBuilder<'a> {
                     bail!("duplicate external IP: {external_ip}");
                 }
             }
-            if let Some(nic) = zone_type.service_vnic() {
+            if let Some(nic) = zone_type.opte_vnic() {
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
@@ -415,7 +422,7 @@ impl<'a> BlueprintBuilder<'a> {
         let has_ntp = self
             .zones
             .current_sled_zones(sled_id)
-            .any(|z| z.config.zone_type.is_ntp());
+            .any(|z| z.zone_type.is_ntp());
         if has_ntp {
             return Ok(Ensure::NotNeeded);
         }
@@ -444,27 +451,32 @@ impl<'a> BlueprintBuilder<'a> {
             .parent_blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| {
-                if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
-                    Some(Host::for_zone(z.id, ZoneVariant::Other).fqdn())
+                if matches!(z.zone_type, BlueprintZoneType::BoundaryNtp(_)) {
+                    Some(
+                        Host::for_zone(
+                            z.id.into_untyped_uuid(),
+                            ZoneVariant::Other,
+                        )
+                        .fqdn(),
+                    )
                 } else {
                     None
                 }
             })
             .collect();
 
-        let zone = OmicronZoneConfig {
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            zone_type: OmicronZoneType::InternalNtp {
-                address: ntp_address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain: None,
-            },
-        };
-        let zone = BlueprintZoneConfig {
-            config: zone,
-            disposition: BlueprintZoneDisposition::InService,
+            zone_type: BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp {
+                    address: ntp_address,
+                    ntp_servers,
+                    dns_servers,
+                    domain: None,
+                },
+            ),
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -480,8 +492,11 @@ impl<'a> BlueprintBuilder<'a> {
         let has_crucible_on_this_pool =
             self.zones.current_sled_zones(sled_id).any(|z| {
                 matches!(
-                    &z.config.zone_type,
-                    OmicronZoneType::Crucible { dataset, .. }
+                    &z.zone_type,
+                    BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                        dataset,
+                        ..
+                    })
                     if dataset.pool_name == pool_name
                 )
             });
@@ -501,20 +516,19 @@ impl<'a> BlueprintBuilder<'a> {
 
         let ip = self.sled_alloc_ip(sled_id)?;
         let port = omicron_common::address::CRUCIBLE_PORT;
-        let address = SocketAddrV6::new(ip, port, 0, 0).to_string();
-        let zone = OmicronZoneConfig {
+        let address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            zone_type: OmicronZoneType::Crucible {
-                address,
-                dataset: OmicronZoneDataset { pool_name },
-            },
+            zone_type: BlueprintZoneType::Crucible(
+                blueprint_zone_type::Crucible {
+                    address,
+                    dataset: OmicronZoneDataset { pool_name },
+                },
+            ),
         };
 
-        let zone = BlueprintZoneConfig {
-            config: zone,
-            disposition: BlueprintZoneDisposition::InService,
-        };
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
     }
@@ -527,7 +541,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_num_nexus_zones(&self, sled_id: SledUuid) -> usize {
         self.zones
             .current_sled_zones(sled_id)
-            .filter(|z| z.config.zone_type.is_nexus())
+            .filter(|z| z.zone_type.is_nexus())
             .count()
     }
 
@@ -551,11 +565,10 @@ impl<'a> BlueprintBuilder<'a> {
             .parent_blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
             .find_map(|(_, z)| match &z.zone_type {
-                OmicronZoneType::Nexus {
-                    external_tls,
-                    external_dns_servers,
-                    ..
-                } => Some((*external_tls, external_dns_servers.clone())),
+                BlueprintZoneType::Nexus(nexus) => Some((
+                    nexus.external_tls,
+                    nexus.external_dns_servers.clone(),
+                )),
                 _ => None,
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
@@ -619,7 +632,9 @@ impl<'a> BlueprintBuilder<'a> {
                     .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
                     id: self.rng.network_interface_rng.next(),
-                    kind: NetworkInterfaceKind::Service { id: nexus_id },
+                    kind: NetworkInterfaceKind::Service {
+                        id: nexus_id.into_untyped_uuid(),
+                    },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
                     mac,
@@ -632,22 +647,20 @@ impl<'a> BlueprintBuilder<'a> {
 
             let ip = self.sled_alloc_ip(sled_id)?;
             let port = omicron_common::address::NEXUS_INTERNAL_PORT;
-            let internal_address =
-                SocketAddrV6::new(ip, port, 0, 0).to_string();
-            let zone = OmicronZoneConfig {
+            let internal_address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
                 underlay_address: ip,
-                zone_type: OmicronZoneType::Nexus {
-                    internal_address,
-                    external_ip,
-                    nic,
-                    external_tls,
-                    external_dns_servers: external_dns_servers.clone(),
-                },
-            };
-            let zone = BlueprintZoneConfig {
-                config: zone,
-                disposition: BlueprintZoneDisposition::InService,
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address,
+                        external_ip,
+                        nic,
+                        external_tls,
+                        external_dns_servers: external_dns_servers.clone(),
+                    },
+                ),
             };
             self.sled_add_zone(sled_id, zone)?;
         }
@@ -666,10 +679,10 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_zones = self.zones.change_sled_zones(sled_id);
         // A sled should have a small number (< 20) of zones so a linear search
         // should be very fast.
-        if sled_zones.zones.iter().any(|z| z.config.id == zone.config.id) {
+        if sled_zones.zones.iter().any(|z| z.id == zone.id) {
             return Err(Error::Planner(anyhow!(
                 "attempted to add zone that already exists: {}",
-                zone.config.id
+                zone.id
             )));
         }
         sled_zones.zones.push(zone);
@@ -706,7 +719,7 @@ impl<'a> BlueprintBuilder<'a> {
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
                 for z in self.zones.current_sled_zones(sled_id) {
-                    allocator.reserve(z.config.underlay_address);
+                    allocator.reserve(z.underlay_address);
                 }
 
                 allocator
@@ -737,7 +750,7 @@ struct BlueprintBuilderRng {
     // In the future, when we switch to typed UUIDs, each of these will be
     // associated with a specific `TypedUuidKind`.
     blueprint_rng: UuidRng,
-    zone_rng: UuidRng,
+    zone_rng: TypedUuidRng<OmicronZoneKind>,
     network_interface_rng: UuidRng,
 }
 
@@ -748,7 +761,7 @@ impl BlueprintBuilderRng {
 
     fn new_from_parent(mut parent: StdRng) -> Self {
         let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
-        let zone_rng = UuidRng::from_parent_rng(&mut parent, "zone");
+        let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
         let network_interface_rng =
             UuidRng::from_parent_rng(&mut parent, "network_interface");
 
@@ -872,23 +885,27 @@ pub mod test {
     use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_client::types::{OmicronZoneConfig, OmicronZoneType};
+    use sled_agent_client::types::OmicronZoneType;
     use std::collections::BTreeSet;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
     /// Checks various conditions that should be true for all blueprints
     pub fn verify_blueprint(blueprint: &Blueprint) {
-        let mut underlay_ips: BTreeMap<Ipv6Addr, &OmicronZoneConfig> =
+        let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
             BTreeMap::new();
         for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
             if let Some(previous) =
                 underlay_ips.insert(zone.underlay_address, zone)
             {
                 panic!(
-                    "found duplicate underlay IP {} in zones {} and \
-                        {}\n\nblueprint: {:#?}",
-                    zone.underlay_address, zone.id, previous.id, blueprint
+                    "found duplicate underlay IP {} in zones {} and {}\
+                    \n\n\
+                    blueprint: {}",
+                    zone.underlay_address,
+                    zone.id,
+                    previous.id,
+                    blueprint.display(),
                 );
             }
         }
@@ -1039,20 +1056,20 @@ pub mod test {
             assert!(new_sled_resources
                 .subnet
                 .net()
-                .contains(z.config.underlay_address));
+                .contains(z.underlay_address));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the
         // sled's subnet.
         assert!(new_sled_zones.zones.iter().any(|z| {
-            if let OmicronZoneType::InternalNtp { address, .. } =
-                &z.config.zone_type
+            if let BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address, .. },
+            ) = &z.zone_type
             {
-                let sockaddr = address.parse::<SocketAddrV6>().unwrap();
                 assert!(new_sled_resources
                     .subnet
                     .net()
-                    .contains(*sockaddr.ip()));
+                    .contains(*address.ip()));
                 true
             } else {
                 false
@@ -1062,11 +1079,11 @@ pub mod test {
             .zones
             .iter()
             .filter_map(|z| {
-                if let OmicronZoneType::Crucible { address, dataset } =
-                    &z.config.zone_type
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, dataset },
+                ) = &z.zone_type
                 {
-                    let sockaddr = address.parse::<SocketAddrV6>().unwrap();
-                    let ip = sockaddr.ip();
+                    let ip = address.ip();
                     assert!(new_sled_resources.subnet.net().contains(*ip));
                     Some(dataset.pool_name.clone())
                 } else {
@@ -1222,11 +1239,7 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(ip) = z
-                    .zone_type
-                    .external_ip()
-                    .expect("failed to check for external IP")
-                {
+                if let Some(ip) = z.zone_type.external_ip() {
                     used_ip_ranges.push(IpRange::from(ip));
                 }
             }
