@@ -56,13 +56,14 @@ impl DataStore {
         use diesel::query_dsl::methods::FilterDsl;
 
         let insertable_sled = sled_update.clone().into_insertable();
-        let now_secs = insertable_sled.time_modified().timestamp();
+        let now = insertable_sled.time_modified();
 
         let sled = diesel::insert_into(dsl::sled)
             .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
             .set((
+                dsl::time_modified.eq(now),
                 dsl::ip.eq(sled_update.ip),
                 dsl::port.eq(sled_update.port),
                 dsl::rack_id.eq(sled_update.rack_id),
@@ -88,8 +89,9 @@ impl DataStore {
                 )
             })?;
 
-        // We compare only seconds since the DB causes us to lose precision
-        let was_modified = now_secs == sled.time_modified().timestamp();
+        // We compare only seconds since the epoch, because writing to and
+        // reading from the database causes us to lose precision.
+        let was_modified = now.timestamp() == sled.time_modified().timestamp();
         Ok((sled, was_modified))
     }
 

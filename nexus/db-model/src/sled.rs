@@ -46,7 +46,6 @@ pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
-    time_modified: DateTime<Utc>,
     pub rcgen: Generation,
 
     pub rack_id: Uuid,
@@ -117,7 +116,7 @@ impl Sled {
     }
 
     pub fn time_modified(&self) -> DateTime<Utc> {
-        self.time_modified
+        self.identity.time_modified
     }
 }
 
@@ -258,7 +257,6 @@ impl SledUpdate {
             identity: SledIdentity::new(self.id),
             rcgen: Generation::new(),
             time_deleted: None,
-            time_modified: Utc::now(),
             rack_id: self.rack_id,
             is_scrimlet: self.is_scrimlet,
             serial_number: self.serial_number,
