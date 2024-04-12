@@ -340,7 +340,8 @@ mod test {
                 rack_id,
                 Generation::new(),
             );
-            sleds.push(datastore.sled_upsert(sled).await.unwrap());
+            let (sled, _) = datastore.sled_upsert(sled).await.unwrap();
+            sleds.push(sled);
         }
 
         // The same enumerator should immediately find all the new sleds.

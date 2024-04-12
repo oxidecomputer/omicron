@@ -211,9 +211,11 @@ mod test {
             rack_id,
             Generation::new(),
         );
-        db.sled_upsert(sled_update)
+        let (sled, _) = db
+            .sled_upsert(sled_update)
             .await
-            .expect("Could not upsert sled during test prep")
+            .expect("Could not upsert sled during test prep");
+        sled
     }
 
     fn list_disk_params() -> DataPageParams<'static, Uuid> {

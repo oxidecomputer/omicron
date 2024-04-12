@@ -69,7 +69,17 @@ impl super::Nexus {
             self.rack_id,
             info.generation.into(),
         );
-        self.db_datastore.sled_upsert(sled).await?;
+        let (_, was_modified) = self.db_datastore.sled_upsert(sled).await?;
+
+        // If a new sled-agent just came online we want to trigger inventory
+        // collection.
+        //
+        // This will allow us to learn about disks so that they can be added to
+        // the control plane.
+        if was_modified {
+            self.activate_inventory_collection();
+        }
+
         Ok(())
     }
 

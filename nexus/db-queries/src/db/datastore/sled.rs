@@ -43,22 +43,26 @@ use uuid::Uuid;
 impl DataStore {
     /// Stores a new sled in the database.
     ///
+    /// Returns the sled, and whether or not it was updated on success.
+    ///
     /// Returns an error if `sled_agent_gen` is stale, or the sled is
     /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<Sled> {
+    ) -> CreateResult<(Sled, bool)> {
         use db::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
-        diesel::insert_into(dsl::sled)
-            .values(sled_update.clone().into_insertable())
+        let insertable_sled = sled_update.clone().into_insertable();
+        let now = insertable_sled.time_modified().clone();
+
+        let sled = diesel::insert_into(dsl::sled)
+            .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
             .set((
-                dsl::time_modified.eq(Utc::now()),
                 dsl::ip.eq(sled_update.ip),
                 dsl::port.eq(sled_update.port),
                 dsl::rack_id.eq(sled_update.rack_id),
@@ -82,7 +86,10 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })
+            })?;
+
+        let was_modified = now == *sled.time_modified();
+        Ok((sled, was_modified))
     }
 
     pub async fn sled_list(
@@ -753,7 +760,7 @@ mod test {
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let mut sled_update = test_new_sled_update();
-        let observed_sled =
+        let (observed_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
@@ -786,7 +793,7 @@ mod test {
         sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let observed_sled = datastore
+        let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
@@ -813,7 +820,7 @@ mod test {
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let mut sled_update = test_new_sled_update();
-        let observed_sled =
+        let (observed_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
 
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
@@ -835,7 +842,7 @@ mod test {
         sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let observed_sled = datastore
+        let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
@@ -857,7 +864,7 @@ mod test {
         );
         sled_update.sled_agent_gen.0 = current_gen.0.next();
         // Test that upserting the sled propagates those changes to the DB.
-        let observed_sled = datastore
+        let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
@@ -876,7 +883,7 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let mut sled_update = test_new_sled_update();
-        let observed_sled =
+        let (observed_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
@@ -955,13 +962,13 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Define some sleds that resources cannot be provisioned on.
-        let non_provisionable_sled =
+        let (non_provisionable_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let expunged_sled =
+        let (expunged_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let decommissioned_sled =
+        let (decommissioned_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let illegal_decommissioned_sled =
+        let (illegal_decommissioned_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
 
         let ineligible_sleds = IneligibleSleds {
@@ -1000,7 +1007,7 @@ mod test {
 
         // Now add a provisionable sled and try again.
         let sled_update = test_new_sled_update();
-        let provisionable_sled =
+        let (provisionable_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
 
         // Try a few times to ensure that resources never get allocated to the
@@ -1061,7 +1068,8 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Set up a sled to test against.
-        let sled = datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let (sled, _) =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
         let sled_id = sled.id();
 
         // Add a couple disks to this sled.
@@ -1230,7 +1238,8 @@ mod test {
             .enumerate();
 
         // Set up a sled to test against.
-        let sled = datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let (sled, _) =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
         let sled_id = sled.id();
 
         for (i, ((policy, state), after)) in all_transitions {
