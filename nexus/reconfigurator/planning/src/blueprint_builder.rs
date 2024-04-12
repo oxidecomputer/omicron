@@ -8,7 +8,7 @@ use crate::ip_allocator::IpAllocator;
 use anyhow::anyhow;
 use anyhow::bail;
 use internal_dns::config::Host;
-use internal_dns::config::ZoneVariant;
+use internal_dns::config::Zone;
 use ipnet::IpAdd;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
@@ -40,6 +40,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -445,7 +446,13 @@ impl<'a> BlueprintBuilder<'a> {
             .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
-                    Some(Host::for_zone(z.id, ZoneVariant::Other).fqdn())
+                    Some(
+                        Host::for_zone(Zone::Other(
+                            // TODO-cleanup use `TypedUuid` everywhere
+                            OmicronZoneUuid::from_untyped_uuid(z.id),
+                        ))
+                        .fqdn(),
+                    )
                 } else {
                     None
                 }

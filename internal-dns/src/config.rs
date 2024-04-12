@@ -64,22 +64,10 @@ use crate::names::{ServiceName, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
-
-/// Zones that can be referenced within the internal DNS system.
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ZoneVariant {
-    /// This non-global zone runs an instance of Dendrite.
-    ///
-    /// This implies that the Sled is a scrimlet.
-    // When this variant is used, the UUID in the record should match the sled
-    // itself.
-    Dendrite,
-    /// All other non-global zones.
-    Other,
-}
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -88,12 +76,12 @@ pub enum Host {
     Sled(Uuid),
 
     /// Used to construct an AAAA record for a zone on a sled.
-    Zone { id: Uuid, variant: ZoneVariant },
+    Zone(Zone),
 }
 
 impl Host {
-    pub fn for_zone(id: Uuid, variant: ZoneVariant) -> Host {
-        Host::Zone { id, variant }
+    pub fn for_zone(zone: Zone) -> Host {
+        Host::Zone(zone)
     }
 
     /// Returns the DNS name for this host, ignoring the zone part of the DNS
@@ -101,10 +89,10 @@ impl Host {
     pub(crate) fn dns_name(&self) -> String {
         match &self {
             Host::Sled(id) => format!("{}.sled", id),
-            Host::Zone { id, variant: ZoneVariant::Dendrite } => {
+            Host::Zone(Zone::Dendrite(id)) => {
                 format!("dendrite-{}.host", id)
             }
-            Host::Zone { id, variant: ZoneVariant::Other } => {
+            Host::Zone(Zone::Other(id)) => {
                 format!("{}.host", id)
             }
         }
@@ -170,14 +158,25 @@ pub struct Sled(Uuid);
 /// Describes a host of type "zone" (an illumos zone) in the control plane DNS
 /// zone
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Zone {
-    id: Uuid,
-    variant: ZoneVariant,
+pub enum Zone {
+    /// This non-global zone runs an instance of Dendrite.
+    ///
+    /// This implies that the Sled is a scrimlet.
+    // When this variant is used, the UUID in the record should match the sled
+    // itself.
+    Dendrite(
+        // This is a sled UUID.
+        //
+        // TODO-cleanup use TypedUuid everywhere -- this should be a SledUuid
+        Uuid,
+    ),
+    /// All other non-global zones.
+    Other(OmicronZoneUuid),
 }
 
 impl Zone {
     pub(crate) fn to_host(&self) -> Host {
-        Host::Zone { id: self.id, variant: self.variant }
+        Host::Zone(self.clone())
     }
 
     pub(crate) fn dns_name(&self) -> String {
@@ -236,7 +235,7 @@ impl DnsConfigBuilder {
         sled_id: Uuid,
         addr: Ipv6Addr,
     ) -> anyhow::Result<Zone> {
-        self.host_zone_internal(sled_id, ZoneVariant::Dendrite, addr)
+        self.host_zone_internal(Zone::Dendrite(sled_id), addr)
     }
 
     /// Add a new host of type "zone" to the configuration
@@ -251,24 +250,22 @@ impl DnsConfigBuilder {
     /// configuration.
     pub fn host_zone(
         &mut self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
         addr: Ipv6Addr,
     ) -> anyhow::Result<Zone> {
-        self.host_zone_internal(zone_id, ZoneVariant::Other, addr)
+        self.host_zone_internal(Zone::Other(zone_id), addr)
     }
 
     fn host_zone_internal(
         &mut self,
-        id: Uuid,
-        variant: ZoneVariant,
+        zone: Zone,
         addr: Ipv6Addr,
     ) -> anyhow::Result<Zone> {
-        let zone = Zone { id, variant };
         match self.zones.insert(zone.clone(), addr) {
             None => Ok(zone),
             Some(existing) => Err(anyhow!(
-                "multiple definitions for zone {} (previously {}, now {})",
-                id,
+                "multiple definitions for zone {:?} (previously {}, now {})",
+                zone,
                 existing,
                 addr
             )),
@@ -293,8 +290,7 @@ impl DnsConfigBuilder {
         // DnsBuilder.
         ensure!(
             self.zones.contains_key(&zone),
-            "zone {} has not been defined",
-            zone.id
+            "zone {zone:?} has not been defined",
         );
 
         let set = self
@@ -304,10 +300,10 @@ impl DnsConfigBuilder {
         match set.insert(zone.clone(), port) {
             None => Ok(()),
             Some(existing) => Err(anyhow!(
-                "service {}: zone {}: registered twice \
+                "service {}: zone {:?}: registered twice \
                 (previously port {}, now {})",
                 service.dns_name(),
-                zone.id,
+                zone,
                 existing,
                 port
             )),
@@ -362,7 +358,7 @@ impl DnsConfigBuilder {
     /// configuration.
     pub fn host_zone_with_one_backend(
         &mut self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
         addr: Ipv6Addr,
         service: ServiceName,
         port: u16,
@@ -474,8 +470,9 @@ impl DnsConfigBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::{DnsConfigBuilder, Host, ServiceName, ZoneVariant};
-    use crate::DNS_ZONE;
+    use super::{DnsConfigBuilder, Host, ServiceName};
+    use crate::{config::Zone, DNS_ZONE};
+    use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
     use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
     use uuid::Uuid;
 
@@ -514,11 +511,12 @@ mod test {
             "00000000-0000-0000-0000-000000000000.sled",
         );
         assert_eq!(
-            Host::Zone { id: uuid, variant: ZoneVariant::Other }.dns_name(),
+            Host::Zone(Zone::Other(OmicronZoneUuid::from_untyped_uuid(uuid)))
+                .dns_name(),
             "00000000-0000-0000-0000-000000000000.host",
         );
         assert_eq!(
-            Host::Zone { id: uuid, variant: ZoneVariant::Dendrite }.dns_name(),
+            Host::Zone(Zone::Dendrite(uuid)).dns_name(),
             "dendrite-00000000-0000-0000-0000-000000000000.host",
         );
     }
@@ -544,10 +542,10 @@ mod test {
 
         let sled1_uuid: Uuid = SLED1_UUID.parse().unwrap();
         let sled2_uuid: Uuid = SLED2_UUID.parse().unwrap();
-        let zone1_uuid: Uuid = ZONE1_UUID.parse().unwrap();
-        let zone2_uuid: Uuid = ZONE2_UUID.parse().unwrap();
-        let zone3_uuid: Uuid = ZONE3_UUID.parse().unwrap();
-        let zone4_uuid: Uuid = ZONE4_UUID.parse().unwrap();
+        let zone1_uuid: OmicronZoneUuid = ZONE1_UUID.parse().unwrap();
+        let zone2_uuid: OmicronZoneUuid = ZONE2_UUID.parse().unwrap();
+        let zone3_uuid: OmicronZoneUuid = ZONE3_UUID.parse().unwrap();
+        let zone4_uuid: OmicronZoneUuid = ZONE4_UUID.parse().unwrap();
 
         let builder_empty = DnsConfigBuilder::new();
 
@@ -626,7 +624,7 @@ mod test {
     #[test]
     fn test_builder_errors() {
         let sled1_uuid: Uuid = SLED1_UUID.parse().unwrap();
-        let zone1_uuid: Uuid = ZONE1_UUID.parse().unwrap();
+        let zone1_uuid: OmicronZoneUuid = ZONE1_UUID.parse().unwrap();
 
         // Duplicate sled, with both the same IP and a different one
         let mut builder = DnsConfigBuilder::new();

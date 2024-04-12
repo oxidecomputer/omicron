@@ -21,6 +21,7 @@ use dropshot::HttpError;
 use futures::lock::Mutex;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use sled_hardware::DiskVariant;
@@ -758,7 +759,7 @@ impl Storage {
 
 /// Simulated crucible pantry
 pub struct Pantry {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
     sled_agent: Arc<SledAgent>,
     jobs: Mutex<HashSet<String>>,
@@ -767,7 +768,7 @@ pub struct Pantry {
 impl Pantry {
     pub fn new(sled_agent: Arc<SledAgent>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: OmicronZoneUuid::new_v4(),
             vcrs: Mutex::new(HashMap::default()),
             sled_agent,
             jobs: Mutex::new(HashSet::default()),
