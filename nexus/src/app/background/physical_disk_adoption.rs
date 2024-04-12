@@ -18,7 +18,6 @@ use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::inventory::Collection;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -26,13 +25,13 @@ use uuid::Uuid;
 
 pub struct PhysicalDiskAdoption {
     datastore: Arc<DataStore>,
-    rx_inventory_collection: watch::Receiver<Option<Collection>>,
+    rx_inventory_collection: watch::Receiver<Option<Uuid>>,
 }
 
 impl PhysicalDiskAdoption {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_inventory_collection: watch::Receiver<Option<Collection>>,
+        rx_inventory_collection: watch::Receiver<Option<Uuid>>,
     ) -> Self {
         PhysicalDiskAdoption { datastore, rx_inventory_collection }
     }
@@ -48,8 +47,8 @@ impl BackgroundTask for PhysicalDiskAdoption {
             let log = &opctx.log;
             warn!(&log, "physical disk adoption task started");
 
-            let collection = self.rx_inventory_collection.borrow().clone();
-            let Some(collection) = collection else {
+            let collection_id = self.rx_inventory_collection.borrow().clone();
+            let Some(collection_id) = collection_id else {
                 warn!(
                     &opctx.log,
                     "Physical Disk Adoption: skipped";
@@ -58,59 +57,60 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 return json!({ "error": "no inventory" });
             };
 
-            for (sled_id, _) in collection.sled_agents {
-                // TODO: Make sure "not found" doesn't stop execution
-                let result = self.datastore.physical_disk_uninitialized_list(
+            let result = self.datastore.physical_disk_uninitialized_list(
+                opctx,
+                collection_id,
+            ).await;
+
+            let uninitialized = match result {
+                Ok(uninitialized) => uninitialized,
+                Err(err) => {
+                    warn!(
+                        &opctx.log,
+                        "Physical Disk Adoption: failed to query for insertable disks";
+                        "err" => %err,
+                    );
+                    return json!({ "error": format!("failed to query database: {:#}", err) });
+                },
+            };
+
+            for inv_disk in uninitialized {
+                let disk = PhysicalDisk::new(
+                    Uuid::new_v4(),
+                    inv_disk.vendor,
+                    inv_disk.serial,
+                    inv_disk.model,
+                    inv_disk.variant,
+                    inv_disk.sled_id,
+                );
+
+                let zpool = Zpool::new(
+                    Uuid::new_v4(),
+                    inv_disk.sled_id,
+                    disk.id()
+                );
+
+                let result = self.datastore.physical_disk_and_zpool_insert(
                     opctx,
-                    collection.id,
-                    sled_id,
+                    disk,
+                    zpool
                 ).await;
 
-                let uninitialized = match result {
-                    Ok(uninitialized) => uninitialized,
-                    Err(err) => {
-                        warn!(
-                            &opctx.log,
-                            "Physical Disk Adoption: failed to query for insertable disks";
-                            "err" => %err,
-                        );
-                        return json!({ "error": format!("failed to query database: {:#}", err) });
-                    },
-                };
-
-                for inv_disk in uninitialized {
-                    let disk = PhysicalDisk::new(
-                        Uuid::new_v4(),
-                        inv_disk.vendor,
-                        inv_disk.serial,
-                        inv_disk.model,
-                        inv_disk.variant,
-                        inv_disk.sled_id,
+                if let Err(err) = result {
+                    warn!(
+                        &opctx.log,
+                        "Physical Disk Adoption: failed to insert new disk and zpool";
+                        "err" => %err
                     );
-
-                    let zpool = Zpool::new(
-                        Uuid::new_v4(),
-                        sled_id,
-                        disk.id()
-                    );
-
-                    let result = self.datastore.physical_disk_and_zpool_insert(
-                        opctx,
-                        disk,
-                        zpool
-                    ).await;
-
-                    if let Err(err) = result {
-                        warn!(
-                            &opctx.log,
-                            "Physical Disk Adoption: failed to insert new disk and zpool";
-                            "err" => %err
-                        );
-                        return json!({ "error": format!("failed to insert disk/zpool: {:#}", err) });
-                    }
-
-                    disks_added += 1;
+                    return json!({ "error": format!("failed to insert disk/zpool: {:#}", err) });
                 }
+
+                disks_added += 1;
+
+                info!(
+                    &opctx.log,
+                    "Physical Disk Adoption: Successfully added a new disk and zpool"
+                );
             }
 
             warn!(&log, "physical disk adoption task done");

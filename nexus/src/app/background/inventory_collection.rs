@@ -20,6 +20,7 @@ use serde_json::json;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 /// How many rows to request in each paginated database query
 const DB_PAGE_SIZE: u32 = 1024;
@@ -31,7 +32,7 @@ pub struct InventoryCollector {
     creator: String,
     nkeep: u32,
     disable: bool,
-    tx: watch::Sender<Option<Collection>>,
+    tx: watch::Sender<Option<Uuid>>,
 }
 
 impl InventoryCollector {
@@ -53,7 +54,7 @@ impl InventoryCollector {
         }
     }
 
-    pub fn watcher(&self) -> watch::Receiver<Option<Collection>> {
+    pub fn watcher(&self) -> watch::Receiver<Option<Uuid>> {
         self.tx.subscribe()
     }
 }
@@ -91,7 +92,7 @@ impl BackgroundTask for InventoryCollector {
                         "time_started": collection.time_started.to_string(),
                         "time_done": collection.time_done.to_string()
                     });
-                    self.tx.send_replace(Some(collection));
+                    self.tx.send_replace(Some(collection.id));
                     json
                 }
             }

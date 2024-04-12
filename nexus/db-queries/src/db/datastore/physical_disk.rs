@@ -168,11 +168,13 @@ impl DataStore {
     /// - Appear on in-service sleds
     /// - Appear in inventory
     /// - Do not have any records of expungement
+    ///
+    /// If "inventory_collection_id" is not associated with a collection, this
+    /// function returns an empty list, rather than failing.
     pub async fn physical_disk_uninitialized_list(
         &self,
         opctx: &OpContext,
         inventory_collection_id: Uuid,
-        sled_id: Uuid,
     ) -> ListResultVec<InvPhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -182,13 +184,14 @@ impl DataStore {
 
         sled_dsl::sled
             // If the sled is not in-service, drop the list immediately.
+            .filter(sled_dsl::time_deleted.is_null())
             .sled_filter(SledFilter::InService)
             // Look up all inventory physical disks that could match this sled
             .inner_join(
                 inv_physical_disk_dsl::inv_physical_disk.on(
                     inv_physical_disk_dsl::inv_collection_id
                         .eq(inventory_collection_id)
-                        .and(inv_physical_disk_dsl::sled_id.eq(sled_id))
+                        .and(inv_physical_disk_dsl::sled_id.eq(sled_dsl::id))
                         .and(
                             inv_physical_disk_dsl::variant
                                 .eq(PhysicalDiskKind::U2),
@@ -200,7 +203,7 @@ impl DataStore {
             .filter(diesel::dsl::not(diesel::dsl::exists(
                 physical_disk_dsl::physical_disk
                     .select(0.into_sql::<diesel::sql_types::Integer>())
-                    .filter(physical_disk_dsl::sled_id.eq(sled_id))
+                    .filter(physical_disk_dsl::sled_id.eq(sled_dsl::id))
                     .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2))
                     .filter(
                         physical_disk_dsl::vendor
@@ -291,7 +294,11 @@ mod test {
     use nexus_db_model::Generation;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
+    use sled_agent_client::types::DiskVariant;
+    use sled_agent_client::types::InventoryDisk;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -353,7 +360,7 @@ mod test {
 
         assert!(
             err.to_string()
-                .contains("duplicate key value violates unique constraint"),
+                .contains("Object (of type PhysicalDisk) already exists"),
             "{err}"
         );
 
@@ -641,6 +648,221 @@ mod test {
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Most of this data doesn't matter, but adds a sled
+    // to an inventory with a supplied set of disks.
+    fn add_sled_to_inventory(
+        builder: &mut nexus_inventory::CollectionBuilder,
+        sled: &Sled,
+        disks: Vec<sled_agent_client::types::InventoryDisk>,
+    ) {
+        builder
+            .found_sled_inventory(
+                "fake sled agent",
+                sled_agent_client::types::Inventory {
+                    baseboard: sled_agent_client::types::Baseboard::Gimlet {
+                        identifier: sled.serial_number().to_string(),
+                        model: sled.part_number().to_string(),
+                        revision: 0,
+                    },
+                    reservoir_size: ByteCount::from(1024),
+                    sled_role: sled_agent_client::types::SledRole::Gimlet,
+                    sled_agent_address: "[::1]:56792".parse().unwrap(),
+                    sled_id: sled.id(),
+                    usable_hardware_threads: 10,
+                    usable_physical_ram: ByteCount::from(1024 * 1024),
+                    disks,
+                    zpools: vec![],
+                },
+            )
+            .unwrap();
+    }
+
+    fn create_inv_disk(serial: String, slot: i64) -> InventoryDisk {
+        InventoryDisk {
+            identity: DiskIdentity {
+                serial,
+                vendor: "vendor".to_string(),
+                model: "model".to_string(),
+            },
+            variant: DiskVariant::U2,
+            slot,
+        }
+    }
+
+    fn create_disk_zpool_combo(
+        sled_id: Uuid,
+        inv_disk: &InventoryDisk,
+    ) -> (PhysicalDisk, Zpool) {
+        let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
+            inv_disk.identity.vendor.clone(),
+            inv_disk.identity.serial.clone(),
+            inv_disk.identity.model.clone(),
+            PhysicalDiskKind::U2,
+            sled_id,
+        );
+
+        let zpool = Zpool::new(
+            Uuid::new_v4(),
+            sled_id,
+            disk.id()
+        );
+        (disk, zpool)
+    }
+
+    #[tokio::test]
+    async fn test_physical_disk_uninitialized_list() {
+        let logctx =
+            dev::test_setup_log("test_physical_disk_uninitialized_list");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled_a = create_test_sled(&datastore).await;
+        let sled_b = create_test_sled(&datastore).await;
+
+        // No inventory -> No uninitialized disks
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(
+                &opctx,
+                Uuid::new_v4(), // Collection that does not exist
+            )
+            .await
+            .expect("Failed to look up uninitialized disks");
+        assert!(uninitialized_disks.is_empty());
+
+        // Create inventory disks for both sleds
+        let mut builder = nexus_inventory::CollectionBuilder::new("test");
+        let disks_a = vec![
+            create_inv_disk(format!("serial-001"), 1),
+            create_inv_disk(format!("serial-002"), 2),
+            create_inv_disk(format!("serial-003"), 3),
+        ];
+        let disks_b = vec![
+            create_inv_disk(format!("serial-101"), 1),
+            create_inv_disk(format!("serial-102"), 2),
+            create_inv_disk(format!("serial-103"), 3),
+        ];
+        add_sled_to_inventory(&mut builder, &sled_a, disks_a.clone());
+        add_sled_to_inventory(&mut builder, &sled_b, disks_b.clone());
+        let collection = builder.build();
+        let collection_id = collection.id;
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Now when we list the uninitialized disks, we should see everything in
+        // the inventory.
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 6);
+
+        // Normalize the data a bit -- convert to nexus types, and sort vecs for
+        // stability in the comparison.
+        let mut uninitialized_disks: Vec<nexus_types::inventory::PhysicalDisk> =
+            uninitialized_disks.into_iter().map(|d| d.into()).collect();
+        uninitialized_disks
+            .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
+        let mut expected_disks: Vec<nexus_types::inventory::PhysicalDisk> =
+            disks_a
+                .iter()
+                .map(|d| d.clone().into())
+                .chain(disks_b.iter().map(|d| d.clone().into()))
+                .collect();
+        expected_disks
+            .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
+        assert_eq!(uninitialized_disks, expected_disks);
+
+        // Let's create control plane objects for some of these disks.
+        //
+        // They should no longer show up when we list uninitialized devices.
+        //
+        // This creates disks for: 001, 002, and 101.
+        // It leaves the following uninitialized: 003, 102, 103
+        let (disk_001, zpool) = create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
+        datastore.physical_disk_and_zpool_insert(&opctx, disk_001, zpool).await.unwrap();
+        let (disk_002, zpool) = create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
+        datastore.physical_disk_and_zpool_insert(&opctx, disk_002, zpool).await.unwrap();
+        let (disk_101, zpool) = create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
+        datastore.physical_disk_and_zpool_insert(&opctx, disk_101, zpool).await.unwrap();
+
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 3);
+
+        // Pay careful attention to our indexing below.
+        //
+        // We're grabbing the last disk of "disks_a" (which still is
+        // uninitailized) and the last two disks of "disks_b" (of which both are
+        // still uninitialized).
+        let mut uninitialized_disks: Vec<nexus_types::inventory::PhysicalDisk> =
+            uninitialized_disks.into_iter().map(|d| d.into()).collect();
+        uninitialized_disks
+            .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
+        let mut expected_disks: Vec<nexus_types::inventory::PhysicalDisk> =
+            disks_a[2..3]
+                .iter()
+                .map(|d| d.clone().into())
+                .chain(disks_b[1..3].iter().map(|d| d.clone().into()))
+                .collect();
+        expected_disks
+            .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
+        assert_eq!(uninitialized_disks, expected_disks);
+
+        // Create physical disks for all remaining devices.
+        //
+        // Observe no remaining uninitialized disks.
+        let (disk_003, zpool) = create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
+        datastore.physical_disk_and_zpool_insert(&opctx, disk_003.clone(), zpool).await.unwrap();
+        let (disk_102, zpool) = create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
+        datastore.physical_disk_and_zpool_insert(&opctx, disk_102.clone(), zpool).await.unwrap();
+        let (disk_103, zpool) = create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
+        datastore.physical_disk_and_zpool_insert(&opctx, disk_103.clone(), zpool).await.unwrap();
+
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 0);
+
+        // Expunge some disks, observe that they do not re-appear as
+        // initialized.
+        use db::schema::physical_disk::dsl;
+
+        // Set a disk to "deleted".
+        let now = Utc::now();
+        diesel::update(dsl::physical_disk)
+            .filter(dsl::id.eq(disk_003.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*datastore.pool_connection_authorized(&opctx).await.unwrap())
+            .await
+            .unwrap();
+
+        // Set another disk to "expunged"
+        diesel::update(dsl::physical_disk)
+            .filter(dsl::id.eq(disk_102.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+            .execute_async(&*datastore.pool_connection_authorized(&opctx).await.unwrap())
+            .await
+            .unwrap();
+
+        // The set of uninitialized disks should remain at zero
+        let uninitialized_disks = datastore
+            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .await
+            .expect("Failed to list uninitialized disks");
+        assert_eq!(uninitialized_disks.len(), 0);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

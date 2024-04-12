@@ -401,7 +401,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.pub
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public.physical_disk (
     sled_id,
     id
-) WHERE time_deleted IS NULL;
+);
 
 -- x509 certificates which may be used by services
 CREATE TABLE IF NOT EXISTS omicron.public.certificate (
