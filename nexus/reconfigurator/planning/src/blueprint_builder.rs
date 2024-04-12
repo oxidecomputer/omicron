@@ -199,7 +199,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let zones = collection
                     .omicron_zones
-                    .get(sled_id.as_untyped_uuid())
+                    .get(&sled_id)
                     .map(|z| &z.zones)
                     .ok_or_else(|| {
                         // We should not find a sled that's supposed to be
@@ -1142,7 +1142,7 @@ pub mod test {
                     .omicron_zones
                     .keys()
                     .next()
-                    .map(|sled_id| SledUuid::from_untyped_uuid(*sled_id))
+                    .copied()
                     .expect("no sleds present"),
                 1,
             )
@@ -1182,10 +1182,7 @@ pub mod test {
                     break;
                 }
             }
-            let sled_id =
-                selected_sled_id.expect("found no sleds with Nexus zone");
-            // TODO-cleanup use `TypedUuid` everywhere
-            SledUuid::from_untyped_uuid(sled_id)
+            selected_sled_id.expect("found no sleds with Nexus zone")
         };
 
         let parent = BlueprintBuilder::build_initial_from_collection_seeded(

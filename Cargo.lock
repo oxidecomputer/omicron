@@ -4458,9 +4458,9 @@ dependencies = [
 
 [[package]]
 name = "newtype-uuid"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a5ff2b31594942586c1520da8f1e5c705729ec67b3c2ad0fe459f0b576e4d9a"
+checksum = "3526cb7c660872e401beaf3297f95f548ce3b4b4bdd8121b7c0713771d7c4a6e"
 dependencies = [
  "schemars",
  "serde",
@@ -4671,6 +4671,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-sled-agent",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "regex",
  "reqwest",

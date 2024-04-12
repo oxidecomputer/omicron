@@ -49,6 +49,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -108,7 +110,11 @@ impl DataStore {
             .blueprint_zones
             .iter()
             .map(|(sled_id, zones_config)| {
-                BpSledOmicronZones::new(blueprint_id, *sled_id, zones_config)
+                BpSledOmicronZones::new(
+                    blueprint_id,
+                    SledUuid::from_untyped_uuid(*sled_id),
+                    zones_config,
+                )
             })
             .collect::<Vec<_>>();
         let omicron_zones = blueprint
@@ -116,8 +122,12 @@ impl DataStore {
             .iter()
             .flat_map(|(sled_id, zones_config)| {
                 zones_config.zones.iter().map(move |zone| {
-                    BpOmicronZone::new(blueprint_id, *sled_id, zone)
-                        .map_err(|e| Error::internal_error(&format!("{:#}", e)))
+                    BpOmicronZone::new(
+                        blueprint_id,
+                        SledUuid::from_untyped_uuid(*sled_id),
+                        zone,
+                    )
+                    .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -270,7 +280,7 @@ impl DataStore {
 
                 for s in batch {
                     let old = blueprint_zones.insert(
-                        s.sled_id,
+                        s.sled_id.into_untyped_uuid(),
                         BlueprintZonesConfig {
                             generation: *s.generation,
                             zones: Vec::new(),
@@ -369,7 +379,7 @@ impl DataStore {
                         })
                         .transpose()?;
                     let sled_zones = blueprint_zones
-                        .get_mut(&z.sled_id)
+                        .get_mut(z.sled_id.as_untyped_uuid())
                         .ok_or_else(|| {
                             // This error means that we found a row in
                             // bp_omicron_zone with no associated record in
@@ -1091,7 +1101,6 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
@@ -1201,11 +1210,9 @@ mod tests {
                 Generation::new(),
             );
             for (sled_id, agent) in &collection.sled_agents {
-                // TODO-cleanup use `TypedUuid` everywhere
-                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 builder
                     .add_sled(
-                        sled_id,
+                        *sled_id,
                         fake_sled_details(Some(*agent.sled_agent_address.ip())),
                     )
                     .expect("failed to add sled to representative");

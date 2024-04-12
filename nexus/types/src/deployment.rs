@@ -22,6 +22,7 @@ pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use newtype_uuid::GenericUuid;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -220,7 +221,7 @@ impl Blueprint {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                Ok((SledUuid::from_untyped_uuid(*sled_id), zones))
+                Ok((*sled_id, zones))
             })
             .collect::<Result<_, _>>()?;
 
@@ -1046,7 +1047,7 @@ impl fmt::Display for BlueprintDiffSingleError {
 #[derive(Clone, Debug)]
 pub enum DiffBeforeMetadata {
     /// The diff was made from a collection.
-    Collection { id: Uuid },
+    Collection { id: CollectionUuid },
     /// The diff was made from a blueprint.
     Blueprint(Box<BlueprintMetadata>),
 }

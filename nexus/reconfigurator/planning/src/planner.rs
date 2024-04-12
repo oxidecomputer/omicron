@@ -14,7 +14,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -136,7 +135,7 @@ impl<'a> Planner<'a> {
             let has_ntp_inventory = self
                 .inventory
                 .omicron_zones
-                .get(sled_id.as_untyped_uuid())
+                .get(&sled_id)
                 .map(|sled_zones| {
                     sled_zones.zones.zones.iter().any(|z| z.zone_type.is_ntp())
                 })
@@ -460,16 +459,13 @@ mod test {
         assert!(collection
             .omicron_zones
             .insert(
-                // TODO-cleanup use `TypedUuid` everywhere
-                new_sled_id.into_untyped_uuid(),
+                new_sled_id,
                 OmicronZonesFound {
                     time_collected: now_db_precision(),
                     source: String::from("test suite"),
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id: new_sled_id.into_untyped_uuid(),
+                    sled_id: new_sled_id,
                     zones: blueprint4
                         .blueprint_zones
-                        // TODO-cleanup use `TypedUuid` everywhere
                         .get(new_sled_id.as_untyped_uuid())
                         .expect("blueprint should contain zones for new sled")
                         .to_omicron_zones_config(
@@ -564,13 +560,8 @@ mod test {
             let keep_sled_id =
                 builder.sleds().keys().next().copied().expect("no sleds");
             builder.sleds_mut().retain(|&k, _v| keep_sled_id == k);
-            // TODO-cleanup use `TypedUuid` everywhere
-            collection
-                .sled_agents
-                .retain(|&k, _v| *keep_sled_id.as_untyped_uuid() == k);
-            collection
-                .omicron_zones
-                .retain(|&k, _v| *keep_sled_id.as_untyped_uuid() == k);
+            collection.sled_agents.retain(|&k, _v| keep_sled_id == k);
+            collection.omicron_zones.retain(|&k, _v| keep_sled_id == k);
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
