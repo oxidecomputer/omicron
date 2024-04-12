@@ -26,6 +26,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::CollectionUuid;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -207,7 +208,7 @@ impl super::Nexus {
     pub async fn blueprint_generate_from_collection(
         &self,
         opctx: &OpContext,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
     ) -> CreateResult<Blueprint> {
         let collection = self
             .datastore()
