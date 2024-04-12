@@ -13,6 +13,7 @@ mod dns_propagation;
 mod dns_servers;
 mod external_endpoints;
 mod init;
+mod instance_state;
 mod inventory_collection;
 mod metrics_producer_gc;
 mod nat_cleanup;
