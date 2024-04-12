@@ -402,6 +402,7 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::HashMap;
@@ -706,10 +707,10 @@ mod test {
     ) {
         use db::schema::inv_zpool::dsl;
 
-        let inv_collection_id = Uuid::new_v4();
+        let inv_collection_id = CollectionUuid::new_v4();
         let time_collected = Utc::now();
         let inv_pool = nexus_db_model::InvZpool {
-            inv_collection_id,
+            inv_collection_id: inv_collection_id.into(),
             time_collected,
             id: zpool_id,
             sled_id: to_db_typed_uuid(sled_id),

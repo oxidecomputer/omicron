@@ -26,6 +26,7 @@ use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::BaseboardId;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use reedline::DefaultPrompt;
@@ -119,7 +120,7 @@ struct BlueprintIdsArgs {
 #[derive(Debug, Args)]
 struct CollectionIdArgs {
     /// id of an inventory collection
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 #[derive(Debug, Args)]

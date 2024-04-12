@@ -27,6 +27,7 @@ use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
+use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
@@ -34,7 +35,7 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
-use typed_rng::UuidRng;
+use typed_rng::TypedUuidRng;
 
 /// Describes an operational error encountered during the collection process
 ///
@@ -90,7 +91,7 @@ pub struct CollectionBuilder {
     sleds: BTreeMap<SledUuid, SledAgent>,
     omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
     // We just generate one UUID for each collection.
-    id_rng: UuidRng,
+    id_rng: TypedUuidRng<CollectionKind>,
 }
 
 impl CollectionBuilder {
@@ -116,7 +117,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
-            id_rng: UuidRng::from_entropy(),
+            id_rng: TypedUuidRng::from_entropy(),
         }
     }
 
