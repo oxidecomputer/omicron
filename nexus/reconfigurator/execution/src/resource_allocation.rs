@@ -938,7 +938,8 @@ mod tests {
                     }
                 }
                 "invalid NIC kind".to_string()
-            }) as &dyn Fn(OmicronZoneUuid, &mut NetworkInterface) -> String,
+            })
+                as &dyn Fn(OmicronZoneUuid, &mut NetworkInterface) -> String,
             // non-matching IP
             &|zone_id, nic| {
                 nic.ip = bogus_ip;
