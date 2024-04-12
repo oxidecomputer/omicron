@@ -12,6 +12,7 @@ use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::ledger::Ledgerable;
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::{
@@ -29,7 +30,7 @@ use crate::dataset;
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: Uuid,
-    pub pool_id: Uuid,
+    pub pool_id: ZpoolUuid,
 }
 
 #[derive(
@@ -100,7 +101,7 @@ impl SyntheticDisk {
         log: &Logger,
         mount_config: &MountConfig,
         raw: RawSyntheticDisk,
-        zpool_id: Option<Uuid>,
+        zpool_id: Option<ZpoolUuid>,
     ) -> Self {
         let path = if raw.path.is_absolute() {
             raw.path.clone()
@@ -284,7 +285,7 @@ impl Disk {
         log: &Logger,
         mount_config: &MountConfig,
         raw_disk: RawDisk,
-        pool_id: Option<Uuid>,
+        pool_id: Option<ZpoolUuid>,
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let disk: Disk = match raw_disk {

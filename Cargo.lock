@@ -308,9 +308,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.79"
+version = "0.1.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a507401cad91ec6a857ed5513a2073c82a9b9048762b885bb98655b306964681"
+checksum = "c6fa2087f2753a7da8cc1c0dbfcf89579dd57458e36769de5ac750b4671737ca"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -482,9 +482,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
  "libc",
  "strum",
 ]
@@ -501,7 +501,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
 dependencies = [
  "libc",
  "strum",
@@ -859,9 +859,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_toml"
-version = "0.19.0"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "922d6ea3081d68b9e3e09557204bff47f9b5406a4a304dc917e187f8cafd582b"
+checksum = "a98356df42a2eb1bd8f1793ae4ee4de48e384dd974ce5eac8eee802edb7492be"
 dependencies = [
  "serde",
  "toml 0.8.12",
@@ -1415,7 +1415,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4661c23b248da18862012cf55af21b17b79a468e#4661c23b248da18862012cf55af21b17b79a468e"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5677c7be81b60d9ba9c30991d10376f279a1d3b7#5677c7be81b60d9ba9c30991d10376f279a1d3b7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1431,7 +1431,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4661c23b248da18862012cf55af21b17b79a468e#4661c23b248da18862012cf55af21b17b79a468e"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5677c7be81b60d9ba9c30991d10376f279a1d3b7#5677c7be81b60d9ba9c30991d10376f279a1d3b7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1448,7 +1448,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=4661c23b248da18862012cf55af21b17b79a468e#4661c23b248da18862012cf55af21b17b79a468e"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5677c7be81b60d9ba9c30991d10376f279a1d3b7#5677c7be81b60d9ba9c30991d10376f279a1d3b7"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -3499,7 +3499,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -3511,6 +3511,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "opte-ioctl",
  "oxide-vpc",
@@ -4857,6 +4858,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter",
  "oximeter-collector",
@@ -5427,7 +5429,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
@@ -5630,6 +5632,7 @@ dependencies = [
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
@@ -5639,7 +5642,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -5720,6 +5723,7 @@ name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
  "newtype-uuid",
+ "paste",
  "schemars",
 ]
 
@@ -7083,7 +7087,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7104,7 +7108,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
 dependencies = [
  "anyhow",
  "atty",
@@ -7114,7 +7118,7 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7155,7 +7159,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=84e423bfd3bf84ebb04acb95cf7600731e9f361f#84e423bfd3bf84ebb04acb95cf7600731e9f361f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
 dependencies = [
  "schemars",
  "serde",
@@ -7739,9 +7743,9 @@ dependencies = [
 
 [[package]]
 name = "rstest"
-version = "0.18.2"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97eeab2f3c0a199bc4be135c36c924b6590b88c377d416494288c14f2db30199"
+checksum = "9d5316d2a1479eeef1ea21e7f9ddc67c191d497abc8fc3ba2467857abbb68330"
 dependencies = [
  "futures",
  "futures-timer",
@@ -7751,9 +7755,9 @@ dependencies = [
 
 [[package]]
 name = "rstest_macros"
-version = "0.18.2"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d428f8247852f894ee1be110b375111b586d4fa431f6c46e64ba5a0dcccbe605"
+checksum = "04a9df72cc1f67020b0d63ad9bfe4a323e459ea7eb68e03bd9824db49f9a4c25"
 dependencies = [
  "cfg-if",
  "glob",
@@ -8643,6 +8647,7 @@ dependencies = [
  "chrono",
  "ipnetwork",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
  "regress",
@@ -8670,6 +8675,7 @@ dependencies = [
  "macaddr",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
  "schemars",
@@ -8713,6 +8719,7 @@ dependencies = [
  "key-manager",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
  "schemars",
@@ -9438,9 +9445,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.10.0"
+version = "3.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a365e8cd18e44762ef95d87f284f4b5cd04107fec2ff3052bd6a3e6069669e67"
+checksum = "85b77fafb263dd9d05cbeac119526425676db3784113aa9295c88498cbf8bff1"
 dependencies = [
  "cfg-if",
  "fastrand",
@@ -9527,18 +9534,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.57"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e45bcbe8ed29775f228095caf2cd67af7a4ccf756ebff23a306bf3e8b47b24b"
+checksum = "03468839009160513471e86a034bb2c5c0e4baae3b43f79ffc55c4a5427b3297"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.57"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a953cb265bef375dae3de6663da4d3804eee9682ea80d8e2542529b73c531c81"
+checksum = "c61f3ba182994efc43764a46c018c347bc492c79f024e705f46567b418f6d4f7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10251,6 +10258,7 @@ checksum = "4a90726108dab678edab76459751e1cc7c597c3484a6384d6423191255fa641b"
 name = "typed-rng"
 version = "0.1.0"
 dependencies = [
+ "newtype-uuid",
  "omicron-workspace-hack",
  "rand 0.8.5",
  "rand_core 0.6.4",
@@ -10871,9 +10879,9 @@ dependencies = [
 
 [[package]]
 name = "whoami"
-version = "1.5.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fec781d48b41f8163426ed18e8fc2864c12937df9ce54c88ede7bd47270893e"
+checksum = "a44ab49fad634e88f55bf8f9bb3abd2f27d7204172a112c7c9987e01c1c94ea9"
 dependencies = [
  "redox_syscall 0.4.1",
  "wasite",
