@@ -997,12 +997,10 @@ impl<'a> BlueprintDisksBuilder<'a> {
                     disks: old_sled_disks.disks.clone(),
                 }
             } else {
-                // TODO: Check these semantics?
-                //
-                // The first generation is reserved to mean the one containing
-                // no disks.
+                // No requests have been sent to the disk previously,
+                // we should be able to use the first generation.
                 BlueprintPhysicalDisksConfig {
-                    generation: Generation::new().next(),
+                    generation: Generation::new(),
                     disks: vec![],
                 }
             }
