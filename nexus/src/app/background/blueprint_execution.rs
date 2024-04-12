@@ -121,13 +121,12 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZonesConfig,
+        blueprint_zone_type, Blueprint, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
     };
-    use nexus_types::inventory::{
-        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-    };
+    use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -243,22 +242,22 @@ mod test {
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
-                    config: OmicronZoneConfig {
-                        id: Uuid::new_v4(),
-                        underlay_address: "::1".parse().unwrap(),
-                        zone_type: OmicronZoneType::InternalDns {
+                    disposition,
+                    id: OmicronZoneUuid::new_v4(),
+                    underlay_address: "::1".parse().unwrap(),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset {
                                 pool_name: format!("oxp_{}", Uuid::new_v4())
                                     .parse()
                                     .unwrap(),
                             },
-                            dns_address: "oh-hello-internal-dns".into(),
+                            dns_address: "[::1]:0".parse().unwrap(),
                             gz_address: "::1".parse().unwrap(),
                             gz_address_index: 0,
-                            http_address: "[::1]:12345".into(),
+                            http_address: "[::1]:12345".parse().unwrap(),
                         },
-                    },
-                    disposition,
+                    ),
                 }],
             }
         }

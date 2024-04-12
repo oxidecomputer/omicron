@@ -1260,13 +1260,13 @@ mod tests {
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SledUpdate;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
-    use nexus_types::deployment::OmicronZoneConfig;
-    use nexus_types::deployment::OmicronZoneType;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -1278,6 +1278,8 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use slog::info;
     use std::collections::BTreeMap;
     use std::net::IpAddr;
@@ -1585,36 +1587,35 @@ mod tests {
             &self,
         ) -> impl Iterator<Item = (Uuid, BlueprintZoneConfig)> + '_ {
             self.db_services().map(|(service, nic)| {
-                let config = OmicronZoneConfig {
-                    id: service.id(),
-                    underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::Nexus {
-                        internal_address: "[::1]:0".to_string(),
-                        external_ip: "::1".parse().unwrap(),
-                        nic: NetworkInterface {
-                            id: nic.identity.id,
-                            kind: NetworkInterfaceKind::Service {
-                                id: service.id(),
-                            },
-                            name: format!("test-nic-{}", nic.identity.id)
-                                .parse()
-                                .unwrap(),
-                            ip: nic.ip.unwrap(),
-                            mac: nic.mac.unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-                            vni: Vni::SERVICES_VNI,
-                            primary: true,
-                            slot: nic.slot.unwrap(),
-                        },
-                        external_tls: false,
-                        external_dns_servers: Vec::new(),
-                    },
-                };
-                let zone_config = BlueprintZoneConfig {
-                    config,
+                let config = BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
+                    id: OmicronZoneUuid::from_untyped_uuid(service.id()),
+                    underlay_address: "::1".parse().unwrap(),
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:0".parse().unwrap(),
+                            external_ip: "::1".parse().unwrap(),
+                            nic: NetworkInterface {
+                                id: nic.identity.id,
+                                kind: NetworkInterfaceKind::Service {
+                                    id: service.id(),
+                                },
+                                name: format!("test-nic-{}", nic.identity.id)
+                                    .parse()
+                                    .unwrap(),
+                                ip: nic.ip.unwrap(),
+                                mac: nic.mac.unwrap(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: nic.slot.unwrap(),
+                            },
+                            external_tls: false,
+                            external_dns_servers: Vec::new(),
+                        },
+                    ),
                 };
-                (service.sled_id, zone_config)
+                (service.sled_id, config)
             })
         }
     }

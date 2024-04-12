@@ -5508,6 +5508,7 @@ dependencies = [
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter-client",
  "pq-sys",
