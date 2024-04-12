@@ -4908,6 +4908,8 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sled-agent-client",
+ "slog",
+ "slog-error-chain",
  "steno",
  "strum",
  "tabled",

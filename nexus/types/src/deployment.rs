@@ -22,20 +22,25 @@ pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use newtype_uuid::GenericUuid;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::ZoneKind;
+use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::net::AddrParseError;
+use std::net::Ipv6Addr;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
 mod planning_input;
+mod zone_type;
 
 pub use planning_input::ExternalIp;
 pub use planning_input::PlanningInput;
@@ -46,6 +51,8 @@ pub use planning_input::ServiceNetworkInterface;
 pub use planning_input::SledDetails;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
+pub use zone_type::blueprint_zone_type;
+pub use zone_type::BlueprintZoneType;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -145,31 +152,6 @@ impl Blueprint {
         })
     }
 
-    /// Iterate over all the [`OmicronZoneConfig`] instances in the blueprint,
-    /// along with the associated sled id.
-    pub fn all_omicron_zones(
-        &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
-        self.all_blueprint_zones(filter)
-            .map(|(sled_id, z)| (sled_id, &z.config))
-    }
-
-    // Temporary method that provides the list of Omicron zones using
-    // `TypedUuid`.
-    //
-    // In the future, `all_omicron_zones` will return `SledUuid`,
-    // and this method will go away.
-    pub fn all_omicron_zones_typed(
-        &self,
-    ) -> impl Iterator<Item = (SledUuid, &OmicronZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
-            z.zones.iter().map(move |z| {
-                (SledUuid::from_untyped_uuid(*sled_id), &z.config)
-            })
-        })
-    }
-
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
         self.blueprint_zones.keys().copied().map(SledUuid::from_untyped_uuid)
@@ -218,18 +200,29 @@ impl Blueprint {
                     .zones
                     .zones
                     .iter()
-                    .map(|z| BlueprintZoneConfig {
-                        config: z.clone(),
-                        disposition: BlueprintZoneDisposition::InService,
+                    .map(|z| {
+                        BlueprintZoneConfig::from_collection(
+                            z.clone(),
+                            BlueprintZoneDisposition::InService,
+                        )
+                        .map_err(|err| {
+                            BlueprintDiffError {
+                                before_meta: DiffBeforeMetadata::Collection {
+                                    id: before.id,
+                                },
+                                after_meta: Box::new(self.metadata()),
+                                errors: vec![BlueprintDiffSingleError::InvalidOmicronZoneType(err)],
+                            }
+                        })
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
                 let zones = BlueprintZonesConfig {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                (SledUuid::from_untyped_uuid(*sled_id), zones)
+                Ok((SledUuid::from_untyped_uuid(*sled_id), zones))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
@@ -316,15 +309,19 @@ impl BlueprintZonesConfig {
     /// For the initial blueprint, all zones within a collection are assumed to
     /// have the [`InService`](BlueprintZoneDisposition::InService)
     /// disposition.
-    pub fn initial_from_collection(collection: &OmicronZonesConfig) -> Self {
+    pub fn initial_from_collection(
+        collection: &OmicronZonesConfig,
+    ) -> Result<Self, InvalidOmicronZoneType> {
         let zones = collection
             .zones
             .iter()
-            .map(|z| BlueprintZoneConfig {
-                config: z.clone(),
-                disposition: BlueprintZoneDisposition::InService,
+            .map(|z| {
+                BlueprintZoneConfig::from_collection(
+                    z.clone(),
+                    BlueprintZoneDisposition::InService,
+                )
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         let mut ret = Self {
             // An initial `BlueprintZonesConfig` reuses the generation from
@@ -335,7 +332,7 @@ impl BlueprintZonesConfig {
         // For testing, it's helpful for zones to be in sorted order.
         ret.sort();
 
-        ret
+        Ok(ret)
     }
 
     /// Sorts the list of zones stored in this configuration.
@@ -360,9 +357,9 @@ impl BlueprintZonesConfig {
             zones: self
                 .zones
                 .iter()
-                .filter_map(|z| {
-                    z.disposition.matches(filter).then(|| z.config.clone())
-                })
+                .filter(|z| z.disposition.matches(filter))
+                .cloned()
+                .map(OmicronZoneConfig::from)
                 .collect(),
         }
     }
@@ -371,7 +368,21 @@ impl BlueprintZonesConfig {
 fn zone_sort_key(z: &BlueprintZoneConfig) -> impl Ord {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
-    (z.config.zone_type.kind(), z.config.id)
+    (z.zone_type.kind(), z.id)
+}
+
+/// "Should never happen" errors from converting an [`OmicronZoneType`] into a
+/// [`BlueprintZoneType`].
+// Removing this error type would be a side effect of fixing
+// https://github.com/oxidecomputer/omicron/issues/4988.
+#[derive(Debug, Clone, Error, SlogInlineError)]
+pub enum InvalidOmicronZoneType {
+    #[error("invalid socket address for {kind}")]
+    ParseSocketAddr {
+        kind: ZoneKind,
+        #[source]
+        err: AddrParseError,
+    },
 }
 
 /// Describes one Omicron-managed zone in a blueprint.
@@ -382,11 +393,230 @@ fn zone_sort_key(z: &BlueprintZoneConfig) -> impl Ord {
 /// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintZoneConfig {
-    /// The underlying zone configuration.
-    pub config: OmicronZoneConfig,
-
     /// The disposition (desired state) of this zone recorded in the blueprint.
     pub disposition: BlueprintZoneDisposition,
+
+    pub id: OmicronZoneUuid,
+    pub underlay_address: Ipv6Addr,
+    pub zone_type: BlueprintZoneType,
+}
+
+impl BlueprintZoneConfig {
+    fn from_collection(
+        config: OmicronZoneConfig,
+        disposition: BlueprintZoneDisposition,
+    ) -> Result<Self, InvalidOmicronZoneType> {
+        let zone_type = match config.zone_type {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                dns_servers,
+                domain,
+                nic,
+                ntp_servers,
+                snat_cfg,
+            } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::BoundaryNtp,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::BoundaryNtp(
+                    blueprint_zone_type::BoundaryNtp {
+                        address,
+                        ntp_servers,
+                        dns_servers,
+                        domain,
+                        nic,
+                        snat_cfg,
+                    },
+                )
+            }
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::Clickhouse,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                    address,
+                    dataset,
+                })
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::ClickhouseKeeper,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::ClickhouseKeeper(
+                    blueprint_zone_type::ClickhouseKeeper { address, dataset },
+                )
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::CockroachDb,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::CockroachDb(
+                    blueprint_zone_type::CockroachDb { address, dataset },
+                )
+            }
+            OmicronZoneType::Crucible { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::Crucible,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                    address,
+                    dataset,
+                })
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::CruciblePantry,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::CruciblePantry(
+                    blueprint_zone_type::CruciblePantry { address },
+                )
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                dns_address,
+                http_address,
+                nic,
+            } => {
+                let dns_address = dns_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::ExternalDns,
+                        err,
+                    }
+                })?;
+                let http_address = http_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::ExternalDns,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset,
+                        http_address,
+                        dns_address,
+                        nic,
+                    },
+                )
+            }
+            OmicronZoneType::InternalDns {
+                dataset,
+                dns_address,
+                gz_address,
+                gz_address_index,
+                http_address,
+            } => {
+                let dns_address = dns_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::InternalDns,
+                        err,
+                    }
+                })?;
+                let http_address = http_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::InternalDns,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::InternalDns(
+                    blueprint_zone_type::InternalDns {
+                        dataset,
+                        http_address,
+                        dns_address,
+                        gz_address,
+                        gz_address_index,
+                    },
+                )
+            }
+            OmicronZoneType::InternalNtp {
+                address,
+                dns_servers,
+                domain,
+                ntp_servers,
+            } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::InternalNtp,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp {
+                        address,
+                        ntp_servers,
+                        dns_servers,
+                        domain,
+                    },
+                )
+            }
+            OmicronZoneType::Nexus {
+                external_dns_servers,
+                external_ip,
+                external_tls,
+                internal_address,
+                nic,
+            } => {
+                let internal_address =
+                    internal_address.parse().map_err(|err| {
+                        InvalidOmicronZoneType::ParseSocketAddr {
+                            kind: ZoneKind::Nexus,
+                            err,
+                        }
+                    })?;
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    internal_address,
+                    external_ip,
+                    nic,
+                    external_tls,
+                    external_dns_servers,
+                })
+            }
+            OmicronZoneType::Oximeter { address } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::Oximeter,
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                    address,
+                })
+            }
+        };
+        Ok(Self {
+            disposition,
+            id: OmicronZoneUuid::from_untyped_uuid(config.id),
+            underlay_address: config.underlay_address,
+            zone_type,
+        })
+    }
+}
+
+impl From<BlueprintZoneConfig> for OmicronZoneConfig {
+    fn from(z: BlueprintZoneConfig) -> Self {
+        Self {
+            id: z.id.into_untyped_uuid(),
+            underlay_address: z.underlay_address,
+            zone_type: z.zone_type.into(),
+        }
+    }
 }
 
 /// The desired state of an Omicron-managed zone in a blueprint.
@@ -778,6 +1008,7 @@ pub enum BlueprintDiffSingleError {
         before: ZoneKind,
         after: ZoneKind,
     },
+    InvalidOmicronZoneType(InvalidOmicronZoneType),
 }
 
 impl fmt::Display for BlueprintDiffSingleError {
@@ -790,9 +1021,12 @@ impl fmt::Display for BlueprintDiffSingleError {
                 after,
             } => write!(
                 f,
-                "on sled {}, zone {} changed type from {} to {}",
-                zone_id, sled_id, before, after
+                "on sled {sled_id}, zone {zone_id} changed type \
+                 from {before} to {after}",
             ),
+            BlueprintDiffSingleError::InvalidOmicronZoneType(err) => {
+                write!(f, "invalid OmicronZoneType in collection: {err}")
+            }
         }
     }
 }
@@ -837,16 +1071,10 @@ impl DiffSledModified {
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
         // Assemble separate summaries of the zones, indexed by zone id.
-        let before_by_id: HashMap<_, _> = before
-            .zones
-            .into_iter()
-            .map(|zone| (zone.config.id, zone))
-            .collect();
-        let mut after_by_id: HashMap<_, _> = after
-            .zones
-            .into_iter()
-            .map(|zone| (zone.config.id, zone))
-            .collect();
+        let before_by_id: HashMap<_, _> =
+            before.zones.into_iter().map(|zone| (zone.id, zone)).collect();
+        let mut after_by_id: HashMap<_, _> =
+            after.zones.into_iter().map(|zone| (zone.id, zone)).collect();
 
         let mut zones_removed = Vec::new();
         let mut zones_common = Vec::new();
@@ -854,13 +1082,13 @@ impl DiffSledModified {
         // Now go through each zone and compare them.
         for (zone_id, zone_before) in before_by_id {
             if let Some(zone_after) = after_by_id.remove(&zone_id) {
-                let before_kind = zone_before.config.zone_type.kind();
-                let after_kind = zone_after.config.zone_type.kind();
+                let before_kind = zone_before.zone_type.kind();
+                let after_kind = zone_after.zone_type.kind();
 
                 if before_kind != after_kind {
                     errors.push(BlueprintDiffSingleError::ZoneTypeChanged {
                         sled_id,
-                        zone_id,
+                        zone_id: zone_id.into_untyped_uuid(),
                         before: before_kind,
                         after: after_kind,
                     });
@@ -956,7 +1184,8 @@ impl DiffZoneCommon {
     /// changed.
     #[inline]
     pub fn config_changed(&self) -> bool {
-        self.zone_before.config != self.zone_after.config
+        self.zone_before.underlay_address != self.zone_after.underlay_address
+            || self.zone_before.zone_type != self.zone_after.zone_type
     }
 
     /// Returns true if the [`BlueprintZoneDisposition`] for the zone changed.
@@ -1394,10 +1623,10 @@ mod table_display {
     ) {
         section.push_record(vec![
             first_column,
-            zone.config.zone_type.kind().to_string(),
-            zone.config.id.to_string(),
+            zone.zone_type.kind().to_string(),
+            zone.id.to_string(),
             zone.disposition.to_string(),
-            zone.config.underlay_address.to_string(),
+            zone.underlay_address.to_string(),
         ]);
     }
 
@@ -1409,10 +1638,10 @@ mod table_display {
     ) {
         section.push_record(vec![
             first_column,
-            zone.config.zone_type.kind().to_string(),
-            zone.config.id.to_string(),
+            zone.zone_type.kind().to_string(),
+            zone.id.to_string(),
             zone.disposition.to_string(),
-            zone.config.underlay_address.to_string(),
+            zone.underlay_address.to_string(),
             status.to_string(),
         ]);
     }
@@ -1438,13 +1667,13 @@ mod table_display {
         );
 
         let mut what_changed = Vec::new();
-        if before.config.zone_type != after.config.zone_type {
+        if before.zone_type != after.zone_type {
             what_changed.push(ZONE_TYPE_CONFIG);
         }
         if before.disposition != after.disposition {
             what_changed.push(DISPOSITION);
         }
-        if before.config.underlay_address != after.config.underlay_address {
+        if before.underlay_address != after.underlay_address {
             what_changed.push(UNDERLAY_IP);
         }
         debug_assert!(
@@ -1461,7 +1690,7 @@ mod table_display {
             format!(" {SUB_NOT_LAST}"),
             "".to_string(),
             after.disposition.to_string(),
-            after.config.underlay_address.to_string(),
+            after.underlay_address.to_string(),
         ];
         section.push_record(record);
 
