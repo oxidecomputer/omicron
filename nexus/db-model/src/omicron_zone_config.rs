@@ -11,7 +11,7 @@
 //! collecting extra metadata like uptime). This module provides conversion
 //! helpers for the parts of those tables that are common between the two.
 
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 
 use crate::inventory::ZoneType;
 use crate::{ipv6, MacAddr, Name, SqlU16, SqlU32, SqlU8};
@@ -50,10 +50,12 @@ pub(crate) struct OmicronZone {
 impl OmicronZone {
     pub(crate) fn new(
         sled_id: Uuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone_id: Uuid,
+        zone_underlay_address: Ipv6Addr,
+        zone_type: &nexus_types::inventory::OmicronZoneType,
     ) -> anyhow::Result<Self> {
-        let id = zone.id;
-        let underlay_address = ipv6::Ipv6Addr::from(zone.underlay_address);
+        let id = zone_id;
+        let underlay_address = ipv6::Ipv6Addr::from(zone_underlay_address);
         let mut nic_id = None;
         let mut dns_gz_address = None;
         let mut dns_gz_address_index = None;
@@ -68,8 +70,7 @@ impl OmicronZone {
         let mut second_service_ip = None;
         let mut second_service_port = None;
 
-        let (zone_type, primary_service_sockaddr_str, dataset) = match &zone
-            .zone_type
+        let (zone_type, primary_service_sockaddr_str, dataset) = match zone_type
         {
             OmicronZoneType::BoundaryNtp {
                 address,
@@ -401,38 +402,31 @@ pub(crate) struct OmicronZoneNic {
 
 impl OmicronZoneNic {
     pub(crate) fn new(
-        zone: &nexus_types::inventory::OmicronZoneConfig,
-    ) -> anyhow::Result<Option<Self>> {
-        match &zone.zone_type {
-            OmicronZoneType::ExternalDns { nic, .. }
-            | OmicronZoneType::BoundaryNtp { nic, .. }
-            | OmicronZoneType::Nexus { nic, .. } => {
-                // We do not bother storing the NIC's kind and associated id
-                // because it should be inferrable from the other information
-                // that we have.  Verify that here.
-                ensure!(
-                    matches!(
-                        nic.kind,
-                        NetworkInterfaceKind::Service{ id } if id == zone.id
-                    ),
-                    "expected zone's NIC kind to be \"service\" and the \
-                    id to match the zone's id ({})",
-                    zone.id
-                );
+        zone_id: Uuid,
+        nic: &nexus_types::inventory::NetworkInterface,
+    ) -> anyhow::Result<Self> {
+        // We do not bother storing the NIC's kind and associated id
+        // because it should be inferrable from the other information
+        // that we have.  Verify that here.
+        ensure!(
+            matches!(
+                nic.kind,
+                NetworkInterfaceKind::Service{ id } if id == zone_id
+            ),
+            "expected zone's NIC kind to be \"service\" and the \
+                    id to match the zone's id ({zone_id})",
+        );
 
-                Ok(Some(Self {
-                    id: nic.id,
-                    name: Name::from(nic.name.clone()),
-                    ip: IpNetwork::from(nic.ip),
-                    mac: MacAddr::from(nic.mac),
-                    subnet: IpNetwork::from(nic.subnet),
-                    vni: SqlU32::from(u32::from(nic.vni)),
-                    is_primary: nic.primary,
-                    slot: SqlU8::from(nic.slot),
-                }))
-            }
-            _ => Ok(None),
-        }
+        Ok(Self {
+            id: nic.id,
+            name: Name::from(nic.name.clone()),
+            ip: IpNetwork::from(nic.ip),
+            mac: MacAddr::from(nic.mac),
+            subnet: IpNetwork::from(nic.subnet),
+            vni: SqlU32::from(u32::from(nic.vni)),
+            is_primary: nic.primary,
+            slot: SqlU8::from(nic.slot),
+        })
     }
 
     pub(crate) fn into_network_interface_for_zone(

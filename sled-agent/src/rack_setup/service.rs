@@ -93,7 +93,7 @@ use nexus_client::{
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintZoneConfig, BlueprintZoneDisposition,
-    BlueprintZonesConfig,
+    BlueprintZonesConfig, InvalidOmicronZoneType,
 };
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -1329,6 +1329,31 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs: BTreeMap<Uuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> Blueprint {
+    // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
+    // This is separate primarily so rustfmt doesn't lose its mind.
+    let to_bp_zone_config = |z: crate::params::OmicronZoneConfig| {
+        // All initial zones are in-service.
+        let disposition = BlueprintZoneDisposition::InService;
+        match BlueprintZoneConfig::from_omicron_zone_config(
+            z.into(),
+            disposition,
+        ) {
+            Ok(config) => config,
+            Err(InvalidOmicronZoneType::ParseSocketAddr {
+                kind,
+                addr,
+                err,
+            }) => {
+                // This error is impossible, because our `z.into()` converts all
+                // `SocketAddr`s into strings, which are all therefore valid.
+                unreachable!(
+                    "RSS produced {kind} zone with invalid address \
+                    {addr}: {err}"
+                )
+            }
+        }
+    };
+
     let mut blueprint_zones = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs {
         let zones_config = BlueprintZonesConfig {
@@ -1346,11 +1371,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             zones: sled_config
                 .zones
                 .into_iter()
-                .map(|z| BlueprintZoneConfig {
-                    config: z.into(),
-                    // All initial zones are in-service.
-                    disposition: BlueprintZoneDisposition::InService,
-                })
+                .map(to_bp_zone_config)
                 .collect(),
         };
 

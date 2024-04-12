@@ -852,7 +852,12 @@ impl InvOmicronZone {
         sled_id: Uuid,
         zone: &nexus_types::inventory::OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
-        let zone = OmicronZone::new(sled_id, zone)?;
+        let zone = OmicronZone::new(
+            sled_id,
+            zone.id,
+            zone.underlay_address,
+            &zone.zone_type,
+        )?;
         Ok(Self {
             inv_collection_id,
             sled_id: zone.sled_id,
@@ -942,8 +947,11 @@ impl InvOmicronZoneNic {
         inv_collection_id: Uuid,
         zone: &nexus_types::inventory::OmicronZoneConfig,
     ) -> Result<Option<InvOmicronZoneNic>, anyhow::Error> {
-        let zone_nic = OmicronZoneNic::new(zone)?;
-        Ok(zone_nic.map(|nic| Self {
+        let Some(nic) = zone.zone_type.service_vnic() else {
+            return Ok(None);
+        };
+        let nic = OmicronZoneNic::new(zone.id, nic)?;
+        Ok(Some(Self {
             inv_collection_id,
             id: nic.id,
             name: nic.name,

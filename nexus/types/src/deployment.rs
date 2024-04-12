@@ -201,7 +201,7 @@ impl Blueprint {
                     .zones
                     .iter()
                     .map(|z| {
-                        BlueprintZoneConfig::from_collection(
+                        BlueprintZoneConfig::from_omicron_zone_config(
                             z.clone(),
                             BlueprintZoneDisposition::InService,
                         )
@@ -316,7 +316,7 @@ impl BlueprintZonesConfig {
             .zones
             .iter()
             .map(|z| {
-                BlueprintZoneConfig::from_collection(
+                BlueprintZoneConfig::from_omicron_zone_config(
                     z.clone(),
                     BlueprintZoneDisposition::InService,
                 )
@@ -377,9 +377,10 @@ fn zone_sort_key(z: &BlueprintZoneConfig) -> impl Ord {
 // https://github.com/oxidecomputer/omicron/issues/4988.
 #[derive(Debug, Clone, Error, SlogInlineError)]
 pub enum InvalidOmicronZoneType {
-    #[error("invalid socket address for {kind}")]
+    #[error("invalid socket address for {kind} ({addr})")]
     ParseSocketAddr {
         kind: ZoneKind,
+        addr: String,
         #[source]
         err: AddrParseError,
     },
@@ -402,7 +403,7 @@ pub struct BlueprintZoneConfig {
 }
 
 impl BlueprintZoneConfig {
-    fn from_collection(
+    pub fn from_omicron_zone_config(
         config: OmicronZoneConfig,
         disposition: BlueprintZoneDisposition,
     ) -> Result<Self, InvalidOmicronZoneType> {
@@ -418,6 +419,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::BoundaryNtp,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -436,6 +438,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::Clickhouse,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -448,6 +451,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::ClickhouseKeeper,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -459,6 +463,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::CockroachDb,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -470,6 +475,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::Crucible,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -482,6 +488,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::CruciblePantry,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -498,12 +505,14 @@ impl BlueprintZoneConfig {
                 let dns_address = dns_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::ExternalDns,
+                        addr: dns_address.clone(),
                         err,
                     }
                 })?;
                 let http_address = http_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::ExternalDns,
+                        addr: http_address.clone(),
                         err,
                     }
                 })?;
@@ -526,12 +535,14 @@ impl BlueprintZoneConfig {
                 let dns_address = dns_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::InternalDns,
+                        addr: dns_address.clone(),
                         err,
                     }
                 })?;
                 let http_address = http_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::InternalDns,
+                        addr: http_address.clone(),
                         err,
                     }
                 })?;
@@ -554,6 +565,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::InternalNtp,
+                        addr: address.clone(),
                         err,
                     }
                 })?;
@@ -577,6 +589,7 @@ impl BlueprintZoneConfig {
                     internal_address.parse().map_err(|err| {
                         InvalidOmicronZoneType::ParseSocketAddr {
                             kind: ZoneKind::Nexus,
+                            addr: internal_address.clone(),
                             err,
                         }
                     })?;
@@ -592,6 +605,7 @@ impl BlueprintZoneConfig {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
                         kind: ZoneKind::Oximeter,
+                        addr: address.clone(),
                         err,
                     }
                 })?;

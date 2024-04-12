@@ -14,6 +14,7 @@ use crate::schema::{
 use crate::{
     impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
 };
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
@@ -21,6 +22,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -153,7 +155,12 @@ impl BpOmicronZone {
         sled_id: Uuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
-        let zone = OmicronZone::new(sled_id, &blueprint_zone.config)?;
+        let zone = OmicronZone::new(
+            sled_id,
+            blueprint_zone.id.into_untyped_uuid(),
+            blueprint_zone.underlay_address,
+            &blueprint_zone.zone_type.clone().into(),
+        )?;
         Ok(Self {
             blueprint_id,
             sled_id: zone.sled_id,
@@ -208,7 +215,11 @@ impl BpOmicronZone {
         };
         let config =
             zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
-        Ok(BlueprintZoneConfig { config, disposition: self.disposition.into() })
+        BlueprintZoneConfig::from_omicron_zone_config(
+            config,
+            self.disposition.into(),
+        )
+        .context("failed to convert OmicronZoneConfig")
     }
 }
 
@@ -291,8 +302,11 @@ impl BpOmicronZoneNic {
         blueprint_id: Uuid,
         zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let zone_nic = OmicronZoneNic::new(&zone.config)?;
-        Ok(zone_nic.map(|nic| Self {
+        let Some(nic) = zone.zone_type.opte_vnic() else {
+            return Ok(None);
+        };
+        let nic = OmicronZoneNic::new(zone.id.into_untyped_uuid(), nic)?;
+        Ok(Some(Self {
             blueprint_id,
             id: nic.id,
             name: nic.name,
