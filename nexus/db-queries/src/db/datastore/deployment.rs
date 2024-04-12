@@ -1587,10 +1587,15 @@ mod tests {
 
         // Ensure disks on our sled
         assert_eq!(
-            builder.sled_ensure_disks(
-                new_sled_id,
-                &planning_input.sled_resources(&new_sled_id).unwrap().clone(),
-            ).unwrap(),
+            builder
+                .sled_ensure_disks(
+                    new_sled_id,
+                    &planning_input
+                        .sled_resources(&new_sled_id)
+                        .unwrap()
+                        .clone(),
+                )
+                .unwrap(),
             Ensure::Added
         );
 

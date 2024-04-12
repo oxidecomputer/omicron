@@ -445,12 +445,12 @@ impl Sled {
         let serial = format!("serial{}", unique);
         let revision = 0;
         let zpools: BTreeMap<_, _> = (0..nzpools)
-            .map(|i| {
+            .map(|_| {
                 let zpool = ZpoolUuid::new_v4();
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: String::from("fake-vendor"),
-                        serial: format!("serial-{sled_id}-{i}"),
+                        serial: format!("serial-{zpool}"),
                         model: String::from("fake-model"),
                     },
                     disk_id: PhysicalDiskUuid::new_v4(),

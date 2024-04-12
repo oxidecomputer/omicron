@@ -149,11 +149,7 @@ async fn test_physical_disk_create_list_delete(
         .expect("Failed to upsert physical disk");
 
     let list = physical_disks_list(&external_client, &disks_url).await;
-    assert_eq!(
-        list,
-        disks_initial,
-        "{:#?}", list,
-    );
+    assert_eq!(list, disks_initial, "{:#?}", list,);
 }
 
 #[nexus_test]
