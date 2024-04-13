@@ -417,7 +417,7 @@ task: "external_endpoints"
 task: "inventory_collection"
   configured period: every 10m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: iter 5, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
