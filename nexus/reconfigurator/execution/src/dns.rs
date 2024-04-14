@@ -28,19 +28,20 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
     creator: String,
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
@@ -255,7 +256,7 @@ pub(crate) async fn deploy_dns_one(
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<DnsConfigZone, anyhow::Error> {
     // The DNS names configured here should match what RSS configures for the
@@ -353,7 +354,7 @@ pub fn blueprint_internal_dns_config(
         // unwrap(): see above.
         dns_builder
             .host_zone_switch(
-                scrimlet.id,
+                scrimlet.id.into_untyped_uuid(),
                 switch_zone_ip,
                 overrides.dendrite_port(scrimlet.id),
                 overrides.mgs_port(scrimlet.id),
@@ -509,11 +510,13 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
+    use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::ZpoolName;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -528,9 +531,10 @@ mod test {
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -538,7 +542,6 @@ mod test {
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -607,11 +610,19 @@ mod test {
             .zip(possible_sled_subnets)
             .map(|(sled_id, subnet)| {
                 let sled_resources = SledResources {
-                    zpools: BTreeSet::from([ZpoolName::from_str(&format!(
-                        "oxp_{}",
-                        Uuid::new_v4()
-                    ))
-                    .unwrap()]),
+                    zpools: BTreeMap::from([(
+                        ZpoolUuid::new_v4(),
+                        SledDisk {
+                            disk_identity: DiskIdentity {
+                                vendor: String::from("v"),
+                                serial: format!("s-{sled_id}"),
+                                model: String::from("m"),
+                            },
+                            disk_id: PhysicalDiskUuid::new_v4(),
+                            policy: PhysicalDiskPolicy::InService,
+                            state: PhysicalDiskState::Active,
+                        },
+                    )]),
                     subnet: Ipv6Subnet::new(subnet.network()),
                 };
                 (*sled_id, sled_resources)
@@ -625,10 +636,7 @@ mod test {
             &collection,
             initial_dns_generation,
             Generation::new(),
-            policy_sleds.keys().map(|sled_id| {
-                // TODO-cleanup use `TypedUuid` everywhere
-                SledUuid::from_untyped_uuid(*sled_id)
-            }),
+            policy_sleds.keys().copied(),
             "test-suite",
         )
         .expect("failed to build initial blueprint");

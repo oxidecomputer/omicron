@@ -27,6 +27,8 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
@@ -200,7 +202,7 @@ struct SledExpungeArgs {
     db_url_opts: DbUrlOptions,
 
     /// sled ID
-    sled_id: Uuid,
+    sled_id: SledUuid,
 }
 
 impl NexusArgs {
@@ -1208,7 +1210,7 @@ async fn cmd_nexus_sled_expunge(
 
     // First, we need to look up the sled so we know its serial number.
     let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
-        .sled_id(args.sled_id)
+        .sled_id(args.sled_id.into_untyped_uuid())
         .fetch()
         .await
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;
@@ -1286,7 +1288,7 @@ async fn cmd_nexus_sled_expunge(
     }
 
     let old_policy = client
-        .sled_expunge(&SledSelector { sled: args.sled_id })
+        .sled_expunge(&SledSelector { sled: args.sled_id.into_untyped_uuid() })
         .await
         .context("expunging sled")?
         .into_inner();

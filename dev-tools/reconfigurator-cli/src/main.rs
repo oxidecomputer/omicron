@@ -631,8 +631,9 @@ fn cmd_sled_show(
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-    for z in &sled_resources.zpools {
-        swriteln!(s, "    {:?}", z);
+    for (zpool, disk) in &sled_resources.zpools {
+        swriteln!(s, "    {:?}", zpool);
+        swriteln!(s, "    ↳ {:?}", disk);
     }
     Ok(Some(s))
 }
@@ -679,7 +680,7 @@ fn cmd_inventory_generate(
         builder
             .found_sled_omicron_zones(
                 "fake sled agent",
-                *sled_id.as_untyped_uuid(),
+                sled_id,
                 OmicronZonesConfig {
                     generation: Generation::new(),
                     zones: vec![],
@@ -878,8 +879,10 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     sim: &ReconfiguratorSim,
-) -> Result<BTreeMap<Uuid, nexus_reconfigurator_execution::Sled>, anyhow::Error>
-{
+) -> Result<
+    BTreeMap<SledUuid, nexus_reconfigurator_execution::Sled>,
+    anyhow::Error,
+> {
     let collection = sim
         .system
         .to_collection_builder()
@@ -1153,7 +1156,7 @@ fn cmd_load(
         }
 
         let Some(inventory_sled_agent) =
-            primary_collection.sled_agents.get(sled_id.as_untyped_uuid())
+            primary_collection.sled_agents.get(&sled_id)
         else {
             swriteln!(
                 s,
