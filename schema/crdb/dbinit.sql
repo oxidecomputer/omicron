@@ -383,14 +383,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT vendor_serial_model_unique UNIQUE (
-      vendor, serial, model
-    )
+    disk_state omicron.public.physical_disk_state NOT NULL
 );
+
+-- This constraint only needs to be upheld for disks that are not deleted
+-- nor decommissioned.
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_serial_model_unique on omicron.public.physical_disk (
+  vendor, serial, model
+) WHERE time_deleted IS NULL AND disk_state != 'decommissioned';
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.public.physical_disk (
     variant,
@@ -401,7 +401,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.pub
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public.physical_disk (
     sled_id,
     id
-) WHERE time_deleted IS NULL;
+);
 
 -- x509 certificates which may be used by services
 CREATE TABLE IF NOT EXISTS omicron.public.certificate (
@@ -3252,6 +3252,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+-- description of a collection of omicron physical disks stored in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of omicron physical disks specified in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a blueprint could refer to a sled that no longer exists,
+    -- particularly if the blueprint is older than the current target)
+    sled_id UUID NOT NULL,
+
+    vendor TEXT NOT NULL,
+    serial TEXT NOT NULL,
+    model TEXT NOT NULL,
+
+    id UUID NOT NULL,
+    pool_id UUID NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
 -- see inv_sled_omicron_zones, which is identical except it references a
 -- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
@@ -3760,7 +3790,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '51.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '52.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

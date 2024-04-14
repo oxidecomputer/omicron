@@ -29,7 +29,7 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, ZpoolUuid};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -693,7 +693,7 @@ impl Plan {
                     .host_zone_with_one_backend(
                         id,
                         ip,
-                        ServiceName::Crucible(id.into_untyped_uuid()),
+                        ServiceName::Crucible(id),
                         port,
                     )
                     .unwrap();
@@ -786,7 +786,8 @@ impl Plan {
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            sled_request.body.id,
+                            // TODO-cleanup use TypedUuid everywhere
+                            SledUuid::from_untyped_uuid(sled_request.body.id),
                             subnet,
                             sled_address,
                             inventory,
@@ -838,7 +839,7 @@ impl AddressBumpAllocator {
 /// Wraps up the information used to allocate components to a Sled
 pub struct SledInfo {
     /// unique id for the sled agent
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     /// the sled's unique IPv6 subnet
     subnet: Ipv6Subnet<SLED_PREFIX>,
     /// the address of the Sled Agent on the sled's subnet
@@ -860,7 +861,7 @@ pub struct SledInfo {
 
 impl SledInfo {
     pub fn new(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
         inventory: SledAgentTypes::Inventory,

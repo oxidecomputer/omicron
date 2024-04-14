@@ -38,6 +38,7 @@ use uuid::Uuid;
 
 mod planning_input;
 
+pub use planning_input::DiskFilter;
 pub use planning_input::ExternalIp;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
@@ -45,6 +46,7 @@ pub use planning_input::PlanningInputBuilder;
 pub use planning_input::Policy;
 pub use planning_input::ServiceNetworkInterface;
 pub use planning_input::SledDetails;
+pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
 
@@ -97,6 +99,9 @@ pub struct Blueprint {
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
     pub blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+
+    /// A map of sled id -> disks in use on each sled.
+    pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
@@ -228,7 +233,7 @@ impl Blueprint {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                (SledUuid::from_untyped_uuid(*sled_id), zones)
+                (*sled_id, zones)
             })
             .collect();
 
@@ -512,6 +517,15 @@ pub enum BlueprintZoneFilter {
     /// Filter by zones that should be sent VPC firewall rules.
     ShouldDeployVpcFirewallRules,
 }
+
+/// Information about an Omicron physical disk as recorded in a blueprint.
+///
+/// Part of [`Blueprint`].
+pub type BlueprintPhysicalDisksConfig =
+    sled_agent_client::types::OmicronPhysicalDisksConfig;
+
+pub type BlueprintPhysicalDiskConfig =
+    sled_agent_client::types::OmicronPhysicalDiskConfig;
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can

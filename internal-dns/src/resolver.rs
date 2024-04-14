@@ -390,7 +390,6 @@ mod test {
     use std::net::SocketAddrV6;
     use std::str::FromStr;
     use tempfile::TempDir;
-    use uuid::Uuid;
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
@@ -585,7 +584,7 @@ mod test {
 
         let srv_crdb = ServiceName::Cockroach;
         let srv_clickhouse = ServiceName::Clickhouse;
-        let srv_backend = ServiceName::Crucible(Uuid::new_v4());
+        let srv_backend = ServiceName::Crucible(OmicronZoneUuid::new_v4());
 
         let mut dns_builder = DnsConfigBuilder::new();
         for db_ip in &cockroach_addrs {

@@ -8,19 +8,27 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_zones,
-    bp_target,
+    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
+    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_target,
 };
+use crate::typed_uuid::DbTypedUuid;
 use crate::{
     impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
 };
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -95,35 +103,104 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
+/// See [`nexus_types::deployment::BlueprintPhysicalDisksConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_sled_omicron_physical_disks)]
+pub struct BpSledOmicronPhysicalDisks {
+    pub blueprint_id: Uuid,
+    pub sled_id: Uuid,
+    pub generation: Generation,
+}
+
+impl BpSledOmicronPhysicalDisks {
+    pub fn new(
+        blueprint_id: Uuid,
+        sled_id: Uuid,
+        disks_config: &BlueprintPhysicalDisksConfig,
+    ) -> Self {
+        Self {
+            blueprint_id,
+            sled_id,
+            generation: Generation(disks_config.generation),
+        }
+    }
+}
+
+/// See [`nexus_types::deployment::BlueprintPhysicalDiskConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_omicron_physical_disk)]
+pub struct BpOmicronPhysicalDisk {
+    pub blueprint_id: Uuid,
+    pub sled_id: Uuid,
+
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub id: Uuid,
+    pub pool_id: Uuid,
+}
+
+impl BpOmicronPhysicalDisk {
+    pub fn new(
+        blueprint_id: Uuid,
+        sled_id: Uuid,
+        disk_config: &BlueprintPhysicalDiskConfig,
+    ) -> Self {
+        Self {
+            blueprint_id,
+            sled_id,
+            vendor: disk_config.identity.vendor.clone(),
+            serial: disk_config.identity.serial.clone(),
+            model: disk_config.identity.model.clone(),
+            id: disk_config.id,
+            pool_id: disk_config.pool_id.into_untyped_uuid(),
+        }
+    }
+}
+
+impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
+    fn from(disk: BpOmicronPhysicalDisk) -> Self {
+        Self {
+            identity: DiskIdentity {
+                vendor: disk.vendor,
+                serial: disk.serial,
+                model: disk.model,
+            },
+            id: disk.id,
+            pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::OmicronZonesConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_zones)]
 pub struct BpSledOmicronZones {
     pub blueprint_id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub generation: Generation,
 }
 
 impl BpSledOmicronZones {
     pub fn new(
         blueprint_id: Uuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zones_config: &BlueprintZonesConfig,
     ) -> Self {
         Self {
             blueprint_id,
-            sled_id,
+            sled_id: sled_id.into(),
             generation: Generation(zones_config.generation),
         }
     }
 }
-
 /// See [`nexus_types::deployment::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zone)]
 pub struct BpOmicronZone {
     pub blueprint_id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
@@ -150,13 +227,13 @@ pub struct BpOmicronZone {
 impl BpOmicronZone {
     pub fn new(
         blueprint_id: Uuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
         let zone = OmicronZone::new(sled_id, &blueprint_zone.config)?;
         Ok(Self {
             blueprint_id,
-            sled_id: zone.sled_id,
+            sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
             zone_type: zone.zone_type,
@@ -185,7 +262,7 @@ impl BpOmicronZone {
         nic_row: Option<BpOmicronZoneNic>,
     ) -> Result<BlueprintZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
-            sled_id: self.sled_id,
+            sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
             zone_type: self.zone_type,

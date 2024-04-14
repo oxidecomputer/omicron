@@ -32,8 +32,12 @@ use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_uuid_kinds::{CollectionKind, GenericUuid};
-use omicron_uuid_kinds::{CollectionUuid, ZpoolUuid};
+use omicron_uuid_kinds::CollectionKind;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -627,7 +631,7 @@ pub struct InvSledAgent {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub hw_baseboard_id: Option<Uuid>,
     pub sled_agent_ip: ipv6::Ipv6Addr,
     pub sled_agent_port: SqlU16,
@@ -664,7 +668,7 @@ impl InvSledAgent {
                 inv_collection_id: collection_id.into(),
                 time_collected: sled_agent.time_collected,
                 source: sled_agent.source.clone(),
-                sled_id: sled_agent.sled_id,
+                sled_id: sled_agent.sled_id.into(),
                 hw_baseboard_id: None,
                 sled_agent_ip: ipv6::Ipv6Addr::from(
                     *sled_agent.sled_agent_address.ip(),
@@ -688,7 +692,7 @@ impl InvSledAgent {
 #[diesel(table_name = inv_physical_disk)]
 pub struct InvPhysicalDisk {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub slot: i64,
     pub vendor: String,
     pub model: String,
@@ -699,12 +703,12 @@ pub struct InvPhysicalDisk {
 impl InvPhysicalDisk {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         disk: nexus_types::inventory::PhysicalDisk,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
-            sled_id,
+            sled_id: sled_id.into(),
             slot: disk.slot,
             vendor: disk.identity.vendor,
             model: disk.identity.model,
@@ -735,21 +739,21 @@ pub struct InvZpool {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub time_collected: DateTime<Utc>,
     pub id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub total_size: ByteCount,
 }
 
 impl InvZpool {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zpool: &nexus_types::inventory::Zpool,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
             time_collected: zpool.time_collected,
             id: zpool.id.into_untyped_uuid(),
-            sled_id,
+            sled_id: sled_id.into(),
             total_size: zpool.total_size.into(),
         }
     }
@@ -772,7 +776,7 @@ pub struct InvSledOmicronZones {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub generation: Generation,
 }
 
@@ -785,7 +789,7 @@ impl InvSledOmicronZones {
             inv_collection_id: inv_collection_id.into(),
             time_collected: zones_found.time_collected,
             source: zones_found.source.clone(),
-            sled_id: zones_found.sled_id,
+            sled_id: zones_found.sled_id.into(),
             generation: Generation(zones_found.zones.generation),
         }
     }
@@ -796,7 +800,7 @@ impl InvSledOmicronZones {
         nexus_types::inventory::OmicronZonesFound {
             time_collected: self.time_collected,
             source: self.source,
-            sled_id: self.sled_id,
+            sled_id: self.sled_id.into(),
             zones: nexus_types::inventory::OmicronZonesConfig {
                 generation: *self.generation,
                 zones: Vec::new(),
@@ -850,7 +854,7 @@ impl From<ZoneType> for ServiceKind {
 #[diesel(table_name = inv_omicron_zone)]
 pub struct InvOmicronZone {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
@@ -875,13 +879,13 @@ pub struct InvOmicronZone {
 impl InvOmicronZone {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zone: &nexus_types::inventory::OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
         let zone = OmicronZone::new(sled_id, zone)?;
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
-            sled_id: zone.sled_id,
+            sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
             zone_type: zone.zone_type,
@@ -909,7 +913,7 @@ impl InvOmicronZone {
         nic_row: Option<InvOmicronZoneNic>,
     ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
-            sled_id: self.sled_id,
+            sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
             zone_type: self.zone_type,
