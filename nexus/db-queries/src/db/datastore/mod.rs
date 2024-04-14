@@ -656,7 +656,7 @@ mod test {
             sled_id.into_untyped_uuid(),
         );
         datastore
-            .physical_disk_upsert(opctx, physical_disk.clone())
+            .physical_disk_insert(opctx, physical_disk.clone())
             .await
             .expect("Failed to upsert physical disk");
         physical_disk.id()
@@ -694,7 +694,7 @@ mod test {
         let zpool_id = Uuid::new_v4();
         let zpool =
             Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
-        datastore.zpool_upsert(opctx, zpool).await.unwrap();
+        datastore.zpool_insert(opctx, zpool).await.unwrap();
         zpool_id
     }
 

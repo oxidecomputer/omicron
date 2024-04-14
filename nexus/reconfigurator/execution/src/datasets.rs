@@ -210,7 +210,7 @@ mod tests {
                     Uuid::new_v4(), // physical_disk_id
                 );
                 datastore
-                    .zpool_upsert(opctx, zpool)
+                    .zpool_insert(opctx, zpool)
                     .await
                     .expect("failed to upsert zpool");
             }
@@ -279,7 +279,7 @@ mod tests {
                 Uuid::new_v4(), // physical_disk_id
             );
             datastore
-                .zpool_upsert(opctx, zpool)
+                .zpool_insert(opctx, zpool)
                 .await
                 .expect("failed to upsert zpool");
         }
