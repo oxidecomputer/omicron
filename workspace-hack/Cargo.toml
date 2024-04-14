@@ -40,7 +40,7 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 der = { version = "0.7.8", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 diesel = { version = "2.1.5", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
-either = { version = "1.10.0" }
+either = { version = "1.11.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.0.28" }
@@ -147,7 +147,7 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 der = { version = "0.7.8", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 diesel = { version = "2.1.5", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
-either = { version = "1.10.0" }
+either = { version = "1.11.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.0.28" }
