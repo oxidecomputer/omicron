@@ -39,6 +39,7 @@ use omicron_common::api::internal::shared::{
     ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
@@ -351,7 +352,7 @@ impl nexus_test_interface::NexusServer for Server {
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
         address: SocketAddrV6,
     ) {
         let opctx = self.apictx.nexus.opctx_for_internal_api();

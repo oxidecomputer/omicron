@@ -33,6 +33,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -1198,7 +1199,7 @@ async fn test_region_snapshot_create_idempotent(
     let datastore = nexus.datastore();
 
     let region_snapshot = db::model::RegionSnapshot {
-        dataset_id: Uuid::new_v4(),
+        dataset_id: OmicronZoneUuid::new_v4().into(),
         region_id: Uuid::new_v4(),
         snapshot_id: Uuid::new_v4(),
 

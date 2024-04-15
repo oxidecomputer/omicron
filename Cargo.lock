@@ -4827,6 +4827,7 @@ dependencies = [
  "nexus-config",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "slog",
  "uuid 1.8.0",

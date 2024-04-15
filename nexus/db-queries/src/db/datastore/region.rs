@@ -18,10 +18,12 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use uuid::Uuid;
 
@@ -294,13 +296,13 @@ impl DataStore {
     /// Return the total occupied size for a dataset
     pub async fn regions_total_occupied_size(
         &self,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
     ) -> Result<u64, Error> {
         use db::schema::region::dsl as region_dsl;
 
         let total_occupied_size: Option<diesel::pg::data_types::PgNumeric> =
             region_dsl::region
-                .filter(region_dsl::dataset_id.eq(dataset_id))
+                .filter(region_dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
                 .select(diesel::dsl::sum(
                     region_dsl::block_size
                         * region_dsl::blocks_per_extent

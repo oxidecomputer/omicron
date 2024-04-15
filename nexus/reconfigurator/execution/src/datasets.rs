@@ -14,6 +14,7 @@ use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -57,7 +58,8 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
             continue;
         };
 
-        let id = zone.id;
+        // TODO-cleanup use TypedUuid everywhere
+        let id = OmicronZoneUuid::from_untyped_uuid(zone.id);
 
         // If already present in the datastore, move on.
         if crucible_datasets.remove(&id) {

@@ -19,6 +19,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -255,7 +256,7 @@ impl super::Nexus {
     /// Upserts a dataset into the database, updating it if it already exists.
     pub(crate) async fn upsert_dataset(
         &self,
-        id: Uuid,
+        id: OmicronZoneUuid,
         zpool_id: Uuid,
         address: SocketAddrV6,
         kind: DatasetKind,

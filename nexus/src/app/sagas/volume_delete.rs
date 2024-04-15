@@ -307,7 +307,7 @@ async fn svd_delete_crucible_snapshot_records(
         osagactx
             .datastore()
             .region_snapshot_remove(
-                region_snapshot.dataset_id,
+                region_snapshot.dataset_id.into(),
                 region_snapshot.region_id,
                 region_snapshot.snapshot_id,
             )

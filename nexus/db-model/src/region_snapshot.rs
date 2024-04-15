@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::region_snapshot;
+use crate::{schema::region_snapshot, typed_uuid::DbTypedUuid};
+use omicron_uuid_kinds::OmicronZoneKind;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,7 +24,7 @@ use uuid::Uuid;
 #[diesel(table_name = region_snapshot)]
 pub struct RegionSnapshot {
     // unique identifier of this region snapshot
-    pub dataset_id: Uuid,
+    pub dataset_id: DbTypedUuid<OmicronZoneKind>,
     pub region_id: Uuid,
     pub snapshot_id: Uuid,
 

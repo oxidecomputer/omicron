@@ -485,7 +485,7 @@ pub(crate) struct Zpool {
     id: ZpoolUuid,
     physical_disk_id: Uuid,
     total_size: u64,
-    datasets: HashMap<Uuid, CrucibleServer>,
+    datasets: HashMap<OmicronZoneUuid, CrucibleServer>,
 }
 
 impl Zpool {
@@ -496,7 +496,7 @@ impl Zpool {
     fn insert_dataset(
         &mut self,
         log: &Logger,
-        id: Uuid,
+        id: OmicronZoneUuid,
         crucible_ip: IpAddr,
         crucible_port: u16,
     ) -> &CrucibleServer {
@@ -644,7 +644,7 @@ impl Storage {
     pub async fn insert_dataset(
         &mut self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
     ) -> SocketAddr {
         // Update our local data
         let dataset = self
@@ -704,7 +704,7 @@ impl Storage {
     pub fn get_all_datasets(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> Vec<(Uuid, SocketAddr)> {
+    ) -> Vec<(OmicronZoneUuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
@@ -717,7 +717,7 @@ impl Storage {
     pub async fn get_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
     ) -> Arc<CrucibleData> {
         self.zpools
             .get(&zpool_id)

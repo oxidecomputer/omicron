@@ -16,12 +16,13 @@ use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::Zpool;
-use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_mapped;
 use crate::db::pagination::Paginator;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::DatasetKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -30,6 +31,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -131,13 +133,18 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         filter_kind: Option<DatasetKind>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, OmicronZoneUuid>,
     ) -> ListResultVec<Dataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::dataset::dsl;
 
-        let mut query = paginated(dsl::dataset, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null());
+        let mut query = paginated_mapped(
+            dsl::dataset,
+            dsl::id,
+            pagparams,
+            to_db_typed_uuid,
+        )
+        .filter(dsl::time_deleted.is_null());
 
         if let Some(kind) = filter_kind {
             query = query.filter(dsl::kind.eq(kind));
@@ -238,7 +245,7 @@ mod test {
         // Inserting a new dataset should succeed.
         let dataset1 = datastore
             .dataset_insert_if_not_exists(Dataset::new(
-                Uuid::new_v4(),
+                OmicronZoneUuid::new_v4(),
                 zpool_id,
                 "[::1]:0".parse().unwrap(),
                 DatasetKind::Crucible,
@@ -287,7 +294,7 @@ mod test {
         // We can can also upsert a different dataset...
         let dataset2 = datastore
             .dataset_upsert(Dataset::new(
-                Uuid::new_v4(),
+                OmicronZoneUuid::new_v4(),
                 zpool_id,
                 "[::1]:0".parse().unwrap(),
                 DatasetKind::Cockroach,

@@ -34,6 +34,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
@@ -185,13 +186,13 @@ impl Server {
             sled_agent
                 .create_zpool(zpool_id, physical_disk_id, zpool.size)
                 .await;
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = OmicronZoneUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool_id.into_untyped_uuid(),
-                dataset_id,
+                dataset_id: dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
                     kind: NexusTypes::DatasetKind::Crucible,
@@ -486,7 +487,7 @@ pub async fn run_standalone_server(
         {
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool.id,
-                dataset_id,
+                dataset_id: dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
                     kind: NexusTypes::DatasetKind::Crucible,

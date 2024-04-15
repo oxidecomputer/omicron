@@ -402,9 +402,9 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -751,12 +751,12 @@ mod test {
         ineligible: SledToDatasetMap,
 
         // A map from eligible dataset IDs to their corresponding sled IDs.
-        eligible_dataset_ids: HashMap<Uuid, SledUuid>,
-        ineligible_dataset_ids: HashMap<Uuid, IneligibleSledKind>,
+        eligible_dataset_ids: HashMap<OmicronZoneUuid, SledUuid>,
+        ineligible_dataset_ids: HashMap<OmicronZoneUuid, IneligibleSledKind>,
     }
 
     // Map of sled IDs to dataset IDs.
-    type SledToDatasetMap = HashMap<SledUuid, Vec<Uuid>>;
+    type SledToDatasetMap = HashMap<SledUuid, Vec<OmicronZoneUuid>>;
 
     impl TestDatasets {
         async fn create(
@@ -892,7 +892,7 @@ mod test {
                     let zpool_iter: Vec<Zpool> =
                         (0..3).map(|_| zpool).collect();
                     stream::iter(zpool_iter).then(|zpool| {
-                        let dataset_id = Uuid::new_v4();
+                        let dataset_id = OmicronZoneUuid::new_v4();
                         let dataset = Dataset::new(
                             dataset_id,
                             zpool.pool_id,
@@ -982,8 +982,10 @@ mod test {
                 // This is a little goofy, but it catches a bug that has
                 // happened before. The returned columns share names (like
                 // "id"), so we need to process them in-order.
-                assert!(regions.get(&dataset.id()).is_none());
-                assert!(disk_datasets.get(&region.id()).is_none());
+                assert!(regions.get(dataset.id().as_untyped_uuid()).is_none());
+                assert!(disk_datasets
+                    .get(&OmicronZoneUuid::from_untyped_uuid(region.id()))
+                    .is_none());
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =
@@ -1263,7 +1265,7 @@ mod test {
         // 1 dataset per zpool
         stream::iter(zpool_ids.clone())
             .then(|zpool_id| {
-                let id = Uuid::new_v4();
+                let id = OmicronZoneUuid::new_v4();
                 let dataset = Dataset::new(
                     id,
                     zpool_id,
@@ -1362,7 +1364,7 @@ mod test {
         // 1 dataset per zpool
         stream::iter(zpool_ids)
             .then(|zpool_id| {
-                let id = Uuid::new_v4();
+                let id = OmicronZoneUuid::new_v4();
                 let dataset = Dataset::new(
                     id,
                     zpool_id,
@@ -1438,7 +1440,7 @@ mod test {
             .await;
             let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
             let dataset = Dataset::new(
-                Uuid::new_v4(),
+                OmicronZoneUuid::new_v4(),
                 zpool_id,
                 bogus_addr,
                 DatasetKind::Crucible,

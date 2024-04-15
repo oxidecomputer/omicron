@@ -254,7 +254,7 @@ impl RackInitRequestBuilder {
     fn add_dataset(
         &mut self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
         address: SocketAddrV6,
         kind: DatasetKind,
         service_name: internal_dns::ServiceName,
@@ -266,11 +266,7 @@ impl RackInitRequestBuilder {
         });
         let zone = self
             .internal_dns_config
-            .host_zone(
-                // TODO-cleanup use TypedUuid everywhere
-                OmicronZoneUuid::from_untyped_uuid(dataset_id),
-                *address.ip(),
-            )
+            .host_zone(dataset_id, *address.ip())
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -430,7 +426,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .expect("Failed to parse port");
 
         let zpool_id = ZpoolUuid::new_v4();
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = OmicronZoneUuid::new_v4();
         eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
             zpool_id,
@@ -444,7 +440,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .parse()
             .unwrap();
         self.omicron_zones.push(OmicronZoneConfig {
-            id: dataset_id,
+            // TODO-cleanup use TypedUuid everywhere
+            id: dataset_id.into_untyped_uuid(),
             underlay_address: *address.ip(),
             zone_type: OmicronZoneType::CockroachDb {
                 address: address.to_string(),
@@ -467,7 +464,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let port = clickhouse.port();
 
         let zpool_id = ZpoolUuid::new_v4();
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = OmicronZoneUuid::new_v4();
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
         self.rack_init_builder.add_dataset(
             zpool_id,
@@ -493,7 +490,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .parse()
             .unwrap();
         self.omicron_zones.push(OmicronZoneConfig {
-            id: dataset_id,
+            // TODO-cleanup use TUuidypedUuid everywhere
+            id: dataset_id.into_untyped_uuid(),
             underlay_address: *address.ip(),
             zone_type: OmicronZoneType::Clickhouse {
                 address: address.to_string(),

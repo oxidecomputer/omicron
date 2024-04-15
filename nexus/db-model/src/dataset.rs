@@ -8,6 +8,7 @@ use crate::ipv6;
 use crate::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -28,6 +29,7 @@ use uuid::Uuid;
     PartialEq,
 )]
 #[diesel(table_name = dataset)]
+#[asset(uuid_kind = OmicronZoneKind)]
 pub struct Dataset {
     #[diesel(embed)]
     identity: DatasetIdentity,
@@ -45,7 +47,7 @@ pub struct Dataset {
 
 impl Dataset {
     pub fn new(
-        id: Uuid,
+        id: OmicronZoneUuid,
         pool_id: Uuid,
         addr: SocketAddrV6,
         kind: DatasetKind,

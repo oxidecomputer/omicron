@@ -41,6 +41,7 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::debug;
 use std::net::IpAddr;
@@ -694,7 +695,7 @@ pub async fn projects_list(
 }
 
 pub struct TestDataset {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
 }
 
 pub struct TestZpool {
@@ -744,7 +745,7 @@ impl DiskTest {
             cptestctx,
             Uuid::new_v4(),
             ZpoolUuid::new_v4(),
-            Uuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
             Self::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await
@@ -755,7 +756,7 @@ impl DiskTest {
         cptestctx: &ControlPlaneTestContext<N>,
         physical_disk_id: Uuid,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
         gibibytes: u32,
     ) {
         // To get a dataset, we actually need to create a new simulated physical

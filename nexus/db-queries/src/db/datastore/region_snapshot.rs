@@ -12,9 +12,11 @@ use crate::db::model::RegionSnapshot;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::OptionalExtension;
+use nexus_db_model::to_db_typed_uuid;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -35,14 +37,14 @@ impl DataStore {
 
     pub async fn region_snapshot_get(
         &self,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> LookupResult<Option<RegionSnapshot>> {
         use db::schema::region_snapshot::dsl;
 
         dsl::region_snapshot
-            .filter(dsl::dataset_id.eq(dataset_id))
+            .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
             .filter(dsl::region_id.eq(region_id))
             .filter(dsl::snapshot_id.eq(snapshot_id))
             .select(RegionSnapshot::as_select())
@@ -56,14 +58,14 @@ impl DataStore {
 
     pub async fn region_snapshot_remove(
         &self,
-        dataset_id: Uuid,
+        dataset_id: OmicronZoneUuid,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> DeleteResult {
         use db::schema::region_snapshot::dsl;
 
         diesel::delete(dsl::region_snapshot)
-            .filter(dsl::dataset_id.eq(dataset_id))
+            .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
             .filter(dsl::region_id.eq(region_id))
             .filter(dsl::snapshot_id.eq(snapshot_id))
             .execute_async(&*self.pool_connection_unauthorized().await?)

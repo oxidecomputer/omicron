@@ -1311,7 +1311,7 @@ async fn ssc_start_running_snapshot(
         osagactx
             .datastore()
             .region_snapshot_create(db::model::RegionSnapshot {
-                dataset_id: dataset.id(),
+                dataset_id: dataset.id().into(),
                 region_id: region.id(),
                 snapshot_id,
                 snapshot_addr,

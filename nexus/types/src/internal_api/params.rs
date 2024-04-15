@@ -16,6 +16,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -210,7 +211,7 @@ pub struct ServicePutRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetCreateRequest {
     pub zpool_id: Uuid,
-    pub dataset_id: Uuid,
+    pub dataset_id: OmicronZoneUuid,
     pub request: DatasetPutRequest,
 }
 

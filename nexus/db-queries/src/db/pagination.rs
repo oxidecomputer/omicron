@@ -52,18 +52,47 @@ where
     BoxedQuery<T>: query_methods::FilterDsl<Gt<C, M>, Output = BoxedQuery<T>>,
     BoxedQuery<T>: query_methods::FilterDsl<Lt<C, M>, Output = BoxedQuery<T>>,
 {
+    paginated_mapped(table, column, pagparams, std::convert::identity)
+}
+
+/// Like [`paginated`], but also accepts a function that maps the parameter
+/// type to the column type.
+pub fn paginated_mapped<T, C, M, F, N>(
+    table: T,
+    column: C,
+    pagparams: &DataPageParams<'_, M>,
+    mut map: F,
+) -> BoxedQuery<T>
+where
+    // T is a table which can create a BoxedQuery.
+    T: diesel::Table,
+    T: query_methods::BoxedDsl<'static, Pg, Output = BoxedDslOutput<T>>,
+    // C is a column which appears in T.
+    C: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
+    // Required to compare the column with the marker type.
+    C::SqlType: SqlType,
+    F: FnMut(M) -> N,
+    M: Clone,
+    N: AsExpression<C::SqlType>,
+    // Defines the methods which can be called on "query", and tells
+    // the compiler we're gonna output a BoxedQuery each time.
+    BoxedQuery<T>: query_methods::OrderDsl<Desc<C>, Output = BoxedQuery<T>>,
+    BoxedQuery<T>: query_methods::OrderDsl<Asc<C>, Output = BoxedQuery<T>>,
+    BoxedQuery<T>: query_methods::FilterDsl<Gt<C, N>, Output = BoxedQuery<T>>,
+    BoxedQuery<T>: query_methods::FilterDsl<Lt<C, N>, Output = BoxedQuery<T>>,
+{
     let mut query = table.into_boxed().limit(pagparams.limit.get().into());
-    let marker = pagparams.marker.map(|m| m.clone());
+    let marker = pagparams.marker.cloned();
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some(marker) = marker {
-                query = query.filter(column.gt(marker));
+                query = query.filter(column.gt(map(marker)));
             }
             query.order(column.asc())
         }
         dropshot::PaginationOrder::Descending => {
             if let Some(marker) = marker {
-                query = query.filter(column.lt(marker));
+                query = query.filter(column.lt(map(marker)));
             }
             query.order(column.desc())
         }

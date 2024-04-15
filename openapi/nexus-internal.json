@@ -3007,8 +3007,7 @@
         "type": "object",
         "properties": {
           "dataset_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
           "request": {
             "$ref": "#/components/schemas/DatasetPutRequest"
@@ -7530,6 +7529,10 @@
         "format": "uuid"
       },
       "TypedUuidForDownstairsRegionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
       },

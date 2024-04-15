@@ -2215,7 +2215,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             &region_snapshots[i];
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: (*dataset_id).into(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -2328,7 +2328,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             &region_snapshots[i];
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: (*dataset_id).into(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
