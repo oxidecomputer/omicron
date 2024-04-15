@@ -150,26 +150,27 @@ async fn do_run() -> Result<(), CmdError> {
                 .arg(
                     arg!(-f --file <String> "Chrony configuration file")
                     .default_value(CHRONY_CONFIG_FILE)
-            .value_parser(parse_chrony_conf)
+                    .value_parser(parse_chrony_conf)
                 )
-            .arg(
-                arg!(-b --boundary <bool> "Whether this is a boundary or internal NTP zone")
-                .required(true)
-        .value_parser(parse_boundary),
-            )
-            .arg(
-                Arg::new("servers")
-                .short('s')
-                .long("servers")
-                .num_args(1..)
-                .value_delimiter(' ')
-                .value_parser(value_parser!(String))
-                .help("List of NTP servers separated by a space")
-                .required(true)
-            )
-            .arg(
-                arg!(-a --allow <String> "Allowed IPv6 range")                       
-            ),
+                .arg(
+                    arg!(-b --boundary <bool> "Whether this is a boundary or internal NTP zone")
+                    .required(true)
+                    .value_parser(parse_boundary),
+                )
+                .arg(
+                    Arg::new("servers")
+                    .short('s')
+                    .long("servers")
+                    .num_args(1..)
+                    .value_delimiter(' ')
+                    .value_parser(value_parser!(String))
+                    .help("List of NTP servers separated by a space")
+                    .required(true)
+                )
+                .arg(
+                    arg!(-a --allow <String> "Allowed IPv6 range")
+                    .num_args(0..=1)                     
+                ),
         )
         .get_matches();
 
@@ -203,7 +204,7 @@ async fn chrony_setup(
         servers, file, allow, is_boundary
     );
 
-    generate_chrony_config(&log, is_boundary, allow, file, servers).await?;
+    generate_chrony_config(&log, is_boundary, allow, file, servers)?;
 
     // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
     // be added to the system's /etc/logadm.conf. Unfortunately, the service which
@@ -211,7 +212,7 @@ async fn chrony_setup(
     // root:sys ownership so we need to adjust things here (until omicron package
     // supports including ownership and permissions in the generated tar files).
     info!(&log, "Setting mode 444 and root:sys ownership to logadm fragment file"; "logadm config" => ?LOGADM_CONFIG_FILE);
-    set_permissions_for_logadm_config().await?;
+    set_permissions_for_logadm_config()?;
 
     info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
     Svcadm::refresh_logadm_upgrade()
@@ -220,7 +221,7 @@ async fn chrony_setup(
     Ok(())
 }
 
-async fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
+fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
     let mut perms = metadata(LOGADM_CONFIG_FILE)
         .map_err(|err| {
             CmdError::Failure(anyhow!(
@@ -250,7 +251,7 @@ async fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
     Ok(())
 }
 
-async fn generate_chrony_config(
+fn generate_chrony_config(
     log: &Logger,
     is_boundary: &bool,
     allow: Option<&String>,
@@ -273,11 +274,15 @@ async fn generate_chrony_config(
             err
         ))
     })?;
-    let new_config = if *is_boundary {
-        let mut contents = contents.replace(
+
+    if let Some(allow) = allow {
+        contents = contents.replace(
             "@ALLOW@",
-            &allow.expect("Chrony allowed address not supplied").to_string(),
-        );
+            &allow.to_string(),
+        );    
+    }
+    
+    let new_config = if *is_boundary {
         for s in servers {
             let str_line =
                 format!("pool {} iburst maxdelay 0.1 maxsources 16\n", s);
@@ -328,7 +333,7 @@ async fn generate_chrony_config(
 
     if old_file.clone().is_some_and(|f| f != new_config) {
         info!(&log, "Chrony configuration file has changed"; 
-        "old configuration file" => ?old_file);
+        "old configuration file" => ?old_file, "new configuration file" => ?new_config,);
     }
 
     Ok(())
