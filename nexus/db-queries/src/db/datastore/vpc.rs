@@ -1254,6 +1254,8 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use slog::info;
     use std::collections::BTreeMap;
     use std::net::IpAddr;
@@ -1479,13 +1481,13 @@ mod tests {
     #[derive(Debug)]
     struct Harness {
         rack_id: Uuid,
-        sled_ids: Vec<Uuid>,
+        sled_ids: Vec<SledUuid>,
         nexuses: Vec<HarnessNexus>,
     }
 
     #[derive(Debug)]
     struct HarnessNexus {
-        sled_id: Uuid,
+        sled_id: SledUuid,
         id: Uuid,
         ip: IpAddr,
         mac: MacAddr,
@@ -1495,7 +1497,7 @@ mod tests {
     impl Harness {
         fn new(num_sleds: usize) -> Self {
             let mut sled_ids =
-                (0..num_sleds).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+                (0..num_sleds).map(|_| SledUuid::new_v4()).collect::<Vec<_>>();
             sled_ids.sort();
 
             let mut nexus_ips = NEXUS_OPTE_IPV4_SUBNET
@@ -1520,7 +1522,7 @@ mod tests {
         fn db_sleds(&self) -> impl Iterator<Item = SledUpdate> + '_ {
             self.sled_ids.iter().copied().map(|sled_id| {
                 SledUpdate::new(
-                    sled_id,
+                    sled_id.into_untyped_uuid(),
                     "[::1]:0".parse().unwrap(),
                     sled_baseboard_for_test(),
                     sled_system_hardware_for_test(),
@@ -1585,21 +1587,21 @@ mod tests {
                     config,
                     disposition: BlueprintZoneDisposition::InService,
                 };
-                (nexus.sled_id, zone_config)
+                (nexus.sled_id.into_untyped_uuid(), zone_config)
             })
         }
     }
 
     async fn assert_service_sled_ids(
         datastore: &DataStore,
-        expected_sled_ids: &[Uuid],
+        expected_sled_ids: &[SledUuid],
     ) {
         let mut service_sled_ids = datastore
             .vpc_resolve_to_sleds(*SERVICES_VPC_ID, &[])
             .await
             .expect("failed to resolve to sleds")
             .into_iter()
-            .map(|sled| sled.id())
+            .map(|sled| SledUuid::from_untyped_uuid(sled.id()))
             .collect::<Vec<_>>();
         service_sled_ids.sort();
         assert_eq!(expected_sled_ids, service_sled_ids);
@@ -1614,20 +1616,6 @@ mod tests {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        // Helper function to fetch and sort the IDs of sleds we've resolved the
-        // SERVICES_VPC_ID to.
-        let fetch_service_sled_ids = || async {
-            let mut service_sled_ids = datastore
-                .vpc_resolve_to_sleds(*SERVICES_VPC_ID, &[])
-                .await
-                .expect("failed to resolve to sleds")
-                .into_iter()
-                .map(|sled| sled.id())
-                .collect::<Vec<_>>();
-            service_sled_ids.sort();
-            service_sled_ids
-        };
 
         // Create five sleds.
         let harness = Harness::new(5);
@@ -1661,6 +1649,7 @@ mod tests {
         let bp1 = Blueprint {
             id: bp1_id,
             blueprint_zones: bp1_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1712,6 +1701,7 @@ mod tests {
         let bp2 = Blueprint {
             id: bp2_id,
             blueprint_zones: BTreeMap::new(),
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp1_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1771,6 +1761,7 @@ mod tests {
         let bp3 = Blueprint {
             id: bp3_id,
             blueprint_zones: bp3_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp2_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1830,6 +1821,7 @@ mod tests {
         let bp4 = Blueprint {
             id: bp4_id,
             blueprint_zones: bp4_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp3_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1868,8 +1860,7 @@ mod tests {
             .setup(&opctx, &datastore)
             .await
             .expect("failed to set up ineligible sleds");
-
-        assert_eq!(&harness.sled_ids[3..=4], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &harness.sled_ids[3..=4]).await;
 
         // ---
 
@@ -1938,6 +1929,7 @@ mod tests {
         let bp5 = Blueprint {
             id: bp5_id,
             blueprint_zones: bp5_zones,
+            blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp4_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1961,7 +1953,7 @@ mod tests {
             )
             .await
             .expect("failed to set blueprint target");
-        assert_eq!(&harness.sled_ids[1..=2], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &harness.sled_ids[1..=2]).await;
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

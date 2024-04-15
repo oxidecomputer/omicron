@@ -91,6 +91,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
+use omicron_uuid_kinds::CollectionUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -383,7 +384,7 @@ enum CollectionsCommands {
 #[derive(Debug, Args)]
 struct CollectionsShowArgs {
     /// id of the collection
-    id: Uuid,
+    id: CollectionUuid,
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
@@ -2738,7 +2739,7 @@ async fn cmd_db_inventory_collections_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct CollectionRow {
-        id: Uuid,
+        id: CollectionUuid,
         started: String,
         took: String,
         nsps: i64,
@@ -2787,7 +2788,7 @@ async fn cmd_db_inventory_collections_list(
                 .num_milliseconds()
         );
         rows.push(CollectionRow {
-            id: collection.id,
+            id: collection.id.into(),
             started: humantime::format_rfc3339_seconds(
                 collection.time_started.into(),
             )
@@ -2811,7 +2812,7 @@ async fn cmd_db_inventory_collections_list(
 async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    id: Uuid,
+    id: CollectionUuid,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     let collection = datastore

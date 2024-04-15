@@ -33,6 +33,8 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -165,7 +167,7 @@ impl Server {
         // on the physical rack.
         for zpool in &config.storage.zpools {
             let physical_disk_id = Uuid::new_v4();
-            let zpool_id = Uuid::new_v4();
+            let zpool_id = ZpoolUuid::new_v4();
             let vendor = "synthetic-vendor".to_string();
             let serial = format!("synthetic-serial-{zpool_id}");
             let model = "synthetic-model".to_string();
@@ -188,7 +190,7 @@ impl Server {
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
             datasets.push(NexusTypes::DatasetCreateRequest {
-                zpool_id,
+                zpool_id: zpool_id.into_untyped_uuid(),
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
@@ -363,7 +365,7 @@ pub async fn run_standalone_server(
         underlay_address: *http_bound.ip(),
         zone_type: OmicronZoneType::InternalDns {
             dataset: OmicronZoneDataset {
-                pool_name: ZpoolName::new_external(Uuid::new_v4()),
+                pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
             },
             http_address: http_bound,
             dns_address: match dns.dns_server.local_address() {
@@ -432,7 +434,7 @@ pub async fn run_standalone_server(
             underlay_address: ip,
             zone_type: OmicronZoneType::ExternalDns {
                 dataset: OmicronZoneDataset {
-                    pool_name: ZpoolName::new_external(Uuid::new_v4()),
+                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 },
                 http_address: external_dns_internal_addr,
                 dns_address: SocketAddr::V6(external_dns_internal_addr),
@@ -478,8 +480,9 @@ pub async fn run_standalone_server(
     let physical_disks = server.sled_agent.get_all_physical_disks().await;
     let zpools = server.sled_agent.get_zpools().await;
     for zpool in &zpools {
+        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id);
         for (dataset_id, address) in
-            server.sled_agent.get_datasets(zpool.id).await
+            server.sled_agent.get_datasets(zpool_id).await
         {
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool.id,

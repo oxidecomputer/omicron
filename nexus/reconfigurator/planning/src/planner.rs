@@ -14,9 +14,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -95,9 +93,27 @@ impl<'a> Planner<'a> {
         // is fine.
         let mut sleds_waiting_for_ntp_zones = BTreeSet::new();
 
-        for (sled_id, sled_info) in
+        for (sled_id, sled_resources) in
             self.input.all_sled_resources(SledFilter::InService)
         {
+            // First, we need to ensure that sleds are using their expected
+            // disks. This is necessary before we can allocate any zones.
+            if self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+                == Ensure::Added
+            {
+                info!(
+                    &self.log,
+                    "altered physical disks";
+                    "sled_id" => %sled_id
+                );
+                self.blueprint
+                    .comment(&format!("sled {}: altered disks", sled_id));
+
+                // Note that this doesn't actually need to short-circuit the
+                // rest of the blueprint planning, as long as during execution
+                // we send this request first.
+            }
+
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
@@ -137,7 +153,7 @@ impl<'a> Planner<'a> {
             let has_ntp_inventory = self
                 .inventory
                 .omicron_zones
-                .get(sled_id.as_untyped_uuid())
+                .get(&sled_id)
                 .map(|sled_zones| {
                     sled_zones.zones.zones.iter().any(|z| z.zone_type.is_ntp())
                 })
@@ -154,17 +170,17 @@ impl<'a> Planner<'a> {
 
             // Every zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
-            for zpool_name in &sled_info.zpools {
+            for zpool_id in sled_resources.zpools.keys() {
                 if self
                     .blueprint
-                    .sled_ensure_zone_crucible(sled_id, zpool_name.clone())?
+                    .sled_ensure_zone_crucible(sled_id, *zpool_id)?
                     == Ensure::Added
                 {
                     info!(
                         &self.log,
                         "found sled zpool missing Crucible zone (will add one)";
                         "sled_id" => ?sled_id,
-                        "zpool_name" => ?zpool_name,
+                        "zpool_id" => ?zpool_id,
                     );
                     ncrucibles_added += 1;
                 }
@@ -191,7 +207,7 @@ impl<'a> Planner<'a> {
 
     fn ensure_correct_number_of_nexus_zones(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<TypedUuid<SledKind>>,
+        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
     ) -> Result<(), Error> {
         // Count the number of Nexus zones on all in-service sleds. This will
         // include sleds that are in service but not eligible for new services,
@@ -222,7 +238,7 @@ impl<'a> Planner<'a> {
         // by their current Nexus zone count. Skip sleds with a policy/state
         // that should be eligible for Nexus but that don't yet have an NTP
         // zone.
-        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<TypedUuid<SledKind>>> =
+        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<SledUuid>> =
             BTreeMap::new();
         for sled_id in self
             .input
@@ -244,8 +260,7 @@ impl<'a> Planner<'a> {
         }
 
         // Build a map of sled -> new nexus zone count.
-        let mut sleds_to_change: BTreeMap<TypedUuid<SledKind>, usize> =
-            BTreeMap::new();
+        let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
         'outer: for _ in 0..nexus_to_add {
             // `sleds_by_num_nexus` is sorted by key already, and we want to
@@ -461,16 +476,13 @@ mod test {
         assert!(collection
             .omicron_zones
             .insert(
-                // TODO-cleanup use `TypedUuid` everywhere
-                new_sled_id.into_untyped_uuid(),
+                new_sled_id,
                 OmicronZonesFound {
                     time_collected: now_db_precision(),
                     source: String::from("test suite"),
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id: new_sled_id.into_untyped_uuid(),
+                    sled_id: new_sled_id,
                     zones: blueprint4
                         .blueprint_zones
-                        // TODO-cleanup use `TypedUuid` everywhere
                         .get(new_sled_id.as_untyped_uuid())
                         .expect("blueprint should contain zones for new sled")
                         .to_omicron_zones_config(
@@ -565,13 +577,8 @@ mod test {
             let keep_sled_id =
                 builder.sleds().keys().next().copied().expect("no sleds");
             builder.sleds_mut().retain(|&k, _v| keep_sled_id == k);
-            // TODO-cleanup use `TypedUuid` everywhere
-            collection
-                .sled_agents
-                .retain(|&k, _v| *keep_sled_id.as_untyped_uuid() == k);
-            collection
-                .omicron_zones
-                .retain(|&k, _v| *keep_sled_id.as_untyped_uuid() == k);
+            collection.sled_agents.retain(|&k, _v| keep_sled_id == k);
+            collection.omicron_zones.retain(|&k, _v| keep_sled_id == k);
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);

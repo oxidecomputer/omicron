@@ -19,6 +19,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use sled_hardware::DendriteAsic;
@@ -251,7 +252,7 @@ impl From<sled_hardware::DiskVariant> for DiskType {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Zpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub disk_type: DiskType,
 }
 
@@ -750,7 +751,7 @@ pub struct InventoryDisk {
 /// Identifies information about zpools managed by the control plane
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryZpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub total_size: ByteCount,
 }
 

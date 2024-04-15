@@ -16,9 +16,8 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
 use sled_agent_client::types::OmicronZonesConfig;
 use typed_rng::TypedUuidRng;
 use uuid::Uuid;
@@ -61,12 +60,11 @@ impl ExampleSystem {
         // For each sled, have it report 0 zones in the initial inventory.
         // This will enable us to build a blueprint from the initial
         // inventory, which we can then use to build new blueprints.
-        for sled_id in &sled_ids {
+        for &sled_id in &sled_ids {
             inventory_builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     OmicronZonesConfig {
                         generation: Generation::new(),
                         zones: vec![],
@@ -108,9 +106,9 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
-            for pool_name in &sled_resources.zpools {
+            for pool_name in sled_resources.zpools.keys() {
                 let _ = builder
-                    .sled_ensure_zone_crucible(sled_id, pool_name.clone())
+                    .sled_ensure_zone_crucible(sled_id, *pool_name)
                     .unwrap();
             }
         }
@@ -128,8 +126,7 @@ impl ExampleSystem {
                 continue;
             };
             for zone in zones.zones.iter().map(|z| &z.config) {
-                let service_id =
-                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                let service_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
                 if let Ok(Some(ip)) = zone.zone_type.external_ip() {
                     input_builder
                         .add_omicron_zone_external_ip(
@@ -156,8 +153,7 @@ impl ExampleSystem {
             builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id.into_untyped_uuid(),
+                    sled_id,
                     zones.to_omicron_zones_config(
                         BlueprintZoneFilter::ShouldBeRunning,
                     ),

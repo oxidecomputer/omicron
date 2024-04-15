@@ -5,41 +5,93 @@
 //! Types describing inputs the Reconfigurator needs to plan and produce new
 //! blueprints.
 
+use crate::external_api::views::PhysicalDiskPolicy;
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use crate::inventory::ZpoolName;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::OmicronZoneKind;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
+
+/// Describes a single disk already managed by the sled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SledDisk {
+    pub disk_identity: DiskIdentity,
+    pub disk_id: PhysicalDiskUuid,
+    pub policy: PhysicalDiskPolicy,
+    pub state: PhysicalDiskState,
+}
+
+/// Filters that apply to disks.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DiskFilter {
+    /// All disks
+    All,
+
+    /// All disks which are in-service.
+    InService,
+}
+
+impl DiskFilter {
+    fn matches_policy_and_state(
+        self,
+        policy: PhysicalDiskPolicy,
+        state: PhysicalDiskState,
+    ) -> bool {
+        match self {
+            DiskFilter::All => true,
+            DiskFilter::InService => match (policy, state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+}
 
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    /// zpools on this sled
+    /// zpools (and their backing disks) on this sled
     ///
     /// (used to allocate storage for control plane zones with persistent
     /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
+    pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
 
     /// the IPv6 subnet of this sled on the underlay network
     ///
     /// (implicitly specifies the whole range of addresses that the planner can
     /// use for control plane components)
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+impl SledResources {
+    pub fn all_disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = (&ZpoolUuid, &SledDisk)> + '_ {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some((zpool, disk))
+        })
+    }
 }
 
 /// External IP allocated to a service
@@ -258,14 +310,13 @@ pub struct PlanningInput {
     external_dns_version: Generation,
 
     /// per-sled policy and resources
-    sleds: BTreeMap<TypedUuid<SledKind>, SledDetails>,
+    sleds: BTreeMap<SledUuid, SledDetails>,
 
     /// external IPs allocated to Omicron zones
-    omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, ExternalIp>,
 
     /// vNICs allocated to Omicron zones
-    omicron_zone_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,7 +349,7 @@ impl PlanningInput {
     pub fn all_sleds(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledDetails)> + '_ {
+    ) -> impl Iterator<Item = (SledUuid, &SledDetails)> + '_ {
         self.sleds.iter().filter_map(move |(&sled_id, details)| {
             filter
                 .matches_policy_and_state(details.policy, details.state)
@@ -309,29 +360,23 @@ impl PlanningInput {
     pub fn all_sled_ids(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = TypedUuid<SledKind>> + '_ {
+    ) -> impl Iterator<Item = SledUuid> + '_ {
         self.all_sleds(filter).map(|(sled_id, _)| sled_id)
     }
 
     pub fn all_sled_resources(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledResources)> + '_ {
+    ) -> impl Iterator<Item = (SledUuid, &SledResources)> + '_ {
         self.all_sleds(filter)
             .map(|(sled_id, details)| (sled_id, &details.resources))
     }
 
-    pub fn sled_policy(
-        &self,
-        sled_id: &TypedUuid<SledKind>,
-    ) -> Option<SledPolicy> {
+    pub fn sled_policy(&self, sled_id: &SledUuid) -> Option<SledPolicy> {
         self.sleds.get(sled_id).map(|details| details.policy)
     }
 
-    pub fn sled_resources(
-        &self,
-        sled_id: &TypedUuid<SledKind>,
-    ) -> Option<&SledResources> {
+    pub fn sled_resources(&self, sled_id: &SledUuid) -> Option<&SledResources> {
         self.sleds.get(sled_id).map(|details| &details.resources)
     }
 
@@ -354,15 +399,12 @@ impl PlanningInput {
 #[derive(Debug, thiserror::Error)]
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
-    DuplicateSledId(TypedUuid<SledKind>),
+    DuplicateSledId(SledUuid),
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
-    DuplicateOmicronZoneExternalIp {
-        zone_id: TypedUuid<OmicronZoneKind>,
-        ip: ExternalIp,
-    },
+    DuplicateOmicronZoneExternalIp { zone_id: OmicronZoneUuid, ip: ExternalIp },
     #[error("Omicron zone {zone_id} already has a NIC ({nic:?})")]
     DuplicateOmicronZoneNic {
-        zone_id: TypedUuid<OmicronZoneKind>,
+        zone_id: OmicronZoneUuid,
         nic: ServiceNetworkInterface,
     },
 }
@@ -373,10 +415,9 @@ pub struct PlanningInputBuilder {
     policy: Policy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
-    sleds: BTreeMap<TypedUuid<SledKind>, SledDetails>,
-    omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
-    omicron_zone_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+    sleds: BTreeMap<SledUuid, SledDetails>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, ExternalIp>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
 }
 
 impl PlanningInputBuilder {
@@ -411,7 +452,7 @@ impl PlanningInputBuilder {
 
     pub fn add_sled(
         &mut self,
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         details: SledDetails,
     ) -> Result<(), PlanningInputBuildError> {
         match self.sleds.entry(sled_id) {
@@ -427,7 +468,7 @@ impl PlanningInputBuilder {
 
     pub fn add_omicron_zone_external_ip(
         &mut self,
-        zone_id: TypedUuid<OmicronZoneKind>,
+        zone_id: OmicronZoneUuid,
         ip: ExternalIp,
     ) -> Result<(), PlanningInputBuildError> {
         match self.omicron_zone_external_ips.entry(zone_id) {
@@ -446,7 +487,7 @@ impl PlanningInputBuilder {
 
     pub fn add_omicron_zone_nic(
         &mut self,
-        zone_id: TypedUuid<OmicronZoneKind>,
+        zone_id: OmicronZoneUuid,
         nic: ServiceNetworkInterface,
     ) -> Result<(), PlanningInputBuildError> {
         match self.omicron_zone_nics.entry(zone_id) {
@@ -467,13 +508,11 @@ impl PlanningInputBuilder {
         &mut self.policy
     }
 
-    pub fn sleds(&mut self) -> &BTreeMap<TypedUuid<SledKind>, SledDetails> {
+    pub fn sleds(&mut self) -> &BTreeMap<SledUuid, SledDetails> {
         &self.sleds
     }
 
-    pub fn sleds_mut(
-        &mut self,
-    ) -> &mut BTreeMap<TypedUuid<SledKind>, SledDetails> {
+    pub fn sleds_mut(&mut self) -> &mut BTreeMap<SledUuid, SledDetails> {
         &mut self.sleds
     }
 

@@ -761,26 +761,27 @@ impl DataStore {
                     info!(log, "Inserted service networking records");
 
                     for physical_disk in physical_disks {
-                        Self::physical_disk_upsert_on_connection(&conn, &opctx, physical_disk)
-                            .await
-                            .map_err(|e| {
+                        if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
+                            .await {
+                            if !matches!(e, Error::ObjectAlreadyExists { .. }) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
                                 err.set(RackInitError::PhysicalDiskInsert(e))
                                     .unwrap();
-                                DieselError::RollbackTransaction
-                            })?;
+                                return Err(DieselError::RollbackTransaction);
+                            }
+                        }
                     }
 
                     info!(log, "Inserted physical disks");
 
                     for zpool in zpools {
-                        Self::zpool_upsert_on_connection(&conn, &opctx, zpool).await.map_err(
-                            |e| {
+                        if let Err(e) = Self::zpool_insert_on_connection(&conn, &opctx, zpool).await {
+                            if !matches!(e, Error::ObjectAlreadyExists { .. }) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
                                 err.set(RackInitError::ZpoolInsert(e)).unwrap();
-                                DieselError::RollbackTransaction
-                            },
-                        )?;
+                                return Err(DieselError::RollbackTransaction);
+                            }
+                        }
                     }
 
                     info!(log, "Inserted zpools");
@@ -972,8 +973,8 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::{GenericUuid, SledUuid, ZpoolUuid};
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -989,6 +990,7 @@ mod test {
                 blueprint: Blueprint {
                     id: Uuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
+                    blueprint_disks: BTreeMap::new(),
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
@@ -1217,7 +1219,7 @@ mod test {
     fn random_dataset() -> OmicronZoneDataset {
         OmicronZoneDataset {
             pool_name: illumos_utils::zpool::ZpoolName::new_external(
-                Uuid::new_v4(),
+                ZpoolUuid::new_v4(),
             )
             .to_string()
             .parse()
@@ -1293,7 +1295,7 @@ mod test {
         inventory_builder
             .found_sled_omicron_zones(
                 "sled1",
-                sled1.id(),
+                SledUuid::from_untyped_uuid(sled1.id()),
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![
@@ -1364,7 +1366,7 @@ mod test {
         inventory_builder
             .found_sled_omicron_zones(
                 "sled2",
-                sled2.id(),
+                SledUuid::from_untyped_uuid(sled2.id()),
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![
@@ -1432,7 +1434,7 @@ mod test {
         inventory_builder
             .found_sled_omicron_zones(
                 "sled3",
-                sled3.id(),
+                SledUuid::from_untyped_uuid(sled3.id()),
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![OmicronZoneConfig {
@@ -1610,7 +1612,7 @@ mod test {
         inventory_builder
             .found_sled_omicron_zones(
                 "sled",
-                sled.id(),
+                SledUuid::from_untyped_uuid(sled.id()),
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![
@@ -1862,7 +1864,7 @@ mod test {
         inventory_builder
             .found_sled_omicron_zones(
                 "sled",
-                sled.id(),
+                SledUuid::from_untyped_uuid(sled.id()),
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![OmicronZoneConfig {
@@ -1965,7 +1967,7 @@ mod test {
         inventory_builder
             .found_sled_omicron_zones(
                 "sled",
-                sled.id(),
+                SledUuid::from_untyped_uuid(sled.id()),
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![

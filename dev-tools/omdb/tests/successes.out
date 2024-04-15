@@ -254,6 +254,10 @@ task: "phantom_disks"
     detects and un-deletes phantom disks
 
 
+task: "physical_disk_adoption"
+    ensure new physical disks are automatically marked in-service
+
+
 task: "region_replacement"
     detects if a region requires replacing and begins the process
 
@@ -398,6 +402,13 @@ task: "phantom_disks"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
+
+task: "physical_disk_adoption"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 3, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
 
 task: "region_replacement"
   configured period: every 30s
