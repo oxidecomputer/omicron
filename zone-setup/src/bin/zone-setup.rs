@@ -169,7 +169,7 @@ async fn do_run() -> Result<(), CmdError> {
                 )
                 .arg(
                     arg!(-a --allow <String> "Allowed IPv6 range")
-                    .num_args(0..=1)                     
+                    .num_args(0..=1)
                 ),
         )
         .get_matches();
@@ -276,12 +276,9 @@ fn generate_chrony_config(
     })?;
 
     if let Some(allow) = allow {
-        contents = contents.replace(
-            "@ALLOW@",
-            &allow.to_string(),
-        );    
+        contents = contents.replace("@ALLOW@", &allow.to_string());
     }
-    
+
     let new_config = if *is_boundary {
         for s in servers {
             let str_line =
