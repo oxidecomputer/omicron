@@ -1496,11 +1496,11 @@ mod test {
         api::external::{ByteCount, Generation},
         disk::DiskIdentity,
     };
+    use omicron_uuid_kinds::{GenericUuid, SledUuid};
     use sled_agent_client::types as SledAgentTypes;
-    use uuid::Uuid;
 
     fn make_sled_info(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1510,7 +1510,7 @@ mod test {
             subnet,
             sled_agent_address,
             SledAgentTypes::Inventory {
-                sled_id,
+                sled_id: sled_id.into_untyped_uuid(),
                 sled_agent_address: sled_agent_address.to_string(),
                 sled_role: SledAgentTypes::SledRole::Scrimlet,
                 baseboard: SledAgentTypes::Baseboard::Unknown,
@@ -1538,14 +1538,14 @@ mod test {
         let rss_config = crate::bootstrap::params::test_config();
         let fake_sleds = vec![
             make_sled_info(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),

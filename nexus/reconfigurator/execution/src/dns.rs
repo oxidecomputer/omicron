@@ -29,6 +29,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
@@ -315,7 +316,12 @@ pub fn blueprint_internal_dns_config(
             }
             OmicronZoneType::Crucible { address, .. } => {
                 let port = parse_port(address).with_context(context)?;
-                (ServiceName::Crucible(zone.config.id), port)
+                (
+                    ServiceName::Crucible(OmicronZoneUuid::from_untyped_uuid(
+                        zone.config.id,
+                    )),
+                    port,
+                )
             }
             OmicronZoneType::CruciblePantry { address } => {
                 let port = parse_port(address).with_context(context)?;
@@ -339,7 +345,8 @@ pub fn blueprint_internal_dns_config(
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                zone.config.id,
+                // TODO-cleanup use `TypedUuid` everywhere
+                OmicronZoneUuid::from_untyped_uuid(zone.config.id),
                 zone.config.underlay_address,
                 service_name,
                 port,
@@ -354,7 +361,7 @@ pub fn blueprint_internal_dns_config(
         // unwrap(): see above.
         dns_builder
             .host_zone_switch(
-                scrimlet.id.into_untyped_uuid(),
+                scrimlet.id,
                 switch_zone_ip,
                 overrides.dendrite_port(scrimlet.id),
                 overrides.mgs_port(scrimlet.id),
@@ -1354,8 +1361,10 @@ mod test {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
         let new_zone_host = internal_dns::config::Host::for_zone(
-            new_zone_id,
-            internal_dns::config::ZoneVariant::Other,
+            // TODO-cleanup use `TypedUuid` everywhere
+            internal_dns::config::Zone::Other(
+                OmicronZoneUuid::from_untyped_uuid(new_zone_id),
+            ),
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));
 

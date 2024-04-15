@@ -56,6 +56,7 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
@@ -220,7 +221,11 @@ impl RackInitRequestBuilder {
         });
         let zone = self
             .internal_dns_config
-            .host_zone(zone_id, *address.ip())
+            .host_zone(
+                // TODO-cleanup use TypedUuid everywhere
+                OmicronZoneUuid::from_untyped_uuid(zone_id),
+                *address.ip(),
+            )
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -261,7 +266,11 @@ impl RackInitRequestBuilder {
         });
         let zone = self
             .internal_dns_config
-            .host_zone(dataset_id, *address.ip())
+            .host_zone(
+                // TODO-cleanup use TypedUuid everywhere
+                OmicronZoneUuid::from_untyped_uuid(dataset_id),
+                *address.ip(),
+            )
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())

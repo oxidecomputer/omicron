@@ -3732,6 +3732,7 @@ dependencies = [
  "hyper 0.14.28",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest",
