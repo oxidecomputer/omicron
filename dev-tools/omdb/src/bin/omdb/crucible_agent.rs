@@ -17,7 +17,7 @@ use crate::Omdb;
 /// Arguments to the "omdb crucible-agent" subcommand
 #[derive(Debug, Args)]
 pub struct CrucibleAgentArgs {
-    /// URL of the crucible agnet internal API
+    /// URL of the crucible agent internal API
     #[clap(long, env("OMDB_CRUCIBLE_AGENT_URL"))]
     crucible_agent_url: Option<String>,
 
@@ -44,7 +44,7 @@ enum RegionCommands {
 
 #[derive(Debug, Subcommand)]
 enum SnapshotCommands {
-    /// Print list of all running control plane regions
+    /// Print list of all running control plane snapshots
     List,
 }
 
@@ -59,7 +59,8 @@ impl CrucibleAgentArgs {
         let Some(crucible_agent_url) = &self.crucible_agent_url else {
             bail!(
                 "crucible agent URL must be specified with \
-                --crucible-agent-url or OMDB_CRUCIBLE_AGENT_URL"
+                --crucible-agent-url or by setting the environment variable \
+                OMDB_CRUCIBLE_AGENT_URL"
             );
         };
         let client = Client::new(crucible_agent_url);
@@ -90,7 +91,7 @@ struct Region {
 async fn cmd_region_list(
     client: &crucible_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
-    let regions = client.region_list().await.context("listing zones")?;
+    let regions = client.region_list().await.context("listing regions")?;
 
     let mut rows = Vec::new();
     for region in regions.iter() {
@@ -124,7 +125,7 @@ struct Snapshot {
 async fn cmd_snapshot_list(
     client: &crucible_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
-    let regions = client.region_list().await.context("listing zones")?;
+    let regions = client.region_list().await.context("listing regions")?;
 
     let mut rows = Vec::new();
     for region in regions.iter() {
