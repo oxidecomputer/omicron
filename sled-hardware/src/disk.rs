@@ -8,11 +8,11 @@ use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use slog::{info, warn};
-use uuid::Uuid;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -35,7 +35,7 @@ pub enum PooledDiskError {
     #[error("Zpool UUID required to format this disk")]
     MissingZpoolUuid,
     #[error("Observed Zpool with unexpected UUID (saw: {observed}, expected: {expected})")]
-    UnexpectedUuid { expected: Uuid, observed: Uuid },
+    UnexpectedUuid { expected: ZpoolUuid, observed: ZpoolUuid },
     #[error("Unexpected disk variant")]
     UnexpectedVariant,
     #[error("Zpool does not exist")]
@@ -66,7 +66,9 @@ pub enum Partition {
     ZfsPool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
 pub struct DiskPaths {
     // Full path to the disk under "/devices".
     // Should NOT end with a ":partition_letter".
@@ -137,7 +139,9 @@ impl DiskPaths {
 /// This exists as a distinct entity from `Disk` in `sled-storage` because it
 /// may be desirable to monitor for hardware in one context, and conform disks
 /// to partition layouts in a different context.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
 pub struct UnparsedDisk {
     paths: DiskPaths,
     slot: i64,
@@ -216,7 +220,7 @@ impl PooledDisk {
     pub fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
-        zpool_id: Option<Uuid>,
+        zpool_id: Option<ZpoolUuid>,
     ) -> Result<Self, PooledDiskError> {
         let paths = &unparsed_disk.paths;
         let variant = unparsed_disk.variant;
@@ -269,7 +273,7 @@ pub fn ensure_zpool_exists(
     log: &Logger,
     variant: DiskVariant,
     zpool_path: &Utf8Path,
-    zpool_id: Option<Uuid>,
+    zpool_id: Option<ZpoolUuid>,
 ) -> Result<ZpoolName, PooledDiskError> {
     let zpool_name = match Fstyp::get_zpool(&zpool_path) {
         Ok(zpool_name) => {
@@ -308,7 +312,7 @@ pub fn ensure_zpool_exists(
                     id
                 }
                 None => {
-                    let id = Uuid::new_v4();
+                    let id = ZpoolUuid::new_v4();
                     info!(log, "Formatting zpool with generated ID"; "id" => ?id);
                     id
                 }

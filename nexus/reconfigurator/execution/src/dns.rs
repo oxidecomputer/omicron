@@ -28,19 +28,21 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
     creator: String,
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
@@ -255,7 +257,7 @@ pub(crate) async fn deploy_dns_one(
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<DnsConfigZone, anyhow::Error> {
     // The DNS names configured here should match what RSS configures for the
@@ -275,8 +277,8 @@ pub fn blueprint_internal_dns_config(
             .map(|addr| addr.port())
     }
 
-    for (_, zone) in
-        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+    for (_, zone) in blueprint
+        .all_blueprint_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
         let context = || {
             format!(
@@ -314,7 +316,12 @@ pub fn blueprint_internal_dns_config(
             }
             OmicronZoneType::Crucible { address, .. } => {
                 let port = parse_port(address).with_context(context)?;
-                (ServiceName::Crucible(zone.config.id), port)
+                (
+                    ServiceName::Crucible(OmicronZoneUuid::from_untyped_uuid(
+                        zone.config.id,
+                    )),
+                    port,
+                )
             }
             OmicronZoneType::CruciblePantry { address } => {
                 let port = parse_port(address).with_context(context)?;
@@ -338,7 +345,8 @@ pub fn blueprint_internal_dns_config(
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                zone.config.id,
+                // TODO-cleanup use `TypedUuid` everywhere
+                OmicronZoneUuid::from_untyped_uuid(zone.config.id),
                 zone.config.underlay_address,
                 service_name,
                 port,
@@ -474,7 +482,7 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
 /// Return the Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones()
+        .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
         .filter_map(|(_, z)| match z.zone_type {
             OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
             _ => None,
@@ -509,11 +517,13 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
+    use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::ZpoolName;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -528,9 +538,10 @@ mod test {
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -538,7 +549,6 @@ mod test {
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -607,11 +617,19 @@ mod test {
             .zip(possible_sled_subnets)
             .map(|(sled_id, subnet)| {
                 let sled_resources = SledResources {
-                    zpools: BTreeSet::from([ZpoolName::from_str(&format!(
-                        "oxp_{}",
-                        Uuid::new_v4()
-                    ))
-                    .unwrap()]),
+                    zpools: BTreeMap::from([(
+                        ZpoolUuid::new_v4(),
+                        SledDisk {
+                            disk_identity: DiskIdentity {
+                                vendor: String::from("v"),
+                                serial: format!("s-{sled_id}"),
+                                model: String::from("m"),
+                            },
+                            disk_id: PhysicalDiskUuid::new_v4(),
+                            policy: PhysicalDiskPolicy::InService,
+                            state: PhysicalDiskState::Active,
+                        },
+                    )]),
                     subnet: Ipv6Subnet::new(subnet.network()),
                 };
                 (*sled_id, sled_resources)
@@ -625,10 +643,7 @@ mod test {
             &collection,
             initial_dns_generation,
             Generation::new(),
-            policy_sleds.keys().map(|sled_id| {
-                // TODO-cleanup use `TypedUuid` everywhere
-                TypedUuid::from_untyped_uuid(*sled_id)
-            }),
+            policy_sleds.keys().copied(),
             "test-suite",
         )
         .expect("failed to build initial blueprint");
@@ -706,11 +721,15 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones()
-            .filter(|(_, zone)| zone.id != out_of_service_id)
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
             .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
+
+        // Check to see that the quiesced zone was actually excluded
+        assert!(omicron_zones_by_ip
+            .values()
+            .all(|id| *id != out_of_service_id));
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.
@@ -856,7 +875,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input) = example(&logctx.log, TEST_NAME, 5);
         let initial_external_dns_generation = Generation::new();
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
+        let mut blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
             initial_external_dns_generation,
@@ -902,18 +921,24 @@ mod test {
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
 
+        // Helper for converting dns records for a given silo to IpAddrs
+        let records_to_ips = |silo_records: &Vec<_>| {
+            let mut ips: Vec<_> = silo_records
+                .into_iter()
+                .map(|record| match record {
+                    DnsRecord::A(v) => IpAddr::V4(*v),
+                    DnsRecord::Aaaa(v) => IpAddr::V6(*v),
+                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                })
+                .collect();
+            ips.sort();
+            ips
+        };
+
         // Here we're hardcoding the contents of the example blueprint.  It
         // currently puts one Nexus zone on each sled.  If we change the example
         // blueprint, change the expected set of IPs here.
-        let mut silo_record_ips: Vec<_> = silo_records
-            .into_iter()
-            .map(|record| match record {
-                DnsRecord::A(v) => IpAddr::V4(*v),
-                DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                DnsRecord::Srv(_) => panic!("unexpected SRV record"),
-            })
-            .collect();
-        silo_record_ips.sort();
+        let silo_record_ips: Vec<_> = records_to_ips(silo_records);
         assert_eq!(
             silo_record_ips,
             &[
@@ -924,6 +949,42 @@ mod test {
                 "192.0.2.6".parse::<IpAddr>().unwrap(),
             ]
         );
+
+        // Change the zone disposition to quiesced for the nexus zone on the
+        // first sled. This should ensure we don't get an external DNS record
+        // back for that sled.
+        let (_, bp_zones_config) =
+            blueprint.blueprint_zones.iter_mut().next().unwrap();
+        let nexus_zone = bp_zones_config
+            .zones
+            .iter_mut()
+            .find(|z| z.config.zone_type.is_nexus())
+            .unwrap();
+        nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+
+        // Retrieve the DNS config based on the modified blueprint
+        let external_dns_zone = blueprint_external_dns_config(
+            &blueprint,
+            std::slice::from_ref(my_silo.name()),
+            String::from("oxide.test"),
+        );
+        let silo_records = &external_dns_zone
+            .records
+            .get(&silo_dns_name(my_silo.name()))
+            .expect("missing silo DNS records");
+        let silo_record_ips: Vec<_> = records_to_ips(silo_records);
+
+        // We shouldn't see the excluded Nexus address
+        assert_eq!(
+            silo_record_ips,
+            &[
+                "192.0.2.3".parse::<IpAddr>().unwrap(),
+                "192.0.2.4".parse::<IpAddr>().unwrap(),
+                "192.0.2.5".parse::<IpAddr>().unwrap(),
+                "192.0.2.6".parse::<IpAddr>().unwrap(),
+            ]
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1242,11 +1303,11 @@ mod test {
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();
@@ -1300,8 +1361,10 @@ mod test {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
         let new_zone_host = internal_dns::config::Host::for_zone(
-            new_zone_id,
-            internal_dns::config::ZoneVariant::Other,
+            // TODO-cleanup use `TypedUuid` everywhere
+            internal_dns::config::Zone::Other(
+                OmicronZoneUuid::from_untyped_uuid(new_zone_id),
+            ),
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));
 

@@ -55,6 +55,9 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
@@ -218,7 +221,11 @@ impl RackInitRequestBuilder {
         });
         let zone = self
             .internal_dns_config
-            .host_zone(zone_id, *address.ip())
+            .host_zone(
+                // TODO-cleanup use TypedUuid everywhere
+                OmicronZoneUuid::from_untyped_uuid(zone_id),
+                *address.ip(),
+            )
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -246,20 +253,24 @@ impl RackInitRequestBuilder {
     // - The internal DNS configuration for this service
     fn add_dataset(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
         address: SocketAddrV6,
         kind: DatasetKind,
         service_name: internal_dns::ServiceName,
     ) {
         self.datasets.push(DatasetCreateRequest {
-            zpool_id,
+            zpool_id: zpool_id.into_untyped_uuid(),
             dataset_id,
             request: DatasetPutRequest { address, kind },
         });
         let zone = self
             .internal_dns_config
-            .host_zone(dataset_id, *address.ip())
+            .host_zone(
+                // TODO-cleanup use TypedUuid everywhere
+                OmicronZoneUuid::from_untyped_uuid(dataset_id),
+                *address.ip(),
+            )
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -418,7 +429,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .parse::<std::net::SocketAddrV6>()
             .expect("Failed to parse port");
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
         eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
@@ -455,7 +466,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         .unwrap();
         let port = clickhouse.port();
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
         self.rack_init_builder.add_dataset(
@@ -827,6 +838,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Blueprint {
                 id: Uuid::new_v4(),
                 blueprint_zones,
+                // NOTE: We'll probably need to actually add disks here
+                // when the Blueprint contains "which disks back zones".
+                //
+                // However, for now, this isn't necessary.
+                blueprint_disks: BTreeMap::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation
@@ -1041,7 +1057,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_id,
         );
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
             .parse()
@@ -1088,7 +1104,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_id,
         );
 
-        let zpool_id = Uuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
             .parse()

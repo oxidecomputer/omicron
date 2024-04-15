@@ -20,6 +20,7 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::ExternalIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::ServiceNetworkInterface;
@@ -31,8 +32,10 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneKind, TypedUuid};
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use reedline::{Reedline, Signal};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -53,7 +56,7 @@ struct ReconfiguratorSim {
     system: SystemDescription,
 
     /// inventory collections created by the user
-    collections: IndexMap<Uuid, Collection>,
+    collections: IndexMap<CollectionUuid, Collection>,
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
@@ -146,9 +149,10 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
-        for (_, zone) in parent_blueprint.all_omicron_zones() {
-            let zone_id =
-                TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+        for (_, zone) in
+            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        {
+            let zone_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
             if let Ok(Some(ip)) = zone.zone_type.external_ip() {
                 let external_ip = ExternalIp {
                     id: *self
@@ -403,13 +407,13 @@ enum Commands {
 #[derive(Debug, Args)]
 struct SledAddArgs {
     /// id of the new sled
-    sled_id: Option<Uuid>,
+    sled_id: Option<SledUuid>,
 }
 
 #[derive(Debug, Args)]
 struct SledArgs {
     /// id of the sled
-    sled_id: TypedUuid<SledKind>,
+    sled_id: SledUuid,
 }
 
 #[derive(Debug, Args)]
@@ -421,7 +425,7 @@ struct SiloAddRemoveArgs {
 #[derive(Debug, Args)]
 struct InventoryArgs {
     /// id of the inventory collection to use in planning
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 #[derive(Debug, Args)]
@@ -429,7 +433,7 @@ struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based
     parent_blueprint_id: Uuid,
     /// id of the inventory collection to use in planning
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 #[derive(Debug, Args)]
@@ -451,7 +455,7 @@ enum BlueprintEditCommands {
     /// add a Nexus instance to a particular sled
     AddNexus {
         /// sled on which to deploy the new instance
-        sled_id: Uuid,
+        sled_id: SledUuid,
     },
 }
 
@@ -480,7 +484,7 @@ enum CliDnsGroup {
 #[derive(Debug, Args)]
 struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     /// id of the blueprint
     blueprint_id: Uuid,
 }
@@ -516,7 +520,7 @@ struct LoadArgs {
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
-    collection_id: Option<Uuid>,
+    collection_id: Option<CollectionUuid>,
 }
 
 #[derive(Debug, Args)]
@@ -573,7 +577,7 @@ fn cmd_sled_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
-        id: TypedUuid<SledKind>,
+        id: SledUuid,
         nzpools: usize,
         subnet: String,
     }
@@ -627,8 +631,9 @@ fn cmd_sled_show(
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-    for z in &sled_resources.zpools {
-        swriteln!(s, "    {:?}", z);
+    for (zpool, disk) in &sled_resources.zpools {
+        swriteln!(s, "    {:?}", zpool);
+        swriteln!(s, "    ↳ {:?}", disk);
     }
     Ok(Some(s))
 }
@@ -639,7 +644,7 @@ fn cmd_inventory_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct InventoryRow {
-        id: Uuid,
+        id: CollectionUuid,
         nerrors: usize,
         time_done: String,
     }
@@ -675,7 +680,7 @@ fn cmd_inventory_generate(
         builder
             .found_sled_omicron_zones(
                 "fake sled agent",
-                *sled_id.as_untyped_uuid(),
+                sled_id,
                 OmicronZonesConfig {
                     generation: Generation::new(),
                     zones: vec![],
@@ -874,8 +879,10 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     sim: &ReconfiguratorSim,
-) -> Result<BTreeMap<Uuid, nexus_reconfigurator_execution::Sled>, anyhow::Error>
-{
+) -> Result<
+    BTreeMap<SledUuid, nexus_reconfigurator_execution::Sled>,
+    anyhow::Error,
+> {
     let collection = sim
         .system
         .to_collection_builder()
@@ -1149,7 +1156,7 @@ fn cmd_load(
         }
 
         let Some(inventory_sled_agent) =
-            primary_collection.sled_agents.get(sled_id.as_untyped_uuid())
+            primary_collection.sled_agents.get(&sled_id)
         else {
             swriteln!(
                 s,
@@ -1178,7 +1185,7 @@ fn cmd_load(
         );
 
         let result = sim.system.sled_full(
-            *sled_id.as_untyped_uuid(),
+            sled_id,
             sled_details.policy,
             sled_details.resources.clone(),
             inventory_sp,

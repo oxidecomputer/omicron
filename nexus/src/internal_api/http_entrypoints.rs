@@ -50,6 +50,7 @@ use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
@@ -961,7 +962,7 @@ async fn blueprint_target_set_enabled(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CollectionId {
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 /// Generates a new blueprint matching the specified inventory collection

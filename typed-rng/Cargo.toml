@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+newtype-uuid.workspace = true
 omicron-workspace-hack.workspace = true
 rand.workspace = true
 rand_core.workspace = true

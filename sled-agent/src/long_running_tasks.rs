@@ -24,7 +24,7 @@ use crate::storage_monitor::StorageMonitor;
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
-use sled_hardware::{HardwareManager, SledMode};
+use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use sled_storage::manager::{StorageHandle, StorageManager};
@@ -73,7 +73,11 @@ pub async fn spawn_all_longrunning_tasks(
 
     spawn_storage_monitor(log, storage_manager.clone());
 
-    let hardware_manager = spawn_hardware_manager(log, sled_mode).await;
+    let nongimlet_observed_disks =
+        config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
+
+    let hardware_manager =
+        spawn_hardware_manager(log, sled_mode, nongimlet_observed_disks).await;
 
     // Start monitoring for hardware changes
     let (sled_agent_started_tx, service_manager_ready_tx) =
@@ -145,6 +149,7 @@ fn spawn_storage_monitor(log: &Logger, storage_handle: StorageHandle) {
 async fn spawn_hardware_manager(
     log: &Logger,
     sled_mode: SledMode,
+    nongimlet_observed_disks: Vec<UnparsedDisk>,
 ) -> HardwareManager {
     // The `HardwareManager` does not use the the "task/handle" pattern
     // and spawns its worker task inside `HardwareManager::new`. Instead of returning
@@ -154,10 +159,10 @@ async fn spawn_hardware_manager(
     //
     // There are pros and cons to both methods, but the reason to mention it here is that
     // the handle in this case is the `HardwareManager` itself.
-    info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode);
+    info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode, "nongimlet_observed_disks" => ?nongimlet_observed_disks);
     let log = log.clone();
     tokio::task::spawn_blocking(move || {
-        HardwareManager::new(&log, sled_mode).unwrap()
+        HardwareManager::new(&log, sled_mode, nongimlet_observed_disks).unwrap()
     })
     .await
     .unwrap()
