@@ -16,6 +16,8 @@ use diesel::AsChangeset;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VnicUuid;
 use uuid::Uuid;
 
 /// The max number of interfaces that may be associated with a resource,
@@ -151,7 +153,8 @@ impl From<ServiceNetworkInterface>
 {
     fn from(nic: ServiceNetworkInterface) -> Self {
         Self {
-            id: nic.id(),
+            // TODO-cleanup use `TypedUuid` everywhere
+            id: VnicUuid::from_untyped_uuid(nic.id()),
             mac: *nic.mac,
             ip: nic.ip,
             slot: *nic.slot,

@@ -9,18 +9,19 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::ExternalIp;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceExternalIp;
 use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::VnicUuid;
 use sled_agent_client::types::OmicronZonesConfig;
 use typed_rng::TypedUuidRng;
-use uuid::Uuid;
 
 pub struct ExampleSystem {
     pub system: SystemDescription,
@@ -131,7 +132,10 @@ impl ExampleSystem {
                     input_builder
                         .add_omicron_zone_external_ip(
                             service_id,
-                            ExternalIp { id: Uuid::new_v4(), ip: ip.into() },
+                            ServiceExternalIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip,
+                            },
                         )
                         .expect("failed to add Omicron zone external IP");
                 }
@@ -140,7 +144,8 @@ impl ExampleSystem {
                         .add_omicron_zone_nic(
                             service_id,
                             ServiceNetworkInterface {
-                                id: nic.id,
+                                // TODO-cleanup use `TypedUuid` everywhere
+                                id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
                                 ip: nic.ip.into(),
                                 slot: nic.slot,
