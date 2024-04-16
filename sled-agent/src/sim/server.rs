@@ -501,18 +501,15 @@ pub async fn run_standalone_server(
     };
 
     let disks = server.sled_agent.omicron_physical_disks_list().await?;
-    let services =
-        zones.iter().map(|z| z.to_nexus_service_req(config.id)).collect();
     let mut sled_configs = BTreeMap::new();
     sled_configs.insert(config.id, SledConfig { disks, zones });
 
     let rack_init_request = NexusTypes::RackInitializationRequest {
         blueprint: build_initial_blueprint_from_sled_configs(
-            sled_configs,
+            &sled_configs,
             internal_dns_version,
         )
         .expect("failed to construct initial blueprint"),
-        services,
         physical_disks,
         zpools,
         datasets,

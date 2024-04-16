@@ -193,20 +193,6 @@ impl fmt::Display for ServiceKind {
     }
 }
 
-/// Describes a service on a sled
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ServicePutRequest {
-    pub service_id: Uuid,
-    pub sled_id: Uuid,
-    pub zone_id: Option<Uuid>,
-
-    /// Address on which a service is responding to requests.
-    pub address: SocketAddrV6,
-
-    /// Type of service being inserted.
-    pub kind: ServiceKind,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetCreateRequest {
     pub zpool_id: Uuid,
@@ -233,8 +219,6 @@ impl std::fmt::Debug for Certificate {
 pub struct RackInitializationRequest {
     /// Blueprint describing services initialized by RSS.
     pub blueprint: Blueprint,
-    /// Services on the rack which have been created by RSS.
-    pub services: Vec<ServicePutRequest>,
 
     /// "Managed" physical disks owned by the control plane
     pub physical_disks: Vec<PhysicalDiskPutRequest>,

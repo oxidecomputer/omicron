@@ -678,11 +678,16 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        // Build a Blueprint describing our service plan. This should never
-        // fail, unless we've set up an invalid plan.
-        let blueprint =
-            build_initial_blueprint_from_plan(sled_plan, service_plan)
+        // Remap our plan into an easier-to-use type...
+        let sled_configs_by_id =
+            build_sled_configs_by_id(sled_plan, service_plan)
                 .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        // ... and use that to derive the initial blueprint from our plan.
+        let blueprint = build_initial_blueprint_from_plan(
+            &sled_configs_by_id,
+            service_plan,
+        )
+        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -699,30 +704,10 @@ impl ServiceInner {
             self.log.new(o!("component" => "NexusClient")),
         );
 
-        // Ensure we can quickly look up "Sled Agent Address" -> "UUID of sled".
-        //
-        // We need the ID when passing info to Nexus.
-        let mut id_map = HashMap::new();
-        for (_, sled_request) in sled_plan.sleds.iter() {
-            id_map.insert(
-                get_sled_address(sled_request.body.subnet),
-                sled_request.body.id,
-            );
-        }
-
-        // Convert all the information we have about services and datasets into
-        // a format which can be processed by Nexus.
-        let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
+        // Convert all the information we have about datasets into a format
+        // which can be processed by Nexus.
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
-        for (addr, sled_config) in service_plan.services.iter() {
-            let sled_id = *id_map
-                .get(addr)
-                .expect("Sled address in service plan, but not sled plan");
-
-            for zone in &sled_config.zones {
-                services.push(zone.to_nexus_service_req(sled_id));
-            }
-
+        for sled_config in service_plan.services.values() {
             for zone in &sled_config.zones {
                 if let Some((dataset_name, dataset_address)) =
                     zone.dataset_name_and_address()
@@ -817,11 +802,9 @@ impl ServiceInner {
 
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
-        let physical_disks: Vec<_> = service_plan
-            .services
+        let physical_disks: Vec<_> = sled_configs_by_id
             .iter()
-            .flat_map(|(addr, config)| {
-                let sled_id = id_map.get(addr).expect("Missing sled");
+            .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
                         id: config.id,
@@ -835,11 +818,9 @@ impl ServiceInner {
             })
             .collect();
 
-        let zpools = service_plan
-            .services
+        let zpools = sled_configs_by_id
             .iter()
-            .flat_map(|(addr, config)| {
-                let sled_id = id_map.get(addr).expect("Missing sled");
+            .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::ZpoolPutRequest {
                         id: config.pool_id.into_untyped_uuid(),
@@ -852,7 +833,6 @@ impl ServiceInner {
 
         let request = NexusTypes::RackInitializationRequest {
             blueprint,
-            services,
             physical_disks,
             zpools,
             datasets,
@@ -1290,14 +1270,14 @@ impl DeployStepVersion {
     const V5_EVERYTHING: Generation = Self::V4_COCKROACHDB.next();
 }
 
-fn build_initial_blueprint_from_plan(
+// Build a map of sled ID to `SledConfig` based on the two plan types we
+// generate. This is a bit of a code smell (why doesn't the plan generate this
+// on its own if we need it?); we should be able to get rid of it when
+// we get to https://github.com/oxidecomputer/omicron/issues/5272.
+fn build_sled_configs_by_id(
     sled_plan: &SledPlan,
     service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    let internal_dns_version =
-        Generation::try_from(service_plan.dns_config.generation)
-            .context("invalid internal dns version")?;
-
+) -> anyhow::Result<BTreeMap<Uuid, SledConfig>> {
     let mut sled_configs = BTreeMap::new();
     for sled_request in sled_plan.sleds.values() {
         let sled_addr = get_sled_address(sled_request.body.subnet);
@@ -1320,26 +1300,52 @@ fn build_initial_blueprint_from_plan(
         entry.insert(sled_config.clone());
     }
 
-    Ok(build_initial_blueprint_from_sled_configs(
-        sled_configs,
+    if sled_configs.len() != service_plan.services.len() {
+        bail!(
+            "error mapping service plan to sled IDs; converted {} sled \
+             addresses into {} sled configs",
+            service_plan.services.len(),
+            sled_configs.len(),
+        );
+    }
+
+    Ok(sled_configs)
+}
+
+// Build an initial blueprint
+fn build_initial_blueprint_from_plan(
+    sled_configs_by_id: &BTreeMap<Uuid, SledConfig>,
+    service_plan: &ServicePlan,
+) -> anyhow::Result<Blueprint> {
+    let internal_dns_version =
+        Generation::try_from(service_plan.dns_config.generation)
+            .context("invalid internal dns version")?;
+
+    let blueprint = build_initial_blueprint_from_sled_configs(
+        sled_configs_by_id,
         internal_dns_version,
-    )?)
+    )?;
+
+    Ok(blueprint)
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
-    sled_configs: BTreeMap<Uuid, SledConfig>,
+    sled_configs_by_id: &BTreeMap<Uuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> Result<Blueprint, InvalidOmicronZoneType> {
     // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
     // This is separate primarily so rustfmt doesn't lose its mind.
-    let to_bp_zone_config = |z: crate::params::OmicronZoneConfig| {
+    let to_bp_zone_config = |z: &crate::params::OmicronZoneConfig| {
         // All initial zones are in-service.
         let disposition = BlueprintZoneDisposition::InService;
-        BlueprintZoneConfig::from_omicron_zone_config(z.into(), disposition)
+        BlueprintZoneConfig::from_omicron_zone_config(
+            z.clone().into(),
+            disposition,
+        )
     };
 
     let mut blueprint_disks = BTreeMap::new();
-    for (sled_id, sled_config) in &sled_configs {
+    for (sled_id, sled_config) in sled_configs_by_id {
         blueprint_disks.insert(
             SledUuid::from_untyped_uuid(*sled_id),
             BlueprintPhysicalDisksConfig {
@@ -1359,7 +1365,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     }
 
     let mut blueprint_zones = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs {
+    for (sled_id, sled_config) in sled_configs_by_id {
         let zones_config = BlueprintZonesConfig {
             // This is a bit of a hack. We only construct a blueprint after
             // completing RSS, so we need to know the final generation value
@@ -1374,12 +1380,12 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             generation: DeployStepVersion::V5_EVERYTHING,
             zones: sled_config
                 .zones
-                .into_iter()
+                .iter()
                 .map(to_bp_zone_config)
                 .collect::<Result<_, _>>()?,
         };
 
-        blueprint_zones.insert(sled_id, zones_config);
+        blueprint_zones.insert(*sled_id, zones_config);
     }
 
     Ok(Blueprint {
