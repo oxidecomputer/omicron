@@ -368,7 +368,7 @@ secrecy = "0.8.0"
 semver = { version = "1.0.22", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.115"
+serde_json = "1.0.116"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -399,7 +399,7 @@ sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "7
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sqlformat = "0.2.3"
-sqlparser = { version = "0.44.0", features = [ "visitor" ] }
+sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
