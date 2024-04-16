@@ -28,7 +28,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
@@ -286,10 +285,7 @@ pub fn blueprint_internal_dns_config(
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
                 ..
-            }) => (
-                ServiceName::Crucible(zone.id.into_untyped_uuid()),
-                address.port(),
-            ),
+            }) => (ServiceName::Crucible(zone.id), address.port()),
             BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ) => (ServiceName::CruciblePantry, address.port()),
@@ -308,7 +304,7 @@ pub fn blueprint_internal_dns_config(
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                zone.id.into_untyped_uuid(),
+                zone.id,
                 zone.underlay_address,
                 service_name,
                 port,
@@ -323,7 +319,7 @@ pub fn blueprint_internal_dns_config(
         // unwrap(): see above.
         dns_builder
             .host_zone_switch(
-                scrimlet.id.into_untyped_uuid(),
+                scrimlet.id,
                 switch_zone_ip,
                 overrides.dendrite_port(scrimlet.id),
                 overrides.mgs_port(scrimlet.id),
@@ -480,11 +476,13 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::ZpoolName;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -499,9 +497,11 @@ mod test {
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -509,9 +509,7 @@ mod test {
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -577,11 +575,19 @@ mod test {
             .zip(possible_sled_subnets)
             .map(|(sled_id, subnet)| {
                 let sled_resources = SledResources {
-                    zpools: BTreeSet::from([ZpoolName::from_str(&format!(
-                        "oxp_{}",
-                        Uuid::new_v4()
-                    ))
-                    .unwrap()]),
+                    zpools: BTreeMap::from([(
+                        ZpoolUuid::new_v4(),
+                        SledDisk {
+                            disk_identity: DiskIdentity {
+                                vendor: String::from("v"),
+                                serial: format!("s-{sled_id}"),
+                                model: String::from("m"),
+                            },
+                            disk_id: PhysicalDiskUuid::new_v4(),
+                            policy: PhysicalDiskPolicy::InService,
+                            state: PhysicalDiskState::Active,
+                        },
+                    )]),
                     subnet: Ipv6Subnet::new(subnet.network()),
                 };
                 (*sled_id, sled_resources)
@@ -1311,8 +1317,7 @@ mod test {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
         let new_zone_host = internal_dns::config::Host::for_zone(
-            new_zone_id.into_untyped_uuid(),
-            internal_dns::config::ZoneVariant::Other,
+            internal_dns::config::Zone::Other(new_zone_id),
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));
 

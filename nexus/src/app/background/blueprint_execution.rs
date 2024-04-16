@@ -121,12 +121,15 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
+        blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneType, BlueprintZonesConfig,
     };
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SledKind;
+    use omicron_uuid_kinds::TypedUuid;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -140,6 +143,10 @@ mod test {
 
     fn create_blueprint(
         blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        blueprint_disks: BTreeMap<
+            TypedUuid<SledKind>,
+            BlueprintPhysicalDisksConfig,
+        >,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
@@ -152,6 +159,7 @@ mod test {
             Blueprint {
                 id,
                 blueprint_zones,
+                blueprint_disks,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_version,
                 external_dns_version: dns_version,
@@ -227,7 +235,11 @@ mod test {
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
-        let blueprint = Arc::new(create_blueprint(BTreeMap::new(), generation));
+        let blueprint = Arc::new(create_blueprint(
+            BTreeMap::new(),
+            BTreeMap::new(),
+            generation,
+        ));
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
@@ -272,6 +284,7 @@ mod test {
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
+            BTreeMap::new(),
             generation,
         );
 

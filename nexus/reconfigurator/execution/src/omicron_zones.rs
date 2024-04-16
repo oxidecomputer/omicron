@@ -124,6 +124,7 @@ mod test {
                     .into_iter()
                     .map(|(typed_id, z)| (typed_id.into_untyped_uuid(), z))
                     .collect(),
+                blueprint_disks: BTreeMap::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),

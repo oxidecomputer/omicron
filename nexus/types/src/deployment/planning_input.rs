@@ -5,40 +5,93 @@
 //! Types describing inputs the Reconfigurator needs to plan and produce new
 //! blueprints.
 
+use crate::external_api::views::PhysicalDiskPolicy;
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use crate::inventory::ZpoolName;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
+
+/// Describes a single disk already managed by the sled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SledDisk {
+    pub disk_identity: DiskIdentity,
+    pub disk_id: PhysicalDiskUuid,
+    pub policy: PhysicalDiskPolicy,
+    pub state: PhysicalDiskState,
+}
+
+/// Filters that apply to disks.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DiskFilter {
+    /// All disks
+    All,
+
+    /// All disks which are in-service.
+    InService,
+}
+
+impl DiskFilter {
+    fn matches_policy_and_state(
+        self,
+        policy: PhysicalDiskPolicy,
+        state: PhysicalDiskState,
+    ) -> bool {
+        match self {
+            DiskFilter::All => true,
+            DiskFilter::InService => match (policy, state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+}
 
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    /// zpools on this sled
+    /// zpools (and their backing disks) on this sled
     ///
     /// (used to allocate storage for control plane zones with persistent
     /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
+    pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
 
     /// the IPv6 subnet of this sled on the underlay network
     ///
     /// (implicitly specifies the whole range of addresses that the planner can
     /// use for control plane components)
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+impl SledResources {
+    pub fn all_disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = (&ZpoolUuid, &SledDisk)> + '_ {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some((zpool, disk))
+        })
+    }
 }
 
 /// External IP allocated to a service

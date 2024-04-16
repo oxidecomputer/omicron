@@ -628,8 +628,9 @@ fn cmd_sled_show(
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-    for z in &sled_resources.zpools {
-        swriteln!(s, "    {:?}", z);
+    for (zpool, disk) in &sled_resources.zpools {
+        swriteln!(s, "    {:?}", zpool);
+        swriteln!(s, "    ↳ {:?}", disk);
     }
     Ok(Some(s))
 }

@@ -92,8 +92,8 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneConfig, BlueprintZoneDisposition,
-    BlueprintZonesConfig, InvalidOmicronZoneType,
+    Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZonesConfig, InvalidOmicronZoneType,
 };
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -104,6 +104,7 @@ use omicron_common::backoff::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -1354,6 +1355,26 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         }
     };
 
+    let mut blueprint_disks = BTreeMap::new();
+    for (sled_id, sled_config) in &sled_configs {
+        blueprint_disks.insert(
+            SledUuid::from_untyped_uuid(*sled_id),
+            BlueprintPhysicalDisksConfig {
+                generation: sled_config.disks.generation,
+                disks: sled_config
+                    .disks
+                    .disks
+                    .iter()
+                    .map(|d| SledAgentTypes::OmicronPhysicalDiskConfig {
+                        identity: d.identity.clone(),
+                        id: d.id,
+                        pool_id: d.pool_id,
+                    })
+                    .collect(),
+            },
+        );
+    }
+
     let mut blueprint_zones = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs {
         let zones_config = BlueprintZonesConfig {
@@ -1381,6 +1402,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
+        blueprint_disks,
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
@@ -1495,11 +1517,11 @@ mod test {
         api::external::{ByteCount, Generation},
         disk::DiskIdentity,
     };
+    use omicron_uuid_kinds::{GenericUuid, SledUuid};
     use sled_agent_client::types as SledAgentTypes;
-    use uuid::Uuid;
 
     fn make_sled_info(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1509,7 +1531,7 @@ mod test {
             subnet,
             sled_agent_address,
             SledAgentTypes::Inventory {
-                sled_id,
+                sled_id: sled_id.into_untyped_uuid(),
                 sled_agent_address: sled_agent_address.to_string(),
                 sled_role: SledAgentTypes::SledRole::Scrimlet,
                 baseboard: SledAgentTypes::Baseboard::Unknown,
@@ -1537,14 +1559,14 @@ mod test {
         let rss_config = crate::bootstrap::params::test_config();
         let fake_sleds = vec![
             make_sled_info(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),

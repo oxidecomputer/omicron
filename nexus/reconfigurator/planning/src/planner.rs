@@ -93,9 +93,27 @@ impl<'a> Planner<'a> {
         // is fine.
         let mut sleds_waiting_for_ntp_zones = BTreeSet::new();
 
-        for (sled_id, sled_info) in
+        for (sled_id, sled_resources) in
             self.input.all_sled_resources(SledFilter::InService)
         {
+            // First, we need to ensure that sleds are using their expected
+            // disks. This is necessary before we can allocate any zones.
+            if self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+                == Ensure::Added
+            {
+                info!(
+                    &self.log,
+                    "altered physical disks";
+                    "sled_id" => %sled_id
+                );
+                self.blueprint
+                    .comment(&format!("sled {}: altered disks", sled_id));
+
+                // Note that this doesn't actually need to short-circuit the
+                // rest of the blueprint planning, as long as during execution
+                // we send this request first.
+            }
+
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
@@ -152,17 +170,17 @@ impl<'a> Planner<'a> {
 
             // Every zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
-            for zpool_name in &sled_info.zpools {
+            for zpool_id in sled_resources.zpools.keys() {
                 if self
                     .blueprint
-                    .sled_ensure_zone_crucible(sled_id, zpool_name.clone())?
+                    .sled_ensure_zone_crucible(sled_id, *zpool_id)?
                     == Ensure::Added
                 {
                     info!(
                         &self.log,
                         "found sled zpool missing Crucible zone (will add one)";
                         "sled_id" => ?sled_id,
-                        "zpool_name" => ?zpool_name,
+                        "zpool_id" => ?zpool_id,
                     );
                     ncrucibles_added += 1;
                 }

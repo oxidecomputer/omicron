@@ -24,6 +24,7 @@ use std::net::SocketAddrV6;
 
 mod datasets;
 mod dns;
+mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
 mod resource_allocation;
@@ -128,6 +129,14 @@ where
             (SledUuid::from_untyped_uuid(db_sled.id()), Sled::from(db_sled))
         })
         .collect();
+
+    omicron_physical_disks::deploy_disks(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_disks,
+    )
+    .await?;
+
     omicron_zones::deploy_zones(
         &opctx,
         &sleds_by_id,
