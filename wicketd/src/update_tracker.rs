@@ -2159,8 +2159,8 @@ impl UpdateContext {
                         if let Some(progress) = progress {
                             cx.send_progress(
                                 StepProgress::with_current_and_total(
-                                    progress.current as u64,
-                                    progress.total as u64,
+                                    u64::from(progress.current),
+                                    u64::from(progress.total),
                                     // The actual units here depend on the
                                     // component being updated and are a bit
                                     // hard to explain succinctly:
@@ -2194,8 +2194,8 @@ impl UpdateContext {
                         ComponentUpdateStage::InProgress => {
                             cx.send_progress(
                                 StepProgress::with_current_and_total(
-                                    bytes_received as u64,
-                                    total_bytes as u64,
+                                    u64::from(bytes_received),
+                                    u64::from(total_bytes),
                                     ProgressUnits::BYTES,
                                     Default::default(),
                                 ),

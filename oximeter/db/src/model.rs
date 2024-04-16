@@ -64,7 +64,7 @@ impl From<u64> for DbBool {
 
 impl From<bool> for DbBool {
     fn from(b: bool) -> Self {
-        DbBool { inner: b as _ }
+        DbBool { inner: u8::from(b) }
     }
 }
 

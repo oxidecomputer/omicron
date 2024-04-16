@@ -857,7 +857,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Create a disk at just over half the capacity of what DiskTest allocates
-    let gibibytes: u64 = DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 / 2 + 1;
+    let gibibytes: u64 = u64::from(DiskTest::DEFAULT_ZPOOL_SIZE_GIB) / 2 + 1;
     let disk_size =
         ByteCount::try_from(gibibytes * 1024 * 1024 * 1024).unwrap();
     let base_disk_name: Name = "base-disk".parse().unwrap();
