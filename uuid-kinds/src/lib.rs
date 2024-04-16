@@ -52,6 +52,7 @@ impl_typed_uuid_kind! {
     Collection => "collection",
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
+    ExternalIp => "external_ip",
     LoopbackAddress => "loopback_address",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",

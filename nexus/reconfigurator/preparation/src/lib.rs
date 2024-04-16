@@ -33,6 +33,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -129,12 +130,11 @@ impl PlanningInputFromDb<'_> {
             };
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
             builder
-                .add_omicron_zone_external_ip(
+                .add_omicron_zone_external_ip_network(
                     zone_id,
-                    nexus_types::deployment::ExternalIp {
-                        id: external_ip_row.id,
-                        ip: external_ip_row.ip,
-                    },
+                    // TODO-cleanup use `TypedUuid` everywhere
+                    ExternalIpUuid::from_untyped_uuid(external_ip_row.id),
+                    external_ip_row.ip,
                 )
                 .map_err(|e| {
                     Error::internal_error(&format!(

@@ -39,11 +39,11 @@ use uuid::Uuid;
 mod planning_input;
 
 pub use planning_input::DiskFilter;
-pub use planning_input::ExternalIp;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;
 pub use planning_input::Policy;
+pub use planning_input::ServiceExternalIp;
 pub use planning_input::ServiceNetworkInterface;
 pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
