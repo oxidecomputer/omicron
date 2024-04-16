@@ -263,6 +263,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
             http::header::CACHE_CONTROL,
             "max-age=31536000, immutable",
         )
+        .expect_response_header(http::header::CONTENT_LENGTH, 11)
         .execute()
         .await
         .expect("failed to get existing file");
@@ -282,6 +283,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
         http::header::CACHE_CONTROL,
         "max-age=31536000, immutable",
     )
+    .expect_response_header(http::header::CONTENT_LENGTH, 10)
     .execute()
     .await
     .expect("failed to get existing file");
@@ -305,6 +307,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
             http::header::CACHE_CONTROL,
             "max-age=31536000, immutable",
         )
+        .expect_response_header(http::header::CONTENT_LENGTH, 11)
         .execute()
         .await
         .expect("failed to get existing file");
@@ -319,6 +322,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::ACCEPT_ENCODING, "gzip")
             .expect_console_asset()
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .expect_response_header(http::header::CONTENT_LENGTH, 16)
             .execute()
             .await
             .expect("failed to get existing file");
@@ -335,6 +339,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
                 http::header::CACHE_CONTROL,
                 "max-age=31536000, immutable",
             )
+            .expect_response_header(http::header::CONTENT_LENGTH, 33)
             .execute()
             .await
             .expect("failed to get existing file");
@@ -345,6 +350,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     let resp =
         RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
             .expect_console_asset()
+            .expect_response_header(http::header::CONTENT_LENGTH, 28)
             .execute()
             .await
             .expect("failed to get existing file");
