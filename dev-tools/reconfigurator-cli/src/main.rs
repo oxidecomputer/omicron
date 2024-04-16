@@ -21,9 +21,9 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ServiceExternalIp;
-use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -155,7 +155,7 @@ impl ReconfiguratorSim {
         {
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
             if let Ok(Some(ip)) = zone.zone_type.external_ip() {
-                let external_ip = ServiceExternalIp {
+                let external_ip = OmicronZoneExternalIp {
                     id: *self
                         .external_ips
                         .borrow_mut()
@@ -168,7 +168,7 @@ impl ReconfiguratorSim {
                     .context("adding omicron zone external IP")?;
             }
             if let Some(nic) = zone.zone_type.service_vnic() {
-                let nic = ServiceNetworkInterface {
+                let nic = OmicronZoneNic {
                     id: nic.id,
                     mac: nic.mac,
                     ip: nic.ip.into(),

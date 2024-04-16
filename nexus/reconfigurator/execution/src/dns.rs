@@ -1198,8 +1198,7 @@ mod test {
         let (_blueprint_target, blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
-            .expect("failed to read current target blueprint")
-            .expect("no target blueprint set");
+            .expect("failed to read current target blueprint");
         eprintln!("blueprint: {}", blueprint.display());
 
         // Now, execute the initial blueprint.

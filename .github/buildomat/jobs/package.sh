@@ -37,7 +37,7 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="7.0.0-0.ci+git${COMMIT:0:11}"
+VERSION="8.0.0-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp

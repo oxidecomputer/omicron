@@ -9,9 +9,9 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ServiceExternalIp;
-use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
@@ -131,7 +131,7 @@ impl ExampleSystem {
                     input_builder
                         .add_omicron_zone_external_ip(
                             service_id,
-                            ServiceExternalIp {
+                            OmicronZoneExternalIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip,
                             },
@@ -142,7 +142,7 @@ impl ExampleSystem {
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
-                            ServiceNetworkInterface {
+                            OmicronZoneNic {
                                 id: nic.id,
                                 mac: nic.mac,
                                 ip: nic.ip.into(),
