@@ -107,6 +107,8 @@ impl DatastoreAttachTargetConfig<Disk> for Instance {
 }
 
 impl DatastoreAttachTargetConfig<ExternalIp> for Instance {
+    // TODO-cleanup ideally this would be an ExternalIpUuid, haven't quite
+    // figured out how to make that work
     type Id = Uuid;
 
     type CollectionIdColumn = instance::dsl::id;

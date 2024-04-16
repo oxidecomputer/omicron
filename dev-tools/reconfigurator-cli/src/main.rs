@@ -21,9 +21,9 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -33,6 +33,7 @@ use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -67,7 +68,7 @@ struct ReconfiguratorSim {
     /// CRDB - they're not part of the zone config sent from Reconfigurator to
     /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
     /// we need.
-    external_ips: RefCell<IndexMap<IpAddr, Uuid>>,
+    external_ips: RefCell<IndexMap<IpAddr, ExternalIpUuid>>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -154,20 +155,20 @@ impl ReconfiguratorSim {
         {
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
             if let Ok(Some(ip)) = zone.zone_type.external_ip() {
-                let external_ip = ExternalIp {
+                let external_ip = OmicronZoneExternalIp {
                     id: *self
                         .external_ips
                         .borrow_mut()
                         .entry(ip)
-                        .or_insert_with(Uuid::new_v4),
-                    ip: ip.into(),
+                        .or_insert_with(ExternalIpUuid::new_v4),
+                    ip,
                 };
                 builder
                     .add_omicron_zone_external_ip(zone_id, external_ip)
                     .context("adding omicron zone external IP")?;
             }
             if let Some(nic) = zone.zone_type.service_vnic() {
-                let nic = ServiceNetworkInterface {
+                let nic = OmicronZoneNic {
                     id: nic.id,
                     mac: nic.mac,
                     ip: nic.ip.into(),
