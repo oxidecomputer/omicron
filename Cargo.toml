@@ -170,7 +170,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.14"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
-async-trait = "0.1.79"
+async-trait = "0.1.80"
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -216,7 +216,7 @@ dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
-either = "1.10.0"
+either = "1.11.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
@@ -294,7 +294,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.46"
-num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
+num = { version = "0.4.2", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
@@ -335,7 +335,7 @@ postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.17", features = ["verbatim"] }
+prettyplease = { version = "0.2.19", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -347,7 +347,7 @@ quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
 rand_seeder = "0.2.3"
-ratatui = "0.26.1"
+ratatui = "0.26.2"
 rayon = "1.10"
 rcgen = "0.12.1"
 reedline = "0.31.0"
@@ -456,7 +456,7 @@ zone = { version = "0.3", default-features = false, features = ["async", "sync"]
 # the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
-newtype-uuid = { version = "1.0.1", default-features = false }
+newtype-uuid = { version = "1.1.0", default-features = false }
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under

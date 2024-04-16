@@ -13,7 +13,7 @@ use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::config::{Host, ZoneVariant};
+use internal_dns::config::{Host, Zone};
 use internal_dns::ServiceName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
@@ -29,7 +29,7 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -396,7 +396,7 @@ impl Plan {
             let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
             let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
 
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -409,7 +409,8 @@ impl Plan {
                 sled.alloc_from_u2_zpool(DatasetKind::InternalDns)?;
 
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::InternalDns {
                     dataset: OmicronZoneDataset {
@@ -430,7 +431,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -445,7 +446,8 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::CockroachDb)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::CockroachDb {
                     dataset: OmicronZoneDataset {
@@ -461,7 +463,7 @@ impl Plan {
         // server IP addresses given to us at RSS-time.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         loop {
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let Some((nic, external_ip)) = svc_port_builder.next_dns(id) else {
                 break;
             };
@@ -488,7 +490,8 @@ impl Plan {
             let dataset_name = sled.alloc_from_u2_zpool(dataset_kind)?;
 
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: *http_address.ip(),
                 zone_type: OmicronZoneType::ExternalDns {
                     dataset: OmicronZoneDataset {
@@ -508,7 +511,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             dns_builder
                 .host_zone_with_one_backend(
@@ -520,7 +523,8 @@ impl Plan {
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type: OmicronZoneType::Nexus {
                     internal_address: SocketAddrV6::new(
@@ -551,7 +555,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             dns_builder
                 .host_zone_with_one_backend(
@@ -562,7 +566,8 @@ impl Plan {
                 )
                 .unwrap();
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type: OmicronZoneType::Oximeter {
                     address: SocketAddrV6::new(
@@ -583,7 +588,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -598,7 +603,8 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::Clickhouse)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::Clickhouse {
                     address,
@@ -619,7 +625,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -634,7 +640,8 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::ClickhouseKeeper {
                     address,
@@ -655,7 +662,7 @@ impl Plan {
             };
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -665,7 +672,8 @@ impl Plan {
                 )
                 .unwrap();
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type: OmicronZoneType::CruciblePantry {
                     address: SocketAddrV6::new(address, port, 0, 0),
@@ -680,7 +688,7 @@ impl Plan {
                 let ip = sled.addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CRUCIBLE_PORT;
                 let address = SocketAddrV6::new(ip, port, 0, 0);
-                let id = Uuid::new_v4();
+                let id = OmicronZoneUuid::new_v4();
                 dns_builder
                     .host_zone_with_one_backend(
                         id,
@@ -691,7 +699,8 @@ impl Plan {
                     .unwrap();
 
                 sled.request.zones.push(OmicronZoneConfig {
-                    id,
+                    // TODO-cleanup use TypedUuid everywhere
+                    id: id.into_untyped_uuid(),
                     underlay_address: ip,
                     zone_type: OmicronZoneType::Crucible {
                         address,
@@ -706,13 +715,13 @@ impl Plan {
         // network.
         let mut boundary_ntp_servers = vec![];
         for (idx, sled) in sled_info.iter_mut().enumerate() {
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
                 boundary_ntp_servers
-                    .push(Host::for_zone(id, ZoneVariant::Other).fqdn());
+                    .push(Host::for_zone(Zone::Other(id)).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
                 (
                     OmicronZoneType::BoundaryNtp {
@@ -742,7 +751,8 @@ impl Plan {
                 .unwrap();
 
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type,
             });
@@ -776,7 +786,8 @@ impl Plan {
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            sled_request.body.id,
+                            // TODO-cleanup use TypedUuid everywhere
+                            SledUuid::from_untyped_uuid(sled_request.body.id),
                             subnet,
                             sled_address,
                             inventory,
@@ -828,7 +839,7 @@ impl AddressBumpAllocator {
 /// Wraps up the information used to allocate components to a Sled
 pub struct SledInfo {
     /// unique id for the sled agent
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     /// the sled's unique IPv6 subnet
     subnet: Ipv6Subnet<SLED_PREFIX>,
     /// the address of the Sled Agent on the sled's subnet
@@ -850,7 +861,7 @@ pub struct SledInfo {
 
 impl SledInfo {
     pub fn new(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
         inventory: SledAgentTypes::Inventory,
@@ -1010,7 +1021,10 @@ impl ServicePortBuilder {
         mac
     }
 
-    fn next_dns(&mut self, svc_id: Uuid) -> Option<(NetworkInterface, IpAddr)> {
+    fn next_dns(
+        &mut self,
+        svc_id: OmicronZoneUuid,
+    ) -> Option<(NetworkInterface, IpAddr)> {
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET,
         };
@@ -1029,7 +1043,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service { id: svc_id },
+            kind: NetworkInterfaceKind::Service {
+                // TODO-cleanup use TypedUuid everywhere
+                id: svc_id.into_untyped_uuid(),
+            },
             name: format!("external-dns-{svc_id}").parse().unwrap(),
             ip,
             mac: self.random_mac(),
@@ -1044,7 +1061,7 @@ impl ServicePortBuilder {
 
     fn next_nexus(
         &mut self,
-        svc_id: Uuid,
+        svc_id: OmicronZoneUuid,
     ) -> Result<(NetworkInterface, IpAddr), PlanError> {
         use omicron_common::address::{
             NEXUS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV6_SUBNET,
@@ -1066,7 +1083,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service { id: svc_id },
+            kind: NetworkInterfaceKind::Service {
+                // TODO-cleanup use TypedUuid everywhere
+                id: svc_id.into_untyped_uuid(),
+            },
             name: format!("nexus-{svc_id}").parse().unwrap(),
             ip,
             mac: self.random_mac(),
@@ -1081,7 +1101,7 @@ impl ServicePortBuilder {
 
     fn next_snat(
         &mut self,
-        svc_id: Uuid,
+        svc_id: OmicronZoneUuid,
     ) -> Result<(NetworkInterface, SourceNatConfig), PlanError> {
         use omicron_common::address::{
             NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
@@ -1113,7 +1133,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service { id: svc_id },
+            kind: NetworkInterfaceKind::Service {
+                // TODO-cleanup use TypedUuid everywhere
+                id: svc_id.into_untyped_uuid(),
+            },
             name: format!("ntp-{svc_id}").parse().unwrap(),
             ip,
             mac: self.random_mac(),
@@ -1242,7 +1265,9 @@ mod tests {
 
         // We should only get back the 5 DNS IPs we specified.
         let mut svp_dns_ips = Vec::new();
-        while let Some((_interface, ip)) = svp.next_dns(Uuid::new_v4()) {
+        while let Some((_interface, ip)) =
+            svp.next_dns(OmicronZoneUuid::new_v4())
+        {
             svp_dns_ips.push(ip.to_string());
         }
         assert_eq!(svp_dns_ips, dns_ips);

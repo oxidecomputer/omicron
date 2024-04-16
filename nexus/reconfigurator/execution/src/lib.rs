@@ -14,15 +14,17 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use overridables::Overridables;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 mod datasets;
 mod dns;
+mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
 mod resource_allocation;
@@ -33,14 +35,14 @@ pub use dns::blueprint_nexus_external_ips;
 pub use dns::silo_dns_name;
 
 pub struct Sled {
-    id: Uuid,
+    id: SledUuid,
     sled_agent_address: SocketAddrV6,
     is_scrimlet: bool,
 }
 
 impl Sled {
     pub fn new(
-        id: Uuid,
+        id: SledUuid,
         sled_agent_address: SocketAddrV6,
         is_scrimlet: bool,
     ) -> Sled {
@@ -55,7 +57,7 @@ impl Sled {
 impl From<nexus_db_model::Sled> for Sled {
     fn from(value: nexus_db_model::Sled) -> Self {
         Sled {
-            id: value.id(),
+            id: SledUuid::from_untyped_uuid(value.id()),
             sled_agent_address: value.address(),
             is_scrimlet: value.is_scrimlet(),
         }
@@ -117,14 +119,24 @@ where
     .await
     .map_err(|err| vec![err])?;
 
-    let sleds_by_id: BTreeMap<Uuid, _> = datastore
+    let sleds_by_id: BTreeMap<SledUuid, _> = datastore
         .sled_list_all_batched(&opctx)
         .await
         .context("listing all sleds")
         .map_err(|e| vec![e])?
         .into_iter()
-        .map(|db_sled| (db_sled.id(), Sled::from(db_sled)))
+        .map(|db_sled| {
+            (SledUuid::from_untyped_uuid(db_sled.id()), Sled::from(db_sled))
+        })
         .collect();
+
+    omicron_physical_disks::deploy_disks(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_disks,
+    )
+    .await?;
+
     omicron_zones::deploy_zones(
         &opctx,
         &sleds_by_id,

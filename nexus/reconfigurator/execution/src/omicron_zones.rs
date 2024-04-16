@@ -12,6 +12,8 @@ use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -21,12 +23,14 @@ use uuid::Uuid;
 /// corresponding sleds
 pub(crate) async fn deploy_zones(
     opctx: &OpContext,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
-            let db_sled = match sleds_by_id.get(sled_id) {
+            let db_sled = match sleds_by_id
+                .get(&SledUuid::from_untyped_uuid(*sled_id))
+            {
                 Some(sled) => sled,
                 None => {
                     let err = anyhow!("sled not found in db list: {}", sled_id);
@@ -36,7 +40,7 @@ pub(crate) async fn deploy_zones(
             };
 
             let client = nexus_networking::sled_client_from_address(
-                *sled_id,
+                sled_id.into_untyped_uuid(),
                 db_sled.sled_agent_address,
                 &opctx.log,
             );
@@ -94,6 +98,7 @@ mod test {
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     };
     use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::{GenericUuid, SledUuid};
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -102,7 +107,7 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn create_blueprint(
-        blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -113,7 +118,11 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones,
+                blueprint_zones: blueprint_zones
+                    .into_iter()
+                    .map(|(typed_id, z)| (typed_id.into_untyped_uuid(), z))
+                    .collect(),
+                blueprint_disks: BTreeMap::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
@@ -137,9 +146,9 @@ mod test {
         // sleds to CRDB.
         let mut s1 = httptest::Server::run();
         let mut s2 = httptest::Server::run();
-        let sled_id1 = Uuid::new_v4();
-        let sled_id2 = Uuid::new_v4();
-        let sleds_by_id: BTreeMap<Uuid, Sled> =
+        let sled_id1 = SledUuid::new_v4();
+        let sled_id2 = SledUuid::new_v4();
+        let sleds_by_id: BTreeMap<SledUuid, Sled> =
             [(sled_id1, &s1), (sled_id2, &s2)]
                 .into_iter()
                 .map(|(sled_id, server)| {

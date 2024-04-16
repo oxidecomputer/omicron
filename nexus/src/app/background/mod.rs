@@ -18,6 +18,7 @@ mod metrics_producer_gc;
 mod nat_cleanup;
 mod networking;
 mod phantom_disks;
+mod physical_disk_adoption;
 mod region_replacement;
 mod status;
 mod sync_service_zone_nat;

@@ -150,6 +150,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::types::OmicronZoneDataset;
     use uuid::Uuid;
@@ -178,7 +179,7 @@ mod tests {
         let rack_id = Uuid::new_v4();
         for (&sled_id, config) in &collection.omicron_zones {
             let sled = SledUpdate::new(
-                sled_id,
+                sled_id.into_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
                 SledBaseboard {
                     serial_number: format!("test-{sled_id}"),
@@ -205,11 +206,11 @@ mod tests {
                     dataset.pool_name.parse().expect("invalid zpool name");
                 let zpool = Zpool::new(
                     zpool_name.id().into_untyped_uuid(),
-                    sled_id,
+                    sled_id.into_untyped_uuid(),
                     Uuid::new_v4(), // physical_disk_id
                 );
                 datastore
-                    .zpool_upsert(opctx, zpool)
+                    .zpool_insert(opctx, zpool)
                     .await
                     .expect("failed to upsert zpool");
             }
@@ -274,11 +275,11 @@ mod tests {
         for &sled_id in collection.omicron_zones.keys().take(1) {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
-                sled_id,
+                sled_id.into_untyped_uuid(),
                 Uuid::new_v4(), // physical_disk_id
             );
             datastore
-                .zpool_upsert(opctx, zpool)
+                .zpool_insert(opctx, zpool)
                 .await
                 .expect("failed to upsert zpool");
         }
