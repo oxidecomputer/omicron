@@ -203,7 +203,8 @@ mod test {
     use nexus_inventory::SledAgentEnumerator;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
-    use omicron_test_utils::dev::poll;
+    use omicron_uuid_kinds::CollectionUuid;
+    use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::num::NonZeroU32;
@@ -223,49 +224,15 @@ mod test {
             datastore.clone(),
         );
 
-        // Nexus starts the very background task that we're also testing
-        // manually here. As a result, we should find a collection in the
-        // database before too long. Wait for it so that after it appears, we
-        // can assume the rest of the collections came from the instance that
-        // we're testing.
-        //
-        // This test setup also contains 2 sled-agents. Each of those
-        // sled-agents will upsert themselves via nexus, which will trigger
-        // another collection.
-        //
-        // Therefore we would expect to have to wait for a total of 3
-        // collections to appear before we run manual activations.
-        // TODO: Why then are we only seeing two collections?
-
-        let initial_activations = 2;
-        let mut last_collections =
-            poll::wait_for_condition::<_, anyhow::Error, _, _>(
-                || async {
-                    let collections = datastore
-                        .inventory_collections()
-                        .await
-                        .map_err(poll::CondCheckError::Failed)?;
-                    if collections.len() != initial_activations {
-                        Err(poll::CondCheckError::NotYet)
-                    } else {
-                        Ok(collections)
-                    }
-                },
-                &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(15),
-            )
-            .await
-            .expect("background task did not populate initial collection");
-
         let resolver = internal_dns::resolver::Resolver::new_from_addrs(
             cptestctx.logctx.log.clone(),
             &[cptestctx.internal_dns.dns_server.local_address()],
         )
         .unwrap();
 
-        // Now we'll create our own copy of the background task and activate it
-        // a bunch and make sure that it always creates a new collection and
-        // does not allow a backlog to accumulate.
+        // Create our own copy of the background task and activate it a bunch
+        // and make sure that it always creates a new collection and does not
+        // allow a backlog to accumulate.
         let nkeep = 3;
         let mut task = InventoryCollector::new(
             datastore.clone(),
@@ -275,28 +242,60 @@ mod test {
             false,
         );
         let nkeep = usize::try_from(nkeep).unwrap();
-        for i in 0..10 {
+        let mut all_our_collection_ids = Vec::new();
+        for i in 0..20 {
             let _ = task.activate(&opctx).await;
             let collections = datastore.inventory_collections().await.unwrap();
-            println!(
-                "iter {}: last = {:?}, current = {:?}",
-                i, last_collections, collections
-            );
 
-            let expected_from_last: Vec<_> = if last_collections.len() <= nkeep
-            {
-                last_collections
-            } else {
-                last_collections.into_iter().skip(1).collect()
-            };
-            let expected_from_current: Vec<_> =
-                collections.iter().rev().skip(1).rev().cloned().collect();
-            assert_eq!(expected_from_last, expected_from_current);
-            assert_eq!(
-                collections.len(),
-                std::cmp::min(i + initial_activations + 1, nkeep + 1)
+            // Nexus is creating inventory collections concurrently with us,
+            // so our expectations here have to be flexible to account for the
+            // fact that there might be collections other than the ones we've
+            // activated interspersed with the ones we care about.
+            let num_collections = collections.len();
+
+            // We should have at least one collection (the one we just
+            // activated).
+            assert!(num_collections > 0);
+
+            // Regardless of the activation source, we should have at
+            // most `nkeep + 1` collections.
+            assert!(num_collections <= nkeep + 1);
+
+            // Filter down to just the collections we activated. (This could be
+            // empty if Nexus shoved several collections in!)
+            let our_collections = collections
+                .into_iter()
+                .filter(|c| c.collector == "me")
+                .map(|c| CollectionUuid::from(c.id))
+                .collect::<Vec<_>>();
+
+            // If we have no collections, we have nothing else to check; Nexus
+            // has pushed us out.
+            if our_collections.is_empty() {
+                println!(
+                    "iter {i}: no test collections \
+                    ({num_collections} Nexus collections)",
+                );
+                continue;
+            }
+
+            // The most recent collection should be new.
+            let new_collection_id = our_collections.last().unwrap();
+            assert!(!all_our_collection_ids.contains(new_collection_id));
+            all_our_collection_ids.push(*new_collection_id);
+
+            // Push this onto the collections we've seen, then assert that the
+            // tail of all IDs we've seen matches the ones we saw in this
+            // iteration (i.e., we're pushing out old collections in order).
+            println!(
+                "iter {i}: saw {our_collections:?}; \
+                 should match tail of {all_our_collection_ids:?}"
             );
-            last_collections = collections;
+            assert_eq!(
+                all_our_collection_ids
+                    [all_our_collection_ids.len() - our_collections.len()..],
+                our_collections
+            );
         }
 
         // Create a disabled task and make sure that does nothing.
@@ -307,10 +306,27 @@ mod test {
             3,
             true,
         );
-        let previous = datastore.inventory_collections().await.unwrap();
         let _ = task.activate(&opctx).await;
-        let latest = datastore.inventory_collections().await.unwrap();
-        assert_eq!(previous, latest);
+
+        // It's possible that Nexus is concurrently running with us still, so
+        // we'll activate this task and ensure that:
+        //
+        // (a) at least one of the collections is from `"me"` above, and
+        // (b) there is no collection from `"disabled"`
+        //
+        // This is technically still racy if Nexus manages to collect `nkeep +
+        // 1` collections in between the loop above and this check, but we don't
+        // expect that to be the case.
+        let latest_collectors = datastore
+            .inventory_collections()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.collector)
+            .collect::<BTreeSet<_>>();
+        println!("latest_collectors: {latest_collectors:?}");
+        assert!(latest_collectors.contains("me"));
+        assert!(!latest_collectors.contains("disabled"));
     }
 
     #[nexus_test(server = crate::Server)]

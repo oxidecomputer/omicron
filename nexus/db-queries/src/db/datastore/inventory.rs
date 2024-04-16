@@ -2067,13 +2067,13 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// This does not paginate.
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<CollectionUuid>>>;
+    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<CollectionUuid>>> {
+    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()
@@ -2085,17 +2085,14 @@ impl DataStoreInventoryTest for DataStore {
                     .context("failed to allow table scan")?;
 
                 use db::schema::inv_collection::dsl;
-                let uuids = dsl::inv_collection
-                    .select(dsl::id)
+                let collections = dsl::inv_collection
+                    .select(InvCollection::as_select())
                     .order_by(dsl::time_started)
-                    .load_async::<Uuid>(&conn)
+                    .load_async(&conn)
                     .await
                     .context("failed to list collections")?;
 
-                Ok(uuids
-                    .into_iter()
-                    .map(CollectionUuid::from_untyped_uuid)
-                    .collect())
+                Ok(collections)
             })
             .await
         }
