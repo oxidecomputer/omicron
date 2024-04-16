@@ -213,21 +213,6 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
-    /// Record a list of header names allowed in the response
-    ///
-    /// If this function is used, then [`Self::execute()`] will check each header in
-    /// the response against this list and raise an error if a header name is
-    /// found that's not in this list.
-    pub fn expect_allowed_headers<
-        I: IntoIterator<Item = http::header::HeaderName>,
-    >(
-        mut self,
-        allowed_headers: I,
-    ) -> Self {
-        self.allowed_headers = Some(allowed_headers.into_iter().collect());
-        self
-    }
-
     /// Add header and value to check for at execution time
     ///
     /// Behaves like header() rather than expect_allowed_headers() in that it
