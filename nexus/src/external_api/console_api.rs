@@ -734,13 +734,14 @@ fn with_gz_ext(path: &Utf8Path) -> Utf8PathBuf {
 // Define header values as const so that `HeaderValue::from_static` is given the
 // opportunity to panic at compile time
 static ALLOWED_EXTENSIONS: Lazy<HashMap<&str, HeaderValue>> = {
-    const CONTENT_TYPES: [(&str, HeaderValue); 9] = [
+    const CONTENT_TYPES: [(&str, HeaderValue); 10] = [
         ("css", HeaderValue::from_static("text/css")),
         ("html", HeaderValue::from_static("text/html; charset=utf-8")),
         ("js", HeaderValue::from_static("text/javascript")),
         ("map", HeaderValue::from_static("application/json")),
         ("png", HeaderValue::from_static("image/png")),
         ("svg", HeaderValue::from_static("image/svg+xml")),
+        ("txt", HeaderValue::from_static("text/plain; charset=utf-8")),
         ("webp", HeaderValue::from_static("image/webp")),
         ("woff", HeaderValue::from_static("application/font-woff")),
         ("woff2", HeaderValue::from_static("font/woff2")),

@@ -113,7 +113,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
-        .expect_status(Some(StatusCode::OK))
+        .expect_console_asset()
         .execute()
         .await
         .expect("failed to get console page with session cookie");
@@ -167,10 +167,10 @@ async fn expect_console_page(
     }
 
     let console_page = builder
-        .expect_status(Some(StatusCode::OK))
+        .expect_console_asset()
         .expect_response_header(
             http::header::CONTENT_TYPE,
-            "text/html; charset=UTF-8",
+            "text/html; charset=utf-8",
         )
         .expect_response_header(http::header::CACHE_CONTROL, "no-store")
         .execute()
@@ -258,7 +258,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
-        .expect_status(Some(StatusCode::OK))
+        .expect_console_asset()
         .expect_response_header(
             http::header::CACHE_CONTROL,
             "max-age=31536000, immutable",
@@ -277,7 +277,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
         Method::GET,
         "/assets/a_directory/another_file.txt",
     )
-    .expect_status(Some(StatusCode::OK))
+    .expect_console_asset()
     .expect_response_header(
         http::header::CACHE_CONTROL,
         "max-age=31536000, immutable",
@@ -297,11 +297,27 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to 404 on gzip file without accept-encoding: gzip");
 
+    // file with only non-gzipped version is returned even if accept requests gzip
+    let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .header(http::header::ACCEPT_ENCODING, "gzip")
+        .expect_console_asset()
+        .expect_response_header(
+            http::header::CACHE_CONTROL,
+            "max-age=31536000, immutable",
+        )
+        .execute()
+        .await
+        .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "hello there".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
     // file with only gzipped version is returned if request accepts gzip
     let resp =
         RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
             .header(http::header::ACCEPT_ENCODING, "gzip")
-            .expect_status(Some(StatusCode::OK))
+            .expect_console_asset()
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
             .execute()
             .await
@@ -313,7 +329,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     let resp =
         RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
             .header(http::header::ACCEPT_ENCODING, "gzip")
-            .expect_status(Some(StatusCode::OK))
+            .expect_console_asset()
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
             .expect_response_header(
                 http::header::CACHE_CONTROL,
@@ -328,7 +344,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     // returns non-gzipped if request doesn't accept gzip
     let resp =
         RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
-            .expect_status(Some(StatusCode::OK))
+            .expect_console_asset()
             .execute()
             .await
             .expect("failed to get existing file");
@@ -356,6 +372,7 @@ async fn test_absolute_static_dir() {
 
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .expect_console_asset()
         .execute()
         .await
         .expect("failed to get existing file");
