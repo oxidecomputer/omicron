@@ -16,7 +16,7 @@ use dropshot::{
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext,
 };
-use http::{header, HeaderValue, Response, StatusCode, Uri};
+use http::{header, HeaderName, HeaderValue, Response, StatusCode, Uri};
 use hyper::Body;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
@@ -749,6 +749,20 @@ static ALLOWED_EXTENSIONS: Lazy<HashMap<&str, HeaderValue>> = {
     Lazy::new(|| HashMap::from(CONTENT_TYPES))
 };
 const CONTENT_ENCODING_GZIP: HeaderValue = HeaderValue::from_static("gzip");
+// Web application security headers; these should stay in sync with the headers
+// listed in the console repo that are used in development.
+// https://github.com/oxidecomputer/console/blob/main/docs/csp-headers.md
+const WEB_SECURITY_HEADERS: [(HeaderName, HeaderValue); 3] = [
+    (
+        http::header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; frame-src 'none'; object-src 'none'; \
+            form-action 'none'; frame-ancestors 'none'",
+        ),
+    ),
+    (http::header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+    (http::header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
+];
 
 async fn serve_static(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -773,6 +787,9 @@ async fn serve_static(
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, content_type)
         .header(http::header::CACHE_CONTROL, cache_control);
+    for (k, v) in WEB_SECURITY_HEADERS {
+        resp = resp.header(k, v);
+    }
 
     // If req accepts gzip and we have a gzipped version, serve that. Otherwise
     // fall back to non-gz. If neither file found, bubble up 404.
