@@ -510,7 +510,8 @@ pub async fn run_standalone_server(
         blueprint: build_initial_blueprint_from_sled_configs(
             sled_configs,
             internal_dns_version,
-        ),
+        )
+        .expect("failed to construct initial blueprint"),
         services,
         physical_disks,
         zpools,

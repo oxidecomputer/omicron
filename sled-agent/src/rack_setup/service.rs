@@ -1323,36 +1323,19 @@ fn build_initial_blueprint_from_plan(
     Ok(build_initial_blueprint_from_sled_configs(
         sled_configs,
         internal_dns_version,
-    ))
+    )?)
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs: BTreeMap<Uuid, SledConfig>,
     internal_dns_version: Generation,
-) -> Blueprint {
+) -> Result<Blueprint, InvalidOmicronZoneType> {
     // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
     // This is separate primarily so rustfmt doesn't lose its mind.
     let to_bp_zone_config = |z: crate::params::OmicronZoneConfig| {
         // All initial zones are in-service.
         let disposition = BlueprintZoneDisposition::InService;
-        match BlueprintZoneConfig::from_omicron_zone_config(
-            z.into(),
-            disposition,
-        ) {
-            Ok(config) => config,
-            Err(InvalidOmicronZoneType::ParseSocketAddr {
-                kind,
-                addr,
-                err,
-            }) => {
-                // This error is impossible, because our `z.into()` converts all
-                // `SocketAddr`s into strings, which are all therefore valid.
-                unreachable!(
-                    "RSS produced {kind} zone with invalid address \
-                    {addr}: {err}"
-                )
-            }
-        }
+        BlueprintZoneConfig::from_omicron_zone_config(z.into(), disposition)
     };
 
     let mut blueprint_disks = BTreeMap::new();
@@ -1393,13 +1376,13 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 .zones
                 .into_iter()
                 .map(to_bp_zone_config)
-                .collect(),
+                .collect::<Result<_, _>>()?,
         };
 
         blueprint_zones.insert(sled_id, zones_config);
     }
 
-    Blueprint {
+    Ok(Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
@@ -1412,7 +1395,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-    }
+    })
 }
 
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
