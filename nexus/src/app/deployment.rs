@@ -75,7 +75,7 @@ impl super::Nexus {
     pub async fn blueprint_target_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<BlueprintTarget>, Error> {
+    ) -> Result<BlueprintTarget, Error> {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
@@ -238,13 +238,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let maybe_target =
+        let (_, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
-        let Some((_, parent_blueprint)) = maybe_target else {
-            return Err(Error::conflict(
-                "cannot regenerate blueprint without existing target",
-            ));
-        };
 
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {

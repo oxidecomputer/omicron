@@ -232,7 +232,7 @@ impl super::Nexus {
             request.variant.into(),
             request.sled_id,
         );
-        self.db_datastore.physical_disk_upsert(&opctx, disk).await?;
+        self.db_datastore.physical_disk_insert(&opctx, disk).await?;
         Ok(())
     }
 
@@ -256,7 +256,7 @@ impl super::Nexus {
             request.sled_id,
             request.physical_disk_id,
         );
-        self.db_datastore.zpool_upsert(&opctx, zpool).await?;
+        self.db_datastore.zpool_insert(&opctx, zpool).await?;
         Ok(())
     }
 

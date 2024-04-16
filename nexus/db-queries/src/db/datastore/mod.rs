@@ -79,7 +79,6 @@ mod region;
 mod region_snapshot;
 mod role;
 mod saga;
-mod service;
 mod silo;
 mod silo_group;
 mod silo_user;
@@ -385,8 +384,8 @@ mod test {
     use crate::db::model::{
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
         PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
-        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
-        SledSystemHardware, SledUpdate, SshKey, VpcSubnet, Zpool,
+        Project, Rack, Region, SiloUser, SledBaseboard, SledSystemHardware,
+        SledUpdate, SshKey, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use chrono::{Duration, Utc};
@@ -397,7 +396,6 @@ mod test {
     use nexus_db_model::{to_db_typed_uuid, Generation};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
-    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
@@ -408,7 +406,6 @@ mod test {
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
-    use std::num::NonZeroU32;
     use std::sync::Arc;
     use strum::EnumCount;
     use uuid::Uuid;
@@ -656,7 +653,7 @@ mod test {
             sled_id.into_untyped_uuid(),
         );
         datastore
-            .physical_disk_upsert(opctx, physical_disk.clone())
+            .physical_disk_insert(opctx, physical_disk.clone())
             .await
             .expect("Failed to upsert physical disk");
         physical_disk.id()
@@ -694,7 +691,7 @@ mod test {
         let zpool_id = Uuid::new_v4();
         let zpool =
             Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
-        datastore.zpool_upsert(opctx, zpool).await.unwrap();
+        datastore.zpool_insert(opctx, zpool).await.unwrap();
         zpool_id
     }
 
@@ -1742,130 +1739,6 @@ mod test {
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_service_upsert_and_list() {
-        let logctx = dev::test_setup_log("test_service_upsert_and_list");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        // Create a sled on which the service should exist.
-        let sled_id = create_test_sled(&datastore).await.into_untyped_uuid();
-
-        // Create a few new service to exist on this sled.
-        let service1_id =
-            "ab7bd7fd-7c37-48ab-a84a-9c09a90c4c7f".parse().unwrap();
-        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
-        let kind = ServiceKind::Nexus;
-
-        let service1 =
-            Service::new(service1_id, sled_id, Some(service1_id), addr, kind);
-        let result =
-            datastore.service_upsert(&opctx, service1.clone()).await.unwrap();
-        assert_eq!(service1.id(), result.id());
-        assert_eq!(service1.ip, result.ip);
-        assert_eq!(service1.kind, result.kind);
-
-        let service2_id =
-            "fe5b6e3d-dfee-47b4-8719-c54f78912c0b".parse().unwrap();
-        let service2 = Service::new(service2_id, sled_id, None, addr, kind);
-        let result =
-            datastore.service_upsert(&opctx, service2.clone()).await.unwrap();
-        assert_eq!(service2.id(), result.id());
-        assert_eq!(service2.ip, result.ip);
-        assert_eq!(service2.kind, result.kind);
-
-        let service3_id = Uuid::new_v4();
-        let kind = ServiceKind::Oximeter;
-        let service3 = Service::new(
-            service3_id,
-            sled_id,
-            Some(Uuid::new_v4()),
-            addr,
-            kind,
-        );
-        let result =
-            datastore.service_upsert(&opctx, service3.clone()).await.unwrap();
-        assert_eq!(service3.id(), result.id());
-        assert_eq!(service3.ip, result.ip);
-        assert_eq!(service3.kind, result.kind);
-
-        // Try listing services of one kind.
-        let services = datastore
-            .services_list_kind(
-                &opctx,
-                ServiceKind::Nexus,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(3).unwrap(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(services[0].id(), service1.id());
-        assert_eq!(services[0].sled_id, service1.sled_id);
-        assert_eq!(services[0].zone_id, service1.zone_id);
-        assert_eq!(services[0].kind, service1.kind);
-        assert_eq!(services[1].id(), service2.id());
-        assert_eq!(services[1].sled_id, service2.sled_id);
-        assert_eq!(services[1].zone_id, service2.zone_id);
-        assert_eq!(services[1].kind, service2.kind);
-        assert_eq!(services.len(), 2);
-
-        // Try listing services of a different kind.
-        let services = datastore
-            .services_list_kind(
-                &opctx,
-                ServiceKind::Oximeter,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(3).unwrap(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(services[0].id(), service3.id());
-        assert_eq!(services[0].sled_id, service3.sled_id);
-        assert_eq!(services[0].zone_id, service3.zone_id);
-        assert_eq!(services[0].kind, service3.kind);
-        assert_eq!(services.len(), 1);
-
-        // Try listing services of a kind for which there are no services.
-        let services = datastore
-            .services_list_kind(
-                &opctx,
-                ServiceKind::Dendrite,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(3).unwrap(),
-                },
-            )
-            .await
-            .unwrap();
-        assert!(services.is_empty());
-
-        // As a quick check, try supplying a marker.
-        let services = datastore
-            .services_list_kind(
-                &opctx,
-                ServiceKind::Nexus,
-                &DataPageParams {
-                    marker: Some(&service1_id),
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(3).unwrap(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(services.len(), 1);
-        assert_eq!(services[0].id(), service2.id());
-
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

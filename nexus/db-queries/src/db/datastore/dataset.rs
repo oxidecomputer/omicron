@@ -231,7 +231,7 @@ mod test {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(zpool_id, sled_id, Uuid::new_v4());
         datastore
-            .zpool_upsert(opctx, zpool)
+            .zpool_insert(opctx, zpool)
             .await
             .expect("failed to upsert zpool");
 

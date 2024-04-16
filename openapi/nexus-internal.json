@@ -2570,6 +2570,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_disks": {
+            "description": "A map of sled id -> disks in use on each sled.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+            }
+          },
           "blueprint_zones": {
             "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
             "type": "object",
@@ -2619,6 +2626,7 @@
           }
         },
         "required": [
+          "blueprint_disks",
           "blueprint_zones",
           "comment",
           "creator",
@@ -3609,6 +3617,26 @@
           "histogram_u64",
           "histogram_f32",
           "histogram_f64"
+        ]
+      },
+      "DiskIdentity": {
+        "description": "Uniquely identifies a disk.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "vendor"
         ]
       },
       "DiskRuntimeState": {
@@ -5503,6 +5531,51 @@
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
       },
+      "OmicronPhysicalDiskConfig": {
+        "description": "OmicronPhysicalDiskConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"identity\", \"pool_id\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"identity\": { \"$ref\": \"#/components/schemas/DiskIdentity\" }, \"pool_id\": { \"$ref\": \"#/components/schemas/TypedUuidForZpoolKind\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "pool_id": {
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+          }
+        },
+        "required": [
+          "id",
+          "identity",
+          "pool_id"
+        ]
+      },
+      "OmicronPhysicalDisksConfig": {
+        "description": "OmicronPhysicalDisksConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"disks\", \"generation\" ], \"properties\": { \"disks\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/OmicronPhysicalDiskConfig\" } }, \"generation\": { \"description\": \"generation number of this configuration\\n\\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\\n\\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Generation\" } ] } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
+          },
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disks",
+          "generation"
+        ]
+      },
       "OmicronZoneConfig": {
         "description": "Describes one Omicron-managed zone running on a sled\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes one Omicron-managed zone running on a sled\", \"type\": \"object\", \"required\": [ \"id\", \"underlay_address\", \"zone_type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"underlay_address\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"zone_type\": { \"$ref\": \"#/components/schemas/OmicronZoneType\" } } } ``` </details>",
         "type": "object",
@@ -6390,13 +6463,6 @@
               }
             ]
           },
-          "services": {
-            "description": "Services on the rack which have been created by RSS.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServicePutRequest"
-            }
-          },
           "zpools": {
             "description": "Zpools created within the physical disks created by the control plane.",
             "type": "array",
@@ -6416,7 +6482,6 @@
           "physical_disks",
           "rack_network_config",
           "recovery_silo",
-          "services",
           "zpools"
         ]
       },
@@ -6839,326 +6904,6 @@
           "timeseries_name"
         ]
       },
-      "ServiceKind": {
-        "description": "Describes the purpose of the service.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse_keeper"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cockroach"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible_pantry"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "object",
-                "properties": {
-                  "external_address": {
-                    "type": "string",
-                    "format": "ip"
-                  },
-                  "nic": {
-                    "$ref": "#/components/schemas/ServiceNic"
-                  }
-                },
-                "required": [
-                  "external_address",
-                  "nic"
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "external_dns"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_dns"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "object",
-                "properties": {
-                  "external_address": {
-                    "type": "string",
-                    "format": "ip"
-                  },
-                  "nic": {
-                    "$ref": "#/components/schemas/ServiceNic"
-                  }
-                },
-                "required": [
-                  "external_address",
-                  "nic"
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "nexus"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "oximeter"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dendrite"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tfport"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "object",
-                "properties": {
-                  "nic": {
-                    "$ref": "#/components/schemas/ServiceNic"
-                  },
-                  "snat": {
-                    "$ref": "#/components/schemas/SourceNatConfig"
-                  }
-                },
-                "required": [
-                  "nic",
-                  "snat"
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "boundary_ntp"
-                ]
-              }
-            },
-            "required": [
-              "content",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_ntp"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "mgd"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
-      "ServiceNic": {
-        "description": "Describes the RSS allocated values for a service vnic",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "ip": {
-            "type": "string",
-            "format": "ip"
-          },
-          "mac": {
-            "$ref": "#/components/schemas/MacAddr"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "slot": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "id",
-          "ip",
-          "mac",
-          "name",
-          "slot"
-        ]
-      },
-      "ServicePutRequest": {
-        "description": "Describes a service on a sled",
-        "type": "object",
-        "properties": {
-          "address": {
-            "description": "Address on which a service is responding to requests.",
-            "type": "string"
-          },
-          "kind": {
-            "description": "Type of service being inserted.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ServiceKind"
-              }
-            ]
-          },
-          "service_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "sled_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "zone_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "address",
-          "kind",
-          "service_id",
-          "sled_id"
-        ]
-      },
       "SledAgentInfo": {
         "description": "Sent by a sled agent to Nexus to inform about resources",
         "type": "object",
@@ -7465,6 +7210,10 @@
         "format": "uuid"
       },
       "TypedUuidForUpstairsSessionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForZpoolKind": {
         "type": "string",
         "format": "uuid"
       },

@@ -876,20 +876,6 @@ table! {
 }
 
 table! {
-    service (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        sled_id -> Uuid,
-        zone_id -> Nullable<Uuid>,
-        ip -> Inet,
-        port -> Int4,
-        kind -> crate::ServiceKindEnum,
-    }
-}
-
-table! {
     physical_disk (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1474,6 +1460,29 @@ table! {
 }
 
 table! {
+    bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_physical_disk (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        id -> Uuid,
+        pool_id -> Uuid,
+    }
+}
+
+table! {
     bp_sled_omicron_zones (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -1655,8 +1664,10 @@ allow_tables_to_appear_in_same_query!(
     metric_producer,
     network_interface,
     instance_network_interface,
+    inv_physical_disk,
     service_network_interface,
     oximeter,
+    physical_disk,
     project,
     rack,
     region,
@@ -1666,7 +1677,6 @@ allow_tables_to_appear_in_same_query!(
     silo,
     identity_provider,
     console_session,
-    service,
     sled,
     sled_resource,
     router_route,
@@ -1682,7 +1692,6 @@ allow_tables_to_appear_in_same_query!(
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
-allow_tables_to_appear_in_same_query!(external_ip, service);
 
 // used for query to check whether an IP pool association has any allocated IPs before deleting
 allow_tables_to_appear_in_same_query!(external_ip, instance);
