@@ -326,9 +326,9 @@ fn populate_network_table(
                     let mut bgp = Table::new();
                     bgp.insert(
                         "asn",
-                        Item::Value(Value::Integer(Formatted::new(
-                            i64::from(cfg.asn),
-                        ))),
+                        Item::Value(Value::Integer(Formatted::new(i64::from(
+                            cfg.asn,
+                        )))),
                     );
 
                     let mut originate = Array::new();

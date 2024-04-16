@@ -882,7 +882,9 @@ impl Pantry {
                         ..
                     } => (
                         block_size,
-                        block_size * blocks_per_extent * u64::from(extent_count),
+                        block_size
+                            * blocks_per_extent
+                            * u64::from(extent_count),
                     ),
 
                     _ => {

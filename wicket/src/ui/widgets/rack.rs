@@ -318,7 +318,9 @@ fn resize(rect: Rect) -> ComponentRects {
     for i in [17, 18] {
         let shelf_rect = Rect {
             x: rack_rect.x,
-            y: rack_rect.y + sled_height * 8 + other_height * (u16::from(i) - 16),
+            y: rack_rect.y
+                + sled_height * 8
+                + other_height * (u16::from(i) - 16),
             width: sled_width * 2,
             height: other_height,
         };
