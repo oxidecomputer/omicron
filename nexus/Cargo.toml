@@ -37,7 +37,6 @@ internal-dns.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
-mime_guess.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
@@ -76,6 +75,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
+tokio-util = { workspace = true, features = ["codec"] }
 tough.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
