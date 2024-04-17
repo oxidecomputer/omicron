@@ -402,18 +402,39 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        // We know this format string always produces a valid `Name`, so we'll
-        // unwrap here.
-        let name: external::Name = format!("{zone_kind}-{zone_id}")
+        // Ideally we'd use `zone_kind.to_string()` here, but that uses
+        // underscores as separators which aren't allowed in `Name`s. We also
+        // preserve some existing naming behavior where NTP external networking
+        // is just called "ntp", not "boundary-ntp".
+        //
+        // Most of these zone kinds do not get external networking, but it's
+        // simpler to give them valid descriptions than worry about error
+        // handling here.
+        let description = match zone_kind {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
+            ZoneKind::CockroachDb => "cockroach",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible-pantry",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        };
+
+        // Now that we have a valid description, we know this format string
+        // always produces a valid `Name`, so we'll unwrap here.
+        let name: external::Name = format!("{description}-{zone_id}")
             .parse()
             .expect("fixed name failed to parse");
-        let description = zone_kind.to_string();
+
         let data = match external_ip.ip {
             OmicronZoneExternalIpKind::Floating(ip) => {
                 IncompleteExternalIp::for_service_explicit(
                     external_ip.id.into_untyped_uuid(),
                     &Name(name),
-                    &description,
+                    description,
                     zone_id.into_untyped_uuid(),
                     pool.id(),
                     ip,
@@ -429,6 +450,7 @@ impl DataStore {
                 )
             }
         };
+
         self.allocate_external_ip(opctx, data).await
     }
 
