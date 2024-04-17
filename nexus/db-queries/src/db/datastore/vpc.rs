@@ -1236,13 +1236,13 @@ mod tests {
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SledUpdate;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
-    use nexus_types::deployment::OmicronZoneConfig;
-    use nexus_types::deployment::OmicronZoneType;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -1255,6 +1255,7 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use slog::info;
     use std::collections::BTreeMap;
@@ -1488,7 +1489,7 @@ mod tests {
     #[derive(Debug)]
     struct HarnessNexus {
         sled_id: SledUuid,
-        id: Uuid,
+        id: OmicronZoneUuid,
         ip: IpAddr,
         mac: MacAddr,
         nic_id: Uuid,
@@ -1510,7 +1511,7 @@ mod tests {
                 .copied()
                 .map(|sled_id| HarnessNexus {
                     sled_id,
-                    id: Uuid::new_v4(),
+                    id: OmicronZoneUuid::new_v4(),
                     ip: nexus_ips.next().unwrap(),
                     mac: nexus_macs.next().unwrap(),
                     nic_id: Uuid::new_v4(),
@@ -1540,7 +1541,7 @@ mod tests {
                 let name = format!("test-nexus-{}", nexus.id);
                 db::model::IncompleteNetworkInterface::new_service(
                     nexus.nic_id,
-                    nexus.id,
+                    nexus.id.into_untyped_uuid(),
                     NEXUS_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: name.parse().unwrap(),
@@ -1558,36 +1559,35 @@ mod tests {
             &self,
         ) -> impl Iterator<Item = (Uuid, BlueprintZoneConfig)> + '_ {
             self.nexuses.iter().zip(self.db_nics()).map(|(nexus, nic)| {
-                let config = OmicronZoneConfig {
+                let config = BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
                     id: nexus.id,
                     underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::Nexus {
-                        internal_address: "[::1]:0".to_string(),
-                        external_ip: "::1".parse().unwrap(),
-                        nic: NetworkInterface {
-                            id: nic.identity.id,
-                            kind: NetworkInterfaceKind::Service {
-                                id: nexus.id,
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:0".parse().unwrap(),
+                            external_ip: "::1".parse().unwrap(),
+                            nic: NetworkInterface {
+                                id: nic.identity.id,
+                                kind: NetworkInterfaceKind::Service {
+                                    id: nexus.id.into_untyped_uuid(),
+                                },
+                                name: format!("test-nic-{}", nic.identity.id)
+                                    .parse()
+                                    .unwrap(),
+                                ip: nic.ip.unwrap(),
+                                mac: nic.mac.unwrap(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: nic.slot.unwrap(),
                             },
-                            name: format!("test-nic-{}", nic.identity.id)
-                                .parse()
-                                .unwrap(),
-                            ip: nic.ip.unwrap(),
-                            mac: nic.mac.unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-                            vni: Vni::SERVICES_VNI,
-                            primary: true,
-                            slot: nic.slot.unwrap(),
+                            external_tls: false,
+                            external_dns_servers: Vec::new(),
                         },
-                        external_tls: false,
-                        external_dns_servers: Vec::new(),
-                    },
+                    ),
                 };
-                let zone_config = BlueprintZoneConfig {
-                    config,
-                    disposition: BlueprintZoneDisposition::InService,
-                };
-                (nexus.sled_id.into_untyped_uuid(), zone_config)
+                (nexus.sled_id.into_untyped_uuid(), config)
             })
         }
     }

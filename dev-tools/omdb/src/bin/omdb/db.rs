@@ -80,7 +80,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -92,6 +92,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -667,9 +668,9 @@ async fn lookup_service_info(
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
     let Some(zone_config) = blueprint
-        .all_blueprint_zones(BlueprintZoneFilter::All)
+        .all_omicron_zones(BlueprintZoneFilter::All)
         .find_map(|(_sled_id, zone_config)| {
-            if zone_config.config.id == service_id {
+            if zone_config.id.into_untyped_uuid() == service_id {
                 Some(zone_config)
             } else {
                 None
@@ -679,20 +680,18 @@ async fn lookup_service_info(
         return Ok(None);
     };
 
-    let service_kind = match &zone_config.config.zone_type {
-        OmicronZoneType::BoundaryNtp { .. }
-        | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
-        OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
-        OmicronZoneType::ClickhouseKeeper { .. } => {
-            ServiceKind::ClickhouseKeeper
-        }
-        OmicronZoneType::CockroachDb { .. } => ServiceKind::Cockroach,
-        OmicronZoneType::Crucible { .. } => ServiceKind::Crucible,
-        OmicronZoneType::CruciblePantry { .. } => ServiceKind::CruciblePantry,
-        OmicronZoneType::ExternalDns { .. } => ServiceKind::ExternalDns,
-        OmicronZoneType::InternalDns { .. } => ServiceKind::InternalDns,
-        OmicronZoneType::Nexus { .. } => ServiceKind::Nexus,
-        OmicronZoneType::Oximeter { .. } => ServiceKind::Oximeter,
+    let service_kind = match &zone_config.zone_type {
+        BlueprintZoneType::BoundaryNtp(_)
+        | BlueprintZoneType::InternalNtp(_) => ServiceKind::Ntp,
+        BlueprintZoneType::Clickhouse(_) => ServiceKind::Clickhouse,
+        BlueprintZoneType::ClickhouseKeeper(_) => ServiceKind::ClickhouseKeeper,
+        BlueprintZoneType::CockroachDb(_) => ServiceKind::Cockroach,
+        BlueprintZoneType::Crucible(_) => ServiceKind::Crucible,
+        BlueprintZoneType::CruciblePantry(_) => ServiceKind::CruciblePantry,
+        BlueprintZoneType::ExternalDns(_) => ServiceKind::ExternalDns,
+        BlueprintZoneType::InternalDns(_) => ServiceKind::InternalDns,
+        BlueprintZoneType::Nexus(_) => ServiceKind::Nexus,
+        BlueprintZoneType::Oximeter(_) => ServiceKind::Oximeter,
     };
 
     Ok(Some(ServiceInfo { service_kind, disposition: zone_config.disposition }))
