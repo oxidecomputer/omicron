@@ -7,6 +7,7 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::IpKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
@@ -16,6 +17,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -27,6 +29,7 @@ use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_REDUNDANCY;
@@ -129,6 +132,28 @@ impl PlanningInputFromDb<'_> {
                 );
                 continue;
             };
+            // Validate that we know how to interpret this kind of IP, then
+            // construct the closure that does so.
+            match external_ip_row.kind {
+                IpKind::SNat | IpKind::Floating => (),
+                IpKind::Ephemeral => {
+                    return Err(Error::internal_error(&format!(
+                        "unexpected ephemeral IP for Omicron zone {zone_id}"
+                    )));
+                }
+            };
+            let to_kind = |ip| match external_ip_row.kind {
+                IpKind::Floating => OmicronZoneExternalIpKind::Floating(ip),
+                IpKind::SNat => {
+                    OmicronZoneExternalIpKind::Snat(SourceNatConfig {
+                        ip,
+                        first_port: *external_ip_row.first_port,
+                        last_port: *external_ip_row.last_port,
+                    })
+                }
+                IpKind::Ephemeral => unreachable!(), // guarded above
+            };
+
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
             builder
                 .add_omicron_zone_external_ip_network(
@@ -136,6 +161,7 @@ impl PlanningInputFromDb<'_> {
                     // TODO-cleanup use `TypedUuid` everywhere
                     ExternalIpUuid::from_untyped_uuid(external_ip_row.id),
                     external_ip_row.ip,
+                    to_kind,
                 )
                 .map_err(|e| {
                     Error::internal_error(&format!(

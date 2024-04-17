@@ -890,6 +890,7 @@ mod tests {
     use nexus_db_model::IpPoolResourceType;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::OmicronZoneExternalIp;
+    use nexus_types::deployment::OmicronZoneExternalIpKind;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -1497,6 +1498,13 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
+        let ip_10_0_0_2 = OmicronZoneExternalIpKind::Floating(IpAddr::V4(
+            Ipv4Addr::new(10, 0, 0, 2),
+        ));
+        let ip_10_0_0_3 = OmicronZoneExternalIpKind::Floating(IpAddr::V4(
+            Ipv4Addr::new(10, 0, 0, 3),
+        ));
+
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let service_id = OmicronZoneUuid::new_v4();
@@ -1507,10 +1515,7 @@ mod tests {
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp {
-                    id,
-                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-                },
+                OmicronZoneExternalIp { id, ip: ip_10_0_0_3 },
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1527,10 +1532,7 @@ mod tests {
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp {
-                    id,
-                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-                },
+                OmicronZoneExternalIp { id, ip: ip_10_0_0_3 },
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1548,7 +1550,7 @@ mod tests {
                 ZoneKind::Nexus,
                 OmicronZoneExternalIp {
                     id: ExternalIpUuid::new_v4(),
-                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                    ip: ip_10_0_0_3,
                 },
             )
             .await
@@ -1568,7 +1570,7 @@ mod tests {
                 ZoneKind::Nexus,
                 OmicronZoneExternalIp {
                     id,
-                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                    ip: ip_10_0_0_2,
                 },
             )
             .await
@@ -1670,6 +1672,10 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
+        let ip_10_0_0_5 = OmicronZoneExternalIpKind::Floating(IpAddr::V4(
+            Ipv4Addr::new(10, 0, 0, 5),
+        ));
+
         let service_id = OmicronZoneUuid::new_v4();
         let id = ExternalIpUuid::new_v4();
         let err = context
@@ -1678,10 +1684,7 @@ mod tests {
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp {
-                    id,
-                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
-                },
+                OmicronZoneExternalIp { id, ip: ip_10_0_0_5 },
             )
             .await
             .expect_err("Should have failed to allocate out-of-bounds IP");

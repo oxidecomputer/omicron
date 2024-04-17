@@ -17,6 +17,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -97,15 +98,33 @@ impl SledResources {
     }
 }
 
+/// External IP variants possible for Omicron-managed zones.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum OmicronZoneExternalIpKind {
+    Floating(IpAddr),
+    Snat(SourceNatConfig),
+    // We should probably have `Ephemeral(IpAddr)` too (for Nexus), but
+    // currently we record Nexus as Floating.
+}
+
+impl OmicronZoneExternalIpKind {
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            OmicronZoneExternalIpKind::Floating(ip) => *ip,
+            OmicronZoneExternalIpKind::Snat(snat) => snat.ip,
+        }
+    }
+}
+
 /// External IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct OmicronZoneExternalIp {
     pub id: ExternalIpUuid,
-    pub ip: IpAddr,
+    pub ip: OmicronZoneExternalIpKind,
 }
 
 /// Network interface allocated to an Omicron-managed zone.
@@ -474,12 +493,16 @@ impl PlanningInputBuilder {
 
     /// Like `add_omicron_zone_external_ip`, but can accept an [`IpNetwork`],
     /// validating that the IP is a single address.
-    pub fn add_omicron_zone_external_ip_network(
+    pub fn add_omicron_zone_external_ip_network<F>(
         &mut self,
         zone_id: OmicronZoneUuid,
         ip_id: ExternalIpUuid,
         ip: IpNetwork,
-    ) -> Result<(), PlanningInputBuildError> {
+        to_kind: F,
+    ) -> Result<(), PlanningInputBuildError>
+    where
+        F: FnOnce(IpAddr) -> OmicronZoneExternalIpKind,
+    {
         let size = match ip.size() {
             NetworkSize::V4(n) => u128::from(n),
             NetworkSize::V6(n) => n,
@@ -490,7 +513,7 @@ impl PlanningInputBuilder {
 
         self.add_omicron_zone_external_ip(
             zone_id,
-            OmicronZoneExternalIp { id: ip_id, ip: ip.ip() },
+            OmicronZoneExternalIp { id: ip_id, ip: to_kind(ip.ip()) },
         )
     }
 

@@ -41,6 +41,7 @@ use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -407,14 +408,27 @@ impl DataStore {
             .parse()
             .expect("fixed name failed to parse");
         let description = zone_kind.to_string();
-        let data = IncompleteExternalIp::for_service_explicit(
-            external_ip.id.into_untyped_uuid(),
-            &Name(name),
-            &description,
-            zone_id.into_untyped_uuid(),
-            pool.id(),
-            external_ip.ip,
-        );
+        let data = match external_ip.ip {
+            OmicronZoneExternalIpKind::Floating(ip) => {
+                IncompleteExternalIp::for_service_explicit(
+                    external_ip.id.into_untyped_uuid(),
+                    &Name(name),
+                    &description,
+                    zone_id.into_untyped_uuid(),
+                    pool.id(),
+                    ip,
+                )
+            }
+            OmicronZoneExternalIpKind::Snat(snat_cfg) => {
+                IncompleteExternalIp::for_service_explicit_snat(
+                    external_ip.id.into_untyped_uuid(),
+                    zone_id.into_untyped_uuid(),
+                    pool.id(),
+                    snat_cfg.ip,
+                    (snat_cfg.first_port, snat_cfg.last_port),
+                )
+            }
+        };
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -1226,6 +1240,7 @@ mod tests {
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::IpRange;
+    use nexus_types::inventory::SourceNatConfig;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1278,31 +1293,27 @@ mod tests {
         let mut external_ips = Vec::new();
         let mut allocate_snat = false; // flip-flop between regular and snat
         for ip in ip_range.iter() {
-            let external_ip = if allocate_snat {
-                datastore
-                    .external_ip_allocate_service_explicit_snat(
-                        &opctx,
-                        Uuid::new_v4(),
-                        Uuid::new_v4(),
-                        ip,
-                        (0, NUM_SOURCE_NAT_PORTS - 1),
-                    )
-                    .await
-                    .expect("failed to allocate service IP")
+            let external_ip_kind = if allocate_snat {
+                OmicronZoneExternalIpKind::Snat(SourceNatConfig {
+                    ip,
+                    first_port: 0,
+                    last_port: NUM_SOURCE_NAT_PORTS - 1,
+                })
             } else {
-                datastore
-                    .external_ip_allocate_service_explicit(
-                        &opctx,
-                        OmicronZoneUuid::new_v4(),
-                        ZoneKind::Nexus,
-                        OmicronZoneExternalIp {
-                            id: ExternalIpUuid::new_v4(),
-                            ip,
-                        },
-                    )
-                    .await
-                    .expect("failed to allocate service IP")
+                OmicronZoneExternalIpKind::Floating(ip)
             };
+            let external_ip = datastore
+                .external_ip_allocate_service_explicit(
+                    &opctx,
+                    OmicronZoneUuid::new_v4(),
+                    ZoneKind::Nexus,
+                    OmicronZoneExternalIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: external_ip_kind,
+                    },
+                )
+                .await
+                .expect("failed to allocate service IP");
             external_ips.push(external_ip);
             allocate_snat = !allocate_snat;
         }

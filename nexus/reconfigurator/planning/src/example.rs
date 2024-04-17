@@ -10,6 +10,7 @@ use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -132,7 +133,8 @@ impl ExampleSystem {
                             service_id,
                             OmicronZoneExternalIp {
                                 id: ExternalIpUuid::new_v4(),
-                                ip,
+                                // TODO-john cleanup
+                                ip: OmicronZoneExternalIpKind::Floating(ip),
                             },
                         )
                         .expect("failed to add Omicron zone external IP");
