@@ -982,6 +982,14 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Returns the state of the instance with the provided ID.
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<Option<SledInstanceState>, ()> {
+        todo!("eliza do this")
+    }
+
     /// Idempotently ensures that the given virtual disk is attached (or not) as
     /// specified.
     ///
