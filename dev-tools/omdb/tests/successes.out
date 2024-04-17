@@ -406,7 +406,7 @@ task: "phantom_disks"
 task: "physical_disk_adoption"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 3, triggered by a dependent task completing
+  last completed activation: iter 4, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
