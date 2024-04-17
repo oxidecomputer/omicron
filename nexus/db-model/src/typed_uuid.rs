@@ -10,6 +10,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -31,7 +32,7 @@ pub fn to_db_typed_uuid<T: TypedUuidKind>(id: TypedUuid<T>) -> DbTypedUuid<T> {
 /// `db-model` crate (this type is not exported at the top level). External
 /// users must use omicron-common's `TypedUuid`.
 #[derive_where(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
-#[derive(AsExpression, FromSqlRow, Serialize, Deserialize)]
+#[derive(AsExpression, FromSqlRow, Serialize, Deserialize, JsonSchema)]
 #[diesel(sql_type = sql_types::Uuid)]
 #[serde(transparent, bound = "")]
 pub struct DbTypedUuid<T: TypedUuidKind>(pub(crate) TypedUuid<T>);

@@ -303,7 +303,7 @@ impl DataStore {
                     .gt(version)
                     .or(dsl::version_removed.gt(version)),
             )
-            .limit(limit as i64)
+            .limit(i64::from(limit))
             .select(Ipv4NatEntry::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -322,7 +322,7 @@ impl DataStore {
 
         let nat_changes = dsl::ipv4_nat_changes
             .filter(dsl::version.gt(version))
-            .limit(limit as i64)
+            .limit(i64::from(limit))
             .order_by(dsl::version)
             .select(Ipv4NatChange::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)

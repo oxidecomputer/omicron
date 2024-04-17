@@ -21,9 +21,9 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -33,8 +33,7 @@ use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::SledUuid;
 use reedline::{Reedline, Signal};
 use std::cell::RefCell;
@@ -67,7 +66,7 @@ struct ReconfiguratorSim {
     /// CRDB - they're not part of the zone config sent from Reconfigurator to
     /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
     /// we need.
-    external_ips: RefCell<IndexMap<IpAddr, Uuid>>,
+    external_ips: RefCell<IndexMap<IpAddr, ExternalIpUuid>>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -152,22 +151,21 @@ impl ReconfiguratorSim {
         for (_, zone) in
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
-            let zone_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
-            if let Ok(Some(ip)) = zone.zone_type.external_ip() {
-                let external_ip = ExternalIp {
+            if let Some(ip) = zone.zone_type.external_ip() {
+                let external_ip = OmicronZoneExternalIp {
                     id: *self
                         .external_ips
                         .borrow_mut()
                         .entry(ip)
-                        .or_insert_with(Uuid::new_v4),
-                    ip: ip.into(),
+                        .or_insert_with(ExternalIpUuid::new_v4),
+                    ip,
                 };
                 builder
-                    .add_omicron_zone_external_ip(zone_id, external_ip)
+                    .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
             }
-            if let Some(nic) = zone.zone_type.service_vnic() {
-                let nic = ServiceNetworkInterface {
+            if let Some(nic) = zone.zone_type.opte_vnic() {
+                let nic = OmicronZoneNic {
                     id: nic.id,
                     mac: nic.mac,
                     ip: nic.ip.into(),
@@ -175,7 +173,7 @@ impl ReconfiguratorSim {
                     primary: nic.primary,
                 };
                 builder
-                    .add_omicron_zone_nic(zone_id, nic)
+                    .add_omicron_zone_nic(zone.id, nic)
                     .context("adding omicron zone NIC")?;
             }
         }
@@ -850,12 +848,12 @@ fn cmd_blueprint_diff(
         &blueprint1,
         &sleds_by_id,
         &Default::default(),
-    )?;
+    );
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
         &Default::default(),
-    )?;
+    );
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
         .context("failed to assemble DNS diff")?;
     swriteln!(rv, "internal DNS:\n{}", dns_diff);
@@ -926,19 +924,13 @@ fn cmd_blueprint_diff_dns(
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(sim)?;
             blueprint_internal_dns_config(
-                &blueprint,
+                blueprint,
                 &sleds_by_id,
                 &Default::default(),
             )
-            .with_context(|| {
-                format!(
-                    "computing internal DNS config for blueprint {}",
-                    blueprint_id
-                )
-            })?
         }
         CliDnsGroup::External => blueprint_external_dns_config(
-            &blueprint,
+            blueprint,
             &sim.silo_names,
             sim.external_dns_zone_name.clone(),
         ),

@@ -13,17 +13,18 @@ use internal_dns::config::Zone;
 use ipnet::IpAdd;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::OmicronZoneConfig;
+use nexus_types::deployment::InvalidOmicronZoneType;
 use nexus_types::deployment::OmicronZoneDataset;
-use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -45,6 +46,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -55,7 +57,6 @@ use slog::o;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -64,6 +65,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 use thiserror::Error;
+use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
 use uuid::Uuid;
 
@@ -82,6 +84,8 @@ pub enum Error {
     ExhaustedNexusIps,
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
+    #[error("invalid OmicronZoneType in collection")]
+    InvalidOmicronZoneType(#[from] InvalidOmicronZoneType),
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -237,11 +241,13 @@ impl<'a> BlueprintBuilder<'a> {
                             sled_id
                         ))
                     })?;
+                let config =
+                    BlueprintZonesConfig::initial_from_collection(&zones)?;
 
                 Ok((
                     // TODO-cleanup use `TypedUuid` everywhere
                     sled_id.into_untyped_uuid(),
-                    BlueprintZonesConfig::initial_from_collection(&zones),
+                    config,
                 ))
             })
             .collect::<Result<_, Error>>()?;
@@ -306,67 +312,50 @@ impl<'a> BlueprintBuilder<'a> {
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
         // Note: we're iterating over *all* omicron zones here, including
-        // expunged ones. For now, we don't unassign a resource from an
-        // expunged sled/zone and reassign it to a different zone in the same
-        // blueprint. (This can happen across successive blueprints, though.)
+        // expunged ones. For now:
+        //
+        // * We don't unassign a resource from an expunged sled/zone and
+        //   reassign it to a different zone.
+        // * We also don't perform any kind of garbage collection here: a sled
+        //   or zone that's marked expunged will always stay in that state.
+        //
+        // https://github.com/oxidecomputer/omicron/issues/5552 tracks
+        // implementing this kind of garbage collection, and we should do it
+        // very soon.
 
         for (_, z) in
-            parent_blueprint.all_blueprint_zones(BlueprintZoneFilter::All)
+            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
-            let zone_type = &z.config.zone_type;
-
-            // Running services have internal IPs.
-            if z.disposition.matches(BlueprintZoneFilter::ShouldBeRunning) {
-                if let OmicronZoneType::Nexus { nic, .. } = zone_type {
-                    match nic.ip {
-                        IpAddr::V4(ip) => {
-                            if !existing_nexus_v4_ips.insert(ip) {
-                                bail!("duplicate Nexus NIC IP: {ip}");
-                            }
+            let zone_type = &z.zone_type;
+            if let BlueprintZoneType::Nexus(nexus) = zone_type {
+                match nexus.nic.ip {
+                    IpAddr::V4(ip) => {
+                        if !existing_nexus_v4_ips.insert(ip) {
+                            bail!("duplicate Nexus NIC IP: {ip}");
                         }
-                        IpAddr::V6(ip) => {
-                            if !existing_nexus_v6_ips.insert(ip) {
-                                bail!("duplicate Nexus NIC IP: {ip}");
-                            }
+                    }
+                    IpAddr::V6(ip) => {
+                        if !existing_nexus_v6_ips.insert(ip) {
+                            bail!("duplicate Nexus NIC IP: {ip}");
                         }
                     }
                 }
             }
 
-            // Externally reachable services have external IPs and vNICs. This
-            // includes:
-            //
-            // 1. Everything that the planning input says is currently assigned
-            //    an external IP, including zones that the parent blueprint
-            //    says should not be externally reachable (actual state of the
-            //    world).
-            // 2. Everything that the parent blueprint says should be
-            //    externally reachable (aspirational state).
-            //
-            // At the moment, we don't attempt to reassign an external resource
-            // within the same blueprint.
-            //
-            // Note, however, that in the future we may want to reassign
-            // external IPs for external DNS zones within a single blueprint.
-            // But we're not solving that problem at the moment.
-
-            if z.disposition
-                .matches(BlueprintZoneFilter::ShouldBeExternallyReachable)
-            {
-                if let Some(external_ip) = zone_type.external_ip()? {
-                    // For the test suite, ignore localhost.  It gets reused many
-                    // times and that's okay.  We don't expect to see localhost
-                    // outside the test suite.
-                    if !external_ip.is_loopback()
-                        && !used_external_ips.insert(external_ip)
-                    {
-                        bail!("duplicate external IP: {external_ip}");
-                    }
+            if let Some(external_ip) = zone_type.external_ip() {
+                // For the test suite, ignore localhost.  It gets reused many
+                // times and that's okay.  We don't expect to see localhost
+                // outside the test suite.
+                if !external_ip.is_loopback()
+                    && !used_external_ips.insert(external_ip)
+                {
+                    bail!("duplicate external IP: {external_ip}");
                 }
-                if let Some(nic) = zone_type.service_vnic() {
-                    if !used_macs.insert(nic.mac) {
-                        bail!("duplicate service vNIC MAC: {}", nic.mac);
-                    }
+            }
+
+            if let Some(nic) = zone_type.opte_vnic() {
+                if !used_macs.insert(nic.mac) {
+                    bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
             }
         }
@@ -478,9 +467,8 @@ impl<'a> BlueprintBuilder<'a> {
                 BlueprintZoneDisposition::InService
                 | BlueprintZoneDisposition::Quiesced => {
                     // This zone is not expunged, but it needs to be.
-                    zones_to_expunge
-                        // TODO-cleanup use `TypedUuid` everywhere
-                        .push(OmicronZoneUuid::from_untyped_uuid(z.config.id));
+                    // TODO-cleanup use `TypedUuid` everywhere
+                    zones_to_expunge.push(z.id);
                 }
                 BlueprintZoneDisposition::Expunged => {
                     // This zone is already expunged, so nothing needs to be
@@ -511,21 +499,17 @@ impl<'a> BlueprintBuilder<'a> {
         for zone_id in &pending_expunge.zones_to_expunge {
             // A linear search for each zone is fine, each sled has a pretty
             // small number of zones.
-            //
-            // TODO-cleanup use `TypedUuid` everywhere
-            let zone_id = zone_id.into_untyped_uuid();
-            let zone = change
-                .zones
-                .iter_mut()
-                .find(|z| z.config.id == zone_id)
-                .ok_or_else(|| {
-                    Error::Planner(anyhow!(
-                        "for sled {}, attempted to expunge zone \
+            let zone =
+                change.zones.iter_mut().find(|z| z.id == *zone_id).ok_or_else(
+                    || {
+                        Error::Planner(anyhow!(
+                            "for sled {}, attempted to expunge zone \
                          that doesn't exist: {}",
-                        pending_expunge.sled_id,
-                        zone_id
-                    ))
-                })?;
+                            pending_expunge.sled_id,
+                            zone_id
+                        ))
+                    },
+                )?;
             zone.disposition = BlueprintZoneDisposition::Expunged;
         }
 
@@ -617,7 +601,7 @@ impl<'a> BlueprintBuilder<'a> {
         let has_ntp = self
             .zones
             .current_sled_zones(sled_id)
-            .any(|z| z.config.zone_type.is_ntp());
+            .any(|z| z.zone_type.is_ntp());
         if has_ntp {
             return Ok(Ensure::NotNeeded);
         }
@@ -646,33 +630,26 @@ impl<'a> BlueprintBuilder<'a> {
             .parent_blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| {
-                if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
-                    Some(
-                        Host::for_zone(Zone::Other(
-                            // TODO-cleanup use `TypedUuid` everywhere
-                            OmicronZoneUuid::from_untyped_uuid(z.id),
-                        ))
-                        .fqdn(),
-                    )
+                if matches!(z.zone_type, BlueprintZoneType::BoundaryNtp(_)) {
+                    Some(Host::for_zone(Zone::Other(z.id)).fqdn())
                 } else {
                     None
                 }
             })
             .collect();
 
-        let zone = OmicronZoneConfig {
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            zone_type: OmicronZoneType::InternalNtp {
-                address: ntp_address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain: None,
-            },
-        };
-        let zone = BlueprintZoneConfig {
-            config: zone,
-            disposition: BlueprintZoneDisposition::InService,
+            zone_type: BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp {
+                    address: ntp_address,
+                    ntp_servers,
+                    dns_servers,
+                    domain: None,
+                },
+            ),
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -690,8 +667,11 @@ impl<'a> BlueprintBuilder<'a> {
         let has_crucible_on_this_pool =
             self.zones.current_sled_zones(sled_id).any(|z| {
                 matches!(
-                    &z.config.zone_type,
-                    OmicronZoneType::Crucible { dataset, .. }
+                    &z.zone_type,
+                    BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                        dataset,
+                        ..
+                    })
                     if dataset.pool_name == pool_name
                 )
             });
@@ -711,20 +691,19 @@ impl<'a> BlueprintBuilder<'a> {
 
         let ip = self.sled_alloc_ip(sled_id)?;
         let port = omicron_common::address::CRUCIBLE_PORT;
-        let address = SocketAddrV6::new(ip, port, 0, 0).to_string();
-        let zone = OmicronZoneConfig {
+        let address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            zone_type: OmicronZoneType::Crucible {
-                address,
-                dataset: OmicronZoneDataset { pool_name },
-            },
+            zone_type: BlueprintZoneType::Crucible(
+                blueprint_zone_type::Crucible {
+                    address,
+                    dataset: OmicronZoneDataset { pool_name },
+                },
+            ),
         };
 
-        let zone = BlueprintZoneConfig {
-            config: zone,
-            disposition: BlueprintZoneDisposition::InService,
-        };
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
     }
@@ -737,7 +716,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_num_nexus_zones(&self, sled_id: SledUuid) -> usize {
         self.zones
             .current_sled_zones(sled_id)
-            .filter(|z| z.config.zone_type.is_nexus())
+            .filter(|z| z.zone_type.is_nexus())
             .count()
     }
 
@@ -761,11 +740,10 @@ impl<'a> BlueprintBuilder<'a> {
             .parent_blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
             .find_map(|(_, z)| match &z.zone_type {
-                OmicronZoneType::Nexus {
-                    external_tls,
-                    external_dns_servers,
-                    ..
-                } => Some((*external_tls, external_dns_servers.clone())),
+                BlueprintZoneType::Nexus(nexus) => Some((
+                    nexus.external_tls,
+                    nexus.external_dns_servers.clone(),
+                )),
                 _ => None,
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
@@ -829,7 +807,9 @@ impl<'a> BlueprintBuilder<'a> {
                     .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
                     id: self.rng.network_interface_rng.next(),
-                    kind: NetworkInterfaceKind::Service { id: nexus_id },
+                    kind: NetworkInterfaceKind::Service {
+                        id: nexus_id.into_untyped_uuid(),
+                    },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
                     mac,
@@ -842,22 +822,20 @@ impl<'a> BlueprintBuilder<'a> {
 
             let ip = self.sled_alloc_ip(sled_id)?;
             let port = omicron_common::address::NEXUS_INTERNAL_PORT;
-            let internal_address =
-                SocketAddrV6::new(ip, port, 0, 0).to_string();
-            let zone = OmicronZoneConfig {
+            let internal_address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
                 underlay_address: ip,
-                zone_type: OmicronZoneType::Nexus {
-                    internal_address,
-                    external_ip,
-                    nic,
-                    external_tls,
-                    external_dns_servers: external_dns_servers.clone(),
-                },
-            };
-            let zone = BlueprintZoneConfig {
-                config: zone,
-                disposition: BlueprintZoneDisposition::InService,
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address,
+                        external_ip,
+                        nic,
+                        external_tls,
+                        external_dns_servers: external_dns_servers.clone(),
+                    },
+                ),
             };
             self.sled_add_zone(sled_id, zone)?;
         }
@@ -876,10 +854,10 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_zones = self.zones.change_sled_zones(sled_id);
         // A sled should have a small number (< 20) of zones so a linear search
         // should be very fast.
-        if sled_zones.zones.iter().any(|z| z.config.id == zone.config.id) {
+        if sled_zones.zones.iter().any(|z| z.id == zone.id) {
             return Err(Error::Planner(anyhow!(
                 "attempted to add zone that already exists: {}",
-                zone.config.id
+                zone.id
             )));
         }
         sled_zones.zones.push(zone);
@@ -916,7 +894,7 @@ impl<'a> BlueprintBuilder<'a> {
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
                 for z in self.zones.current_sled_zones(sled_id) {
-                    allocator.reserve(z.config.underlay_address);
+                    allocator.reserve(z.underlay_address);
                 }
 
                 allocator
@@ -936,91 +914,6 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })
     }
-}
-
-/// Builds a map of resources that either the planning input or the parent
-/// blueprint says are in-use.
-fn build_external_in_use_map<T: Clone + Hash + Eq>(
-    parent_blueprint: &Blueprint,
-    input_map: &BTreeMap<OmicronZoneUuid, T>,
-    accessor: impl Fn(&OmicronZoneConfig) -> Option<T>,
-) -> Result<HashMap<T, ResourceInUseDetails>, Error> {
-    // The basic table is, for each resource:
-    //
-    // ```
-    //    in blueprint?     in input_map?    result
-    //  yes, reachable          yes          in use
-    //  yes, non-reachable      yes          in use      [1]
-    //         no               yes        in use, warn  [2]
-    //  yes, reachable           no          in use      [3]
-    //  yes, non-reachable       no         not in use
-    //         no                no         not in use   [4]
-    // ```
-    //
-    // "in blueprint?" means whether that resource is allocated to a zone
-    // that's described in the blueprint (desired state). "reachable" is
-    // defined by the `ShouldBeExternallyReachable` filter.
-    //
-    // "in input_map?" means whether that resource is allocated to a zone
-    // that's described in the planning input (actual state).
-    //
-    // [1]: This is a zone that the executor will aim to remove external
-    //      resources for. However, it is *currently* in use, and we can't just
-    //      pave over and reallocate its resources.
-    // [2]: This should never happen. The blueprint is meant to be a complete
-    //      description of the state. This is a bug -- warn about it (and maybe
-    //      consider erroring out?)
-    // [3]: This is a zone that the executor will aim to add external resources
-    //      for. We consider it to be in use.
-    // [4]: This resource will never be considered in the below code.
-    //
-    // There are also some error cases:
-    //
-    // 1. Two zones in the input map are using the same resource.
-    // 2. Two zones in the blueprint are using the same resource.
-    // 3. For the same zone, the blueprint and the input map disagree on what
-    //    resource is allocated to them.
-    //
-    // Case 3 is potentially migration of a zone to a different resource --
-    // this is not supported at the moment.
-    //
-    // So, how do we go about actually implementing this table? We'll perform
-    // two loops: one over the input map and one over the parent blueprint.
-
-    let mut in_use: HashMap<T, ResourceInUseDetails> = HashMap::new();
-
-    for (zone_id, resource) in input_map {
-        let details = in_use.entry(resource.clone()).or_default();
-        if details.in_input_map {
-            // Error case 1: two zones in the input map are using the same
-            // resource.
-            return Err(Error::Planner(anyhow!(
-                "in input map, zone {} and zone {} are using the same resource: {:?}",
-                zone_id,
-                zone_id,
-                resource,
-            )));
-        }
-        in_use.insert(
-            resource.clone(),
-            ResourceInUseDetails {
-                in_input_map: true,
-                allocated_to_zone: None,
-            },
-        );
-    }
-
-    Ok(in_use)
-}
-
-/// Describes why a resource is currently marked in use.
-///
-/// The `Default` is only for construction -- the in-use map should always have
-/// non-default values.
-#[derive(Debug, Default)]
-struct ResourceInUseDetails {
-    in_input_map: bool,
-    allocated_to_zone: OmicronZoneUuid,
 }
 
 /// Combines a base iterator with an `in_use` set, filtering out any elements
@@ -1094,7 +987,7 @@ struct BlueprintBuilderRng {
     // In the future, when we switch to typed UUIDs, each of these will be
     // associated with a specific `TypedUuidKind`.
     blueprint_rng: UuidRng,
-    zone_rng: UuidRng,
+    zone_rng: TypedUuidRng<OmicronZoneKind>,
     network_interface_rng: UuidRng,
 }
 
@@ -1105,7 +998,7 @@ impl BlueprintBuilderRng {
 
     fn new_from_parent(mut parent: StdRng) -> Self {
         let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
-        let zone_rng = UuidRng::from_parent_rng(&mut parent, "zone");
+        let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
         let network_interface_rng =
             UuidRng::from_parent_rng(&mut parent, "network_interface");
 
@@ -1322,7 +1215,7 @@ pub mod test {
     use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_client::types::{OmicronZoneConfig, OmicronZoneType};
+    use sled_agent_client::types::OmicronZoneType;
     use std::collections::BTreeSet;
     use test_strategy::proptest;
 
@@ -1330,16 +1223,20 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     pub fn verify_blueprint(blueprint: &Blueprint) {
-        let mut underlay_ips: BTreeMap<Ipv6Addr, &OmicronZoneConfig> =
+        let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
             BTreeMap::new();
         for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
             if let Some(previous) =
                 underlay_ips.insert(zone.underlay_address, zone)
             {
                 panic!(
-                    "found duplicate underlay IP {} in zones {} and \
-                        {}\n\nblueprint: {:#?}",
-                    zone.underlay_address, zone.id, previous.id, blueprint
+                    "found duplicate underlay IP {} in zones {} and {}\
+                    \n\n\
+                    blueprint: {}",
+                    zone.underlay_address,
+                    zone.id,
+                    previous.id,
+                    blueprint.display(),
                 );
             }
         }
@@ -1486,20 +1383,20 @@ pub mod test {
             assert!(new_sled_resources
                 .subnet
                 .net()
-                .contains(z.config.underlay_address));
+                .contains(z.underlay_address));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the
         // sled's subnet.
         assert!(new_sled_zones.zones.iter().any(|z| {
-            if let OmicronZoneType::InternalNtp { address, .. } =
-                &z.config.zone_type
+            if let BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address, .. },
+            ) = &z.zone_type
             {
-                let sockaddr = address.parse::<SocketAddrV6>().unwrap();
                 assert!(new_sled_resources
                     .subnet
                     .net()
-                    .contains(*sockaddr.ip()));
+                    .contains(*address.ip()));
                 true
             } else {
                 false
@@ -1509,11 +1406,11 @@ pub mod test {
             .zones
             .iter()
             .filter_map(|z| {
-                if let OmicronZoneType::Crucible { address, dataset } =
-                    &z.config.zone_type
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, dataset },
+                ) = &z.zone_type
                 {
-                    let sockaddr = address.parse::<SocketAddrV6>().unwrap();
-                    let ip = sockaddr.ip();
+                    let ip = address.ip();
                     assert!(new_sled_resources.subnet.net().contains(*ip));
                     Some(dataset.pool_name.clone())
                 } else {
@@ -1724,11 +1621,7 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(ip) = z
-                    .zone_type
-                    .external_ip()
-                    .expect("failed to check for external IP")
-                {
+                if let Some(ip) = z.zone_type.external_ip() {
                     used_ip_ranges.push(IpRange::from(ip));
                 }
             }

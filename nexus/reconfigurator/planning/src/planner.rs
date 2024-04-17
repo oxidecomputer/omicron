@@ -402,9 +402,6 @@ impl<'a> Planner<'a> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-    use std::net::IpAddr;
-
     use super::Planner;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
@@ -417,18 +414,20 @@ mod test {
     use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::DiffSledModified;
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::OmicronZoneType;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
+    use std::collections::HashMap;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -517,8 +516,8 @@ mod test {
         assert_eq!(sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
         assert!(matches!(
-            sled_zones.zones[0].config.zone_type,
-            OmicronZoneType::InternalNtp { .. }
+            sled_zones.zones[0].zone_type,
+            BlueprintZoneType::InternalNtp(_),
         ));
         assert_eq!(diff.sleds_removed().len(), 0);
         assert_eq!(diff.sleds_modified().count(), 0);
@@ -600,7 +599,7 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), 10);
         for zone in &zones {
-            if !zone.config.zone_type.is_crucible() {
+            if !zone.zone_type.is_crucible() {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
         }
@@ -682,7 +681,7 @@ mod test {
                 .expect("missing kept sled")
                 .zones
                 .iter()
-                .filter(|z| z.config.zone_type.is_nexus())
+                .filter(|z| z.zone_type.is_nexus())
                 .count(),
             1
         );
@@ -718,7 +717,7 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), input.target_nexus_zone_count() - 1);
         for zone in &zones {
-            if !zone.config.zone_type.is_nexus() {
+            if !zone.zone_type.is_nexus() {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
         }
@@ -757,7 +756,7 @@ mod test {
                 sled_config
                     .zones
                     .iter()
-                    .filter(|z| z.config.zone_type.is_nexus())
+                    .filter(|z| z.zone_type.is_nexus())
                     .count(),
                 1
             );
@@ -803,7 +802,7 @@ mod test {
                 }
             }
             for zone in &zones {
-                if !zone.config.zone_type.is_nexus() {
+                if !zone.zone_type.is_nexus() {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 }
             }
@@ -848,7 +847,7 @@ mod test {
                 sled_config
                     .zones
                     .iter()
-                    .filter(|z| z.config.zone_type.is_nexus())
+                    .filter(|z| z.zone_type.is_nexus())
                     .count(),
                 1
             );
@@ -951,8 +950,7 @@ mod test {
             assert_eq!(sled_changes.zones_modified().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
             for zone in &zones {
-                let OmicronZoneType::Nexus { .. } = zone.config.zone_type
-                else {
+                let BlueprintZoneType::Nexus(_) = zone.zone_type else {
                     panic!("unexpectedly added a non-Crucible zone: {zone:?}");
                 };
             }
@@ -998,16 +996,17 @@ mod test {
             .zones;
 
         zones.retain_mut(|zone| {
-            if let OmicronZoneType::Nexus { internal_address, .. } =
-                &mut zone.config.zone_type
+            if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address,
+                ..
+            }) = &mut zone.zone_type
             {
-                // Change one of these params to ensure that the diff output
-                // makes sense.
-                *internal_address = format!("{internal_address}foo");
+                // Change the internal address.
+                let mut segments = internal_address.ip().segments();
+                segments[0] = segments[0].wrapping_add(1);
+                internal_address.set_ip(segments.into());
                 true
-            } else if let OmicronZoneType::Crucible { .. } =
-                zone.config.zone_type
-            {
+            } else if let BlueprintZoneType::Crucible(_) = zone.zone_type {
                 match next {
                     NextCrucibleMutate::Modify => {
                         zone.disposition = BlueprintZoneDisposition::Quiesced;
@@ -1020,13 +1019,13 @@ mod test {
                     }
                     NextCrucibleMutate::Done => true,
                 }
-            } else if let OmicronZoneType::InternalNtp { .. } =
-                &mut zone.config.zone_type
+            } else if let BlueprintZoneType::InternalNtp(_) =
+                &mut zone.zone_type
             {
                 // Change the underlay IP.
-                let mut segments = zone.config.underlay_address.segments();
+                let mut segments = zone.underlay_address.segments();
                 segments[0] += 1;
-                zone.config.underlay_address = segments.into();
+                zone.underlay_address = segments.into();
                 true
             } else {
                 true
@@ -1057,78 +1056,6 @@ mod test {
         );
 
         // ---
-
-        // Create a new blueprint that starts from bp2. Ensure that the new
-        // builder's idea of which resources are used has been updated to
-        // reflect that the corresponding zones are now expunged.
-
-        let planner3 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint2,
-            &input,
-            "test_blueprint3",
-            &collection,
-        )
-        .expect("planner created")
-        .with_rng_seed((TEST_NAME, "bp3"));
-
-        // Ensure that the expunged and decommissioned sled's allocated
-        // resources are no longer in use.
-        let nexus_v4_in_use = planner3.blueprint.nexus_v4_ips.in_use();
-        let nexus_v6_in_use = planner3.blueprint.nexus_v6_ips.in_use();
-        let external_ips_in_use =
-            planner3.blueprint.available_external_ips.in_use();
-        let system_macs_in_use =
-            planner3.blueprint.available_system_macs.in_use();
-
-        for (sled_id, zone) in
-            blueprint2.all_omicron_zones_typed(BlueprintZoneFilter::All)
-        {
-            // TODO: also verify quiesced zones here.
-
-            let desc = if sled_id == expunged_sled_id {
-                "expunged sled"
-            } else if sled_id == decommissioned_sled_id {
-                "decommissioned sled"
-            } else {
-                continue;
-            };
-
-            // For the decommissioned sled, ensure that IPs are no longer in
-            // use.
-            if let OmicronZoneType::Nexus { nic, .. } = &zone.zone_type {
-                match nic.ip {
-                    IpAddr::V4(ip) => {
-                        assert!(
-                            !nexus_v4_in_use.contains(&ip),
-                            "for {desc}, Nexus V4 IP {ip} should not be in use"
-                        );
-                    }
-                    IpAddr::V6(ip) => {
-                        assert!(
-                            !nexus_v6_in_use.contains(&ip),
-                            "for {desc}, Nexus V6 IP {ip} should not be in use"
-                        );
-                    }
-                }
-            }
-
-            if let Some(external_ip) =
-                zone.zone_type.external_ip().expect("fetching external IP")
-            {
-                assert!(
-                    !external_ips_in_use.contains(&external_ip),
-                    "for {desc}, external IP {external_ip} should not be in use"
-                );
-            }
-            if let Some(nic) = zone.zone_type.service_vnic() {
-                assert!(
-                    !system_macs_in_use.contains(&nic.mac),
-                    "for {desc}, system MAC {} should not be in use",
-                    nic.mac
-                );
-            }
-        }
 
         logctx.cleanup_successful();
     }
@@ -1164,7 +1091,7 @@ mod test {
                 zone.zone_after.disposition,
                 BlueprintZoneDisposition::Expunged,
                 "for {desc}, zone {} should have been marked expunged",
-                zone.zone_after.config.id
+                zone.zone_after.id
             );
         }
     }
