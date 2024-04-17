@@ -799,7 +799,7 @@ mod tests {
                     {
                         *external_ip = bogus_ip;
                         return format!(
-                            "zone {} already has 1 non-matching IP",
+                            "zone {} has a different IP allocated",
                             zone.id
                         );
                     }
@@ -819,7 +819,7 @@ mod tests {
                     {
                         *dns_address = SocketAddr::new(bogus_ip, 0);
                         return format!(
-                            "zone {} already has 1 non-matching IP",
+                            "zone {} has a different IP allocated",
                             zone.id
                         );
                     }
@@ -839,7 +839,7 @@ mod tests {
                         snat_cfg.first_port += NUM_SOURCE_NAT_PORTS;
                         snat_cfg.last_port += NUM_SOURCE_NAT_PORTS;
                         return format!(
-                            "zone {} already has 1 non-matching IP",
+                            "zone {} has a different IP allocated",
                             zone.id
                         );
                     }
