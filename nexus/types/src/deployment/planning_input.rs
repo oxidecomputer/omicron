@@ -116,7 +116,7 @@ pub struct OmicronZoneExternalIp {
 pub struct OmicronZoneNic {
     pub id: Uuid,
     pub mac: MacAddr,
-    pub ip: IpNetwork,
+    pub ip: IpAddr,
     pub slot: u8,
     pub primary: bool,
 }
@@ -404,7 +404,7 @@ impl PlanningInput {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
-    #[error("Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported")]
+    #[error("Omicron zone {zone_id} has a range of IPs ({ip}); only a single IP is supported")]
     NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
     DuplicateOmicronZoneExternalIp {

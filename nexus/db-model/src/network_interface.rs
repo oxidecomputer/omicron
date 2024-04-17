@@ -13,6 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
+use ipnetwork::NetworkSize;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
@@ -146,15 +147,36 @@ pub struct ServiceNetworkInterface {
     pub primary: bool,
 }
 
-impl From<ServiceNetworkInterface> for nexus_types::deployment::OmicronZoneNic {
-    fn from(nic: ServiceNetworkInterface) -> Self {
-        Self {
+#[derive(Debug, thiserror::Error)]
+#[error("Service NIC {nic_id} has a range of IPs ({ip}); only a single IP is supported")]
+pub struct ServiceNicNotSingleIpError {
+    pub nic_id: Uuid,
+    pub ip: ipnetwork::IpNetwork,
+}
+
+impl TryFrom<&'_ ServiceNetworkInterface>
+    for nexus_types::deployment::OmicronZoneNic
+{
+    type Error = ServiceNicNotSingleIpError;
+
+    fn try_from(nic: &ServiceNetworkInterface) -> Result<Self, Self::Error> {
+        let size = match nic.ip.size() {
+            NetworkSize::V4(n) => u128::from(n),
+            NetworkSize::V6(n) => n,
+        };
+        if size != 1 {
+            return Err(ServiceNicNotSingleIpError {
+                nic_id: nic.id(),
+                ip: nic.ip,
+            });
+        }
+        Ok(Self {
             id: nic.id(),
             mac: *nic.mac,
-            ip: nic.ip,
+            ip: nic.ip.ip(),
             slot: *nic.slot,
             primary: nic.primary,
-        }
+        })
     }
 }
 

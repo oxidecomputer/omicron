@@ -16,6 +16,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
@@ -142,6 +143,22 @@ impl PlanningInputFromDb<'_> {
                          to planning input: {e}"
                     ))
                 })?;
+        }
+
+        for nic_row in self.service_nic_rows {
+            let zone_id =
+                OmicronZoneUuid::from_untyped_uuid(nic_row.service_id);
+            let nic = OmicronZoneNic::try_from(nic_row).map_err(|e| {
+                Error::internal_error(&format!(
+                    "invalid Omicron zone NIC read from database: {e}"
+                ))
+            })?;
+            builder.add_omicron_zone_nic(zone_id, nic).map_err(|e| {
+                Error::internal_error(&format!(
+                    "unexpectedly failed to add Omicron zone NIC \
+                     to planning input: {e}"
+                ))
+            })?;
         }
 
         Ok(builder.build())
