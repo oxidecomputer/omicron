@@ -114,7 +114,7 @@ impl FromStr for BlueprintIdOrCurrentTarget {
     type Err = uuid::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "current-target" {
+        if s == "target" {
             Ok(Self::CurrentTarget)
         } else {
             let id = s.parse()?;
@@ -143,15 +143,15 @@ impl BlueprintIdOrCurrentTarget {
 
 #[derive(Debug, Clone, Copy, Args)]
 struct BlueprintIdArgs {
-    /// id of blueprint (or `current-target`)
+    /// id of blueprint (or `target` for the current target)
     blueprint_id: BlueprintIdOrCurrentTarget,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintIdsArgs {
-    /// id of first blueprint (or `current-target`)
+    /// id of first blueprint (or `target` for the current target)
     blueprint1_id: BlueprintIdOrCurrentTarget,
-    /// id of second blueprint (or `current-target`)
+    /// id of second blueprint (or `target` for the current target)
     blueprint2_id: BlueprintIdOrCurrentTarget,
 }
 
