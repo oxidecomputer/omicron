@@ -159,7 +159,8 @@ impl ReconfiguratorSim {
                         .borrow_mut()
                         .entry(ip)
                         .or_insert_with(ExternalIpUuid::new_v4),
-                    // TODO-john
+                    // TODO-cleanup This is potentially wrong;
+                    // zone_type should tell us the IP kind.
                     ip: OmicronZoneExternalIpKind::Floating(ip),
                 };
                 builder

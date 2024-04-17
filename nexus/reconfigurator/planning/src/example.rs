@@ -133,7 +133,8 @@ impl ExampleSystem {
                             service_id,
                             OmicronZoneExternalIp {
                                 id: ExternalIpUuid::new_v4(),
-                                // TODO-john cleanup
+                                // TODO-cleanup This is potentially wrong;
+                                // zone_type should tell us the IP kind.
                                 ip: OmicronZoneExternalIpKind::Floating(ip),
                             },
                         )
