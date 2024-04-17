@@ -67,7 +67,13 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         .arg("--warn")
         .arg("clippy::len_zero")
         .arg("--warn")
-        .arg("clippy::redundant_field_names");
+        .arg("clippy::redundant_field_names")
+        // Also warn on casts, preferring explicit conversions instead.
+        //
+        // We'd like to warn on lossy casts in the future, but lossless casts
+        // are the easiest ones to convert over.
+        .arg("--warn")
+        .arg("clippy::cast_lossless");
 
     eprintln!(
         "running: {:?} {}",

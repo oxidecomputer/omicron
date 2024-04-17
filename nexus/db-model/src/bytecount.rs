@@ -93,7 +93,7 @@ impl TryFrom<diesel::pg::data_types::PgNumeric> for ByteCount {
                 let mut multiplier = 1;
 
                 for digit in digits.iter().rev() {
-                    result += *digit as i64 * multiplier;
+                    result += i64::from(*digit) * multiplier;
                     multiplier *= 10000;
                 }
 

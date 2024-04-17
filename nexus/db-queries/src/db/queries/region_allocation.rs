@@ -90,7 +90,7 @@ pub fn allocation_query(
                         .unwrap()
                         .as_nanos()
                 },
-                |seed| seed as u128,
+                |seed| u128::from(seed),
             ),
             distinct_sleds,
         )

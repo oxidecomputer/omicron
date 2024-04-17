@@ -801,7 +801,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     // divisible by block size.
     assert!(
         disk_size.to_bytes()
-            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 * 1024 * 1024 * 1024
+            < u64::from(DiskTest::DEFAULT_ZPOOL_SIZE_GIB) * 1024 * 1024 * 1024
     );
 
     let disks_url = get_disks_url();

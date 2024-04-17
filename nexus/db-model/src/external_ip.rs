@@ -22,6 +22,7 @@ use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
+use omicron_uuid_kinds::GenericUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -128,12 +129,6 @@ pub struct ExternalIp {
     pub project_id: Option<Uuid>,
     pub state: IpAttachState,
     pub is_probe: bool,
-}
-
-impl From<ExternalIp> for nexus_types::deployment::ExternalIp {
-    fn from(ext_ip: ExternalIp) -> Self {
-        Self { id: ext_ip.id, ip: ext_ip.ip }
-    }
 }
 
 /// A view type constructed from `ExternalIp` used to represent Floating IP
@@ -537,7 +532,7 @@ impl TryFrom<ExternalIp> for FloatingIp {
         ))?;
 
         let identity = FloatingIpIdentity {
-            id: ip.id,
+            id: ip.id.into_untyped_uuid(),
             name,
             description,
             time_created: ip.time_created,
