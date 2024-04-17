@@ -17,7 +17,6 @@ use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
-use futures::TryFutureExt;
 use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
@@ -140,6 +139,23 @@ impl BlueprintIdOrCurrentTarget {
             }
             Self::BlueprintId(id) => Ok(*id),
         }
+    }
+
+    async fn resolve_to_blueprint(
+        &self,
+        client: &nexus_client::Client,
+    ) -> anyhow::Result<Blueprint> {
+        let id = self.resolve_to_id(client).await?;
+        let response = client.blueprint_view(&id).await.with_context(|| {
+            let suffix = match self {
+                BlueprintIdOrCurrentTarget::CurrentTarget => {
+                    " (current target)"
+                }
+                BlueprintIdOrCurrentTarget::BlueprintId(_) => "",
+            };
+            format!("fetching blueprint {id}{suffix}")
+        })?;
+        Ok(response.into_inner())
     }
 }
 
@@ -1013,11 +1029,7 @@ async fn cmd_nexus_blueprints_show(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
 ) -> Result<(), anyhow::Error> {
-    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
-    let blueprint = client
-        .blueprint_view(&blueprint_id)
-        .await
-        .with_context(|| format!("fetching blueprint {blueprint_id}"))?;
+    let blueprint = args.blueprint_id.resolve_to_blueprint(client).await?;
     println!("{}", blueprint.display());
     Ok(())
 }
@@ -1026,20 +1038,9 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintIdsArgs,
 ) -> Result<(), anyhow::Error> {
-    let (blueprint1_id, blueprint2_id) = try_join(
-        args.blueprint1_id.resolve_to_id(client),
-        args.blueprint2_id.resolve_to_id(client),
-    )
-    .await?;
     let (b1, b2) = try_join(
-        client.blueprint_view(&blueprint1_id).map_err(|err| {
-            anyhow::Error::new(err)
-                .context(format!("fetching blueprint {blueprint1_id}"))
-        }),
-        client.blueprint_view(&blueprint2_id).map_err(|err| {
-            anyhow::Error::new(err)
-                .context(format!("fetching blueprint {blueprint2_id}"))
-        }),
+        args.blueprint1_id.resolve_to_blueprint(client),
+        args.blueprint2_id.resolve_to_blueprint(client),
     )
     .await?;
     let diff = b2.diff_since_blueprint(&b1).context("diffing blueprints")?;
