@@ -303,10 +303,9 @@ impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
     async fn check_server_key(
-        self,
+        &mut self,
         server_public_key: &PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
-        let b = &self.host_key == server_public_key;
-        Ok((self, b))
+    ) -> Result<bool, Self::Error> {
+        Ok(&self.host_key == server_public_key)
     }
 }
