@@ -95,6 +95,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "background-tasks", "show"],
         &["nexus", "blueprints", "list"],
         &["nexus", "blueprints", "show", &initial_blueprint_id],
+        &["nexus", "blueprints", "show", "current-target"],
+        &[
+            "nexus",
+            "blueprints",
+            "diff",
+            &initial_blueprint_id,
+            "current-target",
+        ],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
