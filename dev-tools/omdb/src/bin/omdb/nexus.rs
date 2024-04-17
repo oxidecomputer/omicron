@@ -116,7 +116,7 @@ impl FromStr for BlueprintIdOrCurrentTarget {
     type Err = uuid::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "target" {
+        if matches!(s, "current-target" | "current" | "target") {
             Ok(Self::CurrentTarget)
         } else {
             let id = s.parse()?;
