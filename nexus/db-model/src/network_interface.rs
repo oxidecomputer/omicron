@@ -148,9 +148,7 @@ pub struct ServiceNetworkInterface {
     pub primary: bool,
 }
 
-impl From<ServiceNetworkInterface>
-    for nexus_types::deployment::ServiceNetworkInterface
-{
+impl From<ServiceNetworkInterface> for nexus_types::deployment::OmicronZoneNic {
     fn from(nic: ServiceNetworkInterface) -> Self {
         Self {
             // TODO-cleanup use `TypedUuid` everywhere

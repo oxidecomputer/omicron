@@ -57,7 +57,6 @@ pub trait NexusServer: Send + Sync + 'static {
         internal_server: Self::InternalServer,
         config: &NexusConfig,
         blueprint: Blueprint,
-        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         physical_disks: Vec<PhysicalDiskPutRequest>,
         zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,

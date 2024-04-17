@@ -256,7 +256,9 @@ impl From<std::time::Duration> for types::Duration {
 
 impl From<types::Duration> for std::time::Duration {
     fn from(s: types::Duration) -> Self {
-        std::time::Duration::from_nanos(s.secs * 1000000000 + s.nanos as u64)
+        std::time::Duration::from_nanos(
+            s.secs * 1000000000 + u64::from(s.nanos),
+        )
     }
 }
 

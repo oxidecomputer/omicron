@@ -153,7 +153,7 @@ async fn sim_reserve_sled_resources(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         propolis_id,
-        params.instance.ncpus.0 .0 as u32,
+        u32::from(params.instance.ncpus.0 .0),
         params.instance.memory,
         constraints,
     )

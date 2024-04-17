@@ -479,7 +479,7 @@ impl From<u64> for Ipv4Cidr {
 impl From<Ipv4Cidr> for u64 {
     fn from(x: Ipv4Cidr) -> Self {
         let prefix: u32 = x.prefix.into();
-        ((prefix as u64) << 32) | (x.prefix_len as u64)
+        (u64::from(prefix) << 32) | u64::from(x.prefix_len)
     }
 }
 
@@ -762,12 +762,12 @@ impl fmt::Debug for MacAddr {
 
 impl From<MacAddr> for u64 {
     fn from(mac: MacAddr) -> u64 {
-        ((mac.a[0] as u64) << 40)
-            | ((mac.a[1] as u64) << 32)
-            | ((mac.a[2] as u64) << 24)
-            | ((mac.a[3] as u64) << 16)
-            | ((mac.a[4] as u64) << 8)
-            | (mac.a[5] as u64)
+        (u64::from(mac.a[0]) << 40)
+            | (u64::from(mac.a[1]) << 32)
+            | (u64::from(mac.a[2]) << 24)
+            | (u64::from(mac.a[3]) << 16)
+            | (u64::from(mac.a[4]) << 8)
+            | u64::from(mac.a[5])
     }
 }
 

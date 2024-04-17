@@ -89,7 +89,7 @@ impl SimSpUpdate {
                 if chunk.id != *id || chunk.component != *component {
                     return Err(SpError::InvalidUpdateId { sp_update_id: *id });
                 };
-                if data.position() != chunk.offset as u64 {
+                if data.position() != u64::from(chunk.offset) {
                     return Err(SpError::UpdateInProgress(
                         self.state.to_message(),
                     ));

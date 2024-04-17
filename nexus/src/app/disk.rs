@@ -151,7 +151,7 @@ impl super::Nexus {
 
         // Reject disks where the size isn't at least
         // MIN_DISK_SIZE_BYTES
-        if params.size.to_bytes() < MIN_DISK_SIZE_BYTES as u64 {
+        if params.size.to_bytes() < u64::from(MIN_DISK_SIZE_BYTES) {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -163,7 +163,7 @@ impl super::Nexus {
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
-        if (params.size.to_bytes() % MIN_DISK_SIZE_BYTES as u64) != 0 {
+        if (params.size.to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
             return Err(Error::invalid_value(
                 "size",
                 format!(

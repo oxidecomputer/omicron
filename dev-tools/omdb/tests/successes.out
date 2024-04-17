@@ -69,45 +69,6 @@ note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
 wrote <TMP_PATH_REDACTED>
 =============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-SERVICE        INSTANCE_ID                          ADDR                     SLED_SERIAL  
-CruciblePantry ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
-ExternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
-InternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
-Nexus          ..........<REDACTED_UUID>........... [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
-Mgd            ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-039be560 
-Mgd            ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-sled: sim-039be560 (id ..........<REDACTED_UUID>...........)
-
-  SERVICE INSTANCE_ID                          ADDR        
-  Mgd     ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT 
-
-sled: sim-b6d65341 (id ..........<REDACTED_UUID>...........)
-
-  SERVICE        INSTANCE_ID                          ADDR                     
-  CruciblePantry ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-  ExternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-  InternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-  Nexus          ..........<REDACTED_UUID>........... [::ffff:127.0.0.1]:REDACTED_PORT 
-  Mgd            ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
@@ -385,7 +346,7 @@ task: "blueprint_loader"
   currently executing: no
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "blueprint_loader" (don't know how to interpret details: Object {"status": String("no target blueprint")})
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m

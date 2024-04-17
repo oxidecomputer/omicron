@@ -10,15 +10,15 @@ use nexus_db_model::Dataset;
 use nexus_db_model::DatasetKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::OmicronZoneConfig;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use slog::warn;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::net::SocketAddrV6;
 
 /// For each crucible zone in `all_omicron_zones`, ensure that a corresponding
 /// dataset record exists in `datastore`
@@ -28,7 +28,7 @@ use std::net::SocketAddrV6;
 pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
+    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
 ) -> anyhow::Result<usize> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
@@ -45,14 +45,17 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         .await
         .context("failed to list all datasets")?
         .into_iter()
-        .map(|dataset| dataset.id())
+        .map(|dataset| OmicronZoneUuid::from_untyped_uuid(dataset.id()))
         .collect::<BTreeSet<_>>();
 
     let mut num_inserted = 0;
     let mut num_already_exist = 0;
 
     for zone in all_omicron_zones {
-        let OmicronZoneType::Crucible { address, dataset } = &zone.zone_type
+        let BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+            address,
+            dataset,
+        }) = &zone.zone_type
         else {
             continue;
         };
@@ -67,17 +70,6 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
 
         // Map progenitor client strings into the types we need. We never
         // expect these to fail.
-        let addr: SocketAddrV6 = match address.parse() {
-            Ok(addr) => addr,
-            Err(err) => {
-                warn!(
-                    opctx.log, "failed to parse crucible zone address";
-                    "address" => address,
-                    "err" => InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
         let zpool_name: ZpoolName = match dataset.pool_name.parse() {
             Ok(name) => name,
             Err(err) => {
@@ -92,9 +84,9 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
 
         let pool_id = zpool_name.id();
         let dataset = Dataset::new(
-            id,
+            id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
-            addr,
+            *address,
             DatasetKind::Crucible,
         );
         let maybe_inserted = datastore
@@ -150,9 +142,11 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::types::OmicronZoneDataset;
+    use sled_agent_client::types::OmicronZoneType;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -231,10 +225,23 @@ mod tests {
                 .len(),
             0
         );
+
+        // Convert the collection zones into blueprint zones.
+        let all_omicron_zones = collection
+            .all_omicron_zones()
+            .map(|z| {
+                BlueprintZoneConfig::from_omicron_zone_config(
+                    z.clone(),
+                    BlueprintZoneDisposition::InService,
+                )
+                .expect("failed to convert to blueprint zone config")
+            })
+            .collect::<Vec<_>>();
+
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            collection.all_omicron_zones(),
+            all_omicron_zones.iter(),
         )
         .await
         .expect("failed to ensure crucible datasets");
@@ -255,7 +262,7 @@ mod tests {
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            collection.all_omicron_zones(),
+            all_omicron_zones.iter(),
         )
         .await
         .expect("failed to ensure crucible datasets");
@@ -286,23 +293,26 @@ mod tests {
 
         // Call `ensure_crucible_dataset_records_exist` again, adding a new
         // crucible zone. It should insert only this new zone.
-        let new_zone = OmicronZoneConfig {
-            id: Uuid::new_v4(),
+        let new_zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::new_v4(),
             underlay_address: "::1".parse().unwrap(),
-            zone_type: OmicronZoneType::Crucible {
-                address: "[::1]:0".to_string(),
-                dataset: OmicronZoneDataset {
-                    pool_name: ZpoolName::new_external(new_zpool_id)
-                        .to_string()
-                        .parse()
-                        .unwrap(),
+            zone_type: BlueprintZoneType::Crucible(
+                blueprint_zone_type::Crucible {
+                    address: "[::1]:0".parse().unwrap(),
+                    dataset: OmicronZoneDataset {
+                        pool_name: ZpoolName::new_external(new_zpool_id)
+                            .to_string()
+                            .parse()
+                            .unwrap(),
+                    },
                 },
-            },
+            ),
         };
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            collection.all_omicron_zones().chain(std::iter::once(&new_zone)),
+            all_omicron_zones.iter().chain(std::iter::once(&new_zone)),
         )
         .await
         .expect("failed to ensure crucible datasets");

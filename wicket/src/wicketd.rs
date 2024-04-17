@@ -26,13 +26,13 @@ impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
         match id {
             ComponentId::Sled(i) => {
-                SpIdentifier { type_: SpType::Sled, slot: i as u32 }
+                SpIdentifier { type_: SpType::Sled, slot: u32::from(i) }
             }
             ComponentId::Psc(i) => {
-                SpIdentifier { type_: SpType::Power, slot: i as u32 }
+                SpIdentifier { type_: SpType::Power, slot: u32::from(i) }
             }
             ComponentId::Switch(i) => {
-                SpIdentifier { type_: SpType::Switch, slot: i as u32 }
+                SpIdentifier { type_: SpType::Switch, slot: u32::from(i) }
             }
         }
     }

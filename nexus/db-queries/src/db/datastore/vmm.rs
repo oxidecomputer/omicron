@@ -155,7 +155,7 @@ impl DataStore {
             .filter(dsl::id.eq(*vmm_id))
             .set((
                 dsl::propolis_ip.eq(new_ip),
-                dsl::propolis_port.eq(new_port as i32),
+                dsl::propolis_port.eq(i32::from(new_port)),
             ))
             .returning(Vmm::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)

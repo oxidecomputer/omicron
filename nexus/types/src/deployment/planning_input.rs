@@ -58,29 +58,61 @@ pub struct PlanningInput {
 }
 
 impl PlanningInput {
-    /// Creates a new `PlanningInput` from the unvalidated form, returning
-    /// errors if the input is invalid.
-    pub fn from_unvalidated(
-        input: UnvalidatedPlanningInput,
+    fn from_unvalidated(
+        inner: UnvalidatedPlanningInput,
     ) -> Result<Self, PlanningInputValidationError> {
-        input.validate()?;
-        Ok(Self { inner: input })
+        inner.validate()?;
+        Ok(Self { inner })
     }
 
-    /// Returns the unvalidated planning input contained inside.
-    ///
-    /// This drops the constraint that the planning input is valid.
-    pub fn as_unvalidated(&self) -> &UnvalidatedPlanningInput {
-        &self.inner
+    pub fn internal_dns_version(&self) -> Generation {
+        self.inner.internal_dns_version
     }
 
-    /// Converts self into the unvalidated planning input.
-    ///
-    /// This drops the constraint that the planning input is valid. The
-    /// constraint can be restored by calling
-    /// [`PlanningInput::from_unvalidated`].
-    pub fn into_unvalidated(self) -> UnvalidatedPlanningInput {
-        self.inner
+    pub fn external_dns_version(&self) -> Generation {
+        self.inner.external_dns_version
+    }
+
+    pub fn target_nexus_zone_count(&self) -> usize {
+        self.inner.policy.target_nexus_zone_count
+    }
+
+    pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
+        &self.inner.policy.service_ip_pool_ranges
+    }
+
+    pub fn all_sleds(
+        &self,
+        filter: SledFilter,
+    ) -> impl Iterator<Item = (SledUuid, &SledDetails)> + '_ {
+        self.inner.sleds.iter().filter_map(move |(&sled_id, details)| {
+            filter
+                .matches_policy_and_state(details.policy, details.state)
+                .then_some((sled_id, details))
+        })
+    }
+
+    pub fn all_sled_ids(
+        &self,
+        filter: SledFilter,
+    ) -> impl Iterator<Item = SledUuid> + '_ {
+        self.all_sleds(filter).map(|(sled_id, _)| sled_id)
+    }
+
+    pub fn all_sled_resources(
+        &self,
+        filter: SledFilter,
+    ) -> impl Iterator<Item = (SledUuid, &SledResources)> + '_ {
+        self.all_sleds(filter)
+            .map(|(sled_id, details)| (sled_id, &details.resources))
+    }
+
+    pub fn sled_policy(&self, sled_id: &SledUuid) -> Option<SledPolicy> {
+        self.inner.sleds.get(sled_id).map(|details| details.policy)
+    }
+
+    pub fn sled_resources(&self, sled_id: &SledUuid) -> Option<&SledResources> {
+        self.inner.sleds.get(sled_id).map(|details| &details.resources)
     }
 
     /// Convert this `PlanningInput` back into a [`PlanningInputBuilder`]
@@ -133,7 +165,7 @@ impl<'de> Deserialize<'de> for PlanningInput {
 /// This is helpful for intermediate deserialization -- so that we can both
 /// show what's stored and validate it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UnvalidatedPlanningInput {
+struct UnvalidatedPlanningInput {
     /// fleet-wide policy
     policy: Policy,
 
@@ -147,98 +179,25 @@ pub struct UnvalidatedPlanningInput {
     sleds: BTreeMap<SledUuid, SledDetails>,
 
     /// external IPs allocated to Omicron zones
-    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, ServiceExternalIp>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
 
     /// vNICs allocated to Omicron zones
-    omicron_zone_nics: BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
 }
 
 impl UnvalidatedPlanningInput {
     /// Validates the planning input, returning errors if the input is invalid.
-    pub fn validate(&self) -> Result<(), PlanningInputValidationError> {
+    fn validate(&self) -> Result<(), PlanningInputValidationError> {
         // Simply constructing the validation state is enough to show that the
         // input is valid.
-        _ = ValidationState::new(
+        ValidationState::new(
             &self.omicron_zone_external_ips,
             &self.omicron_zone_nics,
         )?;
 
         Ok(())
     }
-
-    // (Only used in the macro below.)
-    #[inline]
-    fn as_unvalidated(&self) -> &Self {
-        self
-    }
 }
-
-macro_rules! impl_planning_input {
-    ($($ty:ident),*) => {
-        $(impl $ty {
-            pub fn internal_dns_version(&self) -> Generation {
-                self.as_unvalidated().internal_dns_version
-            }
-
-            pub fn external_dns_version(&self) -> Generation {
-                self.as_unvalidated().external_dns_version
-            }
-
-            pub fn target_nexus_zone_count(&self) -> usize {
-                self.as_unvalidated().policy.target_nexus_zone_count
-            }
-
-            pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
-                &self.as_unvalidated().policy.service_ip_pool_ranges
-            }
-
-            pub fn all_sleds(
-                &self,
-                filter: SledFilter,
-            ) -> impl Iterator<Item = (SledUuid, &SledDetails)> + '_ {
-                self.as_unvalidated().sleds.iter().filter_map(move |(&sled_id, details)| {
-                    filter
-                        .matches_policy_and_state(details.policy, details.state)
-                        .then_some((sled_id, details))
-                })
-            }
-
-            pub fn all_sled_ids(
-                &self,
-                filter: SledFilter,
-            ) -> impl Iterator<Item = SledUuid> + '_ {
-                self.as_unvalidated().all_sleds(filter).map(|(sled_id, _)| sled_id)
-            }
-
-            pub fn all_sled_resources(
-                &self,
-                filter: SledFilter,
-            ) -> impl Iterator<Item = (SledUuid, &SledResources)> + '_ {
-                self.as_unvalidated().all_sleds(filter)
-                    .map(|(sled_id, details)| (sled_id, &details.resources))
-            }
-
-            pub fn sled_policy(
-                &self,
-                sled_id: &SledUuid,
-            ) -> Option<SledPolicy> {
-                self.as_unvalidated().sleds.get(sled_id).map(|details| details.policy)
-            }
-
-            pub fn sled_resources(
-                &self,
-                sled_id: &SledUuid,
-            ) -> Option<&SledResources> {
-                self.as_unvalidated().sleds.get(sled_id).map(|details| &details.resources)
-            }
-        })*
-    };
-}
-
-// Many of these operations make sense for both validated and unvalidated
-// planning inputs -- this allows callers to show the contents of the planning
-// input while validating it separately.
-impl_planning_input!(PlanningInput, UnvalidatedPlanningInput);
 
 /// Describes a single disk already managed by the sled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,23 +265,23 @@ impl SledResources {
     }
 }
 
-/// External IP allocated to a service
+/// External IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
-/// necessary for blueprint planning, and requires that the service have a
-/// single IP.
+/// necessary for blueprint planning, and requires that the zone have a single
+/// IP.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceExternalIp {
+pub struct OmicronZoneExternalIp {
     pub id: ExternalIpUuid,
     pub ip: IpAddr,
 }
 
-/// Network interface allocated to a service
+/// Network interface allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceNetworkInterface {
+pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
     pub ip: IpNetwork,
@@ -539,14 +498,14 @@ pub enum PlanningInputBuildError {
     #[error("associating Omicron zone {zone_id} with {ip:?} failed due to duplicates: {}", join_dups(dups))]
     DuplicateOmicronZoneExternalIp {
         zone_id: OmicronZoneUuid,
-        ip: ServiceExternalIp,
-        dups: Vec<ServiceExternalIpEntry>,
+        ip: OmicronZoneExternalIp,
+        dups: Vec<OmicronZoneExternalIpEntry>,
     },
     #[error("associating Omicron zone {zone_id} with {nic:?} failed due to duplicates: {}", join_dups(dups))]
     DuplicateOmicronZoneNic {
         zone_id: OmicronZoneUuid,
-        nic: ServiceNetworkInterface,
-        dups: Vec<ServiceNicEntry>,
+        nic: OmicronZoneNic,
+        dups: Vec<OmicronZoneNicEntry>,
     },
 }
 
@@ -621,7 +580,7 @@ impl PlanningInputBuilder {
         ip: IpNetwork,
     ) -> Result<(), PlanningInputBuildError> {
         let size = match ip.size() {
-            NetworkSize::V4(n) => n as u128,
+            NetworkSize::V4(n) => u128::from(n),
             NetworkSize::V6(n) => n,
         };
         if size != 1 {
@@ -630,14 +589,14 @@ impl PlanningInputBuilder {
 
         self.add_omicron_zone_external_ip(
             zone_id,
-            ServiceExternalIp { id: ip_id, ip: ip.ip() },
+            OmicronZoneExternalIp { id: ip_id, ip: ip.ip() },
         )
     }
 
     pub fn add_omicron_zone_external_ip(
         &mut self,
         zone_id: OmicronZoneUuid,
-        ip: ServiceExternalIp,
+        ip: OmicronZoneExternalIp,
     ) -> Result<(), PlanningInputBuildError> {
         self.validation_state.insert_external_ip(zone_id, ip)
     }
@@ -645,7 +604,7 @@ impl PlanningInputBuilder {
     pub fn add_omicron_zone_nic(
         &mut self,
         zone_id: OmicronZoneUuid,
-        nic: ServiceNetworkInterface,
+        nic: OmicronZoneNic,
     ) -> Result<(), PlanningInputBuildError> {
         self.validation_state.insert_nic(zone_id, nic)
     }
@@ -701,13 +660,13 @@ struct ValidationState {
     // (zone) UUIDs, external IP UUIDs, and IP addresses. The easiest way to do
     // that is to store a list of structs and a series of maps that index into
     // the struct.
-    external_ip_entries: Vec<ServiceExternalIpEntry>,
+    external_ip_entries: Vec<OmicronZoneExternalIpEntry>,
     zone_id_to_ip_entry: HashMap<OmicronZoneUuid, usize>,
     ip_id_to_ip_entry: HashMap<ExternalIpUuid, usize>,
     ip_to_ip_entry: HashMap<IpAddr, usize>,
 
     // And similar for vNICs.
-    external_mac_entries: Vec<ServiceNicEntry>,
+    external_mac_entries: Vec<OmicronZoneNicEntry>,
     zone_id_to_mac_entry: HashMap<OmicronZoneUuid, usize>,
     vnic_id_to_mac_entry: HashMap<VnicUuid, usize>,
     mac_to_mac_entry: HashMap<MacAddr, usize>,
@@ -715,8 +674,8 @@ struct ValidationState {
 
 impl ValidationState {
     fn new(
-        external_ips: &BTreeMap<OmicronZoneUuid, ServiceExternalIp>,
-        nics: &BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
+        external_ips: &BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
+        nics: &BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
     ) -> Result<Self, PlanningInputValidationError> {
         let mut errors = Vec::new();
 
@@ -744,17 +703,23 @@ impl ValidationState {
     fn insert_external_ip(
         &mut self,
         zone_id: OmicronZoneUuid,
-        ip: ServiceExternalIp,
+        ip: OmicronZoneExternalIp,
     ) -> Result<(), PlanningInputBuildError> {
         let mut dups = BTreeSet::new();
 
         // Check that the entry doesn't already exist in any of the maps. (We
         // need to do a round of this before we insert the entry, because we
         // don't want to leave the validator in an indeterminate state!)
-        let e1 =
-            or_insert_dup(self.zone_id_to_ip_entry.entry(zone_id), &mut dups);
-        let e2 = or_insert_dup(self.ip_id_to_ip_entry.entry(ip.id), &mut dups);
-        let e3 = or_insert_dup(self.ip_to_ip_entry.entry(ip.ip), &mut dups);
+        let e1 = insert_dup_if_exists(
+            self.zone_id_to_ip_entry.entry(zone_id),
+            &mut dups,
+        );
+        let e2 = insert_dup_if_exists(
+            self.ip_id_to_ip_entry.entry(ip.id),
+            &mut dups,
+        );
+        let e3 =
+            insert_dup_if_exists(self.ip_to_ip_entry.entry(ip.ip), &mut dups);
 
         if !dups.is_empty() {
             let dups = dups
@@ -774,7 +739,7 @@ impl ValidationState {
         // the Options are Some.
         let next_index = self.external_ip_entries.len();
         self.external_ip_entries
-            .push(ServiceExternalIpEntry { zone_id, external_ip: ip });
+            .push(OmicronZoneExternalIpEntry { zone_id, external_ip: ip });
         e1.unwrap().insert(next_index);
         e2.unwrap().insert(next_index);
         e3.unwrap().insert(next_index);
@@ -785,18 +750,25 @@ impl ValidationState {
     fn insert_nic(
         &mut self,
         zone_id: OmicronZoneUuid,
-        nic: ServiceNetworkInterface,
+        nic: OmicronZoneNic,
     ) -> Result<(), PlanningInputBuildError> {
         let mut dups = BTreeSet::new();
 
         // Check that the entry doesn't already exist in any of the maps. (We
         // need to do a round of this before we insert the entry, because we
         // don't want to leave the validator in an indeterminate state!)
-        let e1 =
-            or_insert_dup(self.zone_id_to_mac_entry.entry(zone_id), &mut dups);
-        let e2 =
-            or_insert_dup(self.vnic_id_to_mac_entry.entry(nic.id), &mut dups);
-        let e3 = or_insert_dup(self.mac_to_mac_entry.entry(nic.mac), &mut dups);
+        let e1 = insert_dup_if_exists(
+            self.zone_id_to_mac_entry.entry(zone_id),
+            &mut dups,
+        );
+        let e2 = insert_dup_if_exists(
+            self.vnic_id_to_mac_entry.entry(nic.id),
+            &mut dups,
+        );
+        let e3 = insert_dup_if_exists(
+            self.mac_to_mac_entry.entry(nic.mac),
+            &mut dups,
+        );
 
         if !dups.is_empty() {
             let dups = dups
@@ -813,7 +785,7 @@ impl ValidationState {
         // Insert the entry into the maps. Returning early above means all of
         // the Options are Some.
         let next_index = self.external_mac_entries.len();
-        self.external_mac_entries.push(ServiceNicEntry { zone_id, nic });
+        self.external_mac_entries.push(OmicronZoneNicEntry { zone_id, nic });
         e1.unwrap().insert(next_index);
         e2.unwrap().insert(next_index);
         e3.unwrap().insert(next_index);
@@ -824,8 +796,8 @@ impl ValidationState {
     fn into_maps(
         self,
     ) -> (
-        BTreeMap<OmicronZoneUuid, ServiceExternalIp>,
-        BTreeMap<OmicronZoneUuid, ServiceNetworkInterface>,
+        BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
+        BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
     ) {
         // During construction, we've ensured that the maps are 1:1:1, so no
         // further checks are required before constructing this.
@@ -843,7 +815,7 @@ impl ValidationState {
     }
 }
 
-fn or_insert_dup<'a, K>(
+fn insert_dup_if_exists<'a, K>(
     entry: hash_map::Entry<'a, K, usize>,
     dups: &mut BTreeSet<usize>,
 ) -> Option<hash_map::VacantEntry<'a, K, usize>> {
@@ -857,13 +829,15 @@ fn or_insert_dup<'a, K>(
 }
 
 #[derive(Clone, Debug)]
-pub struct ServiceExternalIpEntry {
+pub struct OmicronZoneExternalIpEntry {
     pub zone_id: OmicronZoneUuid,
-    pub external_ip: ServiceExternalIp,
+    pub external_ip: OmicronZoneExternalIp,
 }
 
 #[derive(Clone, Debug)]
-pub struct ServiceNicEntry {
+pub struct OmicronZoneNicEntry {
     pub zone_id: OmicronZoneUuid,
-    pub nic: ServiceNetworkInterface,
+    pub nic: OmicronZoneNic,
 }
+
+// TODO: add tests for ValidationState
