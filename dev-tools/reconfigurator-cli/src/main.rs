@@ -170,7 +170,7 @@ impl ReconfiguratorSim {
                 let nic = OmicronZoneNic {
                     id: nic.id,
                     mac: nic.mac,
-                    ip: nic.ip.into(),
+                    ip: nic.ip,
                     slot: nic.slot,
                     primary: nic.primary,
                 };

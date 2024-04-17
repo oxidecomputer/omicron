@@ -389,7 +389,7 @@ impl DataStore {
         })
     }
 
-    /// Allocates an explicit Floating IP address for an internal service.
+    /// Allocates an explicit IP address for an internal service.
     ///
     /// Unlike the other IP allocation requests, this does not search for an
     /// available IP address, it asks for one explicitly.
@@ -429,30 +429,6 @@ impl DataStore {
                 )
             }
         };
-        self.allocate_external_ip(opctx, data).await
-    }
-
-    /// Allocates an explicit SNAT IP address for an internal service.
-    ///
-    /// Unlike the other IP allocation requests, this does not search for an
-    /// available IP address, it asks for one explicitly.
-    pub async fn external_ip_allocate_service_explicit_snat(
-        &self,
-        opctx: &OpContext,
-        ip_id: Uuid,
-        service_id: Uuid,
-        ip: IpAddr,
-        port_range: (u16, u16),
-    ) -> CreateResult<ExternalIp> {
-        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        let data = IncompleteExternalIp::for_service_explicit_snat(
-            ip_id,
-            service_id,
-            pool.id(),
-            ip,
-            port_range,
-        );
         self.allocate_external_ip(opctx, data).await
     }
 
