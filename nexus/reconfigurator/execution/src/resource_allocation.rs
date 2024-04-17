@@ -7,7 +7,6 @@
 use anyhow::bail;
 use anyhow::Context;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::Name;
 use nexus_db_model::SqlU16;
 use nexus_db_model::VpcSubnet;
 use nexus_db_queries::context::OpContext;
@@ -18,12 +17,15 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_client::ZoneKind;
 use slog::info;
 use slog::warn;
 use std::net::IpAddr;
@@ -96,7 +98,7 @@ impl<'a> ResourceAllocator<'a> {
     // already allocated to a specific service zone.
     async fn is_external_ip_already_allocated(
         &self,
-        zone_type: &'static str,
+        zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
         external_ip: IpAddr,
         port_range: Option<(u16, u16)>,
@@ -115,7 +117,7 @@ impl<'a> ResourceAllocator<'a> {
             .await
             .with_context(|| {
                 format!(
-                    "failed to look up external IPs for {zone_type} {zone_id}"
+                    "failed to look up external IPs for {zone_kind} {zone_id}"
                 )
             })?;
 
@@ -134,7 +136,7 @@ impl<'a> ResourceAllocator<'a> {
                 {
                     info!(
                         self.opctx.log, "found already-allocated external IP";
-                        "zone_type" => zone_type,
+                        "zone_kind" => %zone_kind,
                         "zone_id" => %zone_id,
                         "ip" => %external_ip,
                     );
@@ -144,7 +146,7 @@ impl<'a> ResourceAllocator<'a> {
 
             warn!(
                 self.opctx.log, "zone has unexpected IPs allocated";
-                "zone_type" => zone_type,
+                "zone_kind" => %zone_kind,
                 "zone_id" => %zone_id,
                 "want_ip" => %external_ip,
                 "allocated_ips" => ?allocated_ips,
@@ -157,7 +159,7 @@ impl<'a> ResourceAllocator<'a> {
 
         info!(
             self.opctx.log, "external IP allocation required for zone";
-            "zone_type" => zone_type,
+            "zone_kind" => %zone_kind,
             "zone_id" => %zone_id,
             "ip" => %external_ip,
         );
@@ -241,10 +243,9 @@ impl<'a> ResourceAllocator<'a> {
     // to allocate external networking for both of them.
     async fn ensure_external_service_ip(
         &self,
-        zone_type: &'static str,
-        service_id: OmicronZoneUuid,
+        zone_kind: ZoneKind,
+        zone_id: OmicronZoneUuid,
         external_ip: IpAddr,
-        ip_name: &Name,
     ) -> anyhow::Result<()> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
@@ -260,8 +261,8 @@ impl<'a> ResourceAllocator<'a> {
         // blueprint at the same time.
         if self
             .is_external_ip_already_allocated(
-                zone_type,
-                service_id,
+                zone_kind,
+                zone_id,
                 external_ip,
                 None,
             )
@@ -269,29 +270,26 @@ impl<'a> ResourceAllocator<'a> {
         {
             return Ok(());
         }
-        let ip_id = Uuid::new_v4();
-        let description = zone_type;
+        let ip_id = ExternalIpUuid::new_v4();
         self.datastore
             .external_ip_allocate_service_explicit(
                 self.opctx,
-                ip_id,
-                ip_name,
-                description,
-                service_id.into_untyped_uuid(),
-                external_ip,
+                zone_id,
+                zone_kind,
+                OmicronZoneExternalIp { id: ip_id, ip: external_ip },
             )
             .await
             .with_context(|| {
                 format!(
-                    "failed to allocate IP to {zone_type} {service_id}: \
-                         {external_ip}"
+                    "failed to allocate IP to {zone_kind} {zone_id}: \
+                     {external_ip}"
                 )
             })?;
 
         info!(
             self.opctx.log, "successfully allocated external IP";
-            "zone_type" => zone_type,
-            "zone_id" => %service_id,
+            "zone_kind" => %zone_kind,
+            "zone_id" => %zone_id,
             "ip" => %external_ip,
             "ip_id" => %ip_id,
         );
@@ -303,7 +301,7 @@ impl<'a> ResourceAllocator<'a> {
     // `ensure_external_service_ip` but accounts for that.
     async fn ensure_external_service_snat_ip(
         &self,
-        zone_type: &'static str,
+        zone_kind: ZoneKind,
         service_id: OmicronZoneUuid,
         snat: &SourceNatConfig,
     ) -> anyhow::Result<()> {
@@ -315,7 +313,7 @@ impl<'a> ResourceAllocator<'a> {
         // for the same reasons as described there.
         if self
             .is_external_ip_already_allocated(
-                zone_type,
+                zone_kind,
                 service_id,
                 snat.ip,
                 Some((snat.first_port, snat.last_port)),
@@ -337,14 +335,14 @@ impl<'a> ResourceAllocator<'a> {
             .await
             .with_context(|| {
                 format!(
-                    "failed to allocate snat IP to {zone_type} {service_id}: \
+                    "failed to allocate snat IP to {zone_kind} {service_id}: \
                      {snat:?}"
                 )
             })?;
 
         info!(
             self.opctx.log, "successfully allocated external SNAT IP";
-            "zone_type" => zone_type,
+            "zone_kind" => %zone_kind,
             "zone_id" => %service_id,
             "snat" => ?snat,
             "ip_id" => %ip_id,
@@ -461,10 +459,9 @@ impl<'a> ResourceAllocator<'a> {
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
         self.ensure_external_service_ip(
-            "nexus",
+            ZoneKind::Nexus,
             zone_id,
             external_ip,
-            &Name(nic.name.clone()),
         )
         .await?;
         self.ensure_service_nic("nexus", zone_id, nic, &NEXUS_VPC_SUBNET)
@@ -479,10 +476,9 @@ impl<'a> ResourceAllocator<'a> {
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
         self.ensure_external_service_ip(
-            "external_dns",
+            ZoneKind::ExternalDns,
             zone_id,
             dns_address.ip(),
-            &Name(nic.name.clone()),
         )
         .await?;
         self.ensure_service_nic("external_dns", zone_id, nic, &DNS_VPC_SUBNET)
@@ -496,7 +492,12 @@ impl<'a> ResourceAllocator<'a> {
         snat: &SourceNatConfig,
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
-        self.ensure_external_service_snat_ip("ntp", zone_id, snat).await?;
+        self.ensure_external_service_snat_ip(
+            ZoneKind::BoundaryNtp,
+            zone_id,
+            snat,
+        )
+        .await?;
         self.ensure_service_nic("ntp", zone_id, nic, &NTP_VPC_SUBNET).await?;
         Ok(())
     }

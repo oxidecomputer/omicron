@@ -40,7 +40,9 @@ use diesel::prelude::*;
 use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
+use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -52,7 +54,10 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
+use sled_agent_client::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -390,21 +395,25 @@ impl DataStore {
     pub async fn external_ip_allocate_service_explicit(
         &self,
         opctx: &OpContext,
-        ip_id: Uuid,
-        name: &Name,
-        description: &str,
-        service_id: Uuid,
-        ip: IpAddr,
+        zone_id: OmicronZoneUuid,
+        zone_kind: ZoneKind,
+        external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
         let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+        // We know this format string always produces a valid `Name`, so we'll
+        // unwrap here.
+        let name: external::Name = format!("{zone_kind}-{zone_id}")
+            .parse()
+            .expect("fixed name failed to parse");
+        let description = zone_kind.to_string();
         let data = IncompleteExternalIp::for_service_explicit(
-            ip_id,
-            name,
-            description,
-            service_id,
+            external_ip.id.into_untyped_uuid(),
+            &Name(name),
+            &description,
+            zone_id.into_untyped_uuid(),
             pool.id(),
-            ip,
+            external_ip.ip,
         );
         self.allocate_external_ip(opctx, data).await
     }
@@ -1219,6 +1228,7 @@ mod tests {
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
 
@@ -1267,8 +1277,7 @@ mod tests {
         // Allocate a bunch of fake service IPs.
         let mut external_ips = Vec::new();
         let mut allocate_snat = false; // flip-flop between regular and snat
-        for (i, ip) in ip_range.iter().enumerate() {
-            let name = format!("service-ip-{i}");
+        for ip in ip_range.iter() {
             let external_ip = if allocate_snat {
                 datastore
                     .external_ip_allocate_service_explicit_snat(
@@ -1284,11 +1293,12 @@ mod tests {
                 datastore
                     .external_ip_allocate_service_explicit(
                         &opctx,
-                        Uuid::new_v4(),
-                        &Name(name.parse().unwrap()),
-                        &name,
-                        Uuid::new_v4(),
-                        ip,
+                        OmicronZoneUuid::new_v4(),
+                        ZoneKind::Nexus,
+                        OmicronZoneExternalIp {
+                            id: ExternalIpUuid::new_v4(),
+                            ip,
+                        },
                     )
                     .await
                     .expect("failed to allocate service IP")

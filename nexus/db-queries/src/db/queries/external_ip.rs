@@ -889,6 +889,7 @@ mod tests {
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::OmicronZoneExternalIp;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -896,6 +897,10 @@ mod tests {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_client::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
@@ -1494,17 +1499,18 @@ mod tests {
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
-        let service_id = Uuid::new_v4();
-        let id = Uuid::new_v4();
+        let service_id = OmicronZoneUuid::new_v4();
+        let id = ExternalIpUuid::new_v4();
         let ip = context
             .db_datastore
             .external_ip_allocate_service_explicit(
                 &context.opctx,
-                id,
-                &Name("service-ip".parse().unwrap()),
-                "service-ip",
                 service_id,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                ZoneKind::Nexus,
+                OmicronZoneExternalIp {
+                    id,
+                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                },
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1512,18 +1518,19 @@ mod tests {
         assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)));
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.parent_id, Some(service_id));
+        assert_eq!(ip.parent_id, Some(service_id.into_untyped_uuid()));
 
         // Try allocating the same service IP again.
         let ip_again = context
             .db_datastore
             .external_ip_allocate_service_explicit(
                 &context.opctx,
-                id,
-                &Name("service-ip".parse().unwrap()),
-                "service-ip",
                 service_id,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                ZoneKind::Nexus,
+                OmicronZoneExternalIp {
+                    id,
+                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                },
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1537,11 +1544,12 @@ mod tests {
             .db_datastore
             .external_ip_allocate_service_explicit(
                 &context.opctx,
-                Uuid::new_v4(),
-                &Name("service-ip".parse().unwrap()),
-                "service-ip",
                 service_id,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                ZoneKind::Nexus,
+                OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                },
             )
             .await
             .expect_err("Should have failed to re-allocate same IP address (different UUID)");
@@ -1556,11 +1564,12 @@ mod tests {
             .db_datastore
             .external_ip_allocate_service_explicit(
                 &context.opctx,
-                id,
-                &Name("service-ip".parse().unwrap()),
-                "service-ip",
                 service_id,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                ZoneKind::Nexus,
+                OmicronZoneExternalIp {
+                    id,
+                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                },
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (same UUID)");
@@ -1575,8 +1584,8 @@ mod tests {
             .db_datastore
             .external_ip_allocate_service_explicit_snat(
                 &context.opctx,
-                id,
-                service_id,
+                id.into_untyped_uuid(),
+                service_id.into_untyped_uuid(),
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
                 (0, 16383),
             )
@@ -1661,17 +1670,18 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
-        let service_id = Uuid::new_v4();
-        let id = Uuid::new_v4();
+        let service_id = OmicronZoneUuid::new_v4();
+        let id = ExternalIpUuid::new_v4();
         let err = context
             .db_datastore
             .external_ip_allocate_service_explicit(
                 &context.opctx,
-                id,
-                &Name("service-ip".parse().unwrap()),
-                "service-ip",
                 service_id,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+                ZoneKind::Nexus,
+                OmicronZoneExternalIp {
+                    id,
+                    ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+                },
             )
             .await
             .expect_err("Should have failed to allocate out-of-bounds IP");
