@@ -9,15 +9,14 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ServiceExternalIp;
-use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledKind;
 use sled_agent_client::types::OmicronZonesConfig;
 use typed_rng::TypedUuidRng;
@@ -125,24 +124,24 @@ impl ExampleSystem {
             else {
                 continue;
             };
-            for zone in zones.zones.iter().map(|z| &z.config) {
-                let service_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
-                if let Ok(Some(ip)) = zone.zone_type.external_ip() {
+            for zone in zones.zones.iter() {
+                let service_id = zone.id;
+                if let Some(ip) = zone.zone_type.external_ip() {
                     input_builder
                         .add_omicron_zone_external_ip(
                             service_id,
-                            ServiceExternalIp {
+                            OmicronZoneExternalIp {
                                 id: ExternalIpUuid::new_v4(),
                                 ip,
                             },
                         )
                         .expect("failed to add Omicron zone external IP");
                 }
-                if let Some(nic) = zone.zone_type.service_vnic() {
+                if let Some(nic) = zone.zone_type.opte_vnic() {
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
-                            ServiceNetworkInterface {
+                            OmicronZoneNic {
                                 id: nic.id,
                                 mac: nic.mac,
                                 ip: nic.ip.into(),

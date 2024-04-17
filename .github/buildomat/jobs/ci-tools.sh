@@ -9,6 +9,11 @@
 #:	"=/work/caboose-util.gz",
 #:	"=/work/tufaceous.gz",
 #:	"=/work/commtest",
+#:	"=/work/permslip.gz",
+#: ]
+#: access_repos = [
+#:      "oxidecomputer/permission-slip",
+#:      "oxidecomputer/sshauth"
 #: ]
 
 set -o errexit
@@ -57,3 +62,16 @@ banner tufaceous
 
 ptime -m cargo build --locked -p tufaceous --release
 ptime -m gzip < target/release/tufaceous > /work/tufaceous.gz
+
+########## permission-slip ##########
+
+banner permission-slip
+
+source "./tools/permslip_commit"
+git init /work/permission-slip-build
+pushd /work/permission-slip-build
+git remote add origin https://github.com/oxidecomputer/permission-slip.git
+ptime -m git fetch --depth 1 origin "$COMMIT"
+git checkout FETCH_HEAD
+ptime -m cargo build --locked -p permission-slip-client --release
+ptime -m gzip < target/release/permslip > /work/permslip.gz

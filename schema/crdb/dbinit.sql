@@ -164,29 +164,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
 ) WHERE time_deleted IS NULL;
 
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.dataset
-    'dataset',
-    -- omicron.public.service
-    'service',
     -- omicron.public.instance
-    'instance',
-    -- omicron.public.sled
-    --
-    -- reserved as an approximation of sled internal usage, such as "by the OS
-    -- and all unaccounted services".
-    'reserved'
+    'instance'
+    -- We expect to other resource kinds here in the future; e.g., to track
+    -- resources used by control plane services. For now, we only track
+    -- instances.
 );
 
 -- Accounting for programs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
-    -- Should match the UUID of the corresponding service
+    -- Should match the UUID of the corresponding resource
     id UUID PRIMARY KEY,
 
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
-
-    -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL,
 
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
@@ -195,7 +186,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     rss_ram INT8 NOT NULL,
 
     -- The maximum amount of Reservoir RAM provisioned to this resource
-    reservoir_ram INT8 NOT NULL
+    reservoir_ram INT8 NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL
 );
 
 -- Allow looking up all resources which reside on a sled
@@ -294,36 +288,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'oximeter',
   'tfport',
   'mgd'
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.service (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    /* FK into the Sled table */
-    sled_id UUID NOT NULL,
-    /* For services in illumos zones, the zone's unique id (for debugging) */
-    zone_id UUID,
-    /* The IP address of the service. */
-    ip INET NOT NULL,
-    /* The UDP or TCP port on which the service listens. */
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
-    /* Indicates the type of service. */
-    kind omicron.public.service_kind NOT NULL
-);
-
-/* Add an index which lets us look up the services on a sled */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_sled ON omicron.public.service (
-    sled_id,
-    id
-);
-
-/* Look up (and paginate) services of a given kind. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_kind ON omicron.public.service (
-    kind,
-    id
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
@@ -1300,7 +1264,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
     -- A sled agent for an entry in the sled table.
     'sled_agent',
-    -- A service in the omicron.public.service table
+    -- A service in a blueprint (typically the current target blueprint, but it
+    -- may reference a prior blueprint if the service is in the process of being
+    -- removed).
     'service',
     -- A Propolis VMM for an instance in the omicron.public.instance table
     'instance'
@@ -3790,7 +3756,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '52.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '53.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

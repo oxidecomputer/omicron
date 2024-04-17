@@ -344,13 +344,14 @@ mod test {
     use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::OmicronZoneType;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
@@ -443,8 +444,8 @@ mod test {
         assert_eq!(sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
         assert!(matches!(
-            sled_zones.zones[0].config.zone_type,
-            OmicronZoneType::InternalNtp { .. }
+            sled_zones.zones[0].zone_type,
+            BlueprintZoneType::InternalNtp(_),
         ));
         assert_eq!(diff.sleds_removed().len(), 0);
         assert_eq!(diff.sleds_modified().count(), 0);
@@ -526,7 +527,7 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), 10);
         for zone in &zones {
-            if !zone.config.zone_type.is_crucible() {
+            if !zone.zone_type.is_crucible() {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
         }
@@ -608,7 +609,7 @@ mod test {
                 .expect("missing kept sled")
                 .zones
                 .iter()
-                .filter(|z| z.config.zone_type.is_nexus())
+                .filter(|z| z.zone_type.is_nexus())
                 .count(),
             1
         );
@@ -644,7 +645,7 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), input.target_nexus_zone_count() - 1);
         for zone in &zones {
-            if !zone.config.zone_type.is_nexus() {
+            if !zone.zone_type.is_nexus() {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
         }
@@ -683,7 +684,7 @@ mod test {
                 sled_config
                     .zones
                     .iter()
-                    .filter(|z| z.config.zone_type.is_nexus())
+                    .filter(|z| z.zone_type.is_nexus())
                     .count(),
                 1
             );
@@ -729,7 +730,7 @@ mod test {
                 }
             }
             for zone in &zones {
-                if !zone.config.zone_type.is_nexus() {
+                if !zone.zone_type.is_nexus() {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 }
             }
@@ -774,7 +775,7 @@ mod test {
                 sled_config
                     .zones
                     .iter()
-                    .filter(|z| z.config.zone_type.is_nexus())
+                    .filter(|z| z.zone_type.is_nexus())
                     .count(),
                 1
             );
@@ -861,8 +862,7 @@ mod test {
             assert_eq!(sled_changes.zones_modified().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
             for zone in &zones {
-                let OmicronZoneType::Nexus { .. } = zone.config.zone_type
-                else {
+                let BlueprintZoneType::Nexus(_) = zone.zone_type else {
                     panic!("unexpectedly added a non-Crucible zone: {zone:?}");
                 };
             }
@@ -908,16 +908,17 @@ mod test {
             .zones;
 
         zones.retain_mut(|zone| {
-            if let OmicronZoneType::Nexus { internal_address, .. } =
-                &mut zone.config.zone_type
+            if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address,
+                ..
+            }) = &mut zone.zone_type
             {
-                // Change one of these params to ensure that the diff output
-                // makes sense.
-                *internal_address = format!("{internal_address}foo");
+                // Change the internal address.
+                let mut segments = internal_address.ip().segments();
+                segments[0] = segments[0].wrapping_add(1);
+                internal_address.set_ip(segments.into());
                 true
-            } else if let OmicronZoneType::Crucible { .. } =
-                zone.config.zone_type
-            {
+            } else if let BlueprintZoneType::Crucible(_) = zone.zone_type {
                 match next {
                     NextCrucibleMutate::Modify => {
                         zone.disposition = BlueprintZoneDisposition::Quiesced;
@@ -930,13 +931,13 @@ mod test {
                     }
                     NextCrucibleMutate::Done => true,
                 }
-            } else if let OmicronZoneType::InternalNtp { .. } =
-                &mut zone.config.zone_type
+            } else if let BlueprintZoneType::InternalNtp(_) =
+                &mut zone.zone_type
             {
                 // Change the underlay IP.
-                let mut segments = zone.config.underlay_address.segments();
+                let mut segments = zone.underlay_address.segments();
                 segments[0] += 1;
-                zone.config.underlay_address = segments.into();
+                zone.underlay_address = segments.into();
                 true
             } else {
                 true

@@ -708,7 +708,7 @@ mod tests {
         }
 
         assert!(query_parser::duration_literal_impl("-1m").is_err());
-        let too_big: i64 = u32::MAX as i64 + 1;
+        let too_big: i64 = i64::from(u32::MAX) + 1;
         assert!(query_parser::duration_literal_impl(&format!("{too_big}s"))
             .is_err());
     }
