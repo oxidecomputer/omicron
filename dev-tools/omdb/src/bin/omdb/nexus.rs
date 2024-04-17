@@ -16,6 +16,8 @@ use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
+use futures::future::try_join;
+use futures::TryFutureExt;
 use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
@@ -1024,16 +1026,22 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintIdsArgs,
 ) -> Result<(), anyhow::Error> {
-    let blueprint1_id = args.blueprint1_id.resolve_to_id(client).await?;
-    let blueprint2_id = args.blueprint2_id.resolve_to_id(client).await?;
-    let b1 = client
-        .blueprint_view(&blueprint1_id)
-        .await
-        .with_context(|| format!("fetching blueprint {blueprint1_id}"))?;
-    let b2 = client
-        .blueprint_view(&blueprint2_id)
-        .await
-        .with_context(|| format!("fetching blueprint {blueprint2_id}"))?;
+    let (blueprint1_id, blueprint2_id) = try_join(
+        args.blueprint1_id.resolve_to_id(client),
+        args.blueprint2_id.resolve_to_id(client),
+    )
+    .await?;
+    let (b1, b2) = try_join(
+        client.blueprint_view(&blueprint1_id).map_err(|err| {
+            anyhow::Error::new(err)
+                .context(format!("fetching blueprint {blueprint1_id}"))
+        }),
+        client.blueprint_view(&blueprint2_id).map_err(|err| {
+            anyhow::Error::new(err)
+                .context(format!("fetching blueprint {blueprint2_id}"))
+        }),
+    )
+    .await?;
     let diff = b2.diff_since_blueprint(&b1).context("diffing blueprints")?;
     println!("{}", diff.display());
     Ok(())
