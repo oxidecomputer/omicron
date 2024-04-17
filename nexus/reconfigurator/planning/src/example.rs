@@ -17,7 +17,6 @@ use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledKind;
 use sled_agent_client::types::OmicronZonesConfig;
 use typed_rng::TypedUuidRng;
@@ -125,9 +124,9 @@ impl ExampleSystem {
             else {
                 continue;
             };
-            for zone in zones.zones.iter().map(|z| &z.config) {
-                let service_id = OmicronZoneUuid::from_untyped_uuid(zone.id);
-                if let Ok(Some(ip)) = zone.zone_type.external_ip() {
+            for zone in zones.zones.iter() {
+                let service_id = zone.id;
+                if let Some(ip) = zone.zone_type.external_ip() {
                     input_builder
                         .add_omicron_zone_external_ip(
                             service_id,
@@ -138,7 +137,7 @@ impl ExampleSystem {
                         )
                         .expect("failed to add Omicron zone external IP");
                 }
-                if let Some(nic) = zone.zone_type.service_vnic() {
+                if let Some(nic) = zone.zone_type.opte_vnic() {
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,

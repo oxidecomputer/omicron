@@ -164,7 +164,7 @@ impl DataStore {
             .flat_map(|zones_config| {
                 zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
-                        .with_context(|| format!("zone {:?}", zone.config.id))
+                        .with_context(|| format!("zone {}", zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                         .transpose()
                 })
@@ -2020,7 +2020,7 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_blueprint_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter(|(_, z)| {
                 z.disposition != BlueprintZoneDisposition::InService
             })

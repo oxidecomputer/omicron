@@ -41,11 +41,12 @@ use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_db_model::SledUnderlaySubnetAllocation;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneConfig;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -60,6 +61,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -464,56 +466,29 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
         service_pool: &db::model::IpPool,
-        zone_config: &OmicronZoneConfig,
+        zone_config: &BlueprintZoneConfig,
     ) -> Result<(), RackInitError> {
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
         let zone_type = &zone_config.zone_type;
         let service_ip_nic = match zone_type {
-            OmicronZoneType::ExternalDns { nic, .. }
-            | OmicronZoneType::Nexus { nic, .. } => {
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { nic, dns_address, .. },
+            ) => {
+                let external_ip = dns_address.ip();
                 let service_kind = format!("{}", zone_type.kind());
-                let external_ip = match zone_type.external_ip() {
-                    Ok(Some(ip)) => ip,
-                    Ok(None) => {
-                        let message = format!(
-                            "missing external IP in blueprint for {} zone {}",
-                            service_kind, zone_config.id
-                        );
-                        return Err(RackInitError::AddingNic(
-                            Error::internal_error(&message),
-                        ));
-                    }
-                    Err(err) => {
-                        let message = format!(
-                            "error parsing external IP in blueprint for \
-                             {} zone {}: {err:#}",
-                            service_kind, zone_config.id
-                        );
-                        return Err(RackInitError::AddingNic(
-                            Error::internal_error(&message),
-                        ));
-                    }
-                };
                 let db_ip = IncompleteExternalIp::for_service_explicit(
                     Uuid::new_v4(),
                     &db::model::Name(nic.name.clone()),
                     &service_kind,
-                    zone_config.id,
+                    zone_config.id.into_untyped_uuid(),
                     service_pool.id(),
                     external_ip,
                 );
-                let vpc_subnet = match zone_type {
-                    OmicronZoneType::ExternalDns { .. } => {
-                        DNS_VPC_SUBNET.clone()
-                    }
-                    OmicronZoneType::Nexus { .. } => NEXUS_VPC_SUBNET.clone(),
-                    _ => unreachable!(),
-                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
-                    zone_config.id,
-                    vpc_subnet,
+                    zone_config.id.into_untyped_uuid(),
+                    DNS_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: nic.name.clone(),
                         description: format!("{service_kind} service vNIC"),
@@ -525,17 +500,48 @@ impl DataStore {
                 .map_err(|e| RackInitError::AddingNic(e))?;
                 Some((db_ip, db_nic))
             }
-            OmicronZoneType::BoundaryNtp { snat_cfg, ref nic, .. } => {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                nic,
+                external_ip,
+                ..
+            }) => {
+                let service_kind = format!("{}", zone_type.kind());
+                let db_ip = IncompleteExternalIp::for_service_explicit(
+                    Uuid::new_v4(),
+                    &db::model::Name(nic.name.clone()),
+                    &service_kind,
+                    zone_config.id.into_untyped_uuid(),
+                    service_pool.id(),
+                    *external_ip,
+                );
+                let db_nic = IncompleteNetworkInterface::new_service(
+                    nic.id,
+                    zone_config.id.into_untyped_uuid(),
+                    NEXUS_VPC_SUBNET.clone(),
+                    IdentityMetadataCreateParams {
+                        name: nic.name.clone(),
+                        description: format!("{service_kind} service vNIC"),
+                    },
+                    nic.ip,
+                    nic.mac,
+                    nic.slot,
+                )
+                .map_err(|e| RackInitError::AddingNic(e))?;
+                Some((db_ip, db_nic))
+            }
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { snat_cfg, nic, .. },
+            ) => {
                 let db_ip = IncompleteExternalIp::for_service_explicit_snat(
                     Uuid::new_v4(),
-                    zone_config.id,
+                    zone_config.id.into_untyped_uuid(),
                     service_pool.id(),
                     snat_cfg.ip,
                     (snat_cfg.first_port, snat_cfg.last_port),
                 );
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
-                    zone_config.id,
+                    zone_config.id.into_untyped_uuid(),
                     NTP_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: nic.name.clone(),
@@ -551,14 +557,14 @@ impl DataStore {
                 .map_err(|e| RackInitError::AddingNic(e))?;
                 Some((db_ip, db_nic))
             }
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
+            BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::Oximeter(_) => None,
         };
         let Some((db_ip, db_nic)) = service_ip_nic else {
             info!(
@@ -964,6 +970,7 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
+    use nexus_types::inventory::OmicronZoneType;
     use omicron_common::address::{
         DNS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV4_SUBNET, NTP_OPTE_IPV4_SUBNET,
     };
@@ -1755,8 +1762,13 @@ mod test {
 
         // The address allocated for the service should match the input.
         assert_eq!(
-            observed_external_ips[&observed_zones[0].id].ip.ip(),
-            if let OmicronZoneType::Nexus { external_ip, .. } = &blueprint
+            observed_external_ips[observed_zones[0].id.as_untyped_uuid()]
+                .ip
+                .ip(),
+            if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ip,
+                ..
+            }) = &blueprint
                 .all_omicron_zones(BlueprintZoneFilter::All)
                 .next()
                 .unwrap()
@@ -1769,8 +1781,13 @@ mod test {
             }
         );
         assert_eq!(
-            observed_external_ips[&observed_zones[1].id].ip.ip(),
-            if let OmicronZoneType::Nexus { external_ip, .. } = &blueprint
+            observed_external_ips[observed_zones[1].id.as_untyped_uuid()]
+                .ip
+                .ip(),
+            if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ip,
+                ..
+            }) = &blueprint
                 .all_omicron_zones(BlueprintZoneFilter::All)
                 .nth(1)
                 .unwrap()

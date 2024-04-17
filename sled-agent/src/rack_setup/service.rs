@@ -93,7 +93,7 @@ use nexus_client::{
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig,
+    BlueprintZoneDisposition, BlueprintZonesConfig, InvalidOmicronZoneType,
 };
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -1322,9 +1322,9 @@ fn build_initial_blueprint_from_plan(
             .context("invalid internal dns version")?;
 
     let blueprint = build_initial_blueprint_from_sled_configs(
-        &sled_configs_by_id,
+        sled_configs_by_id,
         internal_dns_version,
-    );
+    )?;
 
     Ok(blueprint)
 }
@@ -1332,34 +1332,17 @@ fn build_initial_blueprint_from_plan(
 pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs_by_id: &BTreeMap<Uuid, SledConfig>,
     internal_dns_version: Generation,
-) -> Blueprint {
-    let mut blueprint_zones = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs_by_id {
-        let zones_config = BlueprintZonesConfig {
-            // This is a bit of a hack. We only construct a blueprint after
-            // completing RSS, so we need to know the final generation value
-            // sent to all sleds. Arguably, we should record this in the
-            // serialized RSS plan; however, we have already deployed
-            // systems that did not. We know that every such system used
-            // `V5_EVERYTHING` as the final generation count, so we can just
-            // use that value here. If we ever change this, in particular in
-            // a way where newly-deployed systems will have a different
-            // value, we will need to revisit storing this in the serialized
-            // RSS plan.
-            generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config
-                .zones
-                .iter()
-                .map(|z| BlueprintZoneConfig {
-                    config: z.clone().into(),
-                    // All initial zones are in-service.
-                    disposition: BlueprintZoneDisposition::InService,
-                })
-                .collect(),
-        };
-
-        blueprint_zones.insert(*sled_id, zones_config);
-    }
+) -> Result<Blueprint, InvalidOmicronZoneType> {
+    // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
+    // This is separate primarily so rustfmt doesn't lose its mind.
+    let to_bp_zone_config = |z: &crate::params::OmicronZoneConfig| {
+        // All initial zones are in-service.
+        let disposition = BlueprintZoneDisposition::InService;
+        BlueprintZoneConfig::from_omicron_zone_config(
+            z.clone().into(),
+            disposition,
+        )
+    };
 
     let mut blueprint_disks = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
@@ -1381,7 +1364,31 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         );
     }
 
-    Blueprint {
+    let mut blueprint_zones = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
+        let zones_config = BlueprintZonesConfig {
+            // This is a bit of a hack. We only construct a blueprint after
+            // completing RSS, so we need to know the final generation value
+            // sent to all sleds. Arguably, we should record this in the
+            // serialized RSS plan; however, we have already deployed
+            // systems that did not. We know that every such system used
+            // `V5_EVERYTHING` as the final generation count, so we can just
+            // use that value here. If we ever change this, in particular in
+            // a way where newly-deployed systems will have a different
+            // value, we will need to revisit storing this in the serialized
+            // RSS plan.
+            generation: DeployStepVersion::V5_EVERYTHING,
+            zones: sled_config
+                .zones
+                .iter()
+                .map(to_bp_zone_config)
+                .collect::<Result<_, _>>()?,
+        };
+
+        blueprint_zones.insert(*sled_id, zones_config);
+    }
+
+    Ok(Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
@@ -1394,7 +1401,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-    }
+    })
 }
 
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled

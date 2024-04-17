@@ -27,9 +27,10 @@ use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
@@ -272,17 +273,13 @@ impl nexus_test_interface::NexusServer for Server {
         let internal_services_ip_pool_ranges = blueprint
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
             .filter_map(|(_, zc)| match &zc.zone_type {
-                OmicronZoneType::ExternalDns { dns_address, .. } => {
-                    // Work around
-                    // https://github.com/oxidecomputer/omicron/issues/4988
-                    let dns_address: SocketAddr = dns_address
-                        .parse()
-                        .expect("invalid DNS socket address");
-                    Some(IpRange::from(dns_address.ip()))
-                }
-                OmicronZoneType::Nexus { external_ip, .. } => {
-                    Some(IpRange::from(*external_ip))
-                }
+                BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns { dns_address, .. },
+                ) => Some(IpRange::from(dns_address.ip())),
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    external_ip,
+                    ..
+                }) => Some(IpRange::from(*external_ip)),
                 _ => None,
             })
             .collect();
