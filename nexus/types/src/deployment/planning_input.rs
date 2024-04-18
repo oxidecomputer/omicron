@@ -530,7 +530,7 @@ impl PlanningInputBuilder {
             Entry::Occupied(prev) => {
                 Err(PlanningInputBuildError::DuplicateOmicronZoneExternalIp {
                     zone_id,
-                    ip: prev.get().clone(),
+                    ip: *prev.get(),
                 })
             }
         }
