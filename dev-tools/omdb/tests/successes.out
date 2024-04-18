@@ -281,14 +281,14 @@ stdout:
 task: "dns_config_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -298,7 +298,7 @@ task: "dns_servers_internal"
 task: "dns_propagation_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 4, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
@@ -309,14 +309,14 @@ task: "dns_propagation_internal"
 task: "dns_config_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -326,7 +326,7 @@ task: "dns_servers_external"
 task: "dns_propagation_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 4, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
@@ -337,35 +337,35 @@ task: "dns_propagation_external"
 task: "nat_v4_garbage_collector"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every 1m 40s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 task: "bfd_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "external_endpoints"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
@@ -382,7 +382,7 @@ task: "external_endpoints"
 task: "inventory_collection"
   configured period: every 10m
   currently executing: no
-  last completed activation: iter 5, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
@@ -391,14 +391,14 @@ task: "inventory_collection"
 task: "metrics_producer_gc"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: metric producer gc disabled (omicron#5284)
 
 task: "phantom_disks"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
@@ -406,14 +406,14 @@ task: "phantom_disks"
 task: "physical_disk_adoption"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 4, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
 task: "region_replacement"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
@@ -421,14 +421,14 @@ task: "region_replacement"
 task: "service_zone_nat_tracker"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "switch_port_config_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
