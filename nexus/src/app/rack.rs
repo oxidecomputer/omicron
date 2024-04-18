@@ -848,10 +848,6 @@ impl super::Nexus {
             ),
         })?;
 
-        // Trigger an inventory collection so that the newly added sled is known
-        // about.
-        self.activate_inventory_collection();
-
         Ok(())
     }
 

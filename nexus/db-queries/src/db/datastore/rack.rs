@@ -768,6 +768,7 @@ impl DataStore {
                     info!(log, "Inserted service networking records");
 
                     for physical_disk in physical_disks {
+                        info!(log, "physical disk upsert in handoff: {physical_disk:#?}");
                         if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
                             .await {
                             if !matches!(e, Error::ObjectAlreadyExists { .. }) {
@@ -1181,9 +1182,11 @@ mod test {
             rack_id(),
             Generation::new(),
         );
-        db.sled_upsert(sled_update)
+        let (sled, _) = db
+            .sled_upsert(sled_update)
             .await
-            .expect("Could not upsert sled during test prep")
+            .expect("Could not upsert sled during test prep");
+        sled
     }
 
     // Hacky macro helper to:

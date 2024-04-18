@@ -252,7 +252,9 @@ pub async fn reconfigurator_state_load(
     let collection_ids = datastore
         .inventory_collections()
         .await
-        .context("listing collections")?;
+        .context("listing collections")?
+        .into_iter()
+        .map(|c| c.id());
     let collections = futures::stream::iter(collection_ids)
         .filter_map(|id| async move {
             let read = datastore
