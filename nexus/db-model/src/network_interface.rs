@@ -17,6 +17,8 @@ use ipnetwork::NetworkSize;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
+use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_client::ZoneKind;
 use uuid::Uuid;
 
 /// The max number of interfaces that may be associated with a resource,
@@ -145,6 +147,40 @@ pub struct ServiceNetworkInterface {
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+}
+
+impl ServiceNetworkInterface {
+    /// Generate a suitable [`Name`] for the given Omicron zone ID and kind.
+    pub fn name(zone_id: OmicronZoneUuid, zone_kind: ZoneKind) -> Name {
+        // Ideally we'd use `zone_kind.to_string()` here, but that uses
+        // underscores as separators which aren't allowed in `Name`s. We also
+        // preserve some existing naming behavior where NTP external networking
+        // is just called "ntp", not "boundary-ntp".
+        //
+        // Most of these zone kinds do not get external networking and therefore
+        // we don't need to be able to generate names for them, but it's simpler
+        // to give them valid descriptions than worry about error handling here.
+        let prefix = match zone_kind {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
+            ZoneKind::CockroachDb => "cockroach",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible-pantry",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        };
+
+        // Now that we have a valid prefix, we know this format string
+        // always produces a valid `Name`, so we'll unwrap here.
+        let name = format!("{prefix}-{zone_id}")
+            .parse()
+            .expect("valid name failed to parse");
+
+        Name(name)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
