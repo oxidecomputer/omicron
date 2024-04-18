@@ -355,11 +355,19 @@ impl IncompleteExternalIp {
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> Self {
-        let (kind, ip, port_range, name, description) = match external_ip.kind {
+        let (kind, ip, port_range, name, description, state) = match external_ip
+            .kind
+        {
             OmicronZoneExternalIpKind::Floating(ip) => {
                 // We'll name this external IP the same as we'll name the NIC
                 // associated with this zone.
                 let name = ServiceNetworkInterface::name(zone_id, zone_kind);
+
+                // Using `IpAttachState::Attached` preserves existing behavior,
+                // `IpKind::Floating.initial_state()` is `::Detached`. If/when
+                // we do more to unify IPs between services and instances, this
+                // probably needs to be addressed.
+                let state = IpAttachState::Attached;
 
                 (
                     IpKind::Floating,
@@ -367,18 +375,21 @@ impl IncompleteExternalIp {
                     None,
                     Some(name),
                     Some(zone_kind.to_string()),
+                    state,
                 )
             }
             OmicronZoneExternalIpKind::Snat(snat_cfg) => {
                 let (first_port, last_port) = snat_cfg.port_range_raw();
+                let kind = IpKind::SNat;
                 (
-                    IpKind::SNat,
+                    kind,
                     snat_cfg.ip,
                     Some((first_port.into(), last_port.into())),
                     // Only floating IPs are allowed to have names and
                     // descriptions.
                     None,
                     None,
+                    kind.initial_state(),
                 )
             }
         };
@@ -396,7 +407,7 @@ impl IncompleteExternalIp {
             project_id: None,
             explicit_ip: Some(IpNetwork::from(ip)),
             explicit_port_range: port_range,
-            state: kind.initial_state(),
+            state,
         }
     }
 
