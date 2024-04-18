@@ -314,9 +314,19 @@ impl IncompleteExternalIp {
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> Self {
-        let (kind, ip, port_range) = match external_ip.kind {
+        let (kind, ip, port_range, name, description) = match external_ip.kind {
             OmicronZoneExternalIpKind::Floating(ip) => {
-                (IpKind::Floating, ip, None)
+                // We'll name this external IP the same as we'll name the NIC
+                // associated with this zone.
+                let name = ServiceNetworkInterface::name(zone_id, zone_kind);
+
+                (
+                    IpKind::Floating,
+                    ip,
+                    None,
+                    Some(name),
+                    Some(zone_kind.to_string()),
+                )
             }
             OmicronZoneExternalIpKind::Snat(snat_cfg) => {
                 assert!(
@@ -333,18 +343,18 @@ impl IncompleteExternalIp {
                         snat_cfg.first_port.into(),
                         snat_cfg.last_port.into(),
                     )),
+                    // Only floating IPs are allowed to have names and
+                    // descriptions.
+                    None,
+                    None,
                 )
             }
         };
 
-        // We'll name this external IP the same as we'll name the NIC associated
-        // with this zone.
-        let name = ServiceNetworkInterface::name(zone_id, zone_kind);
-
         Self {
             id: external_ip.id.into_untyped_uuid(),
-            name: Some(name),
-            description: Some(zone_kind.to_string()),
+            name,
+            description,
             time_created: Utc::now(),
             kind,
             is_service: true,
