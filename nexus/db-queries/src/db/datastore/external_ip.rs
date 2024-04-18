@@ -1150,9 +1150,9 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::OmicronZoneExternalIpKind;
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfig;
-    use nexus_types::deployment::OmicronZoneExternalIpKind;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
