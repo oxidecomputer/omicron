@@ -333,32 +333,6 @@ pub struct SledDetails {
     pub resources: SledResources,
 }
 
-impl SledDetails {
-    /// Returns `Some(reason)` if the sled needs its zones to be expunged,
-    /// based on the policy and state.
-    pub fn needs_zone_expungement(&self) -> Option<ZoneExpungeReason> {
-        match self.state {
-            SledState::Active => {}
-            SledState::Decommissioned => {
-                // A decommissioned sled that still has resources attached to
-                // it is an illegal state, but representable. If we see a sled
-                return Some(ZoneExpungeReason::SledDecommissioned);
-            }
-        }
-
-        match self.policy {
-            SledPolicy::InService { .. } => None,
-            SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum ZoneExpungeReason {
-    SledDecommissioned,
-    SledExpunged,
-}
-
 impl PlanningInput {
     pub fn internal_dns_version(&self) -> Generation {
         self.internal_dns_version
@@ -408,18 +382,6 @@ impl PlanningInput {
 
     pub fn sled_resources(&self, sled_id: &SledUuid) -> Option<&SledResources> {
         self.sleds.get(sled_id).map(|details| &details.resources)
-    }
-
-    pub fn omicron_zone_external_ips(
-        &self,
-    ) -> &BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp> {
-        &self.omicron_zone_external_ips
-    }
-
-    pub fn omicron_zone_nics(
-        &self,
-    ) -> &BTreeMap<OmicronZoneUuid, OmicronZoneNic> {
-        &self.omicron_zone_nics
     }
 
     // Convert this `PlanningInput` back into a [`PlanningInputBuilder`]

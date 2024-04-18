@@ -54,7 +54,6 @@ pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
-pub use planning_input::ZoneExpungeReason;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 

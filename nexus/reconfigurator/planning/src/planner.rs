@@ -13,7 +13,8 @@ use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::ZoneExpungeReason;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -95,13 +96,16 @@ impl<'a> Planner<'a> {
             ));
 
             // Does this sled need zone expungement based on the details?
-            let Some(reason) = sled_details.needs_zone_expungement() else {
+            let Some(reason) =
+                needs_zone_expungement(sled_details.state, sled_details.policy)
+            else {
                 continue;
             };
 
             // Are there any zones that need to be expunged?
-            let Some(pending_expunge) =
-                self.blueprint.build_pending_expunge_for_sled(sled_id, reason)
+            let Some(pending_expunge) = self
+                .blueprint
+                .build_pending_expunge_for_sled(sled_id, reason)?
             else {
                 debug!(
                     log,
@@ -398,6 +402,39 @@ impl<'a> Planner<'a> {
 
         Ok(())
     }
+}
+
+/// Returns `Some(reason)` if the sled needs its zones to be expunged,
+/// based on the policy and state.
+fn needs_zone_expungement(
+    state: SledState,
+    policy: SledPolicy,
+) -> Option<ZoneExpungeReason> {
+    match state {
+        SledState::Active => {}
+        SledState::Decommissioned => {
+            // A decommissioned sled that still has resources attached to it is
+            // an illegal state, but representable. If we see a sled in this
+            // state, we should still expunge all zones in it, but parent code
+            // should warn on it.
+            return Some(ZoneExpungeReason::SledDecommissioned);
+        }
+    }
+
+    match policy {
+        SledPolicy::InService { .. } => None,
+        SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
+    }
+}
+
+/// The reason a sled's zones need to be expunged.
+///
+/// This is used only for introspection and logging -- it's not part of the
+/// logical flow.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum ZoneExpungeReason {
+    SledDecommissioned,
+    SledExpunged,
 }
 
 #[cfg(test)]
@@ -912,19 +949,26 @@ mod test {
         );
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
+        println!(
+            "1 -> 2 (added additional Nexus zones, take 2 sleds out of service):\n{}",
+            diff.display()
+        );
         assert_contents(
             "tests/output/planner_nonprovisionable_1_2.txt",
             &diff.display().to_string(),
         );
+
+        // The expunged and decommissioned sleds should have had all zones be
+        // marked as expunged. (Not removed! Just marked as expunged.)
+        //
+        // Note that at this point we're neither removing zones from the
+        // blueprint nor marking sleds as decommissioned -- we still need to do
+        // cleanup, and we aren't performing garbage collection on zones or
+        // sleds at the moment.
+
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
         let mut sleds = diff.sleds_modified().collect::<HashMap<_, _>>();
-
-        // The expunged and decommissioned sleds should have had all zones
-        // removed. Note that the sled entries themselves shouldn't have been
-        // removed -- we still need to do cleanup, and we aren't performing
-        // garbage collection on decommissioned sleds at the moment.
 
         let expunged_modified = sleds.remove(&expunged_sled_id).unwrap();
         assert_all_zones_expunged(&expunged_modified, "expunged sled");
