@@ -82,20 +82,21 @@ impl<'de> Deserialize<'de> for SourceNatConfig {
     {
         use serde::de::Error;
 
-        // The fields of `Inner` should exactly match the fields of
-        // `SourceNatConfig`.
-        //
-        // TODO-cleanup can we statically validate this without breaking
-        // JsonSchema on `SourceNatConfig`?
+        // The fields of `SourceNatConfigShadow` should exactly match the fields
+        // of `SourceNatConfig`. We're not really using serde's remote derive,
+        // but by adding the attribute we get compile-time checking that all the
+        // field names and types match. (It doesn't check the _order_, but that
+        // should be fine as long as we're using JSON or similar formats.)
         #[derive(Deserialize)]
-        struct Inner {
+        #[serde(remote = "SourceNatConfig")]
+        struct SourceNatConfigShadow {
             ip: IpAddr,
             first_port: u16,
             last_port: u16,
         }
 
-        let inner = Inner::deserialize(deserializer)?;
-        SourceNatConfig::new(inner.ip, inner.first_port, inner.last_port)
+        let shadow = SourceNatConfigShadow::deserialize(deserializer)?;
+        SourceNatConfig::new(shadow.ip, shadow.first_port, shadow.last_port)
             .map_err(D::Error::custom)
     }
 }
