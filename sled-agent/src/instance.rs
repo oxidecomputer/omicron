@@ -1757,7 +1757,8 @@ mod tests {
                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                 0,
                 16383,
-            ).unwrap(),
+            )
+            .unwrap(),
             ephemeral_ip: None,
             floating_ips: vec![],
             firewall_rules: vec![],
