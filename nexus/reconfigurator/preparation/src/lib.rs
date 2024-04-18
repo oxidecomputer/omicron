@@ -20,6 +20,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningInputBuildError;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -132,29 +133,27 @@ impl PlanningInputFromDb<'_> {
                 );
                 continue;
             };
-            // Validate that we know how to interpret this kind of IP, then
-            // construct the closure that does so.
-            match external_ip_row.kind {
-                IpKind::SNat | IpKind::Floating => (),
-                IpKind::Ephemeral => {
-                    return Err(Error::internal_error(&format!(
-                        "unexpected ephemeral IP for Omicron zone {zone_id}"
-                    )));
-                }
-            };
-            let to_kind = |ip| match external_ip_row.kind {
-                IpKind::Floating => OmicronZoneExternalIpKind::Floating(ip),
-                IpKind::SNat => {
-                    OmicronZoneExternalIpKind::Snat(SourceNatConfig {
-                        ip,
-                        first_port: *external_ip_row.first_port,
-                        last_port: *external_ip_row.last_port,
-                    })
-                }
-                IpKind::Ephemeral => unreachable!(), // guarded above
-            };
 
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
+
+            let to_kind = |ip| match external_ip_row.kind {
+                IpKind::Floating => Ok(OmicronZoneExternalIpKind::Floating(ip)),
+                IpKind::SNat => {
+                    let snat = SourceNatConfig::new(
+                        ip,
+                        *external_ip_row.first_port,
+                        *external_ip_row.last_port,
+                    )
+                    .map_err(|err| {
+                        PlanningInputBuildError::BadSnatConfig { zone_id, err }
+                    })?;
+                    Ok(OmicronZoneExternalIpKind::Snat(snat))
+                }
+                IpKind::Ephemeral => Err(
+                    PlanningInputBuildError::EphemeralIpUnsupported(zone_id),
+                ),
+            };
+
             builder
                 .add_omicron_zone_external_ip_network(
                     zone_id,

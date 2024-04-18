@@ -1426,12 +1426,10 @@ mod tests {
 
         // Try allocating the same service IP once more, but do it with a
         // different port range.
-        let ip_10_0_0_3_snat_0 =
-            OmicronZoneExternalIpKind::Snat(SourceNatConfig {
-                ip: "10.0.0.3".parse().unwrap(),
-                first_port: 0,
-                last_port: 16383,
-            });
+        let ip_10_0_0_3_snat_0 = OmicronZoneExternalIpKind::Snat(
+            SourceNatConfig::new("10.0.0.3".parse().unwrap(), 0, 16383)
+                .unwrap(),
+        );
         let err = context
             .db_datastore
             .external_ip_allocate_omicron_zone(
@@ -1448,12 +1446,10 @@ mod tests {
         );
 
         // This time start with an explicit SNat
-        let ip_10_0_0_1_snat_32768 =
-            OmicronZoneExternalIpKind::Snat(SourceNatConfig {
-                ip: "10.0.0.1".parse().unwrap(),
-                first_port: 32768,
-                last_port: 49151,
-            });
+        let ip_10_0_0_1_snat_32768 = OmicronZoneExternalIpKind::Snat(
+            SourceNatConfig::new("10.0.0.1".parse().unwrap(), 32768, 49151)
+                .unwrap(),
+        );
         let snat_service_id = OmicronZoneUuid::new_v4();
         let snat_id = ExternalIpUuid::new_v4();
         let snat_ip = context
@@ -1501,12 +1497,10 @@ mod tests {
 
         // Try allocating the same service IP once more, but do it with a
         // different port range.
-        let ip_10_0_0_1_snat_49152 =
-            OmicronZoneExternalIpKind::Snat(SourceNatConfig {
-                ip: "10.0.0.1".parse().unwrap(),
-                first_port: 49152,
-                last_port: 65535,
-            });
+        let ip_10_0_0_1_snat_49152 = OmicronZoneExternalIpKind::Snat(
+            SourceNatConfig::new("10.0.0.1".parse().unwrap(), 49152, 65535)
+                .unwrap(),
+        );
         let err = context
             .db_datastore
             .external_ip_allocate_omicron_zone(

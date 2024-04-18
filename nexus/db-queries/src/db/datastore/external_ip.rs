@@ -1206,11 +1206,10 @@ mod tests {
         let mut allocate_snat = false; // flip-flop between regular and snat
         for ip in ip_range.iter() {
             let external_ip_kind = if allocate_snat {
-                OmicronZoneExternalIpKind::Snat(SourceNatConfig {
-                    ip,
-                    first_port: 0,
-                    last_port: NUM_SOURCE_NAT_PORTS - 1,
-                })
+                OmicronZoneExternalIpKind::Snat(
+                    SourceNatConfig::new(ip, 0, NUM_SOURCE_NAT_PORTS - 1)
+                        .unwrap(),
+                )
             } else {
                 OmicronZoneExternalIpKind::Floating(ip)
             };

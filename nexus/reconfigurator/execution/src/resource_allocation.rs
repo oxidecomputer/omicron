@@ -7,7 +7,6 @@
 use anyhow::bail;
 use anyhow::Context;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::IpKind;
 use nexus_db_model::VpcSubnet;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
@@ -27,6 +26,7 @@ use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_client::ZoneKind;
+use slog::error;
 use slog::info;
 use slog::warn;
 use std::net::IpAddr;
@@ -150,16 +150,26 @@ impl<'a> ResourceAllocator<'a> {
             }
         };
 
-        let kind_matches = match (existing_ip.kind, ip_kind) {
-            (IpKind::Floating, OmicronZoneExternalIpKind::Floating(_)) => true,
-            (IpKind::SNat, OmicronZoneExternalIpKind::Snat(snat)) => {
-                *existing_ip.first_port == snat.first_port
-                    && *existing_ip.last_port == snat.last_port
+        // We expect this to always succeed; a failure here means we've stored
+        // an Omicron zone IP in the database that can't be converted back to an
+        // Omicron zone IP!
+        let existing_ip = match OmicronZoneExternalIp::try_from(existing_ip) {
+            Ok(existing_ip) => existing_ip,
+            Err(err) => {
+                error!(
+                    self.opctx.log, "invalid IP in database for zone";
+                    "zone_kind" => %zone_kind,
+                    "zone_id" => %zone_id,
+                    "ip" => ?existing_ip,
+                    &err,
+                );
+                bail!("zone {zone_id} has invalid IP database record: {err}");
             }
-            (_, _) => false,
         };
 
-        if existing_ip.ip.ip() == ip_kind.ip() && kind_matches {
+        // TODO-cleanup The blueprint should store the IP ID, at which point we
+        // could check full equality here instead of only checking the kind.
+        if existing_ip.kind == ip_kind {
             info!(
                 self.opctx.log, "found already-allocated external IP";
                 "zone_kind" => %zone_kind,
@@ -176,10 +186,7 @@ impl<'a> ResourceAllocator<'a> {
             "want_ip" => ?ip_kind,
             "allocated_ip" => ?existing_ip,
         );
-        bail!(
-            "zone {zone_id} has a different IP allocated ({})",
-            existing_ip.ip.ip()
-        );
+        bail!("zone {zone_id} has a different IP allocated ({existing_ip:?})",);
     }
 
     // Helper function to determine whether a given NIC is already allocated to
@@ -561,11 +568,12 @@ mod tests {
 
         // Boundary NTP:
         let ntp_id = OmicronZoneUuid::new_v4();
-        let ntp_snat = SourceNatConfig {
-            ip: external_ips.next().expect("exhausted external_ips"),
-            first_port: NUM_SOURCE_NAT_PORTS,
-            last_port: 2 * NUM_SOURCE_NAT_PORTS - 1,
-        };
+        let ntp_snat = SourceNatConfig::new(
+            external_ips.next().expect("exhausted external_ips"),
+            NUM_SOURCE_NAT_PORTS,
+            2 * NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
         let ntp_nic = NetworkInterface {
             id: Uuid::new_v4(),
             kind: NetworkInterfaceKind::Service {
@@ -676,8 +684,10 @@ mod tests {
         assert!(db_ntp_ips[0].is_service);
         assert_eq!(db_ntp_ips[0].parent_id, Some(ntp_id.into_untyped_uuid()));
         assert_eq!(db_ntp_ips[0].ip, ntp_snat.ip.into());
-        assert_eq!(db_ntp_ips[0].first_port, SqlU16(ntp_snat.first_port));
-        assert_eq!(db_ntp_ips[0].last_port, SqlU16(ntp_snat.last_port));
+        assert_eq!(
+            db_ntp_ips[0].first_port.0..=db_ntp_ips[0].last_port.0,
+            ntp_snat.port_range()
+        );
 
         // Check that the NIC records were created.
         let db_nexus_nics = datastore
@@ -836,8 +846,12 @@ mod tests {
                         },
                     ) = &mut zone.zone_type
                     {
-                        snat_cfg.first_port += NUM_SOURCE_NAT_PORTS;
-                        snat_cfg.last_port += NUM_SOURCE_NAT_PORTS;
+                        let (mut first, mut last) = snat_cfg.port_range_raw();
+                        first += NUM_SOURCE_NAT_PORTS;
+                        last += NUM_SOURCE_NAT_PORTS;
+                        *snat_cfg =
+                            SourceNatConfig::new(snat_cfg.ip, first, last)
+                                .unwrap();
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id

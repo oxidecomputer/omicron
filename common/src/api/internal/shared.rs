@@ -4,7 +4,10 @@
 
 //! Types shared between Nexus and Sled Agent.
 
-use crate::api::external::{self, BfdMode, Name};
+use crate::{
+    address::NUM_SOURCE_NAT_PORTS,
+    api::external::{self, BfdMode, Name},
+};
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -58,16 +61,94 @@ pub struct NetworkInterface {
 
 /// An IP address and port range used for source NAT, i.e., making
 /// outbound network connections from guests or services.
-#[derive(
-    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
+// Note that `Deserialize` is manually implemented; if you make any changes to
+// the fields of this structure, you must make them to that implementation too.
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq, Hash)]
 pub struct SourceNatConfig {
     /// The external address provided to the instance or service.
     pub ip: IpAddr,
     /// The first port used for source NAT, inclusive.
-    pub first_port: u16,
+    first_port: u16,
     /// The last port used for source NAT, also inclusive.
-    pub last_port: u16,
+    last_port: u16,
+}
+
+// We implement `Deserialize` manually to add validity checking on the port
+// range.
+impl<'de> Deserialize<'de> for SourceNatConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        // The fields of `Inner` should exactly match the fields of
+        // `SourceNatConfig`.
+        //
+        // TODO-cleanup can we statically validate this without breaking
+        // JsonSchema on `SourceNatConfig`?
+        #[derive(Deserialize)]
+        struct Inner {
+            ip: IpAddr,
+            first_port: u16,
+            last_port: u16,
+        }
+
+        let inner = Inner::deserialize(deserializer)?;
+        SourceNatConfig::new(inner.ip, inner.first_port, inner.last_port)
+            .map_err(D::Error::custom)
+    }
+}
+
+impl SourceNatConfig {
+    /// Construct a `SourceNatConfig` with the given port range, both inclusive.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `(first_port, last_port)` is not aligned to
+    /// [`NUM_SOURCE_NAT_PORTS`].
+    pub fn new(
+        ip: IpAddr,
+        first_port: u16,
+        last_port: u16,
+    ) -> Result<Self, SourceNatConfigError> {
+        if first_port % NUM_SOURCE_NAT_PORTS == 0
+            && last_port
+                .checked_sub(first_port)
+                .and_then(|diff| diff.checked_add(1))
+                == Some(NUM_SOURCE_NAT_PORTS)
+        {
+            Ok(Self { ip, first_port, last_port })
+        } else {
+            Err(SourceNatConfigError::UnalignedPortPair {
+                first_port,
+                last_port,
+            })
+        }
+    }
+
+    /// Get the port range.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range(&self) -> std::ops::RangeInclusive<u16> {
+        self.first_port..=self.last_port
+    }
+
+    /// Get the port range as a raw tuple; both values are inclusive.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range_raw(&self) -> (u16, u16) {
+        self.port_range().into_inner()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SourceNatConfigError {
+    #[error(
+        "snat port range is not aligned to {NUM_SOURCE_NAT_PORTS}: \
+         ({first_port}, {last_port})"
+    )]
+    UnalignedPortPair { first_port: u16, last_port: u16 },
 }
 
 // We alias [`RackNetworkConfig`] to the current version of the protocol, so

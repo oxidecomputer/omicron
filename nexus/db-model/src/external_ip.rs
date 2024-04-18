@@ -22,9 +22,11 @@ use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
-use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+use nexus_types::inventory::SourceNatConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::internal::shared::SourceNatConfigError;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
@@ -32,6 +34,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
 use sled_agent_client::ZoneKind;
+use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -136,6 +139,46 @@ pub struct ExternalIp {
     pub is_probe: bool,
 }
 
+#[derive(Debug, thiserror::Error, SlogInlineError)]
+pub enum OmicronZoneExternalIpError {
+    #[error("database IP is for an instance")]
+    IpIsForInstance,
+    #[error("invalid SNAT configuration")]
+    InvalidSnatConfig(#[from] SourceNatConfigError),
+    #[error(
+        "database IP is ephemeral; currently unsupported for Omicron zones"
+    )]
+    EphemeralIp,
+}
+
+impl TryFrom<&'_ ExternalIp> for OmicronZoneExternalIp {
+    type Error = OmicronZoneExternalIpError;
+
+    fn try_from(row: &ExternalIp) -> Result<Self, Self::Error> {
+        if !row.is_service {
+            return Err(OmicronZoneExternalIpError::IpIsForInstance);
+        }
+
+        let kind = match row.kind {
+            IpKind::SNat => {
+                OmicronZoneExternalIpKind::Snat(SourceNatConfig::new(
+                    row.ip.ip(),
+                    row.first_port.0,
+                    row.last_port.0,
+                )?)
+            }
+            IpKind::Floating => {
+                OmicronZoneExternalIpKind::Floating(row.ip.ip())
+            }
+            IpKind::Ephemeral => {
+                return Err(OmicronZoneExternalIpError::EphemeralIp)
+            }
+        };
+
+        Ok(Self { id: ExternalIpUuid::from_untyped_uuid(row.id), kind })
+    }
+}
+
 /// A view type constructed from `ExternalIp` used to represent Floating IP
 /// objects in user-facing APIs.
 ///
@@ -158,15 +201,13 @@ pub struct FloatingIp {
     pub project_id: Uuid,
 }
 
-impl From<ExternalIp>
+impl TryFrom<ExternalIp>
     for omicron_common::api::internal::shared::SourceNatConfig
 {
-    fn from(eip: ExternalIp) -> Self {
-        Self {
-            ip: eip.ip.ip(),
-            first_port: eip.first_port.0,
-            last_port: eip.last_port.0,
-        }
+    type Error = SourceNatConfigError;
+
+    fn try_from(eip: ExternalIp) -> Result<Self, Self::Error> {
+        Self::new(eip.ip.ip(), eip.first_port.0, eip.last_port.0)
     }
 }
 
@@ -329,20 +370,11 @@ impl IncompleteExternalIp {
                 )
             }
             OmicronZoneExternalIpKind::Snat(snat_cfg) => {
-                assert!(
-                    (snat_cfg.first_port % NUM_SOURCE_NAT_PORTS == 0)
-                        && (snat_cfg.last_port - snat_cfg.first_port + 1)
-                            == NUM_SOURCE_NAT_PORTS,
-                    "explicit port range must be aligned to {}",
-                    NUM_SOURCE_NAT_PORTS,
-                );
+                let (first_port, last_port) = snat_cfg.port_range_raw();
                 (
                     IpKind::SNat,
                     snat_cfg.ip,
-                    Some((
-                        snat_cfg.first_port.into(),
-                        snat_cfg.last_port.into(),
-                    )),
+                    Some((first_port.into(), last_port.into())),
                     // Only floating IPs are allowed to have names and
                     // descriptions.
                     None,

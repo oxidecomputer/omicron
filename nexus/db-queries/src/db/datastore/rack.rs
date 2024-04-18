@@ -1360,11 +1360,10 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig {
-                                    ip: ntp1_ip,
-                                    first_port: 16384,
-                                    last_port: 32767,
-                                },
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp1_ip, 16384, 32767,
+                                )
+                                .unwrap(),
                             },
                         },
                     ],
@@ -1428,11 +1427,10 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig {
-                                    ip: ntp2_ip,
-                                    first_port: 0,
-                                    last_port: 16383,
-                                },
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp2_ip, 0, 16383,
+                                )
+                                .unwrap(),
                             },
                         },
                     ],
