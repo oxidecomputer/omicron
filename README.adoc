@@ -47,7 +47,7 @@ To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run
 
 The supported way to run tests is via https://nexte.st/[cargo-nextest].
 
-NOTE: `cargo test` may work, but that can't be guaranteed as `cargo test` isn't run in CI.
+NOTE: `cargo test` will not work for many of our tests, since they rely on nextest-specific features.
 
 If you don't already have nextest installed, get started by https://nexte.st/book/pre-built-binaries[downloading a pre-built binary] or installing nextest via your package manager. Nextest has pre-built binaries for Linux, macOS and illumos.
 

@@ -112,7 +112,7 @@ impl DataStore {
         size: external::ByteCount,
     ) -> (u64, u64) {
         let blocks_per_extent =
-            Self::EXTENT_SIZE / block_size.to_bytes() as u64;
+            Self::EXTENT_SIZE / u64::from(block_size.to_bytes());
 
         let size = size.to_bytes();
 
@@ -175,7 +175,7 @@ impl DataStore {
 
         let query = crate::db::queries::region_allocation::allocation_query(
             volume_id,
-            block_size.to_bytes() as u64,
+            u64::from(block_size.to_bytes()),
             blocks_per_extent,
             extent_count,
             allocation_strategy,
@@ -378,7 +378,7 @@ mod test {
         // Note that i64::MAX bytes is an invalid disk size as it's not
         // divisible by 4096. Create the maximum sized disk here.
         let max_disk_size = i64::MAX
-            - (i64::MAX % (BlockSize::AdvancedFormat.to_bytes() as i64));
+            - (i64::MAX % i64::from(BlockSize::AdvancedFormat.to_bytes()));
         let (blocks_per_extent, extent_count) =
             DataStore::get_crucible_allocation(
                 &BlockSize::AdvancedFormat,
@@ -387,16 +387,16 @@ mod test {
 
         // We should still be rounding up to the nearest extent size.
         assert_eq!(
-            extent_count as u128 * DataStore::EXTENT_SIZE as u128,
+            u128::from(extent_count) * u128::from(DataStore::EXTENT_SIZE),
             i64::MAX as u128 + 1,
         );
 
         // Assert that the regions allocated will fit this disk
         assert!(
             max_disk_size as u128
-                <= extent_count as u128
-                    * blocks_per_extent as u128
-                    * DataStore::EXTENT_SIZE as u128
+                <= u128::from(extent_count)
+                    * u128::from(blocks_per_extent)
+                    * u128::from(DataStore::EXTENT_SIZE)
         );
     }
 }

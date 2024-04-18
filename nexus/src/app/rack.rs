@@ -20,7 +20,9 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_reconfigurator_execution::silo_dns_name;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -195,10 +197,10 @@ impl super::Nexus {
             .blueprint
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
             .filter_map(|(_, zc)| match zc.zone_type {
-                nexus_types::deployment::OmicronZoneType::Nexus {
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     external_ip,
                     ..
-                } => Some(match external_ip {
+                }) => Some(match external_ip {
                     IpAddr::V4(addr) => DnsRecord::A(addr),
                     IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
                 }),
