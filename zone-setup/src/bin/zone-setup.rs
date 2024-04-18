@@ -21,8 +21,6 @@ use std::path::Path;
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
 pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
-pub const INTERNAL_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.internal";
-pub const BOUNDARY_NTP_CONFIG_TPL: &str = "/etc/inet/chrony.conf.boundary";
 
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
@@ -258,22 +256,75 @@ fn generate_chrony_config(
     file: &String,
     servers: Vec<&String>,
 ) -> Result<(), CmdError> {
-    let template = if *is_boundary {
-        BOUNDARY_NTP_CONFIG_TPL
-    } else {
-        INTERNAL_NTP_CONFIG_TPL
-    };
-    info!(&log, "Generating chrony configuration file"; 
-    "configuration file" => ?file, "configuration template" => ?template, 
-    "allowed IPs" => ?allow, "servers" => ?servers, "is boundary" => ?is_boundary);
+    let internal_ntp_tpl = String::from(
+        "#
+# Configuration file for an internal NTP server - one which communicates with
+# boundary NTP servers within the rack.
+#
 
-    let mut contents = read_to_string(template).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not read chrony configuration template {}: {}",
-            template,
-            err
-        ))
-    })?;
+driftfile /var/lib/chrony/drift
+ntsdumpdir /var/lib/chrony
+dumpdir /var/lib/chrony
+pidfile /var/run/chrony/chronyd.pid
+logdir /var/log/chrony
+
+log measurements statistics tracking
+
+# makestep <threshold> <limit>
+# We allow chrony to step the system clock if we are more than a day out,
+# regardless of how many clock updates have occurred since boot.
+# The boundary NTP servers are configured with local reference mode, which
+# means that if they start up without external connectivity, they will appear
+# as authoritative servers even if they are advertising January 1987
+# (which is the default system clock on a gimlet after boot).
+# This configuration allows a one-off adjustment once RSS begins and the
+# boundary servers are synchronised, after which the clock will advance
+# monotonically forwards.
+makestep 86400 -1
+
+# When a leap second occurs we slew the clock over approximately 37 seconds.
+leapsecmode slew
+maxslewrate 2708.333
+
+",
+    );
+
+    let boundary_ntp_tpl = String::from(
+        "#
+# Configuration file for a boundary NTP server - one which communicates with
+# NTP servers outside the rack.
+#
+
+driftfile /var/lib/chrony/drift
+ntsdumpdir /var/lib/chrony
+dumpdir /var/lib/chrony
+pidfile /var/run/chrony/chronyd.pid
+logdir /var/log/chrony
+
+log measurements statistics tracking
+
+allow fe80::/10
+allow @ALLOW@
+
+# Enable local reference mode, which keeps us operating as an NTP server that
+# appears synchronised even if there are currently no active upstreams. When
+# in this mode, we report as stratum 10 to clients.
+local stratum 10
+
+# makestep <threshold> <limit>
+# We allow chrony to step the system clock during the first three time updates
+# if we are more than 0.1 seconds out.
+makestep 0.1 3
+
+# When a leap second occurs we slew the clock over approximately 37 seconds.
+leapsecmode slew
+maxslewrate 2708.333
+
+",
+    );
+
+    let mut contents =
+        if *is_boundary { boundary_ntp_tpl } else { internal_ntp_tpl };
 
     if let Some(allow) = allow {
         contents = contents.replace("@ALLOW@", &allow.to_string());
