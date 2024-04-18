@@ -16,6 +16,7 @@ use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
+use futures::future::try_join;
 use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
@@ -35,6 +36,7 @@ use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -89,7 +91,7 @@ enum BlueprintsCommands {
     List,
     /// Show a blueprint
     Show(BlueprintIdArgs),
-    /// Diff two blueprint
+    /// Diff two blueprints
     Diff(BlueprintIdsArgs),
     /// Delete a blueprint
     Delete(BlueprintIdArgs),
@@ -103,18 +105,72 @@ enum BlueprintsCommands {
     Import(BlueprintImportArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Copy)]
+enum BlueprintIdOrCurrentTarget {
+    CurrentTarget,
+    BlueprintId(Uuid),
+}
+
+impl FromStr for BlueprintIdOrCurrentTarget {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if matches!(s, "current-target" | "current" | "target") {
+            Ok(Self::CurrentTarget)
+        } else {
+            let id = s.parse()?;
+            Ok(Self::BlueprintId(id))
+        }
+    }
+}
+
+impl BlueprintIdOrCurrentTarget {
+    async fn resolve_to_id(
+        &self,
+        client: &nexus_client::Client,
+    ) -> anyhow::Result<Uuid> {
+        match self {
+            Self::CurrentTarget => {
+                let target = client
+                    .blueprint_target_view()
+                    .await
+                    .context("getting current blueprint target")?;
+                Ok(target.target_id)
+            }
+            Self::BlueprintId(id) => Ok(*id),
+        }
+    }
+
+    async fn resolve_to_blueprint(
+        &self,
+        client: &nexus_client::Client,
+    ) -> anyhow::Result<Blueprint> {
+        let id = self.resolve_to_id(client).await?;
+        let response = client.blueprint_view(&id).await.with_context(|| {
+            let suffix = match self {
+                BlueprintIdOrCurrentTarget::CurrentTarget => {
+                    " (current target)"
+                }
+                BlueprintIdOrCurrentTarget::BlueprintId(_) => "",
+            };
+            format!("fetching blueprint {id}{suffix}")
+        })?;
+        Ok(response.into_inner())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Args)]
 struct BlueprintIdArgs {
-    /// id of a blueprint
-    blueprint_id: Uuid,
+    /// id of blueprint (or `target` for the current target)
+    blueprint_id: BlueprintIdOrCurrentTarget,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintIdsArgs {
-    /// id of first blueprint
-    blueprint1_id: Uuid,
-    /// id of second blueprint
-    blueprint2_id: Uuid,
+    /// id of first blueprint (or `target` for the current target)
+    blueprint1_id: BlueprintIdOrCurrentTarget,
+    /// id of second blueprint (or `target` for the current target)
+    blueprint2_id: BlueprintIdOrCurrentTarget,
 }
 
 #[derive(Debug, Args)]
@@ -973,10 +1029,7 @@ async fn cmd_nexus_blueprints_show(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
 ) -> Result<(), anyhow::Error> {
-    let blueprint = client
-        .blueprint_view(&args.blueprint_id)
-        .await
-        .with_context(|| format!("fetching blueprint {}", args.blueprint_id))?;
+    let blueprint = args.blueprint_id.resolve_to_blueprint(client).await?;
     println!("{}", blueprint.display());
     Ok(())
 }
@@ -985,12 +1038,11 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintIdsArgs,
 ) -> Result<(), anyhow::Error> {
-    let b1 = client.blueprint_view(&args.blueprint1_id).await.with_context(
-        || format!("fetching blueprint {}", args.blueprint1_id),
-    )?;
-    let b2 = client.blueprint_view(&args.blueprint2_id).await.with_context(
-        || format!("fetching blueprint {}", args.blueprint2_id),
-    )?;
+    let (b1, b2) = try_join(
+        args.blueprint1_id.resolve_to_blueprint(client),
+        args.blueprint2_id.resolve_to_blueprint(client),
+    )
+    .await?;
     let diff = b2.diff_since_blueprint(&b1).context("diffing blueprints")?;
     println!("{}", diff.display());
     Ok(())
@@ -1001,11 +1053,12 @@ async fn cmd_nexus_blueprints_delete(
     args: &BlueprintIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
     let _ = client
-        .blueprint_delete(&args.blueprint_id)
+        .blueprint_delete(&blueprint_id)
         .await
-        .with_context(|| format!("deleting blueprint {}", args.blueprint_id))?;
-    println!("blueprint {} deleted", args.blueprint_id);
+        .with_context(|| format!("deleting blueprint {blueprint_id}"))?;
+    println!("blueprint {blueprint_id} deleted");
     Ok(())
 }
 
@@ -1064,19 +1117,20 @@ async fn cmd_nexus_blueprints_target_set_enabled(
     enabled: bool,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
     let description = if enabled { "enabled" } else { "disabled" };
     client
         .blueprint_target_set_enabled(
             &nexus_client::types::BlueprintTargetSet {
-                target_id: args.blueprint_id,
+                target_id: blueprint_id,
                 enabled,
             },
         )
         .await
         .with_context(|| {
-            format!("setting blueprint {} to {description}", args.blueprint_id)
+            format!("setting blueprint {blueprint_id} to {description}")
         })?;
-    eprintln!("set target blueprint {} to {description}", args.blueprint_id);
+    eprintln!("set target blueprint {blueprint_id} to {description}");
     Ok(())
 }
 
