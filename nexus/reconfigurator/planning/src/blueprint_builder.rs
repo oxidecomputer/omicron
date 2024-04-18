@@ -1566,6 +1566,8 @@ pub mod test {
                 assert_eq!(sled_modified.zones_modified().count(), 0);
             }
         }
+
+        logctx.cleanup_successful();
     }
 
     #[test]
