@@ -280,7 +280,7 @@ impl<'a> ResourceAllocator<'a> {
         }
         let ip_id = ExternalIpUuid::new_v4();
         self.datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 self.opctx,
                 zone_id,
                 zone_kind,

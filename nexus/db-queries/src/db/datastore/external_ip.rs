@@ -348,11 +348,8 @@ impl DataStore {
         })
     }
 
-    /// Allocates an explicit IP address for an internal service.
-    ///
-    /// Unlike the other IP allocation requests, this does not search for an
-    /// available IP address, it asks for one explicitly.
-    pub async fn external_ip_allocate_service_explicit(
+    /// Allocates an explicit IP address for an Omicron zone.
+    pub async fn external_ip_allocate_omicron_zone(
         &self,
         opctx: &OpContext,
         zone_id: OmicronZoneUuid,
@@ -1218,7 +1215,7 @@ mod tests {
                 OmicronZoneExternalIpKind::Floating(ip)
             };
             let external_ip = datastore
-                .external_ip_allocate_service_explicit(
+                .external_ip_allocate_omicron_zone(
                     &opctx,
                     OmicronZoneUuid::new_v4(),
                     ZoneKind::Nexus,

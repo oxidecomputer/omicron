@@ -1331,9 +1331,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_explicit_external_ip_for_service_is_idempotent() {
+    async fn test_external_ip_allocate_omicron_zone_is_idempotent() {
         let context = TestContext::new(
-            "test_explicit_external_ip_for_service_is_idempotent",
+            "test_external_ip_allocate_omicron_zone_is_idempotent",
         )
         .await;
 
@@ -1355,7 +1355,7 @@ mod tests {
         let id = ExternalIpUuid::new_v4();
         let ip = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
@@ -1372,7 +1372,7 @@ mod tests {
         // Try allocating the same service IP again.
         let ip_again = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
@@ -1388,7 +1388,7 @@ mod tests {
         // different UUID.
         let err = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
@@ -1408,7 +1408,7 @@ mod tests {
         // different input address.
         let err = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
@@ -1434,7 +1434,7 @@ mod tests {
             });
         let err = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::BoundaryNtp,
@@ -1458,7 +1458,7 @@ mod tests {
         let snat_id = ExternalIpUuid::new_v4();
         let snat_ip = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
@@ -1482,7 +1482,7 @@ mod tests {
         // Try allocating the same service IP again.
         let snat_ip_again = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
@@ -1509,7 +1509,7 @@ mod tests {
             });
         let err = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
@@ -1529,9 +1529,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_explicit_external_ip_for_service_out_of_range() {
+    async fn test_external_ip_allocate_omicron_zone_out_of_range() {
         let context = TestContext::new(
-            "test_explicit_external_ip_for_service_out_of_range",
+            "test_external_ip_allocate_omicron_zone_out_of_range",
         )
         .await;
 
@@ -1550,7 +1550,7 @@ mod tests {
         let id = ExternalIpUuid::new_v4();
         let err = context
             .db_datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
