@@ -571,6 +571,49 @@ impl PortManager {
     }
 
     #[cfg(target_os = "illumos")]
+    pub fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<SetVirtualNetworkInterfaceHost>, Error> {
+        use macaddr::MacAddr6;
+        use opte_ioctl::OpteHdl;
+
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        let v2p =
+            hdl.dump_v2p(&oxide_vpc::api::DumpVirt2PhysReq { unused: 99 })?;
+        let mut mappings: Vec<_> = vec![];
+
+        for mapping in v2p.mappings {
+            for entry in mapping.ip4 {
+                mappings.push(SetVirtualNetworkInterfaceHost {
+                    virtual_ip: IpAddr::V4(entry.0.into()),
+                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
+                    physical_host_ip: entry.1.ip.into(),
+                    vni: mapping
+                        .vni
+                        .as_u32()
+                        .try_into()
+                        .expect("opte VNI should be 24 bits"),
+                });
+            }
+
+            for entry in mapping.ip6 {
+                mappings.push(SetVirtualNetworkInterfaceHost {
+                    virtual_ip: IpAddr::V6(entry.0.into()),
+                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
+                    physical_host_ip: entry.1.ip.into(),
+                    vni: mapping
+                        .vni
+                        .as_u32()
+                        .try_into()
+                        .expect("opte VNI should be 24 bits"),
+                });
+            }
+        }
+
+        Ok(mappings)
+    }
+
+    #[cfg(target_os = "illumos")]
     pub fn set_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,

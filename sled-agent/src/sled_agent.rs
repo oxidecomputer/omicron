@@ -1053,6 +1053,12 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
+    pub async fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<SetVirtualNetworkInterfaceHost>, Error> {
+        self.inner.port_manager.list_virtual_nics().map_err(Error::from)
+    }
+
     pub async fn set_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,

@@ -241,6 +241,17 @@ table! {
 }
 
 table! {
+    v2p_mapping_view (nic_id) {
+        nic_id -> Uuid,
+        sled_id -> Uuid,
+        sled_ip -> Inet,
+        vni -> Int8,
+        mac -> Int8,
+        ip -> Inet,
+    }
+}
+
+table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,

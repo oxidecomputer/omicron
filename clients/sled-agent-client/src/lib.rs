@@ -14,6 +14,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use types::{
     BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig,
+    SetVirtualNetworkInterfaceHost,
 };
 use uuid::Uuid;
 
@@ -714,5 +715,16 @@ impl Hash for BfdPeerConfig {
         self.required_rx.hash(state);
         self.mode.hash(state);
         self.switch.hash(state);
+    }
+}
+
+impl Eq for SetVirtualNetworkInterfaceHost {}
+
+impl Hash for SetVirtualNetworkInterfaceHost {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.physical_host_ip.hash(state);
+        self.virtual_ip.hash(state);
+        self.virtual_mac.hash(state);
+        self.vni.hash(state);
     }
 }

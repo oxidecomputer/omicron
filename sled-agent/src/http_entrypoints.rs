@@ -73,6 +73,7 @@ pub fn api() -> SledApiDescription {
         api.register(zone_bundle_cleanup_context_update)?;
         api.register(zone_bundle_cleanup)?;
         api.register(sled_role_get)?;
+        api.register(list_v2p)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
         api.register(timesync_get)?;
@@ -687,6 +688,22 @@ async fn del_v2p(
     sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// List v2p mappings present on sled
+// Used by nexus background task
+#[endpoint {
+    method = GET,
+    path = "/v2p/",
+}]
+async fn list_v2p(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Vec<SetVirtualNetworkInterfaceHost>>, HttpError> {
+    let sa = rqctx.context();
+
+    let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;
+
+    Ok(HttpResponseOk(vnics))
 }
 
 #[endpoint {

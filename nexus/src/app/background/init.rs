@@ -19,6 +19,7 @@ use super::phantom_disks;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
+use super::v2p_mappings::V2PManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
@@ -82,6 +83,9 @@ pub struct BackgroundTasks {
 
     /// task handle for the switch port settings manager
     pub task_switch_port_settings_manager: common::TaskHandle,
+
+    /// task handle for the opte v2p manager
+    pub task_v2p_manager: common::TaskHandle,
 
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
@@ -298,6 +302,20 @@ impl BackgroundTasks {
             )
         };
 
+        let task_v2p_manager = {
+            driver.register(
+                "v2p_manager".to_string(),
+                String::from("manages opte v2p mappings for vpc networking"),
+                // TODO add custom config?
+                // should we create a general setting that can be shared across
+                // multiple tasks? A lot of these have the same values...
+                config.switch_port_settings_manager.period_secs,
+                Box::new(V2PManager::new(datastore.clone())),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         // Background task: detect if a region needs replacement and begin the
         // process
         let task_region_replacement = {
@@ -335,6 +353,7 @@ impl BackgroundTasks {
             task_blueprint_executor,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
+            task_v2p_manager,
             task_region_replacement,
         }
     }

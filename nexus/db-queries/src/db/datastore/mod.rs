@@ -94,6 +94,7 @@ mod switch_port;
 pub(crate) mod test_utils;
 mod update;
 mod utilization;
+mod v2p_mapping;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;

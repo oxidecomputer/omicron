@@ -3726,6 +3726,36 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
+-- view for v2p mapping rpw
+CREATE VIEW IF NOT EXISTS omicron.public.v2p_mapping_view
+AS
+SELECT
+  n.id as nic_id,
+  s.id as sled_id,
+  s.ip as sled_ip,
+  v.vni,
+  n.mac,
+  n.ip
+FROM omicron.public.vmm vmm
+JOIN omicron.public.sled s ON vmm.sled_id = s.id
+JOIN omicron.public.network_interface n ON n.parent_id = vmm.instance_id
+JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
+JOIN omicron.public.vpc v ON v.id = n.vpc_id
+WHERE vmm.time_deleted IS NULL
+AND n.kind = 'instance'
+AND s.sled_policy = 'in_service'
+AND s.sled_state = 'active';
+
+CREATE INDEX IF NOT EXISTS network_interface_by_parent
+ON omicron.public.network_interface (parent_id)
+STORING (name, kind, vpc_id, subnet_id, mac, ip, slot);
+
+CREATE INDEX IF NOT EXISTS sled_by_policy_and_state
+ON omicron.public.sled (sled_policy, sled_state, id) STORING (ip);
+
+CREATE INDEX IF NOT EXISTS active_vmm
+on omicron.public.vmm (time_deleted, sled_id, instance_id);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3760,7 +3790,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '51.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '52.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

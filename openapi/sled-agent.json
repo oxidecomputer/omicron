@@ -849,6 +849,34 @@
         }
       }
     },
+    "/v2p": {
+      "get": {
+        "summary": "List v2p mappings present on sled",
+        "operationId": "list_v2p",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SetVirtualNetworkInterfaceHost",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v2p/{interface_id}": {
       "put": {
         "summary": "Create a mapping from a virtual NIC to a physical host",
