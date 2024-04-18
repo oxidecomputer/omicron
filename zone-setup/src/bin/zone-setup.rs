@@ -17,10 +17,13 @@ use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
 use std::path::Path;
+use uzers::{get_group_by_name, get_user_by_name};
 
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
 pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
+pub const ROOT: &str = "root";
+pub const SYS: &str = "sys";
 
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
@@ -238,13 +241,35 @@ fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
             ))
         })?;
 
-    chown(LOGADM_CONFIG_FILE, Some(0), Some(3)).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not set ownership of logadm configuration file {}: {}",
-            LOGADM_CONFIG_FILE,
-            err
-        ))
-    })?;
+    let root_uid = match get_user_by_name(ROOT) {
+        Some(user) => user.uid(),
+        None => {
+            return Err(CmdError::Failure(anyhow!(format!(
+                "Could not retrieve ID from user: {}",
+                ROOT
+            ))))
+        }
+    };
+
+    let sys_gid = match get_group_by_name(SYS) {
+        Some(group) => group.gid(),
+        None => {
+            return Err(CmdError::Failure(anyhow!(format!(
+                "Could not retrieve ID from group: {}",
+                SYS
+            ))))
+        }
+    };
+
+    chown(LOGADM_CONFIG_FILE, Some(root_uid), Some(sys_gid)).map_err(
+        |err| {
+            CmdError::Failure(anyhow!(
+                "Could not set ownership of logadm configuration file {}: {}",
+                LOGADM_CONFIG_FILE,
+                err
+            ))
+        },
+    )?;
 
     Ok(())
 }
