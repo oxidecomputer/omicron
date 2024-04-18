@@ -62,11 +62,17 @@ impl BackgroundTask for PhysicalDiskAdoption {
 
             // Only adopt physical disks after rack handoff has completed.
             //
-            // This prevents a race condition where the same disks are attempted
-            // to be inserted simultaneously after a sled-agent gets put.
+            // This prevents a race condition where the same physical disks
+            // are inserted simultaneously at handoff time and inside this
+            // background task. This is bad because the handoff transaction will
+            // fail if the same disk already exists.
             //
-            // TODO-multirack: This will only work for clusters smaller than a page
-            let result = self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await;
+            // TODO-multirack: This will only work for clusters smaller than
+            // a page.
+            let result = self.datastore.rack_list_initialized(
+                opctx,
+                &DataPageParams::max_page()
+            ).await;
             match result {
                 Ok(racks) => {
                     if !racks.iter().any(|r| r.identity().id == self.rack_id) {
@@ -75,7 +81,8 @@ impl BackgroundTask for PhysicalDiskAdoption {
                             "Physical Disk Adoption: Rack not yet initialized";
                             "rack_id" => %self.rack_id,
                         );
-                        return json!({ "error": format!("rack not yet initialized: {}", self.rack_id) });
+                        let msg = format!("rack not yet initialized: {}", self.rack_id);
+                        return json!({"error": msg});
                     }
                 },
                 Err(err) => {
@@ -147,7 +154,12 @@ impl BackgroundTask for PhysicalDiskAdoption {
                         "Physical Disk Adoption: failed to insert new disk and zpool";
                         "err" => %err
                     );
-                    return json!({ "error": format!("failed to insert disk/zpool: {:#}; disk = {:#?}", err, disk) });
+                    let msg = format!(
+                        "failed to insert disk/zpool: {:#}; disk = {:#?}",
+                        err,
+                        disk
+                    );
+                    return json!({ "error": msg});
                 }
 
                 disks_added += 1;
