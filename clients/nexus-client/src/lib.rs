@@ -35,6 +35,7 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
@@ -255,7 +256,9 @@ impl From<std::time::Duration> for types::Duration {
 
 impl From<types::Duration> for std::time::Duration {
     fn from(s: types::Duration) -> Self {
-        std::time::Duration::from_nanos(s.secs * 1000000000 + s.nanos as u64)
+        std::time::Duration::from_nanos(
+            s.secs * 1000000000 + u64::from(s.nanos),
+        )
     }
 }
 

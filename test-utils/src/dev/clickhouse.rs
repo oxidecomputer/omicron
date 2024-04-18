@@ -125,7 +125,7 @@ impl ClickHouseInstance {
             data_dir: Some(data_dir),
             data_path,
             port,
-            address: address,
+            address,
             args,
             child: Some(child),
         })
@@ -197,7 +197,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
-                address: address,
+                address,
                 args,
                 child: Some(child),
             }),
@@ -271,7 +271,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
-                address: address,
+                address,
                 args,
                 child: Some(child),
             }),
@@ -418,7 +418,7 @@ impl ClickHouseDataDir {
     ///
     /// Removes all files except those in any of the log directories.
     fn close_unclean(self) -> Result<(), anyhow::Error> {
-        let keep_prefixes = vec![
+        let keep_prefixes = [
             self.log_path(),
             self.err_log_path(),
             self.keeper_log_path(),

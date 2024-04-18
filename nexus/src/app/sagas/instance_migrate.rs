@@ -4,7 +4,8 @@
 
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::instance::{
-    InstanceStateChangeError, InstanceStateChangeRequest,
+    InstanceRegisterReason, InstanceStateChangeError,
+    InstanceStateChangeRequest,
 };
 use crate::app::sagas::{
     declare_saga_actions, instance_common::allocate_vmm_ipv6,
@@ -152,7 +153,7 @@ async fn sim_reserve_sled_resources(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         propolis_id,
-        params.instance.ncpus.0 .0 as u32,
+        u32::from(params.instance.ncpus.0 .0),
         params.instance.memory,
         constraints,
     )
@@ -356,6 +357,10 @@ async fn sim_ensure_destination_propolis(
             &db_instance,
             &vmm.id,
             &vmm,
+            InstanceRegisterReason::Migrate {
+                vmm_id: params.src_vmm.id,
+                target_vmm_id: vmm.id,
+            },
         )
         .await
         .map_err(ActionError::action_failed)?;

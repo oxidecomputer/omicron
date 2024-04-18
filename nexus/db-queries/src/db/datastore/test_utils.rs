@@ -14,10 +14,13 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use dropshot::test_util::LogContext;
+use futures::future::try_join_all;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_test_utils::dev::db::CockroachInstance;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use strum::EnumCount;
 use uuid::Uuid;
@@ -48,16 +51,16 @@ pub(super) enum IneligibleSledKind {
 /// This is less error-prone than several places duplicating this logic.
 #[derive(Debug)]
 pub(super) struct IneligibleSleds {
-    pub(super) non_provisionable: Uuid,
-    pub(super) expunged: Uuid,
-    pub(super) decommissioned: Uuid,
-    pub(super) illegal_decommissioned: Uuid,
+    pub(super) non_provisionable: SledUuid,
+    pub(super) expunged: SledUuid,
+    pub(super) decommissioned: SledUuid,
+    pub(super) illegal_decommissioned: SledUuid,
 }
 
 impl IneligibleSleds {
     pub(super) fn iter(
         &self,
-    ) -> impl Iterator<Item = (IneligibleSledKind, Uuid)> {
+    ) -> impl Iterator<Item = (IneligibleSledKind, SledUuid)> {
         [
             (IneligibleSledKind::NonProvisionable, self.non_provisionable),
             (IneligibleSledKind::Expunged, self.expunged),
@@ -190,18 +193,79 @@ impl IneligibleSleds {
 
         Ok(())
     }
+
+    /// Brings all of the sleds back to being in-service and provisionable.
+    ///
+    /// This is never going to happen in production, but it's easier to do this
+    /// in many tests than to set up a new set of sleds.
+    ///
+    /// Note: there's no memory of the previous state stored here -- this just
+    /// resets the sleds to the default state.
+    pub async fn undo(
+        &self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Result<()> {
+        async fn undo_single(
+            opctx: &OpContext,
+            datastore: &DataStore,
+            sled_id: SledUuid,
+            kind: IneligibleSledKind,
+        ) -> Result<()> {
+            sled_set_policy(
+                &opctx,
+                &datastore,
+                sled_id,
+                SledPolicy::provisionable(),
+                ValidateTransition::No,
+                Expected::Ignore,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to set provisionable policy for sled {} ({:?})",
+                    sled_id, kind,
+                )
+            })?;
+
+            sled_set_state(
+                &opctx,
+                &datastore,
+                sled_id,
+                SledState::Active,
+                ValidateTransition::No,
+                Expected::Ignore,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to set active state for sled {} ({:?})",
+                    sled_id, kind,
+                )
+            })?;
+
+            Ok(())
+        }
+
+        _ = try_join_all(self.iter().map(|(kind, sled_id)| {
+            undo_single(opctx, datastore, sled_id, kind)
+        }))
+        .await?;
+
+        Ok(())
+    }
 }
 
 pub(super) async fn sled_set_policy(
     opctx: &OpContext,
     datastore: &DataStore,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     new_policy: SledPolicy,
     check: ValidateTransition,
     expected_old_policy: Expected<SledPolicy>,
 ) -> Result<()> {
     let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
-        .sled_id(sled_id)
+        .sled_id(sled_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
         .unwrap();
@@ -243,13 +307,13 @@ pub(super) async fn sled_set_policy(
 pub(super) async fn sled_set_state(
     opctx: &OpContext,
     datastore: &DataStore,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     new_state: SledState,
     check: ValidateTransition,
     expected_old_state: Expected<SledState>,
 ) -> Result<()> {
     let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
-        .sled_id(sled_id)
+        .sled_id(sled_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
         .unwrap();

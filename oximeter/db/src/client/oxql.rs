@@ -12,6 +12,8 @@ use crate::model;
 use crate::oxql;
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
+use crate::oxql::ast::table_ops::limit::Limit;
+use crate::oxql::ast::table_ops::limit::LimitKind;
 use crate::query::field_table_name;
 use crate::Error;
 use crate::Metric;
@@ -102,6 +104,7 @@ pub const MAX_DATABASE_ROWS: u64 = 1_000_000;
 //
 // This type stores the predicates used to generate the keys, and the keys
 // consistent with it.
+#[derive(Clone, Debug, PartialEq)]
 struct ConsistentKeyGroup {
     predicates: Option<Filter>,
     consistent_keys: BTreeMap<TimeseriesKey, (Target, Metric)>,
@@ -145,6 +148,7 @@ impl Client {
                 query_id,
                 parsed_query,
                 &mut total_rows_fetched,
+                None,
                 None,
             )
             .await;
@@ -284,6 +288,7 @@ impl Client {
         query: oxql::Query,
         total_rows_fetched: &mut u64,
         outer_predicates: Option<Filter>,
+        outer_limit: Option<Limit>,
     ) -> Result<OxqlResult, Error> {
         let split = query.split();
         if let oxql::ast::SplitQuery::Nested { subqueries, transformations } =
@@ -298,6 +303,7 @@ impl Client {
             // the transformation portion of this nested query.
             let new_outer_predicates =
                 query.coalesced_predicates(outer_predicates.clone());
+            let new_outer_limit = query.coalesced_limits(outer_limit);
 
             // Run each subquery recursively, and extend the results
             // accordingly.
@@ -312,6 +318,7 @@ impl Client {
                         subq,
                         total_rows_fetched,
                         new_outer_predicates.clone(),
+                        new_outer_limit,
                     )
                     .await?;
                 query_summaries.extend(res.query_summaries);
@@ -369,6 +376,13 @@ impl Client {
             "coalesced predicates from flat query";
             "outer_predicates" => ?&outer_predicates,
             "coalesced" => ?&preds,
+        );
+        let limit = query.coalesced_limits(outer_limit);
+        debug!(
+            query_log,
+            "coalesced limit operations from flat query";
+            "outer_limit" => ?&outer_limit,
+            "coalesced" => ?&limit,
         );
 
         // We generally run a few SQL queries for each OxQL query:
@@ -476,15 +490,16 @@ impl Client {
         // organized by timeseries key. That's because we fetch all consistent
         // samples at once, so we get many concrete _timeseries_ in the returned
         // response, even though they're all from the same schema.
-        let (summary, timeseries_by_key) = self
+        let (summaries, timeseries_by_key) = self
             .select_matching_samples(
                 query_log,
                 &schema,
                 &consistent_key_groups,
+                limit,
                 total_rows_fetched,
             )
             .await?;
-        query_summaries.push(summary);
+        query_summaries.extend(summaries);
 
         // At this point, let's construct a set of tables and run the results
         // through the transformation pipeline.
@@ -535,25 +550,43 @@ impl Client {
         query_log: &Logger,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
+        limit: Option<Limit>,
         total_rows_fetched: &mut u64,
-    ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, oxql::Timeseries>), Error>
-    {
+    ) -> Result<
+        (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql::Timeseries>),
+        Error,
+    > {
         // We'll create timeseries for each key on the fly. To enable computing
         // deltas, we need to track the last measurement we've seen as well.
         let mut measurements_by_key: BTreeMap<_, Vec<_>> = BTreeMap::new();
-        let measurements_query = self.measurements_query(
-            schema,
-            consistent_key_groups,
-            total_rows_fetched,
-        )?;
+
+        // If the set of consistent keys is quite large, we may run into
+        // ClickHouse's SQL query size limit, which is 256KiB by default.
+        // See https://clickhouse.com/docs/en/operations/settings/settings#max_query_size
+        // for that limit.
+        //
+        // To avoid this, we have to split large groups of keys into pages, and
+        // concatenate the results ourself.
         let mut n_measurements: u64 = 0;
-        let (summary, body) =
-            self.execute_with_body(&measurements_query).await?;
-        for line in body.lines() {
-            let (key, measurement) =
-                model::parse_measurement_from_row(line, schema.datum_type);
-            measurements_by_key.entry(key).or_default().push(measurement);
-            n_measurements += 1;
+        let mut summaries = Vec::new();
+        for key_group_chunk in
+            chunk_consistent_key_groups(consistent_key_groups)
+        {
+            let measurements_query = self.measurements_query(
+                schema,
+                &key_group_chunk,
+                limit,
+                total_rows_fetched,
+            )?;
+            let (summary, body) =
+                self.execute_with_body(&measurements_query).await?;
+            summaries.push(summary);
+            for line in body.lines() {
+                let (key, measurement) =
+                    model::parse_measurement_from_row(line, schema.datum_type);
+                measurements_by_key.entry(key).or_default().push(measurement);
+                n_measurements += 1;
+            }
         }
         debug!(
             query_log,
@@ -621,13 +654,14 @@ impl Client {
             );
             out.insert(key, timeseries);
         }
-        Ok((summary, out))
+        Ok((summaries, out))
     }
 
     fn measurements_query(
         &self,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
+        limit: Option<Limit>,
         total_rows_fetched: &mut u64,
     ) -> Result<String, Error> {
         use std::fmt::Write;
@@ -662,7 +696,7 @@ impl Client {
 
                 // Push the predicate that selects the timeseries keys, which
                 // are unique to this group.
-                let maybe_key_set = if group.consistent_keys.len() > 0 {
+                let maybe_key_set = if !group.consistent_keys.is_empty() {
                     let mut chunk = String::from("timeseries_key IN (");
                     let keys = group
                         .consistent_keys
@@ -705,13 +739,63 @@ impl Client {
         // - timestamp
         //
         // We care most about the timestamp ordering, since that is assumed (and
-        // asserted) by downstream table operations. We use the full sort order
-        // of the table, however, to make things the most efficient.
+        // asserted) by downstream table operations.
+        //
+        // Note that although the tables are sorted by start_time, we _omit_
+        // that if the query includes a limiting operation, like `first k`. This
+        // is an unfortunate interaction between the `LIMIT BY` clause that
+        // implements this in ClickHouse and the fact that the start times for
+        // some metrics are not monotonic. In particular, those metrics
+        // collected before a sled syncs with upstream NTP servers may have
+        // wildly inaccurate start times. Using the `LIMIT BY` clause in
+        // ClickHouse along with this sort order means we may end up taking the
+        // latest samples from a block of metrics with an early start time, even
+        // if there is a sample with a globally later, and accurate, timestamp,
+        // but with a start_time _after_ that previous block.
         query.push_str(" ORDER BY timeseries_key");
-        if schema.datum_type.is_cumulative() {
+        if schema.datum_type.is_cumulative() && limit.is_none() {
             query.push_str(", start_time");
         }
         query.push_str(", timestamp");
+
+        // If provided, push a `LIMIT BY` clause, which implements the `first`
+        // or `last` table operations directly in ClickHouse.
+        //
+        // This clause limits the number of rows _within each group_, which here
+        // is always the `timeseries_key`. Note that the clause is completely
+        // independent of the the traditional SQL `LIMIT` clause, pushed below
+        // to avoid selecting too many rows at once.
+        if let Some(limit) = limit {
+            // If this limit takes the _last_ samples, we need to invert the
+            // sorting by timestamp to be descending.
+            let is_last = matches!(limit.kind, LimitKind::Last);
+            if is_last {
+                query.push_str(" DESC");
+            }
+
+            // In either case, add the limit-by clause itself.
+            query.push_str(" LIMIT ");
+            write!(query, "{}", limit.count).unwrap();
+            query.push_str(" BY timeseries_key");
+
+            // Possibly invert the timestamp ordering again.
+            //
+            // To implement a `last k` operation, above we sort by descending
+            // timestamps and use the `LIMIT k BY timeseries_key` clause.
+            // However, this inverts the ordering by timestamp that we need for
+            // all downstream operations to work correctly.
+            //
+            // Restore that ordering here, by putting the now-complete query
+            // inside a CTE and selecting from that ordered by timestamp. Note
+            if is_last {
+                query = format!(
+                    "WITH another_sort_bites_the_dust \
+                    AS ({query}) \
+                    SELECT * FROM another_sort_bites_the_dust \
+                    ORDER BY timeseries_key, timestamp"
+                );
+            }
+        }
 
         // Push a limit clause, which restricts the number of records we could
         // return.
@@ -881,6 +965,113 @@ impl Client {
     }
 }
 
+// Split the list of consistent key groups, ensuring none exceeds ClickHouse's
+// query limit.
+//
+// The set of consistent keys for an OxQL query can be quite large. When stuffed
+// into a giant list of keys and used in a SQL query like so:
+//
+// ```
+// timeseries_key IN (list, of, many, keys)
+// ```
+//
+// this can hit ClickHouse's SQL query size limit (defaulting to 256KiB, see
+// https://clickhouse.com/docs/en/operations/settings/settings#max_query_size).
+//
+// This function chunks the list of consistent keys, ensuring that each group is
+// small enough to fit within that query limit.
+//
+// Note that this unfortunately needs to chunk and reallocate the groups,
+// because it may entail splitting each key group. That requires a copy of the
+// internal map, to split it at a particular size.
+fn chunk_consistent_key_groups(
+    consistent_key_groups: &[ConsistentKeyGroup],
+) -> Vec<Vec<ConsistentKeyGroup>> {
+    // The max number of keys allowed in each measurement query.
+    //
+    // Keys are u64s, so their max is 18446744073709551615, which has 20 base-10
+    // digits. We also separate the keys by a `,`, so let's call it 21 digits.
+    //
+    // ClickHouse's max query size is 256KiB, but we allow for 6KiB of overhead
+    // for the other parts of the query (select, spaces, column names, etc).
+    // That's very conservative.
+    const MAX_QUERY_SIZE_FOR_KEYS: usize = 250 * 1024;
+    const DIGITS_PER_KEY: usize = 21;
+    const MAX_KEYS_PER_MEASUREMENT_QUERY: usize =
+        MAX_QUERY_SIZE_FOR_KEYS / DIGITS_PER_KEY;
+    chunk_consistent_key_groups_impl(
+        consistent_key_groups,
+        MAX_KEYS_PER_MEASUREMENT_QUERY,
+    )
+}
+
+fn chunk_consistent_key_groups_impl(
+    consistent_key_groups: &[ConsistentKeyGroup],
+    chunk_size: usize,
+) -> Vec<Vec<ConsistentKeyGroup>> {
+    // Create the output vec-of-vec of key groups. We'll always push to the last
+    // one, so grab a reference to it.
+    let mut out = vec![vec![]];
+    let mut current_chunk = out.last_mut().unwrap();
+    let mut room = chunk_size;
+    'group: for next_group in consistent_key_groups.iter().cloned() {
+        // If we have room for it in this chunk, push it onto the current chunk,
+        // and then continue to the next group.
+        let group_size = next_group.consistent_keys.len();
+        if room >= group_size {
+            current_chunk.push(next_group);
+            room -= group_size;
+            continue;
+        }
+
+        // If we don't have enough room for this entire group, then we need to
+        // split it up and push whatever we can. It's actually possible that the
+        // next group needs to be split multiple times. So we'll do that until
+        // it's empty, possibly adding new chunks to the output array.
+        //
+        // It's tricky to iterate over a map by the index / count, and since
+        // we're operating on a clone anyway, convert this to a vec.
+        let predicates = next_group.predicates;
+        let mut group_keys: Vec<_> =
+            next_group.consistent_keys.into_iter().collect();
+        while !group_keys.is_empty() {
+            // On a previous pass through this loop, we may have exhausted all
+            // the remaining room. As we have re-entered it, we still have items
+            // in this current group of keys. So "close" the last chunk and push
+            // a new one, onto which we'll start adding the remaining items.
+            if room == 0 {
+                out.push(vec![]);
+                current_chunk = out.last_mut().unwrap();
+                room = chunk_size;
+            }
+
+            // Fetch up to the remaining set of keys.
+            let ix = room.min(group_keys.len());
+            let consistent_keys: BTreeMap<_, _> =
+                group_keys.drain(..ix).collect();
+
+            // There are no more keys in this group, we need to continue to the
+            // next one.
+            if consistent_keys.is_empty() {
+                continue 'group;
+            }
+
+            // We need to update the amount of room we have left, to be sure we
+            // don't push this whole group if the chunk boundary falls in the
+            // middle of it.
+            room -= consistent_keys.len();
+
+            // Push this set of keys onto the current chunk.
+            let this_group_chunk = ConsistentKeyGroup {
+                predicates: predicates.clone(),
+                consistent_keys,
+            };
+            current_chunk.push(this_group_chunk);
+        }
+    }
+    out
+}
+
 // Helper to update the number of total rows fetched so far, and check it's
 // still under the limit.
 fn update_total_rows_and_check(
@@ -909,19 +1100,21 @@ fn update_total_rows_and_check(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
-    use dropshot::test_util::LogContext;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
-    use omicron_test_utils::dev::test_setup_log;
-    use oximeter::Sample;
-    use oximeter::{types::Cumulative, FieldValue};
-    use std::collections::BTreeMap;
-    use std::time::Duration;
-
+    use super::ConsistentKeyGroup;
+    use crate::client::oxql::chunk_consistent_key_groups_impl;
     use crate::{
         oxql::{point::Points, Table, Timeseries},
         Client, DbWrite,
     };
+    use crate::{Metric, Target};
+    use chrono::{DateTime, Utc};
+    use dropshot::test_util::LogContext;
+    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::test_setup_log;
+    use oximeter::{types::Cumulative, FieldValue};
+    use oximeter::{DatumType, Sample};
+    use std::collections::BTreeMap;
+    use std::time::Duration;
 
     #[derive(
         Clone, Debug, Eq, PartialEq, PartialOrd, Ord, oximeter::Target,
@@ -1277,5 +1470,176 @@ mod tests {
             return Some(timeseries);
         }
         None
+    }
+
+    fn make_consistent_key_group(size: u64) -> ConsistentKeyGroup {
+        let consistent_keys = (0..size)
+            .map(|key| {
+                let target = Target { name: "foo".to_string(), fields: vec![] };
+                let metric = Metric {
+                    name: "bar".to_string(),
+                    fields: vec![],
+                    datum_type: DatumType::U8,
+                };
+                (key, (target, metric))
+            })
+            .collect();
+        ConsistentKeyGroup { predicates: None, consistent_keys }
+    }
+
+    #[test]
+    fn test_chunk_consistent_key_groups_all_in_one_chunk() {
+        // Create two key groups, each with 5 keys.
+        //
+        // With a chunk size of 12, these should all be in the same chunk, so
+        // we're really just cloning the inputs. They do go into an outer vec
+        // though, because we can have multiple chunks in theory.
+        let keys =
+            vec![make_consistent_key_group(5), make_consistent_key_group(5)];
+        let chunks = chunk_consistent_key_groups_impl(&keys, 12);
+        assert_eq!(
+            chunks.len(),
+            1,
+            "All key groups should fit into one chunk when their \
+            total size is less than the chunk size"
+        );
+        assert_eq!(
+            keys, chunks[0],
+            "All key groups should fit into one chunk when their \
+            total size is less than the chunk size"
+        );
+    }
+
+    #[test]
+    fn test_chunk_consistent_key_groups_split_middle_of_key_group() {
+        // Create one key group, with 10 keys.
+        //
+        // With a chunk size of 5, this should be split in half across two
+        // chunks.
+        let keys = vec![make_consistent_key_group(10)];
+        let chunks = chunk_consistent_key_groups_impl(&keys, 5);
+        assert_eq!(
+            chunks.len(),
+            2,
+            "Consistent key group should be split into two chunks",
+        );
+
+        let first = keys[0]
+            .consistent_keys
+            .range(..5)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[0][0].consistent_keys, first,
+            "The first chunk of the consistent keys should be \
+            the first half of the input keys"
+        );
+
+        let second = keys[0]
+            .consistent_keys
+            .range(5..)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[1][0].consistent_keys, second,
+            "The second chunk of the consistent keys should be \
+            the second half of the input keys"
+        );
+    }
+
+    #[test]
+    fn test_chunk_consistent_key_groups_split_key_group_multiple_times() {
+        // Create one key group, with 10 keys.
+        //
+        // With a chunk size of 4, this should be split 3 times, with the first
+        // two having 4 items and the last the remaining 2.
+        let keys = vec![make_consistent_key_group(10)];
+        let chunks = chunk_consistent_key_groups_impl(&keys, 4);
+        assert_eq!(
+            chunks.len(),
+            3,
+            "Consistent key group should be split into three chunks",
+        );
+
+        let first = keys[0]
+            .consistent_keys
+            .range(..4)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[0][0].consistent_keys, first,
+            "The first chunk of the consistent keys should be \
+            the first 4 input keys"
+        );
+
+        let second = keys[0]
+            .consistent_keys
+            .range(4..8)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[1][0].consistent_keys, second,
+            "The second chunk of the consistent keys should be \
+            the next 4 input keys",
+        );
+
+        let third = keys[0]
+            .consistent_keys
+            .range(8..)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        assert_eq!(
+            chunks[2][0].consistent_keys, third,
+            "The second chunk of the consistent keys should be \
+            the remaining 2 input keys",
+        );
+    }
+
+    #[tokio::test]
+    async fn test_limit_operations() {
+        let ctx = setup_oxql_test("test_limit_operations").await;
+
+        // Specify exactly one timeseries we _want_ to fetch, by picking the
+        // first timeseries we inserted.
+        let ((expected_target, expected_foo), expected_samples) =
+            ctx.test_data.samples_by_timeseries.first_key_value().unwrap();
+        let query = format!(
+            "get some_target:some_metric | filter {} | first 1",
+            exact_filter_for(expected_target, *expected_foo)
+        );
+        let result = ctx
+            .client
+            .oxql_query(&query)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(
+            table.n_timeseries(),
+            1,
+            "Should have fetched exactly the target timeseries"
+        );
+        assert!(
+            table.iter().all(|t| t.points.len() == 1),
+            "Should have fetched exactly 1 point for this timeseries",
+        );
+
+        let expected_timeseries =
+            find_timeseries_in_table(&table, expected_target, expected_foo)
+                .expect("Table did not contain expected timeseries");
+        let measurements: Vec<_> = expected_samples
+            .iter()
+            .take(1)
+            .map(|s| s.measurement.clone())
+            .collect();
+        let expected_points = Points::delta_from_cumulative(&measurements)
+            .expect("failed to build expected points from measurements");
+        assert_eq!(
+            expected_points, expected_timeseries.points,
+            "Did not reconstruct the correct points for the one \
+            timeseries the query fetched"
+        );
+
+        ctx.cleanup_successful().await;
     }
 }

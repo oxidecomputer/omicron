@@ -333,6 +333,14 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
+/// Result of [ServiceManager::load_services]
+pub enum LoadServicesResult {
+    /// We didn't load anything, there wasn't anything to load
+    NoServicesToLoad,
+    /// We successfully loaded the zones from our ledger.
+    ServicesLoaded,
+}
+
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     if errors.len() == 1 {
         return format!(
@@ -936,7 +944,7 @@ impl ServiceManager {
     // - If we know that disks are missing, we could wait for them
     // - We could permanently fail if we are able to distinguish other errors
     // more clearly.
-    pub async fn load_services(&self) -> Result<(), Error> {
+    pub async fn load_services(&self) -> Result<LoadServicesResult, Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(mut ledger) =
@@ -948,7 +956,7 @@ impl ServiceManager {
                 "Loading Omicron zones - \
                 no zones nor old-format services found"
             );
-            return Ok(());
+            return Ok(LoadServicesResult::NoServicesToLoad);
         };
 
         let zones_config = ledger.data_mut();
@@ -966,7 +974,7 @@ impl ServiceManager {
             None,
         )
         .await?;
-        Ok(())
+        Ok(LoadServicesResult::ServicesLoaded)
     }
 
     /// Sets up "Sled Agent" information, including underlay info.

@@ -19,6 +19,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use sled_hardware::DendriteAsic;
@@ -251,7 +252,7 @@ impl From<sled_hardware::DiskVariant> for DiskType {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Zpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub disk_type: DiskType,
 }
 
@@ -374,152 +375,6 @@ impl OmicronZoneConfig {
             &self.zone_type.zone_type_str(),
             Some(self.id),
         )
-    }
-
-    /// Returns the structure that describes this zone to Nexus during rack
-    /// initialization
-    pub fn to_nexus_service_req(
-        &self,
-        sled_id: Uuid,
-    ) -> nexus_client::types::ServicePutRequest {
-        use nexus_client::types as NexusTypes;
-
-        let service_id = self.id;
-        let zone_id = Some(self.id);
-        match &self.zone_type {
-            OmicronZoneType::Nexus {
-                external_ip,
-                internal_address,
-                nic,
-                ..
-            } => NexusTypes::ServicePutRequest {
-                service_id,
-                zone_id,
-                sled_id,
-                address: internal_address.to_string(),
-                kind: NexusTypes::ServiceKind::Nexus {
-                    external_address: *external_ip,
-                    nic: NexusTypes::ServiceNic {
-                        id: nic.id,
-                        name: nic.name.clone(),
-                        ip: nic.ip,
-                        mac: nic.mac,
-                        slot: nic.slot,
-                    },
-                },
-            },
-            OmicronZoneType::ExternalDns {
-                http_address,
-                dns_address,
-                nic,
-                ..
-            } => NexusTypes::ServicePutRequest {
-                service_id,
-                zone_id,
-                sled_id,
-                address: http_address.to_string(),
-                kind: NexusTypes::ServiceKind::ExternalDns {
-                    external_address: dns_address.ip(),
-                    nic: NexusTypes::ServiceNic {
-                        id: nic.id,
-                        name: nic.name.clone(),
-                        ip: nic.ip,
-                        mac: nic.mac,
-                        slot: nic.slot,
-                    },
-                },
-            },
-            OmicronZoneType::InternalDns { http_address, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: http_address.to_string(),
-                    kind: NexusTypes::ServiceKind::InternalDns,
-                }
-            }
-            OmicronZoneType::Oximeter { address } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::Oximeter,
-                }
-            }
-            OmicronZoneType::CruciblePantry { address } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::CruciblePantry,
-                }
-            }
-            OmicronZoneType::BoundaryNtp { address, snat_cfg, nic, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::BoundaryNtp {
-                        snat: snat_cfg.into(),
-                        nic: NexusTypes::ServiceNic {
-                            id: nic.id,
-                            name: nic.name.clone(),
-                            ip: nic.ip,
-                            mac: nic.mac,
-                            slot: nic.slot,
-                        },
-                    },
-                }
-            }
-            OmicronZoneType::InternalNtp { address, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::InternalNtp,
-                }
-            }
-            OmicronZoneType::Clickhouse { address, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::Clickhouse,
-                }
-            }
-            OmicronZoneType::ClickhouseKeeper { address, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::ClickhouseKeeper,
-                }
-            }
-            OmicronZoneType::Crucible { address, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::Crucible,
-                }
-            }
-            OmicronZoneType::CockroachDb { address, .. } => {
-                NexusTypes::ServicePutRequest {
-                    service_id,
-                    zone_id,
-                    sled_id,
-                    address: address.to_string(),
-                    kind: NexusTypes::ServiceKind::Cockroach,
-                }
-            }
-        }
     }
 }
 
@@ -896,7 +751,7 @@ pub struct InventoryDisk {
 /// Identifies information about zpools managed by the control plane
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryZpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub total_size: ByteCount,
 }
 

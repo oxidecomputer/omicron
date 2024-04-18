@@ -12,8 +12,6 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledPolicy;
-use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
@@ -22,130 +20,42 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
-use ipnetwork::IpNetwork;
-use newtype_uuid::TypedUuid;
-use omicron_common::address::IpRange;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use newtype_uuid::GenericUuid;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::ZoneKind;
+use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
+use std::net::AddrParseError;
+use std::net::Ipv6Addr;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Fleet-wide deployment policy
-///
-/// The **policy** represents the deployment controls that people (operators and
-/// support engineers) can modify directly under normal operation.  In the
-/// limit, this would include things like: which sleds are supposed to be part
-/// of the system, how many CockroachDB nodes should be part of the cluster,
-/// what system version the system should be running, etc.  It would _not_
-/// include things like which services should be running on which sleds or which
-/// host OS version should be on each sled because that's up to the control
-/// plane to decide.  (To be clear, the intent is that for extenuating
-/// circumstances, people could exercise control over such things, but that
-/// would not be part of normal operation.)
-///
-/// The current policy is pretty limited.  It's aimed primarily at supporting
-/// the add/remove sled use case.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Policy {
-    /// set of sleds that are supposed to be part of the control plane, along
-    /// with information about resources available to the planner
-    pub sleds: BTreeMap<Uuid, SledResources>,
+mod planning_input;
+mod zone_type;
 
-    /// ranges specified by the IP pool for externally-visible control plane
-    /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub service_ip_pool_ranges: Vec<IpRange>,
-
-    /// desired total number of deployed Nexus zones
-    pub target_nexus_zone_count: usize,
-}
-
-/// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SledResources {
-    /// current sled policy
-    pub policy: SledPolicy,
-
-    /// current sled state
-    pub state: SledState,
-
-    /// zpools on this sled
-    ///
-    /// (used to allocate storage for control plane zones with persistent
-    /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
-
-    /// the IPv6 subnet of this sled on the underlay network
-    ///
-    /// (implicitly specifies the whole range of addresses that the planner can
-    /// use for control plane components)
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
-}
-
-impl SledResources {
-    /// Returns true if the sled can have services provisioned on it that
-    /// aren't required to be on every sled.
-    ///
-    /// For example, NTP must exist on every sled, but Nexus does not have to.
-    pub fn is_eligible_for_discretionary_services(&self) -> bool {
-        self.policy.is_provisionable()
-            && self.state.is_eligible_for_discretionary_services()
-    }
-}
-
-/// Policy and database inputs to the Reconfigurator planner
-///
-/// The primary inputs to the planner are the parent (either a parent blueprint
-/// or an inventory collection) and this structure. This type holds the
-/// fleet-wide policy as well as any additional information fetched from CRDB
-/// that the planner needs to make decisions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanningInput {
-    /// fleet-wide policy
-    pub policy: Policy,
-
-    /// external IPs allocated to services
-    pub service_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
-
-    /// vNICs allocated to services
-    pub service_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
-}
-
-/// External IP allocated to a service
-///
-/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
-/// necessary for blueprint planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExternalIp {
-    pub id: Uuid,
-    pub ip: IpNetwork,
-}
-
-/// Network interface allocated to a service
-///
-/// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
-/// the fields necessary for blueprint planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceNetworkInterface {
-    pub id: Uuid,
-    pub mac: MacAddr,
-    pub ip: IpNetwork,
-    pub slot: u8,
-    pub primary: bool,
-}
+pub use planning_input::DiskFilter;
+pub use planning_input::OmicronZoneExternalIp;
+pub use planning_input::OmicronZoneNic;
+pub use planning_input::PlanningInput;
+pub use planning_input::PlanningInputBuildError;
+pub use planning_input::PlanningInputBuilder;
+pub use planning_input::Policy;
+pub use planning_input::SledDetails;
+pub use planning_input::SledDisk;
+pub use planning_input::SledFilter;
+pub use planning_input::SledResources;
+pub use zone_type::blueprint_zone_type;
+pub use zone_type::BlueprintZoneType;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -197,6 +107,9 @@ pub struct Blueprint {
     /// entry in this map.
     pub blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
 
+    /// A map of sled id -> disks in use on each sled.
+    pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
 
@@ -234,7 +147,7 @@ impl Blueprint {
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
-    pub fn all_blueprint_zones(
+    pub fn all_omicron_zones(
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
@@ -245,19 +158,9 @@ impl Blueprint {
         })
     }
 
-    /// Iterate over all the [`OmicronZoneConfig`] instances in the blueprint,
-    /// along with the associated sled id.
-    pub fn all_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
-            z.zones.iter().map(|z| (*sled_id, &z.config))
-        })
-    }
-
     /// Iterate over the ids of all sleds in the blueprint
-    pub fn sleds(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.blueprint_zones.keys().copied()
+    pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
+        self.blueprint_zones.keys().copied().map(SledUuid::from_untyped_uuid)
     }
 
     /// Summarize the difference between sleds and zones between two
@@ -272,9 +175,9 @@ impl Blueprint {
     ) -> Result<BlueprintDiff, BlueprintDiffError> {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            before.blueprint_zones.clone(),
+            before.typed_blueprint_zones(),
             self.metadata(),
-            self.blueprint_zones.clone(),
+            self.typed_blueprint_zones(),
         )
     }
 
@@ -303,24 +206,35 @@ impl Blueprint {
                     .zones
                     .zones
                     .iter()
-                    .map(|z| BlueprintZoneConfig {
-                        config: z.clone(),
-                        disposition: BlueprintZoneDisposition::InService,
+                    .map(|z| {
+                        BlueprintZoneConfig::from_omicron_zone_config(
+                            z.clone(),
+                            BlueprintZoneDisposition::InService,
+                        )
+                        .map_err(|err| {
+                            BlueprintDiffError {
+                                before_meta: DiffBeforeMetadata::Collection {
+                                    id: before.id,
+                                },
+                                after_meta: Box::new(self.metadata()),
+                                errors: vec![BlueprintDiffSingleError::InvalidOmicronZoneType(err)],
+                            }
+                        })
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
                 let zones = BlueprintZonesConfig {
                     generation: zones_found.zones.generation,
                     zones,
                 };
-                (*sled_id, zones)
+                Ok((*sled_id, zones))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.metadata(),
-            self.blueprint_zones.clone(),
+            self.typed_blueprint_zones(),
         )
     }
 
@@ -328,6 +242,21 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    /// Temporary method that returns `self.blueprint_zones`, except the keys
+    /// are `SledUuid`.
+    ///
+    /// TODO-cleanup use `TypedUuid` everywhere
+    pub fn typed_blueprint_zones(
+        &self,
+    ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
+        self.blueprint_zones
+            .iter()
+            .map(|(sled_id, zones)| {
+                (SledUuid::from_untyped_uuid(*sled_id), zones.clone())
+            })
+            .collect()
     }
 }
 
@@ -386,15 +315,19 @@ impl BlueprintZonesConfig {
     /// For the initial blueprint, all zones within a collection are assumed to
     /// have the [`InService`](BlueprintZoneDisposition::InService)
     /// disposition.
-    pub fn initial_from_collection(collection: &OmicronZonesConfig) -> Self {
+    pub fn initial_from_collection(
+        collection: &OmicronZonesConfig,
+    ) -> Result<Self, InvalidOmicronZoneType> {
         let zones = collection
             .zones
             .iter()
-            .map(|z| BlueprintZoneConfig {
-                config: z.clone(),
-                disposition: BlueprintZoneDisposition::InService,
+            .map(|z| {
+                BlueprintZoneConfig::from_omicron_zone_config(
+                    z.clone(),
+                    BlueprintZoneDisposition::InService,
+                )
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         let mut ret = Self {
             // An initial `BlueprintZonesConfig` reuses the generation from
@@ -405,7 +338,7 @@ impl BlueprintZonesConfig {
         // For testing, it's helpful for zones to be in sorted order.
         ret.sort();
 
-        ret
+        Ok(ret)
     }
 
     /// Sorts the list of zones stored in this configuration.
@@ -430,9 +363,9 @@ impl BlueprintZonesConfig {
             zones: self
                 .zones
                 .iter()
-                .filter_map(|z| {
-                    z.disposition.matches(filter).then(|| z.config.clone())
-                })
+                .filter(|z| z.disposition.matches(filter))
+                .cloned()
+                .map(OmicronZoneConfig::from)
                 .collect(),
         }
     }
@@ -441,22 +374,266 @@ impl BlueprintZonesConfig {
 fn zone_sort_key(z: &BlueprintZoneConfig) -> impl Ord {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
-    (z.config.zone_type.kind(), z.config.id)
+    (z.zone_type.kind(), z.id)
+}
+
+/// "Should never happen" errors from converting an [`OmicronZoneType`] into a
+/// [`BlueprintZoneType`].
+// Removing this error type would be a side effect of fixing
+// https://github.com/oxidecomputer/omicron/issues/4988.
+#[derive(Debug, Clone, Error, SlogInlineError)]
+pub enum InvalidOmicronZoneType {
+    #[error("invalid socket address for {kind} ({addr})")]
+    ParseSocketAddr {
+        kind: ZoneKind,
+        addr: String,
+        #[source]
+        err: AddrParseError,
+    },
 }
 
 /// Describes one Omicron-managed zone in a blueprint.
 ///
-/// This is a wrapper around an [`OmicronZoneConfig`] that also includes a
-/// [`BlueprintZoneDisposition`].
-///
 /// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintZoneConfig {
-    /// The underlying zone configuration.
-    pub config: OmicronZoneConfig,
-
     /// The disposition (desired state) of this zone recorded in the blueprint.
     pub disposition: BlueprintZoneDisposition,
+
+    pub id: OmicronZoneUuid,
+    pub underlay_address: Ipv6Addr,
+    pub zone_type: BlueprintZoneType,
+}
+
+impl BlueprintZoneConfig {
+    pub fn from_omicron_zone_config(
+        config: OmicronZoneConfig,
+        disposition: BlueprintZoneDisposition,
+    ) -> Result<Self, InvalidOmicronZoneType> {
+        let zone_type = match config.zone_type {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                dns_servers,
+                domain,
+                nic,
+                ntp_servers,
+                snat_cfg,
+            } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::BoundaryNtp,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::BoundaryNtp(
+                    blueprint_zone_type::BoundaryNtp {
+                        address,
+                        ntp_servers,
+                        dns_servers,
+                        domain,
+                        nic,
+                        snat_cfg,
+                    },
+                )
+            }
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::Clickhouse,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                    address,
+                    dataset,
+                })
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::ClickhouseKeeper,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::ClickhouseKeeper(
+                    blueprint_zone_type::ClickhouseKeeper { address, dataset },
+                )
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::CockroachDb,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::CockroachDb(
+                    blueprint_zone_type::CockroachDb { address, dataset },
+                )
+            }
+            OmicronZoneType::Crucible { address, dataset } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::Crucible,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                    address,
+                    dataset,
+                })
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::CruciblePantry,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::CruciblePantry(
+                    blueprint_zone_type::CruciblePantry { address },
+                )
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                dns_address,
+                http_address,
+                nic,
+            } => {
+                let dns_address = dns_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::ExternalDns,
+                        addr: dns_address.clone(),
+                        err,
+                    }
+                })?;
+                let http_address = http_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::ExternalDns,
+                        addr: http_address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset,
+                        http_address,
+                        dns_address,
+                        nic,
+                    },
+                )
+            }
+            OmicronZoneType::InternalDns {
+                dataset,
+                dns_address,
+                gz_address,
+                gz_address_index,
+                http_address,
+            } => {
+                let dns_address = dns_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::InternalDns,
+                        addr: dns_address.clone(),
+                        err,
+                    }
+                })?;
+                let http_address = http_address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::InternalDns,
+                        addr: http_address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::InternalDns(
+                    blueprint_zone_type::InternalDns {
+                        dataset,
+                        http_address,
+                        dns_address,
+                        gz_address,
+                        gz_address_index,
+                    },
+                )
+            }
+            OmicronZoneType::InternalNtp {
+                address,
+                dns_servers,
+                domain,
+                ntp_servers,
+            } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::InternalNtp,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp {
+                        address,
+                        ntp_servers,
+                        dns_servers,
+                        domain,
+                    },
+                )
+            }
+            OmicronZoneType::Nexus {
+                external_dns_servers,
+                external_ip,
+                external_tls,
+                internal_address,
+                nic,
+            } => {
+                let internal_address =
+                    internal_address.parse().map_err(|err| {
+                        InvalidOmicronZoneType::ParseSocketAddr {
+                            kind: ZoneKind::Nexus,
+                            addr: internal_address.clone(),
+                            err,
+                        }
+                    })?;
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    internal_address,
+                    external_ip,
+                    nic,
+                    external_tls,
+                    external_dns_servers,
+                })
+            }
+            OmicronZoneType::Oximeter { address } => {
+                let address = address.parse().map_err(|err| {
+                    InvalidOmicronZoneType::ParseSocketAddr {
+                        kind: ZoneKind::Oximeter,
+                        addr: address.clone(),
+                        err,
+                    }
+                })?;
+                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                    address,
+                })
+            }
+        };
+        Ok(Self {
+            disposition,
+            id: OmicronZoneUuid::from_untyped_uuid(config.id),
+            underlay_address: config.underlay_address,
+            zone_type,
+        })
+    }
+}
+
+impl From<BlueprintZoneConfig> for OmicronZoneConfig {
+    fn from(z: BlueprintZoneConfig) -> Self {
+        Self {
+            id: z.id.into_untyped_uuid(),
+            underlay_address: z.underlay_address,
+            zone_type: z.zone_type.into(),
+        }
+    }
 }
 
 /// The desired state of an Omicron-managed zone in a blueprint.
@@ -483,6 +660,9 @@ pub enum BlueprintZoneDisposition {
 
     /// The zone is not in service.
     Quiesced,
+
+    /// The zone is permanently gone.
+    Expunged,
 }
 
 impl BlueprintZoneDisposition {
@@ -499,21 +679,33 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::SledAgentPut => true,
-                BlueprintZoneFilter::InternalDns => true,
-                BlueprintZoneFilter::VpcFirewall => true,
+                BlueprintZoneFilter::ShouldBeRunning => true,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => true,
+                BlueprintZoneFilter::ShouldBeInInternalDns => true,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
 
-                // Quiesced zones should not be exposed in DNS.
-                BlueprintZoneFilter::InternalDns => false,
+                // Quiesced zones are still running.
+                BlueprintZoneFilter::ShouldBeRunning => true,
 
-                // Quiesced zones are expected to be deployed by sled-agent.
-                BlueprintZoneFilter::SledAgentPut => true,
+                // Quiesced zones should not have external resources -- we do
+                // not want traffic to be directed to them.
+                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
+
+                // Quiesced zones should not be exposed in DNS.
+                BlueprintZoneFilter::ShouldBeInInternalDns => false,
 
                 // Quiesced zones should get firewall rules.
-                BlueprintZoneFilter::VpcFirewall => true,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
+            },
+            Self::Expunged => match filter {
+                BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::ShouldBeRunning => false,
+                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
+                BlueprintZoneFilter::ShouldBeInInternalDns => false,
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => false,
             },
         }
     }
@@ -533,6 +725,7 @@ impl fmt::Display for BlueprintZoneDisposition {
             // and alignment (used above), but this does.
             BlueprintZoneDisposition::InService => "in service".fmt(f),
             BlueprintZoneDisposition::Quiesced => "quiesced".fmt(f),
+            BlueprintZoneDisposition::Expunged => "expunged".fmt(f),
         }
     }
 }
@@ -553,15 +746,27 @@ pub enum BlueprintZoneFilter {
     /// All zones.
     All,
 
-    /// Filter by zones that should be in internal DNS.
-    InternalDns,
+    /// Zones that are desired to be in the RUNNING state
+    ShouldBeRunning,
 
-    /// Filter by zones that we should tell sled-agent to deploy.
-    SledAgentPut,
+    /// Filter by zones that should have external IP and DNS resources.
+    ShouldBeExternallyReachable,
+
+    /// Filter by zones that should be in internal DNS.
+    ShouldBeInInternalDns,
 
     /// Filter by zones that should be sent VPC firewall rules.
-    VpcFirewall,
+    ShouldDeployVpcFirewallRules,
 }
+
+/// Information about an Omicron physical disk as recorded in a blueprint.
+///
+/// Part of [`Blueprint`].
+pub type BlueprintPhysicalDisksConfig =
+    sled_agent_client::types::OmicronPhysicalDisksConfig;
+
+pub type BlueprintPhysicalDiskConfig =
+    sled_agent_client::types::OmicronPhysicalDiskConfig;
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
@@ -628,9 +833,9 @@ impl BlueprintDiff {
     /// data is valid.
     fn new(
         before_meta: DiffBeforeMetadata,
-        before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        before_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         after_meta: BlueprintMetadata,
-        after_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
     ) -> Result<Self, BlueprintDiffError> {
         let mut errors = Vec::new();
 
@@ -660,14 +865,16 @@ impl BlueprintDiff {
     /// Iterate over sleds only present in the second blueprint of a diff
     pub fn sleds_added(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl ExactSizeIterator<Item = (SledUuid, &BlueprintZonesConfig)> + '_
+    {
         self.sleds.added.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
     /// Iterate over sleds only present in the first blueprint of a diff
     pub fn sleds_removed(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl ExactSizeIterator<Item = (SledUuid, &BlueprintZonesConfig)> + '_
+    {
         self.sleds.removed.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -675,7 +882,7 @@ impl BlueprintDiff {
     /// changes.
     pub fn sleds_modified(
         &self,
-    ) -> impl ExactSizeIterator<Item = (Uuid, &DiffSledModified)> + '_ {
+    ) -> impl ExactSizeIterator<Item = (SledUuid, &DiffSledModified)> + '_ {
         self.sleds.modified.iter().map(|(sled_id, sled)| (*sled_id, sled))
     }
 
@@ -683,7 +890,7 @@ impl BlueprintDiff {
     /// changes.
     pub fn sleds_unchanged(
         &self,
-    ) -> impl Iterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZonesConfig)> + '_ {
         self.sleds.unchanged.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -695,10 +902,10 @@ impl BlueprintDiff {
 
 #[derive(Debug)]
 struct DiffSleds {
-    added: BTreeMap<Uuid, BlueprintZonesConfig>,
-    removed: BTreeMap<Uuid, BlueprintZonesConfig>,
-    modified: BTreeMap<Uuid, DiffSledModified>,
-    unchanged: BTreeMap<Uuid, BlueprintZonesConfig>,
+    added: BTreeMap<SledUuid, BlueprintZonesConfig>,
+    removed: BTreeMap<SledUuid, BlueprintZonesConfig>,
+    modified: BTreeMap<SledUuid, DiffSledModified>,
+    unchanged: BTreeMap<SledUuid, BlueprintZonesConfig>,
 }
 
 impl DiffSleds {
@@ -708,8 +915,8 @@ impl DiffSleds {
     /// The return value only contains the sleds that are present in both
     /// blueprints.
     fn new(
-        before: BTreeMap<Uuid, BlueprintZonesConfig>,
-        mut after: BTreeMap<Uuid, BlueprintZonesConfig>,
+        before: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        mut after: BTreeMap<SledUuid, BlueprintZonesConfig>,
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
         let mut removed = BTreeMap::new();
@@ -822,11 +1029,12 @@ pub enum BlueprintDiffSingleError {
     ///
     /// For a particular zone, the type should never change.
     ZoneTypeChanged {
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zone_id: Uuid,
         before: ZoneKind,
         after: ZoneKind,
     },
+    InvalidOmicronZoneType(InvalidOmicronZoneType),
 }
 
 impl fmt::Display for BlueprintDiffSingleError {
@@ -839,9 +1047,12 @@ impl fmt::Display for BlueprintDiffSingleError {
                 after,
             } => write!(
                 f,
-                "on sled {}, zone {} changed type from {} to {}",
-                zone_id, sled_id, before, after
+                "on sled {sled_id}, zone {zone_id} changed type \
+                 from {before} to {after}",
             ),
+            BlueprintDiffSingleError::InvalidOmicronZoneType(err) => {
+                write!(f, "invalid OmicronZoneType in collection: {err}")
+            }
         }
     }
 }
@@ -850,7 +1061,7 @@ impl fmt::Display for BlueprintDiffSingleError {
 #[derive(Clone, Debug)]
 pub enum DiffBeforeMetadata {
     /// The diff was made from a collection.
-    Collection { id: Uuid },
+    Collection { id: CollectionUuid },
     /// The diff was made from a blueprint.
     Blueprint(Box<BlueprintMetadata>),
 }
@@ -868,7 +1079,7 @@ impl DiffBeforeMetadata {
 #[derive(Clone, Debug)]
 pub struct DiffSledModified {
     /// id of the sled
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     /// generation of the "zones" configuration on the left side
     pub generation_before: Generation,
     /// generation of the "zones" configuration on the right side
@@ -880,22 +1091,16 @@ pub struct DiffSledModified {
 
 impl DiffSledModified {
     fn new(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         before: BlueprintZonesConfig,
         after: BlueprintZonesConfig,
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
         // Assemble separate summaries of the zones, indexed by zone id.
-        let before_by_id: HashMap<_, _> = before
-            .zones
-            .into_iter()
-            .map(|zone| (zone.config.id, zone))
-            .collect();
-        let mut after_by_id: HashMap<_, _> = after
-            .zones
-            .into_iter()
-            .map(|zone| (zone.config.id, zone))
-            .collect();
+        let before_by_id: HashMap<_, _> =
+            before.zones.into_iter().map(|zone| (zone.id, zone)).collect();
+        let mut after_by_id: HashMap<_, _> =
+            after.zones.into_iter().map(|zone| (zone.id, zone)).collect();
 
         let mut zones_removed = Vec::new();
         let mut zones_common = Vec::new();
@@ -903,13 +1108,13 @@ impl DiffSledModified {
         // Now go through each zone and compare them.
         for (zone_id, zone_before) in before_by_id {
             if let Some(zone_after) = after_by_id.remove(&zone_id) {
-                let before_kind = zone_before.config.zone_type.kind();
-                let after_kind = zone_after.config.zone_type.kind();
+                let before_kind = zone_before.zone_type.kind();
+                let after_kind = zone_after.zone_type.kind();
 
                 if before_kind != after_kind {
                     errors.push(BlueprintDiffSingleError::ZoneTypeChanged {
                         sled_id,
-                        zone_id,
+                        zone_id: zone_id.into_untyped_uuid(),
                         before: before_kind,
                         after: after_kind,
                     });
@@ -1005,7 +1210,8 @@ impl DiffZoneCommon {
     /// changed.
     #[inline]
     pub fn config_changed(&self) -> bool {
-        self.zone_before.config != self.zone_after.config
+        self.zone_before.underlay_address != self.zone_after.underlay_address
+            || self.zone_before.zone_type != self.zone_after.zone_type
     }
 
     /// Returns true if the [`BlueprintZoneDisposition`] for the zone changed.
@@ -1024,7 +1230,7 @@ impl DiffZoneCommon {
 /// backwards-compatibility guarantees.**
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
-    pub policy: Policy,
+    pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -1302,7 +1508,7 @@ mod table_display {
     }
 
     fn add_whole_sled_records(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         sled_zones: &BlueprintZonesConfig,
         kind: WholeSledKind,
         section: &mut StSectionBuilder,
@@ -1339,7 +1545,7 @@ mod table_display {
     }
 
     fn add_modified_sled_records(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         modified: &DiffSledModified,
         section: &mut StSectionBuilder,
     ) {
@@ -1443,10 +1649,10 @@ mod table_display {
     ) {
         section.push_record(vec![
             first_column,
-            zone.config.zone_type.kind().to_string(),
-            zone.config.id.to_string(),
+            zone.zone_type.kind().to_string(),
+            zone.id.to_string(),
             zone.disposition.to_string(),
-            zone.config.underlay_address.to_string(),
+            zone.underlay_address.to_string(),
         ]);
     }
 
@@ -1458,10 +1664,10 @@ mod table_display {
     ) {
         section.push_record(vec![
             first_column,
-            zone.config.zone_type.kind().to_string(),
-            zone.config.id.to_string(),
+            zone.zone_type.kind().to_string(),
+            zone.id.to_string(),
             zone.disposition.to_string(),
-            zone.config.underlay_address.to_string(),
+            zone.underlay_address.to_string(),
             status.to_string(),
         ]);
     }
@@ -1487,13 +1693,13 @@ mod table_display {
         );
 
         let mut what_changed = Vec::new();
-        if before.config.zone_type != after.config.zone_type {
+        if before.zone_type != after.zone_type {
             what_changed.push(ZONE_TYPE_CONFIG);
         }
         if before.disposition != after.disposition {
             what_changed.push(DISPOSITION);
         }
-        if before.config.underlay_address != after.config.underlay_address {
+        if before.underlay_address != after.underlay_address {
             what_changed.push(UNDERLAY_IP);
         }
         debug_assert!(
@@ -1510,7 +1716,7 @@ mod table_display {
             format!(" {SUB_NOT_LAST}"),
             "".to_string(),
             after.disposition.to_string(),
-            after.config.underlay_address.to_string(),
+            after.underlay_address.to_string(),
         ];
         section.push_record(record);
 

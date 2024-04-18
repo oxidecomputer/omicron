@@ -871,7 +871,14 @@ impl Client {
         let response = self
             .client
             .post(&self.url)
-            .query(&[("output_format_json_quote_64bit_integers", "0")])
+            .query(&[
+                ("output_format_json_quote_64bit_integers", "0"),
+                // TODO-performance: This is needed to get the correct counts of
+                // rows/bytes accessed during a query, but implies larger memory
+                // consumption on the server and higher latency for the request.
+                // We may want to sacrifice accuracy of those counts.
+                ("wait_end_of_query", "1"),
+            ])
             .body(sql)
             .send()
             .await

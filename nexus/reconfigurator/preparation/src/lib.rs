@@ -16,10 +16,13 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledDetails;
+use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
@@ -29,65 +32,120 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use slog::error;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::str::FromStr;
 
 /// Given various pieces of database state that go into the blueprint planning
-/// process, produce a `Policy` object encapsulating what the planner needs to
-/// generate a blueprint
-pub fn policy_from_db(
-    sled_rows: &[nexus_db_model::Sled],
-    zpool_rows: &[nexus_db_model::Zpool],
-    ip_pool_range_rows: &[nexus_db_model::IpPoolRange],
-    target_nexus_zone_count: usize,
-) -> Result<Policy, Error> {
-    let mut zpools_by_sled_id = {
-        let mut zpools = BTreeMap::new();
-        for z in zpool_rows {
-            let sled_zpool_names =
-                zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
-            // It's unfortunate that Nexus knows how Sled Agent
-            // constructs zpool names, but there's not currently an
-            // alternative.
-            let zpool_name_generated =
-                illumos_utils::zpool::ZpoolName::new_external(z.id())
-                    .to_string();
-            let zpool_name = ZpoolName::from_str(&zpool_name_generated)
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unexpectedly failed to parse generated \
-                                zpool name: {}: {}",
-                        zpool_name_generated, e
-                    ))
-                })?;
-            sled_zpool_names.insert(zpool_name);
-        }
-        zpools
-    };
+/// process, produce a `PlanningInput` object encapsulating what the planner
+/// needs to generate a blueprint
+pub struct PlanningInputFromDb<'a> {
+    pub sled_rows: &'a [nexus_db_model::Sled],
+    pub zpool_rows:
+        &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
+    pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
+    pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
+    pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
+    pub target_nexus_zone_count: usize,
+    pub internal_dns_version: nexus_db_model::Generation,
+    pub external_dns_version: nexus_db_model::Generation,
+    pub log: &'a Logger,
+}
 
-    let sleds = sled_rows
-        .into_iter()
-        .map(|sled_row| {
+impl PlanningInputFromDb<'_> {
+    pub fn build(&self) -> Result<PlanningInput, Error> {
+        let service_ip_pool_ranges =
+            self.ip_pool_range_rows.iter().map(IpRange::from).collect();
+        let policy = Policy {
+            service_ip_pool_ranges,
+            target_nexus_zone_count: self.target_nexus_zone_count,
+        };
+        let mut builder = PlanningInputBuilder::new(
+            policy,
+            self.internal_dns_version.into(),
+            self.external_dns_version.into(),
+        );
+
+        let mut zpools_by_sled_id = {
+            let mut zpools = BTreeMap::new();
+            for (zpool, disk) in self.zpool_rows {
+                let sled_zpool_names =
+                    zpools.entry(zpool.sled_id).or_insert_with(BTreeMap::new);
+                let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+                let disk = SledDisk {
+                    disk_identity: DiskIdentity {
+                        vendor: disk.vendor.clone(),
+                        serial: disk.serial.clone(),
+                        model: disk.model.clone(),
+                    },
+                    disk_id: PhysicalDiskUuid::from_untyped_uuid(disk.id()),
+                    policy: disk.disk_policy.into(),
+                    state: disk.disk_state.into(),
+                };
+
+                sled_zpool_names.insert(zpool_id, disk);
+            }
+            zpools
+        };
+
+        for sled_row in self.sled_rows {
             let sled_id = sled_row.id();
             let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
             let zpools = zpools_by_sled_id
                 .remove(&sled_id)
-                .unwrap_or_else(BTreeSet::new);
-            let sled_info = SledResources {
+                .unwrap_or_else(BTreeMap::new);
+            let sled_details = SledDetails {
                 policy: sled_row.policy(),
                 state: sled_row.state().into(),
-                subnet,
-                zpools,
+                resources: SledResources { subnet, zpools },
             };
-            (sled_id, sled_info)
-        })
-        .collect();
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = SledUuid::from_untyped_uuid(sled_id);
+            builder.add_sled(sled_id, sled_details).map_err(|e| {
+                Error::internal_error(&format!(
+                    "unexpectedly failed to add sled to planning input: {e}"
+                ))
+            })?;
+        }
 
-    let service_ip_pool_ranges =
-        ip_pool_range_rows.iter().map(IpRange::from).collect();
+        for external_ip_row in
+            self.external_ip_rows.iter().filter(|r| r.is_service)
+        {
+            let Some(zone_id) = external_ip_row.parent_id else {
+                error!(
+                    self.log,
+                    "internal database consistency error: service external IP \
+                     is missing parent_id (should be the Omicron zone ID)";
+                    "ip_row" => ?external_ip_row,
+                );
+                continue;
+            };
+            let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
+            builder
+                .add_omicron_zone_external_ip_network(
+                    zone_id,
+                    // TODO-cleanup use `TypedUuid` everywhere
+                    ExternalIpUuid::from_untyped_uuid(external_ip_row.id),
+                    external_ip_row.ip,
+                )
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unexpectedly failed to add external IP \
+                         to planning input: {e}"
+                    ))
+                })?;
+        }
 
-    Ok(Policy { sleds, service_ip_pool_ranges, target_nexus_zone_count })
+        Ok(builder.build())
+    }
 }
 
 /// Loads state for import into `reconfigurator-cli`
@@ -116,14 +174,38 @@ pub async fn reconfigurator_state_load(
             .await
             .context("listing services IP pool ranges")?
     };
+    let external_ip_rows = datastore
+        .external_ip_list_service_all_batched(opctx)
+        .await
+        .context("fetching service external IPs")?;
+    let service_nic_rows = datastore
+        .service_network_interfaces_all_list_batched(opctx)
+        .await
+        .context("fetching service NICs")?;
+    let internal_dns_version = datastore
+        .dns_group_latest_version(opctx, DnsGroup::Internal)
+        .await
+        .context("fetching internal DNS version")?
+        .version;
+    let external_dns_version = datastore
+        .dns_group_latest_version(opctx, DnsGroup::External)
+        .await
+        .context("fetching external DNS version")?
+        .version;
 
-    let policy = policy_from_db(
-        &sled_rows,
-        &zpool_rows,
-        &ip_pool_range_rows,
-        NEXUS_REDUNDANCY,
-    )
-    .context("assembling policy")?;
+    let planning_input = PlanningInputFromDb {
+        sled_rows: &sled_rows,
+        zpool_rows: &zpool_rows,
+        ip_pool_range_rows: &ip_pool_range_rows,
+        target_nexus_zone_count: NEXUS_REDUNDANCY,
+        external_ip_rows: &external_ip_rows,
+        service_nic_rows: &service_nic_rows,
+        log: &opctx.log,
+        internal_dns_version,
+        external_dns_version,
+    }
+    .build()
+    .context("assembling planning_input")?;
 
     let collection_ids = datastore
         .inventory_collections()
@@ -224,7 +306,7 @@ pub async fn reconfigurator_state_load(
         .map(|dns_zone| dns_zone.zone_name)
         .collect();
     Ok(UnstableReconfiguratorState {
-        policy,
+        planning_input,
         collections,
         blueprints,
         internal_dns,

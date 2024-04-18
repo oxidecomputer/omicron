@@ -1289,7 +1289,7 @@ impl Into<ByteCount> for BlockSize {
 
 impl From<BlockSize> for u64 {
     fn from(bs: BlockSize) -> u64 {
-        bs.0 as u64
+        u64::from(bs.0)
     }
 }
 

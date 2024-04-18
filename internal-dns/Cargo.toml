@@ -11,6 +11,7 @@ dns-service-client.workspace = true
 futures.workspace = true
 hyper.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 slog.workspace = true
 thiserror.workspace = true

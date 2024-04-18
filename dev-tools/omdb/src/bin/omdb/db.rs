@@ -78,7 +78,9 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -89,6 +91,8 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -247,8 +251,6 @@ enum DbCommands {
     Inventory(InventoryArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
-    /// Print information about control plane services
-    Services(ServicesArgs),
     /// Print information about sleds
     Sleds,
     /// Print information about customer instances
@@ -383,7 +385,7 @@ enum CollectionsCommands {
 #[derive(Debug, Args)]
 struct CollectionsShowArgs {
     /// id of the collection
-    id: Uuid,
+    id: CollectionUuid,
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
@@ -393,20 +395,6 @@ struct CollectionsShowArgs {
 struct ReconfiguratorSaveArgs {
     /// where to save the output
     output_file: Utf8PathBuf,
-}
-
-#[derive(Debug, Args)]
-struct ServicesArgs {
-    #[command(subcommand)]
-    command: ServicesCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum ServicesCommands {
-    /// List service instances
-    ListInstances,
-    /// List service instances, grouped by sled
-    ListBySled,
 }
 
 #[derive(Debug, Args)]
@@ -514,26 +502,6 @@ impl DbArgs {
                     &opctx,
                     &datastore,
                     reconfig_save_args,
-                )
-                .await
-            }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListInstances,
-            }) => {
-                cmd_db_services_list_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                )
-                .await
-            }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListBySled,
-            }) => {
-                cmd_db_services_list_by_sled(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
                 )
                 .await
             }
@@ -686,42 +654,23 @@ async fn lookup_instance(
         .with_context(|| format!("loading instance {instance_id}"))
 }
 
-/// Helper function to look up the kind of the service with the given ID.
+#[derive(Clone, Debug)]
+struct ServiceInfo {
+    service_kind: ServiceKind,
+    disposition: BlueprintZoneDisposition,
+}
+
+/// Helper function to look up the service with the given ID.
 ///
-/// Requires the caller to first have fetched the current target blueprint, so
-/// we can find services that have been added by Reconfigurator.
-async fn lookup_service_kind(
-    datastore: &DataStore,
+/// Requires the caller to first have fetched the current target blueprint.
+async fn lookup_service_info(
     service_id: Uuid,
-    current_target_blueprint: Option<&Blueprint>,
-) -> anyhow::Result<Option<ServiceKind>> {
-    let conn = datastore.pool_connection_for_tests().await?;
-
-    // We need to check the `service` table (populated during rack setup)...
-    {
-        use db::schema::service::dsl;
-        if let Some(kind) = dsl::service
-            .filter(dsl::id.eq(service_id))
-            .limit(1)
-            .select(dsl::kind)
-            .get_result_async(&*conn)
-            .await
-            .optional()
-            .with_context(|| format!("loading service {service_id}"))?
-        {
-            return Ok(Some(kind));
-        }
-    }
-
-    // ...and if we don't find the service, check the latest blueprint, because
-    // the service might have been added by Reconfigurator after RSS ran.
-    let Some(blueprint) = current_target_blueprint else {
-        return Ok(None);
-    };
-
-    let Some(zone_config) =
-        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
-            if zone_config.id == service_id {
+    blueprint: &Blueprint,
+) -> anyhow::Result<Option<ServiceInfo>> {
+    let Some(zone_config) = blueprint
+        .all_omicron_zones(BlueprintZoneFilter::All)
+        .find_map(|(_sled_id, zone_config)| {
+            if zone_config.id.into_untyped_uuid() == service_id {
                 Some(zone_config)
             } else {
                 None
@@ -732,22 +681,20 @@ async fn lookup_service_kind(
     };
 
     let service_kind = match &zone_config.zone_type {
-        OmicronZoneType::BoundaryNtp { .. }
-        | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
-        OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
-        OmicronZoneType::ClickhouseKeeper { .. } => {
-            ServiceKind::ClickhouseKeeper
-        }
-        OmicronZoneType::CockroachDb { .. } => ServiceKind::Cockroach,
-        OmicronZoneType::Crucible { .. } => ServiceKind::Crucible,
-        OmicronZoneType::CruciblePantry { .. } => ServiceKind::CruciblePantry,
-        OmicronZoneType::ExternalDns { .. } => ServiceKind::ExternalDns,
-        OmicronZoneType::InternalDns { .. } => ServiceKind::InternalDns,
-        OmicronZoneType::Nexus { .. } => ServiceKind::Nexus,
-        OmicronZoneType::Oximeter { .. } => ServiceKind::Oximeter,
+        BlueprintZoneType::BoundaryNtp(_)
+        | BlueprintZoneType::InternalNtp(_) => ServiceKind::Ntp,
+        BlueprintZoneType::Clickhouse(_) => ServiceKind::Clickhouse,
+        BlueprintZoneType::ClickhouseKeeper(_) => ServiceKind::ClickhouseKeeper,
+        BlueprintZoneType::CockroachDb(_) => ServiceKind::Cockroach,
+        BlueprintZoneType::Crucible(_) => ServiceKind::Crucible,
+        BlueprintZoneType::CruciblePantry(_) => ServiceKind::CruciblePantry,
+        BlueprintZoneType::ExternalDns(_) => ServiceKind::ExternalDns,
+        BlueprintZoneType::InternalDns(_) => ServiceKind::InternalDns,
+        BlueprintZoneType::Nexus(_) => ServiceKind::Nexus,
+        BlueprintZoneType::Oximeter(_) => ServiceKind::Oximeter,
     };
 
-    Ok(Some(service_kind))
+    Ok(Some(ServiceInfo { service_kind, disposition: zone_config.disposition }))
 }
 
 /// Helper function to looks up a probe with the given ID.
@@ -1452,61 +1399,6 @@ async fn cmd_db_snapshot_info(
     Ok(())
 }
 
-/// Run `omdb db services list-instances`.
-async fn cmd_db_services_list_instances(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-
-    let mut rows = vec![];
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        rows.extend(instances.into_iter().map(|instance| {
-            let addr =
-                std::net::SocketAddrV6::new(*instance.ip, *instance.port, 0, 0)
-                    .to_string();
-
-            ServiceInstanceRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: instance.id(),
-                addr,
-                sled_serial: sleds
-                    .get(&instance.sled_id)
-                    .map(|s| s.serial_number())
-                    .unwrap_or("unknown")
-                    .to_string(),
-            }
-        }));
-    }
-
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-
-    println!("{}", table);
-
-    Ok(())
-}
-
 // SLEDS
 
 #[derive(Tabled)]
@@ -1516,63 +1408,6 @@ struct ServiceInstanceSledRow {
     kind: String,
     instance_id: Uuid,
     addr: String,
-}
-
-/// Run `omdb db services list-by-sled`.
-async fn cmd_db_services_list_by_sled(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-    let mut services_by_sled: BTreeMap<Uuid, Vec<ServiceInstanceSledRow>> =
-        BTreeMap::new();
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        for i in instances {
-            let addr =
-                std::net::SocketAddrV6::new(*i.ip, *i.port, 0, 0).to_string();
-            let sled_instances =
-                services_by_sled.entry(i.sled_id).or_insert_with(Vec::new);
-            sled_instances.push(ServiceInstanceSledRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: i.id(),
-                addr,
-            })
-        }
-    }
-
-    for (sled_id, instances) in services_by_sled {
-        println!(
-            "sled: {} (id {})\n",
-            sleds.get(&sled_id).map(|s| s.serial_number()).unwrap_or("unknown"),
-            sled_id,
-        );
-        let table = tabled::Table::new(instances)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        println!("{}", textwrap::indent(&table.to_string(), "  "));
-        println!("");
-    }
-
-    Ok(())
 }
 
 #[derive(Tabled)]
@@ -1953,9 +1788,20 @@ async fn cmd_db_eips(
     }
 
     enum Owner {
-        Instance { id: Uuid, project: String, name: String },
-        Service { id: Uuid, kind: String },
-        Project { id: Uuid, name: String },
+        Instance {
+            id: Uuid,
+            project: String,
+            name: String,
+        },
+        Service {
+            id: Uuid,
+            kind: String,
+            disposition: Option<BlueprintZoneDisposition>,
+        },
+        Project {
+            id: Uuid,
+            name: String,
+        },
         None,
     }
 
@@ -1988,6 +1834,13 @@ async fn cmd_db_eips(
                 Self::None => "none".to_string(),
             }
         }
+
+        fn disposition(&self) -> Option<BlueprintZoneDisposition> {
+            match self {
+                Self::Service { disposition, .. } => *disposition,
+                _ => None,
+            }
+        }
     }
 
     #[derive(Tabled)]
@@ -2000,6 +1853,13 @@ async fn cmd_db_eips(
         owner_kind: &'static str,
         owner_id: String,
         owner_name: String,
+        #[tabled(display_with = "display_option_blank")]
+        owner_disposition: Option<BlueprintZoneDisposition>,
+    }
+
+    // Display an empty cell for an Option<T> if it's None.
+    fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
+        opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
     }
 
     if verbose {
@@ -2013,26 +1873,29 @@ async fn cmd_db_eips(
 
     let mut rows = Vec::new();
 
-    let current_target_blueprint = datastore
+    let (_, current_target_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await
-        .context("loading current target blueprint")?
-        .map(|(_, blueprint)| blueprint);
+        .context("loading current target blueprint")?;
 
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let kind = match lookup_service_kind(
-                    datastore,
+                let (kind, disposition) = match lookup_service_info(
                     owner_id,
-                    current_target_blueprint.as_ref(),
+                    &current_target_blueprint,
                 )
                 .await?
                 {
-                    Some(kind) => format!("{kind:?}"),
-                    None => "UNKNOWN (service ID not found)".to_string(),
+                    Some(info) => (
+                        format!("{:?}", info.service_kind),
+                        Some(info.disposition),
+                    ),
+                    None => {
+                        ("UNKNOWN (service ID not found)".to_string(), None)
+                    }
                 };
-                Owner::Service { id: owner_id, kind }
+                Owner::Service { id: owner_id, kind, disposition }
             } else {
                 let instance =
                     match lookup_instance(datastore, owner_id).await? {
@@ -2096,6 +1959,7 @@ async fn cmd_db_eips(
             owner_kind: owner.kind(),
             owner_id: owner.id(),
             owner_name: owner.name(),
+            owner_disposition: owner.disposition(),
         };
         rows.push(row);
     }
@@ -2874,7 +2738,7 @@ async fn cmd_db_inventory_collections_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct CollectionRow {
-        id: Uuid,
+        id: CollectionUuid,
         started: String,
         took: String,
         nsps: i64,
@@ -2923,7 +2787,7 @@ async fn cmd_db_inventory_collections_list(
                 .num_milliseconds()
         );
         rows.push(CollectionRow {
-            id: collection.id,
+            id: collection.id.into(),
             started: humantime::format_rfc3339_seconds(
                 collection.time_started.into(),
             )
@@ -2947,7 +2811,7 @@ async fn cmd_db_inventory_collections_list(
 async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    id: Uuid,
+    id: CollectionUuid,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     let collection = datastore

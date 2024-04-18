@@ -37,7 +37,7 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="7.0.0-0.ci+git${COMMIT:0:11}"
+VERSION="8.0.0-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
@@ -50,6 +50,9 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
+# Build the xtask binary used by the deploy job
+ptime -m cargo build --locked --release -p xtask
+
 # Assemble some utilities into a tarball that can be used by deployment
 # phases of buildomat.
 
@@ -60,9 +63,7 @@ files=(
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
-	tools/create_virtual_hardware.sh
-    tools/virtual_hardware.sh
-	tools/scrimlet/*
+	target/release/xtask
 )
 
 pfexec mkdir -p /work && pfexec chown $USER /work

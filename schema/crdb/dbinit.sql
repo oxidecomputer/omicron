@@ -164,29 +164,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
 ) WHERE time_deleted IS NULL;
 
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.dataset
-    'dataset',
-    -- omicron.public.service
-    'service',
     -- omicron.public.instance
-    'instance',
-    -- omicron.public.sled
-    --
-    -- reserved as an approximation of sled internal usage, such as "by the OS
-    -- and all unaccounted services".
-    'reserved'
+    'instance'
+    -- We expect to other resource kinds here in the future; e.g., to track
+    -- resources used by control plane services. For now, we only track
+    -- instances.
 );
 
 -- Accounting for programs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
-    -- Should match the UUID of the corresponding service
+    -- Should match the UUID of the corresponding resource
     id UUID PRIMARY KEY,
 
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
-
-    -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL,
 
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
@@ -195,7 +186,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     rss_ram INT8 NOT NULL,
 
     -- The maximum amount of Reservoir RAM provisioned to this resource
-    reservoir_ram INT8 NOT NULL
+    reservoir_ram INT8 NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL
 );
 
 -- Allow looking up all resources which reside on a sled
@@ -296,36 +290,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'mgd'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.service (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    /* FK into the Sled table */
-    sled_id UUID NOT NULL,
-    /* For services in illumos zones, the zone's unique id (for debugging) */
-    zone_id UUID,
-    /* The IP address of the service. */
-    ip INET NOT NULL,
-    /* The UDP or TCP port on which the service listens. */
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
-    /* Indicates the type of service. */
-    kind omicron.public.service_kind NOT NULL
-);
-
-/* Add an index which lets us look up the services on a sled */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_sled ON omicron.public.service (
-    sled_id,
-    id
-);
-
-/* Look up (and paginate) services of a given kind. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_kind ON omicron.public.service (
-    kind,
-    id
-);
-
 CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'm2',
   'u2'
@@ -383,14 +347,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT vendor_serial_model_unique UNIQUE (
-      vendor, serial, model
-    )
+    disk_state omicron.public.physical_disk_state NOT NULL
 );
+
+-- This constraint only needs to be upheld for disks that are not deleted
+-- nor decommissioned.
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_serial_model_unique on omicron.public.physical_disk (
+  vendor, serial, model
+) WHERE time_deleted IS NULL AND disk_state != 'decommissioned';
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.public.physical_disk (
     variant,
@@ -401,7 +365,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.pub
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public.physical_disk (
     sled_id,
     id
-) WHERE time_deleted IS NULL;
+);
 
 -- x509 certificates which may be used by services
 CREATE TABLE IF NOT EXISTS omicron.public.certificate (
@@ -1152,6 +1116,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
 ) WHERE
     time_deleted IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk (
+    volume_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1295,7 +1264,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
     -- A sled agent for an entry in the sled table.
     'sled_agent',
-    -- A service in the omicron.public.service table
+    -- A service in a blueprint (typically the current target blueprint, but it
+    -- may reference a prior blueprint if the service is in the process of being
+    -- removed).
     'service',
     -- A Propolis VMM for an instance in the omicron.public.instance table
     'instance'
@@ -3191,17 +3162,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
  * `bp_sled_omicron_zones`, `bp_omicron_zone`, and `bp_omicron_zone_nic` are
  * nearly identical to their `inv_*` counterparts, and record the
  * `OmicronZonesConfig` for each sled.
- *
- * `bp_omicron_zones_not_in_service` stores a list of Omicron zones (present in
- * `bp_omicron_zone`) that are NOT in service; e.g., should not appear in
- * internal DNS. Nexus's in-memory `Blueprint` representation stores the set of
- * zones that ARE in service. We invert that logic at this layer because we
- * expect most blueprints to have a relatively large number of omicron zones,
- * almost all of which will be in service. This is a minor and perhaps
- * unnecessary optimization at the database layer, but it's also relatively
- * simple and hidden by the relevant read and insert queries in
- * `nexus-db-queries`.
  */
+
+CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
+    'in_service',
+    'quiesced',
+    'expunged'
+);
 
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
@@ -3249,6 +3216,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
 
     -- Timestamp for when this blueprint was made the current target
     time_made_target TIMESTAMPTZ NOT NULL
+);
+
+-- description of a collection of omicron physical disks stored in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of omicron physical disks specified in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a blueprint could refer to a sled that no longer exists,
+    -- particularly if the blueprint is older than the current target)
+    sled_id UUID NOT NULL,
+
+    vendor TEXT NOT NULL,
+    serial TEXT NOT NULL,
+    model TEXT NOT NULL,
+
+    id UUID NOT NULL,
+    pool_id UUID NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id)
 );
 
 -- see inv_sled_omicron_zones, which is identical except it references a
@@ -3332,6 +3329,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- Zone disposition
+    disposition omicron.public.bp_zone_disposition NOT NULL,
+
     PRIMARY KEY (blueprint_id, id)
 );
 
@@ -3347,20 +3347,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     slot INT2 NOT NULL,
 
     PRIMARY KEY (blueprint_id, id)
-);
-
--- list of omicron zones that are considered NOT in-service for a blueprint
---
--- In Rust code, we generally want to deal with "zones in service", which means
--- they should appear in DNS. However, almost all zones in almost all blueprints
--- will be in service, so we can induce considerably less database work by
--- storing the zones _not_ in service. Our DB wrapper layer handles this
--- inversion, so the rest of our Rust code can ignore it.
-CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zones_not_in_service (
-    blueprint_id UUID NOT NULL,
-    bp_omicron_zone_id UUID NOT NULL,
-
-    PRIMARY KEY (blueprint_id, bp_omicron_zone_id)
 );
 
 /*******************************************************************/
@@ -3770,7 +3756,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '49.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '53.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

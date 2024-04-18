@@ -357,7 +357,7 @@ impl Graph {
 
             for (_ndx, s) in &mut self.series.iter_mut().enumerate() {
                 if let Some(datum) = s.raw[offs] {
-                    let point = (i as f64, datum as f64);
+                    let point = (i as f64, f64::from(datum));
 
                     if self.interpolate != 0 {
                         if let Some(last) = s.data.last() {
@@ -374,7 +374,7 @@ impl Graph {
                         }
                     }
 
-                    s.data.push((i as f64, datum as f64));
+                    s.data.push((i as f64, f64::from(datum)));
                 }
             }
         }

@@ -10,6 +10,7 @@ use super::{
     instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
+use crate::app::instance::InstanceRegisterReason;
 use crate::app::instance::InstanceStateChangeError;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
@@ -131,7 +132,7 @@ async fn sis_alloc_server(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         propolis_id,
-        hardware_threads.0 as u32,
+        u32::from(hardware_threads.0),
         reservoir_ram,
         db::model::SledReservationConstraints::none(),
     )
@@ -527,6 +528,7 @@ async fn sis_ensure_registered(
             &db_instance,
             &propolis_id,
             &vmm_record,
+            InstanceRegisterReason::Start { vmm_id: propolis_id },
         )
         .await
         .map_err(ActionError::action_failed)?;

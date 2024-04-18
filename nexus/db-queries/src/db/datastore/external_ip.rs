@@ -590,7 +590,7 @@ impl DataStore {
                          attach will be safe to retry once start/stop completes"
                     )),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
+                        if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
                             Error::invalid_request(&format!(
                                 "an instance may not have more than \
                                 {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",

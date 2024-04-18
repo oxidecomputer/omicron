@@ -26,7 +26,7 @@ termination: Exited(0)
 stdout:
 DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
-version created by Nexus:   REDACTED_UUID_REDACTED_UUID_REDACTED
+version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
 changes:                    names added: 1, names removed: 0
 
@@ -58,7 +58,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
-EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<REDACTED>"]
+EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -67,54 +67,15 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
-wrote <REDACTED>
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-SERVICE        INSTANCE_ID                          ADDR                     SLED_SERIAL  
-CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-039be560 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-sled: sim-039be560 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
-
-  SERVICE INSTANCE_ID                          ADDR        
-  Mgd     REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT 
-
-sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
-
-  SERVICE        INSTANCE_ID                          ADDR                     
-  CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT 
-  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
+wrote <TMP_PATH_REDACTED>
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 SERIAL       IP          ROLE     ID                                   
-sim-039be560 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
-sim-b6d65341 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
+sim-039be560 [::1]:REDACTED_PORT scrimlet ..........<REDACTED_UUID>........... 
+sim-b6d65341 [::1]:REDACTED_PORT scrimlet ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -293,6 +254,10 @@ task: "phantom_disks"
     detects and un-deletes phantom disks
 
 
+task: "physical_disk_adoption"
+    ensure new physical disks are automatically marked in-service
+
+
 task: "region_replacement"
     detects if a region requires replacing and begins the process
 
@@ -381,7 +346,7 @@ task: "blueprint_loader"
   currently executing: no
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "blueprint_loader" (don't know how to interpret details: Object {"status": String("no target blueprint")})
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
@@ -405,12 +370,12 @@ task: "external_endpoints"
     external API endpoints: 2 ('*' below marks default)
 
           SILO_ID                              DNS_NAME                           
-          REDACTED_UUID_REDACTED_UUID_REDACTED default-silo.sys.oxide-dev.test    
-        * REDACTED_UUID_REDACTED_UUID_REDACTED test-suite-silo.sys.oxide-dev.test 
+          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test    
+        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test 
 
     warnings: 2
-        warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
-        warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
 
@@ -419,7 +384,7 @@ task: "inventory_collection"
   currently executing: no
   last completed activation: iter 3, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last collection id:      REDACTED_UUID_REDACTED_UUID_REDACTED
+    last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
 
@@ -437,6 +402,13 @@ task: "phantom_disks"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
+
+task: "physical_disk_adoption"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 3, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
 
 task: "region_replacement"
   configured period: every 30s
@@ -459,6 +431,111 @@ task: "switch_port_config_manager"
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+T ENA ID                                   PARENT TIME_CREATED             
+* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED     TIMESTAMP> 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "......<REDACTED_BLUEPRINT_ID>......."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+blueprint  ......<REDACTED_BLUEPRINT_ID>.......
+parent:    <none>
+
+  -----------------------------------------------------------------------------------------
+    zone type         zone ID                                disposition  underlay IP      
+  -----------------------------------------------------------------------------------------
+                                                                                           
+  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+   (no zones)                                                                              
+                                                                                           
+  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
+    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
+    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
+    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
+    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+
+METADATA:
+  created by:            nexus-test-utils        
+  created at:            <REDACTED     TIMESTAMP>
+  comment:               initial test blueprint  
+  internal DNS version:  1                       
+  external DNS version:  2                       
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+blueprint  ......<REDACTED_BLUEPRINT_ID>.......
+parent:    <none>
+
+  -----------------------------------------------------------------------------------------
+    zone type         zone ID                                disposition  underlay IP      
+  -----------------------------------------------------------------------------------------
+                                                                                           
+  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+   (no zones)                                                                              
+                                                                                           
+  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
+    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
+    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
+    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
+    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+
+METADATA:
+  created by:            nexus-test-utils        
+  created at:            <REDACTED     TIMESTAMP>
+  comment:               initial test blueprint  
+  internal DNS version:  1                       
+  external DNS version:  2                       
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "diff", "......<REDACTED_BLUEPRINT_ID>.......", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
+to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
+
+  ---------------------------------------------------------------------------------------------------
+     zone type         zone ID                                disposition   underlay IP       status 
+  ---------------------------------------------------------------------------------------------------
+                                                                                                     
+  UNCHANGED SLEDS:                                                                                   
+                                                                                                     
+   sled ..........<REDACTED_UUID>...........: zones at generation 2                                  
+     clickhouse        ..........<REDACTED_UUID>...........   in service    ::1                      
+     cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1                      
+     crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1                      
+     external_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
+     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
+     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1         
+
+  METADATA:
+    internal DNS version:  1 (unchanged)
+    external DNS version:  2 (unchanged)
 
 ---------------------------------------------
 stderr:

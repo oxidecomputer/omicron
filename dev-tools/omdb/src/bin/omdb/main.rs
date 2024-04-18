@@ -40,6 +40,7 @@ use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
+mod crucible_agent;
 mod db;
 mod mgs;
 mod nexus;
@@ -62,6 +63,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
         OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&log).await,
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
+        OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
     }
 }
 
@@ -181,6 +183,8 @@ impl Omdb {
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum OmdbCommands {
+    /// Debug a specific crucible-agent
+    CrucibleAgent(crucible_agent::CrucibleAgentArgs),
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
     /// Debug a specific Management Gateway Service instance
