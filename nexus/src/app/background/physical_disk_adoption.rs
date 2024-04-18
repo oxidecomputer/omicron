@@ -18,6 +18,8 @@ use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::identity::Asset;
+use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
@@ -28,6 +30,7 @@ use uuid::Uuid;
 pub struct PhysicalDiskAdoption {
     datastore: Arc<DataStore>,
     disable: bool,
+    rack_id: Uuid,
     rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
 }
 
@@ -36,8 +39,14 @@ impl PhysicalDiskAdoption {
         datastore: Arc<DataStore>,
         rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
         disable: bool,
+        rack_id: Uuid,
     ) -> Self {
-        PhysicalDiskAdoption { datastore, disable, rx_inventory_collection }
+        PhysicalDiskAdoption {
+            datastore,
+            disable,
+            rack_id,
+            rx_inventory_collection,
+        }
     }
 }
 
@@ -49,6 +58,34 @@ impl BackgroundTask for PhysicalDiskAdoption {
         async {
             if self.disable {
                 return json!({ "error": "task disabled" });
+            }
+
+            // Only adopt physical disks after rack handoff has completed.
+            //
+            // This prevents a race condition where the same disks are attempted
+            // to be inserted simultaneously after a sled-agent gets put.
+            //
+            // TODO-multirack: This will only work for clusters smaller than a page
+            let result = self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await;
+            match result {
+                Ok(racks) => {
+                    if !racks.iter().any(|r| r.identity().id == self.rack_id) {
+                        info!(
+                            &opctx.log,
+                            "Physical Disk Adoption: Rack not yet initialized";
+                            "rack_id" => %self.rack_id,
+                        );
+                        return json!({ "error": format!("rack not yet initialized: {}", self.rack_id) });
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        &opctx.log,
+                        "Physical Disk Adoption: failed to query for initialized racks";
+                        "err" => %err,
+                    );
+                    return json!({ "error": format!("failed to query database: {:#}", err) });
+                }
             }
 
             let mut disks_added = 0;
@@ -100,7 +137,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
 
                 let result = self.datastore.physical_disk_and_zpool_insert(
                     opctx,
-                    disk,
+                    disk.clone(),
                     zpool
                 ).await;
 
@@ -110,14 +147,15 @@ impl BackgroundTask for PhysicalDiskAdoption {
                         "Physical Disk Adoption: failed to insert new disk and zpool";
                         "err" => %err
                     );
-                    return json!({ "error": format!("failed to insert disk/zpool: {:#}", err) });
+                    return json!({ "error": format!("failed to insert disk/zpool: {:#}; disk = {:#?}", err, disk) });
                 }
 
                 disks_added += 1;
 
                 info!(
                     &opctx.log,
-                    "Physical Disk Adoption: Successfully added a new disk and zpool"
+                    "Physical Disk Adoption: Successfully added a new disk and zpool";
+                    "disk" => #?disk
                 );
             }
 

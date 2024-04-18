@@ -767,6 +767,7 @@ impl DataStore {
                     info!(log, "Inserted service networking records");
 
                     for physical_disk in physical_disks {
+                        info!(log, "physical disk upsert in handoff: {physical_disk:#?}");
                         if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
                             .await {
                             if !matches!(e, Error::ObjectAlreadyExists { .. }) {
