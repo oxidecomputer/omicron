@@ -124,7 +124,7 @@ impl OmicronZoneExternalIpKind {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct OmicronZoneExternalIp {
     pub id: ExternalIpUuid,
-    pub ip: OmicronZoneExternalIpKind,
+    pub kind: OmicronZoneExternalIpKind,
 }
 
 /// Network interface allocated to an Omicron-managed zone.
@@ -513,7 +513,7 @@ impl PlanningInputBuilder {
 
         self.add_omicron_zone_external_ip(
             zone_id,
-            OmicronZoneExternalIp { id: ip_id, ip: to_kind(ip.ip()) },
+            OmicronZoneExternalIp { id: ip_id, kind: to_kind(ip.ip()) },
         )
     }
 

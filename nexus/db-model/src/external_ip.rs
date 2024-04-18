@@ -9,6 +9,7 @@ use crate::impl_enum_type;
 use crate::schema::external_ip;
 use crate::schema::floating_ip;
 use crate::Name;
+use crate::ServiceNetworkInterface;
 use crate::SqlU16;
 use chrono::DateTime;
 use chrono::Utc;
@@ -16,6 +17,8 @@ use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
@@ -23,10 +26,12 @@ use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
+use sled_agent_client::ZoneKind;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -303,103 +308,52 @@ impl IncompleteExternalIp {
         }
     }
 
-    pub fn for_service_explicit(
-        id: Uuid,
-        name: &Name,
-        description: &str,
-        service_id: Uuid,
+    pub fn for_omicron_zone(
         pool_id: Uuid,
-        address: IpAddr,
+        external_ip: OmicronZoneExternalIp,
+        zone_id: OmicronZoneUuid,
+        zone_kind: ZoneKind,
     ) -> Self {
-        Self {
-            id,
-            name: Some(name.clone()),
-            description: Some(description.to_string()),
-            time_created: Utc::now(),
-            kind: IpKind::Floating,
-            is_service: true,
-            is_probe: false,
-            parent_id: Some(service_id),
-            pool_id,
-            project_id: None,
-            explicit_ip: Some(IpNetwork::from(address)),
-            explicit_port_range: None,
-            state: IpAttachState::Attached,
-        }
-    }
+        let (kind, ip, port_range) = match external_ip.kind {
+            OmicronZoneExternalIpKind::Floating(ip) => {
+                (IpKind::Floating, ip, None)
+            }
+            OmicronZoneExternalIpKind::Snat(snat_cfg) => {
+                assert!(
+                    (snat_cfg.first_port % NUM_SOURCE_NAT_PORTS == 0)
+                        && (snat_cfg.last_port - snat_cfg.first_port + 1)
+                            == NUM_SOURCE_NAT_PORTS,
+                    "explicit port range must be aligned to {}",
+                    NUM_SOURCE_NAT_PORTS,
+                );
+                (
+                    IpKind::SNat,
+                    snat_cfg.ip,
+                    Some((
+                        snat_cfg.first_port.into(),
+                        snat_cfg.last_port.into(),
+                    )),
+                )
+            }
+        };
 
-    pub fn for_service_explicit_snat(
-        id: Uuid,
-        service_id: Uuid,
-        pool_id: Uuid,
-        address: IpAddr,
-        (first_port, last_port): (u16, u16),
-    ) -> Self {
-        assert!(
-            (first_port % NUM_SOURCE_NAT_PORTS == 0)
-                && (last_port - first_port + 1) == NUM_SOURCE_NAT_PORTS,
-            "explicit port range must be aligned to {}",
-            NUM_SOURCE_NAT_PORTS,
-        );
-        let explicit_port_range = Some((first_port.into(), last_port.into()));
-        let kind = IpKind::SNat;
+        // We'll name this external IP the same as we'll name the NIC associated
+        // with this zone.
+        let name = ServiceNetworkInterface::name(zone_id, zone_kind);
+
         Self {
-            id,
-            name: None,
-            description: None,
+            id: external_ip.id.into_untyped_uuid(),
+            name: Some(name),
+            description: Some(zone_kind.to_string()),
             time_created: Utc::now(),
             kind,
             is_service: true,
             is_probe: false,
-            parent_id: Some(service_id),
+            parent_id: Some(zone_id.into_untyped_uuid()),
             pool_id,
             project_id: None,
-            explicit_ip: Some(IpNetwork::from(address)),
-            explicit_port_range,
-            state: kind.initial_state(),
-        }
-    }
-
-    pub fn for_service(
-        id: Uuid,
-        name: &Name,
-        description: &str,
-        service_id: Uuid,
-        pool_id: Uuid,
-    ) -> Self {
-        let kind = IpKind::Floating;
-        Self {
-            id,
-            name: Some(name.clone()),
-            description: Some(description.to_string()),
-            time_created: Utc::now(),
-            kind,
-            is_service: true,
-            is_probe: false,
-            parent_id: Some(service_id),
-            pool_id,
-            project_id: None,
-            explicit_ip: None,
-            explicit_port_range: None,
-            state: IpAttachState::Attached,
-        }
-    }
-
-    pub fn for_service_snat(id: Uuid, service_id: Uuid, pool_id: Uuid) -> Self {
-        let kind = IpKind::SNat;
-        Self {
-            id,
-            name: None,
-            description: None,
-            time_created: Utc::now(),
-            kind,
-            is_service: true,
-            is_probe: false,
-            parent_id: Some(service_id),
-            pool_id,
-            project_id: None,
-            explicit_ip: None,
-            explicit_port_range: None,
+            explicit_ip: Some(IpNetwork::from(ip)),
+            explicit_port_range: port_range,
             state: kind.initial_state(),
         }
     }

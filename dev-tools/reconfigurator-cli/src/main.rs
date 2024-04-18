@@ -161,7 +161,7 @@ impl ReconfiguratorSim {
                         .or_insert_with(ExternalIpUuid::new_v4),
                     // TODO-cleanup This is potentially wrong;
                     // zone_type should tell us the IP kind.
-                    ip: OmicronZoneExternalIpKind::Floating(ip),
+                    kind: OmicronZoneExternalIpKind::Floating(ip),
                 };
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)

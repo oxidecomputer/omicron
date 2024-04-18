@@ -100,13 +100,13 @@ impl<'a> ResourceAllocator<'a> {
         &self,
         zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        external_ip: OmicronZoneExternalIpKind,
+        ip_kind: OmicronZoneExternalIpKind,
     ) -> anyhow::Result<bool> {
         // localhost is used by many components in the test suite.  We can't use
         // the normal path because normally a given external IP must only be
         // used once.  Just treat localhost in the test suite as though it's
         // already allocated.  We do the same in is_nic_already_allocated().
-        if cfg!(test) && external_ip.ip().is_loopback() {
+        if cfg!(test) && ip_kind.ip().is_loopback() {
             return Ok(true);
         }
 
@@ -129,7 +129,7 @@ impl<'a> ResourceAllocator<'a> {
                     self.opctx.log, "external IP allocation required for zone";
                     "zone_kind" => %zone_kind,
                     "zone_id" => %zone_id,
-                    "ip" => ?external_ip,
+                    "ip" => ?ip_kind,
                 );
 
                 return Ok(false);
@@ -140,7 +140,7 @@ impl<'a> ResourceAllocator<'a> {
                     self.opctx.log, "zone has multiple IPs allocated";
                     "zone_kind" => %zone_kind,
                     "zone_id" => %zone_id,
-                    "want_ip" => ?external_ip,
+                    "want_ip" => ?ip_kind,
                     "allocated_ips" => ?allocated_ips,
                 );
                 bail!(
@@ -150,7 +150,7 @@ impl<'a> ResourceAllocator<'a> {
             }
         };
 
-        let kind_matches = match (existing_ip.kind, external_ip) {
+        let kind_matches = match (existing_ip.kind, ip_kind) {
             (IpKind::Floating, OmicronZoneExternalIpKind::Floating(_)) => true,
             (IpKind::SNat, OmicronZoneExternalIpKind::Snat(snat)) => {
                 *existing_ip.first_port == snat.first_port
@@ -159,12 +159,12 @@ impl<'a> ResourceAllocator<'a> {
             (_, _) => false,
         };
 
-        if existing_ip.ip.ip() == external_ip.ip() && kind_matches {
+        if existing_ip.ip.ip() == ip_kind.ip() && kind_matches {
             info!(
                 self.opctx.log, "found already-allocated external IP";
                 "zone_kind" => %zone_kind,
                 "zone_id" => %zone_id,
-                "ip" => ?external_ip,
+                "ip" => ?ip_kind,
             );
             return Ok(true);
         }
@@ -173,7 +173,7 @@ impl<'a> ResourceAllocator<'a> {
             self.opctx.log, "zone has unexpected IP allocated";
             "zone_kind" => %zone_kind,
             "zone_id" => %zone_id,
-            "want_ip" => ?external_ip,
+            "want_ip" => ?ip_kind,
             "allocated_ip" => ?existing_ip,
         );
         bail!(
@@ -258,7 +258,7 @@ impl<'a> ResourceAllocator<'a> {
         &self,
         zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        external_ip: OmicronZoneExternalIpKind,
+        ip_kind: OmicronZoneExternalIpKind,
     ) -> anyhow::Result<()> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
@@ -273,7 +273,7 @@ impl<'a> ResourceAllocator<'a> {
         // exactly what we want if two Nexuses try to realize the same
         // blueprint at the same time.
         if self
-            .is_external_ip_already_allocated(zone_kind, zone_id, external_ip)
+            .is_external_ip_already_allocated(zone_kind, zone_id, ip_kind)
             .await?
         {
             return Ok(());
@@ -284,13 +284,13 @@ impl<'a> ResourceAllocator<'a> {
                 self.opctx,
                 zone_id,
                 zone_kind,
-                OmicronZoneExternalIp { id: ip_id, ip: external_ip },
+                OmicronZoneExternalIp { id: ip_id, kind: ip_kind },
             )
             .await
             .with_context(|| {
                 format!(
                     "failed to allocate IP to {zone_kind} {zone_id}: \
-                     {external_ip:?}"
+                     {ip_kind:?}"
                 )
             })?;
 
@@ -298,7 +298,7 @@ impl<'a> ResourceAllocator<'a> {
             self.opctx.log, "successfully allocated external IP";
             "zone_kind" => %zone_kind,
             "zone_id" => %zone_id,
-            "ip" => ?external_ip,
+            "ip" => ?ip_kind,
             "ip_id" => %ip_id,
         );
 

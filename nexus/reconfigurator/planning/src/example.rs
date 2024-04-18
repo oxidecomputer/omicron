@@ -135,7 +135,7 @@ impl ExampleSystem {
                                 id: ExternalIpUuid::new_v4(),
                                 // TODO-cleanup This is potentially wrong;
                                 // zone_type should tell us the IP kind.
-                                ip: OmicronZoneExternalIpKind::Floating(ip),
+                                kind: OmicronZoneExternalIpKind::Floating(ip),
                             },
                         )
                         .expect("failed to add Omicron zone external IP");
@@ -147,7 +147,7 @@ impl ExampleSystem {
                             OmicronZoneNic {
                                 id: nic.id,
                                 mac: nic.mac,
-                                ip: nic.ip.into(),
+                                ip: nic.ip,
                                 slot: nic.slot,
                                 primary: nic.primary,
                             },

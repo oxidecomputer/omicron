@@ -40,9 +40,7 @@ use diesel::prelude::*;
 use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
-use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -55,7 +53,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
 use sled_agent_client::ZoneKind;
@@ -231,44 +228,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Allocates an IP address for internal service usage.
-    pub async fn external_ip_allocate_service(
-        &self,
-        opctx: &OpContext,
-        ip_id: Uuid,
-        name: &Name,
-        description: &str,
-        service_id: Uuid,
-    ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
-
-        let data = IncompleteExternalIp::for_service(
-            ip_id,
-            name,
-            description,
-            service_id,
-            pool.id(),
-        );
-        self.allocate_external_ip(opctx, data).await
-    }
-
-    /// Allocates an SNAT IP address for internal service usage.
-    pub async fn external_ip_allocate_service_snat(
-        &self,
-        opctx: &OpContext,
-        ip_id: Uuid,
-        service_id: Uuid,
-    ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
-
-        let data = IncompleteExternalIp::for_service_snat(
-            ip_id,
-            service_id,
-            pool.id(),
-        );
-        self.allocate_external_ip(opctx, data).await
-    }
-
     /// Allocates a floating IP address for instance usage.
     pub async fn allocate_floating_ip(
         &self,
@@ -402,34 +361,12 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-
-        // We'll name this external IP the same as we name the NIC associated
-        // with it.
-        let name = ServiceNetworkInterface::name(zone_id, zone_kind);
-        let description = zone_kind.to_string();
-
-        let data = match external_ip.ip {
-            OmicronZoneExternalIpKind::Floating(ip) => {
-                IncompleteExternalIp::for_service_explicit(
-                    external_ip.id.into_untyped_uuid(),
-                    &name,
-                    &description,
-                    zone_id.into_untyped_uuid(),
-                    pool.id(),
-                    ip,
-                )
-            }
-            OmicronZoneExternalIpKind::Snat(snat_cfg) => {
-                IncompleteExternalIp::for_service_explicit_snat(
-                    external_ip.id.into_untyped_uuid(),
-                    zone_id.into_untyped_uuid(),
-                    pool.id(),
-                    snat_cfg.ip,
-                    (snat_cfg.first_port, snat_cfg.last_port),
-                )
-            }
-        };
-
+        let data = IncompleteExternalIp::for_omicron_zone(
+            pool.id(),
+            external_ip,
+            zone_id,
+            zone_kind,
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -1218,6 +1155,7 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfig;
+    use nexus_types::deployment::OmicronZoneExternalIpKind;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1286,7 +1224,7 @@ mod tests {
                     ZoneKind::Nexus,
                     OmicronZoneExternalIp {
                         id: ExternalIpUuid::new_v4(),
-                        ip: external_ip_kind,
+                        kind: external_ip_kind,
                     },
                 )
                 .await
