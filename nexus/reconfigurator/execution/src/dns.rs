@@ -465,6 +465,7 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
@@ -475,13 +476,9 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::SledDisk;
-    use nexus_types::deployment::SledFilter;
-    use nexus_types::deployment::SledResources;
+    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
-    use nexus_types::external_api::views::PhysicalDiskPolicy;
-    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -496,11 +493,9 @@ mod test {
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -509,6 +504,7 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -555,45 +551,46 @@ mod test {
         let rack_subnet =
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
-        // Ignore sleds with no associated zones in the inventory.
-        // This is included in the "representative" collection, but it's
-        // not allowed by BlueprintBuilder::build_initial_from_collection().
-        let policy_sleds = collection
-            .omicron_zones
-            .keys()
-            .zip(possible_sled_subnets)
-            .map(|(sled_id, subnet)| {
-                let sled_resources = SledResources {
-                    zpools: BTreeMap::from([(
-                        ZpoolUuid::new_v4(),
-                        SledDisk {
-                            disk_identity: DiskIdentity {
-                                vendor: String::from("v"),
-                                serial: format!("s-{sled_id}"),
-                                model: String::from("m"),
-                            },
-                            disk_id: PhysicalDiskUuid::new_v4(),
-                            policy: PhysicalDiskPolicy::InService,
-                            state: PhysicalDiskState::Active,
-                        },
-                    )]),
-                    subnet: Ipv6Subnet::new(subnet.network()),
-                };
-                (*sled_id, sled_resources)
-            })
-            .collect::<BTreeMap<_, _>>();
+
+        // Convert the inventory `OmicronZonesConfig`s into
+        // `BlueprintZonesConfig`. This is going to get more painful over time
+        // as we add to blueprints, but for now we can make this work.
+        let mut blueprint_zones = BTreeMap::new();
+        for (sled_id, zones_config) in collection.omicron_zones {
+            blueprint_zones.insert(
+                sled_id.into_untyped_uuid(),
+                BlueprintZonesConfig {
+                    generation: zones_config.zones.generation,
+                    zones: zones_config
+                        .zones
+                        .zones
+                        .into_iter()
+                        .map(|config| {
+                            BlueprintZoneConfig::from_omicron_zone_config(
+                                config,
+                                BlueprintZoneDisposition::InService,
+                            )
+                            .expect("failed to convert zone config")
+                        })
+                        .collect(),
+                },
+            );
+        }
 
         let dns_empty = dns_config_empty();
         let initial_dns_generation =
             Generation::from(u32::try_from(dns_empty.generation).unwrap());
-        let mut blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            initial_dns_generation,
-            Generation::new(),
-            policy_sleds.keys().copied(),
-            "test-suite",
-        )
-        .expect("failed to build initial blueprint");
+        let mut blueprint = Blueprint {
+            id: Uuid::new_v4(),
+            blueprint_zones,
+            blueprint_disks: BTreeMap::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: initial_dns_generation,
+            external_dns_version: Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test-suite".to_string(),
+            comment: "test blueprint".to_string(),
+        };
 
         // To make things slightly more interesting, let's add a zone that's
         // not currently in service.
@@ -619,18 +616,23 @@ mod test {
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.
-        let sleds_by_id = policy_sleds
-            .iter()
+        let sleds_by_id = blueprint
+            .blueprint_zones
+            .keys()
+            .zip(possible_sled_subnets)
             .enumerate()
-            .map(|(i, (sled_id, sled_resources))| {
+            .map(|(i, (sled_id, subnet))| {
+                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 let sled_info = Sled {
-                    id: *sled_id,
-                    sled_agent_address: get_sled_address(sled_resources.subnet),
+                    id: sled_id,
+                    sled_agent_address: get_sled_address(Ipv6Subnet::new(
+                        subnet.network(),
+                    )),
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     is_scrimlet: i < 2,
                 };
-                (*sled_id, sled_info)
+                (sled_id, sled_info)
             })
             .collect();
 
@@ -682,7 +684,8 @@ mod test {
             .iter()
             .filter_map(|(sled_id, sled)| {
                 if sled.is_scrimlet {
-                    let sled_subnet = policy_sleds.get(sled_id).unwrap().subnet;
+                    let sled_subnet =
+                        sleds_by_id.get(sled_id).unwrap().subnet();
                     let switch_zone_ip = get_switch_zone_address(sled_subnet);
                     Some((switch_zone_ip, *sled_id))
                 } else {
@@ -818,7 +821,7 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut blueprint) = example(&logctx.log, TEST_NAME, 5);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME, 5);
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
