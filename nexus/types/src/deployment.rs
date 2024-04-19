@@ -319,6 +319,15 @@ pub struct BlueprintZonesConfig {
     pub zones: Vec<BlueprintZoneConfig>,
 }
 
+impl From<BlueprintZonesConfig> for OmicronZonesConfig {
+    fn from(config: BlueprintZonesConfig) -> Self {
+        Self {
+            generation: config.generation,
+            zones: config.zones.into_iter().map(From::from).collect(),
+        }
+    }
+}
+
 impl BlueprintZonesConfig {
     /// Sorts the list of zones stored in this configuration.
     ///
