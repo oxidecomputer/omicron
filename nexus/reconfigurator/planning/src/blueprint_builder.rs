@@ -22,7 +22,6 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::InvalidOmicronZoneType;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -80,8 +79,6 @@ pub enum Error {
     ExhaustedNexusIps,
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
-    #[error("invalid OmicronZoneType in collection")]
-    InvalidOmicronZoneType(#[from] InvalidOmicronZoneType),
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -473,7 +470,7 @@ impl<'a> BlueprintBuilder<'a> {
         let has_ntp = self
             .zones
             .current_sled_zones(sled_id)
-            .any(|z| z.zone_type.is_ntp());
+            .any(|(z, _)| z.zone_type.is_ntp());
         if has_ntp {
             return Ok(Ensure::NotNeeded);
         }
@@ -537,7 +534,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
-            self.zones.current_sled_zones(sled_id).any(|z| {
+            self.zones.current_sled_zones(sled_id).any(|(z, _)| {
                 matches!(
                     &z.zone_type,
                     BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
@@ -588,7 +585,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_num_nexus_zones(&self, sled_id: SledUuid) -> usize {
         self.zones
             .current_sled_zones(sled_id)
-            .filter(|z| z.zone_type.is_nexus())
+            .filter(|(z, _)| z.zone_type.is_nexus())
             .count()
     }
 
@@ -724,15 +721,8 @@ impl<'a> BlueprintBuilder<'a> {
         let _ = self.sled_resources(sled_id)?;
 
         let sled_zones = self.zones.change_sled_zones(sled_id);
-        // A sled should have a small number (< 20) of zones so a linear search
-        // should be very fast.
-        if sled_zones.zones.iter().any(|z| z.id == zone.id) {
-            return Err(Error::Planner(anyhow!(
-                "attempted to add zone that already exists: {}",
-                zone.id
-            )));
-        }
-        sled_zones.zones.push(zone);
+        sled_zones.add_zone(zone)?;
+
         Ok(())
     }
 
@@ -765,7 +755,7 @@ impl<'a> BlueprintBuilder<'a> {
 
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
-                for z in self.zones.current_sled_zones(sled_id) {
+                for (z, _) in self.zones.current_sled_zones(sled_id) {
                     allocator.reserve(z.underlay_address);
                 }
 
@@ -832,7 +822,7 @@ impl BlueprintBuilderRng {
 /// that we've changed and a _reference_ to the parent blueprint's zones.  This
 /// struct makes it easy for callers iterate over the right set of zones.
 struct BlueprintZonesBuilder<'a> {
-    changed_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+    changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
     // Temporarily make a clone of the parent blueprint's zones so we can use
     // typed UUIDs everywhere. Once we're done migrating, this `Cow` can be
     // removed.
@@ -854,37 +844,33 @@ impl<'a> BlueprintZonesBuilder<'a> {
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
-    ) -> &mut BlueprintZonesConfig {
+    ) -> &mut BuilderZonesConfig {
         self.changed_zones.entry(sled_id).or_insert_with(|| {
             if let Some(old_sled_zones) = self.parent_zones.get(&sled_id) {
-                BlueprintZonesConfig {
-                    generation: old_sled_zones.generation.next(),
-                    zones: old_sled_zones.zones.clone(),
-                }
+                BuilderZonesConfig::from_parent(old_sled_zones)
             } else {
-                // The first generation is reserved to mean the one containing
-                // no zones.  See OmicronZonesConfig::INITIAL_GENERATION.  So
-                // we start with the next one.
-                BlueprintZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![],
-                }
+                BuilderZonesConfig::new()
             }
         })
     }
 
     /// Iterates over the list of Omicron zones currently configured for this
-    /// sled in the blueprint that's being built
+    /// sled in the blueprint that's being built, along with each zone's state
+    /// in the builder.
     pub fn current_sled_zones(
         &self,
         sled_id: SledUuid,
-    ) -> Box<dyn Iterator<Item = &BlueprintZoneConfig> + '_> {
-        if let Some(sled_zones) = self
-            .changed_zones
-            .get(&sled_id)
-            .or_else(|| self.parent_zones.get(&sled_id))
-        {
-            Box::new(sled_zones.zones.iter())
+    ) -> Box<dyn Iterator<Item = (&BlueprintZoneConfig, BuilderZoneState)> + '_>
+    {
+        if let Some(sled_zones) = self.changed_zones.get(&sled_id) {
+            Box::new(sled_zones.iter_zones().map(|z| (z.zone(), z.state())))
+        } else if let Some(parent_zones) = self.parent_zones.get(&sled_id) {
+            Box::new(
+                parent_zones
+                    .zones
+                    .iter()
+                    .map(|z| (z, BuilderZoneState::Unchanged)),
+            )
         } else {
             Box::new(std::iter::empty())
         }
@@ -899,28 +885,143 @@ impl<'a> BlueprintZonesBuilder<'a> {
             .map(|sled_id| {
                 // Start with self.changed_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
-                let mut zones = self
-                    .changed_zones
-                    .remove(&sled_id)
-                    // If it's not there, use the config from the parent
-                    // blueprint.
-                    .or_else(|| self.parent_zones.get(&sled_id).cloned())
-                    // If it's not there either, then this must be a new sled
-                    // and we haven't added any zones to it yet.  Use the
+                if let Some(zones) = self.changed_zones.remove(&sled_id) {
+                    (sled_id.into_untyped_uuid(), zones.build())
+                }
+                // Next, check self.parent_zones, to represent an unchanged sled.
+                else if let Some(parent_zones) =
+                    self.parent_zones.get(&sled_id)
+                {
+                    (sled_id.into_untyped_uuid(), parent_zones.clone())
+                } else {
+                    // If the sled is not in self.parent_zones, then it must be a
+                    // new sled and we haven't added any zones to it yet.  Use the
                     // standard initial config.
-                    .unwrap_or_else(|| BlueprintZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![],
-                    });
-
-                zones.sort();
-
-                // TODO-cleanup use `TypedUuid` everywhere
-                (sled_id.into_untyped_uuid(), zones)
+                    (
+                        sled_id.into_untyped_uuid(),
+                        BlueprintZonesConfig {
+                            generation: Generation::new(),
+                            zones: vec![],
+                        },
+                    )
+                }
             })
             .collect()
     }
 }
+
+// This is a sub-module to hide implementation details from the rest of
+// blueprint_builder.
+mod builder_zones {
+    use super::*;
+
+    #[derive(Debug)]
+    #[must_use]
+    pub(crate) struct BuilderZonesConfig {
+        // The current generation -- this is bumped at blueprint build time and is
+        // otherwise not exposed to callers.
+        generation: Generation,
+
+        // The list of zones, along with their state.
+        zones: Vec<BuilderZoneConfig>,
+    }
+
+    impl BuilderZonesConfig {
+        pub(super) fn new() -> Self {
+            Self {
+                // Note that the first generation is reserved to mean the one
+                // containing no zones. See
+                // OmicronZonesConfig::INITIAL_GENERATION.
+                //
+                // Since we're currently assuming that creating a new
+                // `BuilderZonesConfig` means that we're going to add new zones
+                // shortly, we start with Generation::new() here. It'll get
+                // bumped up to the next one in `Self::build`.
+                generation: Generation::new(),
+                zones: vec![],
+            }
+        }
+
+        pub(super) fn from_parent(parent: &BlueprintZonesConfig) -> Self {
+            Self {
+                // We'll bump this up at build time.
+                generation: parent.generation,
+
+                zones: parent
+                    .zones
+                    .iter()
+                    .map(|zone| BuilderZoneConfig {
+                        zone: zone.clone(),
+                        state: BuilderZoneState::Unchanged,
+                    })
+                    .collect(),
+            }
+        }
+
+        pub(super) fn add_zone(
+            &mut self,
+            zone: BlueprintZoneConfig,
+        ) -> Result<(), Error> {
+            if self.zones.iter().any(|z| z.zone.id == zone.id) {
+                return Err(Error::Planner(anyhow!(
+                    "attempted to add zone that already exists: {}",
+                    zone.id
+                )));
+            };
+
+            self.zones.push(BuilderZoneConfig {
+                zone,
+                state: BuilderZoneState::Added,
+            });
+            Ok(())
+        }
+
+        pub(super) fn iter_zones(
+            &self,
+        ) -> impl Iterator<Item = &BuilderZoneConfig> {
+            self.zones.iter()
+        }
+
+        pub(super) fn build(self) -> BlueprintZonesConfig {
+            let mut ret = BlueprintZonesConfig {
+                // Something we could do here is to check if any zones have
+                // actually been modified, and if not, return the parent's
+                // generation. For now, we depend on callers to only call
+                // `BlueprintZonesBuilder::change_sled_zones` when they really
+                // mean it.
+                generation: self.generation.next(),
+                zones: self.zones.into_iter().map(|z| z.zone).collect(),
+            };
+            ret.sort();
+            ret
+        }
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct BuilderZoneConfig {
+        zone: BlueprintZoneConfig,
+        state: BuilderZoneState,
+    }
+
+    impl BuilderZoneConfig {
+        pub(super) fn zone(&self) -> &BlueprintZoneConfig {
+            &self.zone
+        }
+
+        pub(super) fn state(&self) -> BuilderZoneState {
+            self.state
+        }
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    pub(crate) enum BuilderZoneState {
+        Unchanged,
+        // Currently unused: Modified
+        Added,
+    }
+}
+
+use builder_zones::*;
 
 /// Helper for working with sets of disks on each sled
 ///
@@ -1023,8 +1124,13 @@ pub mod test {
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::SledDetails;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeSet;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
@@ -1224,6 +1330,173 @@ pub mod test {
                 .map(|id| { zpool_id_to_external_name(*id).unwrap() })
                 .collect()
         );
+
+        logctx.cleanup_successful();
+    }
+
+    /// A test focusing on `BlueprintZonesBuilder` and its internal logic.
+    #[test]
+    fn test_builder_zones() {
+        static TEST_NAME: &str = "blueprint_test_builder_zones";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut example =
+            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let blueprint_initial = example.blueprint;
+
+        // Add a completely bare sled to the input.
+        let (new_sled_id, input2) = {
+            let mut input = example.input.clone().into_builder();
+            let new_sled_id = example.sled_rng.next();
+            input
+                .add_sled(
+                    new_sled_id,
+                    SledDetails {
+                        policy: SledPolicy::provisionable(),
+                        state: SledState::Active,
+                        resources: SledResources {
+                            subnet: Ipv6Subnet::new(
+                                "fd00:1::".parse().unwrap(),
+                            ),
+                            zpools: BTreeMap::new(),
+                        },
+                    },
+                )
+                .expect("adding new sled");
+
+            (new_sled_id, input.build())
+        };
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint_initial,
+            &input2,
+            "the_test",
+        )
+        .expect("creating blueprint builder");
+        builder.set_rng_seed((TEST_NAME, "bp2"));
+
+        // Test adding a new sled with an NTP zone.
+        assert_eq!(
+            builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
+            Ensure::Added
+        );
+
+        // Iterate over the zones for the sled and ensure that the NTP zone is
+        // present.
+        {
+            let mut zones = builder.zones.current_sled_zones(new_sled_id);
+            let (_, state) = zones.next().expect("exactly one zone for sled");
+            assert!(zones.next().is_none(), "exactly one zone for sled");
+            assert_eq!(
+                state,
+                BuilderZoneState::Added,
+                "NTP zone should have been added"
+            );
+        }
+
+        // Now, test adding a new zone (Oximeter, picked arbitrarily) to an
+        // existing sled.
+        let existing_sled_id = example
+            .input
+            .all_sled_ids(SledFilter::All)
+            .next()
+            .expect("at least one sled present");
+        let change = builder.zones.change_sled_zones(existing_sled_id);
+
+        let new_zone_id = OmicronZoneUuid::new_v4();
+        change
+            .add_zone(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: new_zone_id,
+                underlay_address: Ipv6Addr::UNSPECIFIED,
+                zone_type: BlueprintZoneType::Oximeter(
+                    blueprint_zone_type::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::UNSPECIFIED,
+                            0,
+                            0,
+                            0,
+                        ),
+                    },
+                ),
+            })
+            .expect("adding new zone");
+
+        {
+            // Iterate over the zones and ensure that the Oximeter zone is
+            // present, and marked added.
+            let mut zones = builder.zones.current_sled_zones(existing_sled_id);
+            zones
+                .find_map(|(z, state)| {
+                    if z.id == new_zone_id {
+                        assert_eq!(
+                            state,
+                            BuilderZoneState::Added,
+                            "new zone ID {new_zone_id} should be marked added"
+                        );
+                        Some(())
+                    } else {
+                        None
+                    }
+                })
+                .expect("new zone ID should be present");
+        }
+
+        // Also call change_sled_zones without making any changes. This
+        // currently bumps the generation number, but in the future might
+        // become smarter.
+        let control_sled_id = example
+            .input
+            .all_sled_ids(SledFilter::All)
+            .nth(2)
+            .expect("at least 2 sleds present");
+        _ = builder.zones.change_sled_zones(control_sled_id);
+
+        // Now build the blueprint and ensure that all the changes we described
+        // above are present.
+        let blueprint = builder.build();
+        verify_blueprint(&blueprint);
+        let diff = blueprint.diff_since_blueprint(&blueprint_initial).unwrap();
+        println!("expecting new NTP and Oximeter zones:\n{}", diff.display());
+
+        // No sleds were removed.
+        assert_eq!(diff.sleds_removed().len(), 0);
+
+        // One sled was added.
+        let sleds: Vec<_> = diff.sleds_added().collect();
+        assert_eq!(sleds.len(), 1);
+        let (sled_id, new_sled_zones) = sleds[0];
+        assert_eq!(sled_id, new_sled_id);
+        // The generation number should be newer than the initial default.
+        assert_eq!(new_sled_zones.generation, Generation::new().next());
+        assert_eq!(new_sled_zones.zones.len(), 1);
+
+        // Two sleds were modified: existing_sled_id and control_sled_id.
+        let sleds = diff.sleds_modified();
+        assert_eq!(sleds.len(), 2, "2 sleds modified");
+        for (sled_id, sled_modified) in sleds {
+            if sled_id == existing_sled_id {
+                assert_eq!(
+                    sled_modified.generation_after,
+                    sled_modified.generation_before.next()
+                );
+                assert_eq!(sled_modified.zones_added().len(), 1);
+                let added_zone = sled_modified.zones_added().next().unwrap();
+                assert_eq!(added_zone.id, new_zone_id);
+            } else {
+                assert_eq!(sled_id, control_sled_id);
+
+                // The generation number is bumped, but nothing else.
+                assert_eq!(
+                    sled_modified.generation_after,
+                    sled_modified.generation_before.next(),
+                    "control sled has generation number bumped"
+                );
+                assert_eq!(sled_modified.zones_added().len(), 0);
+                assert_eq!(sled_modified.zones_removed().len(), 0);
+                assert_eq!(sled_modified.zones_modified().count(), 0);
+            }
+        }
 
         logctx.cleanup_successful();
     }
