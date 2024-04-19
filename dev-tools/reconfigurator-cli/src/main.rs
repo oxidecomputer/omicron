@@ -22,6 +22,7 @@ use nexus_reconfigurator_planning::system::{
 };
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -158,7 +159,9 @@ impl ReconfiguratorSim {
                         .borrow_mut()
                         .entry(ip)
                         .or_insert_with(ExternalIpUuid::new_v4),
-                    ip,
+                    // TODO-cleanup This is potentially wrong;
+                    // zone_type should tell us the IP kind.
+                    kind: OmicronZoneExternalIpKind::Floating(ip),
                 };
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
@@ -168,7 +171,7 @@ impl ReconfiguratorSim {
                 let nic = OmicronZoneNic {
                     id: nic.id,
                     mac: nic.mac,
-                    ip: nic.ip.into(),
+                    ip: nic.ip,
                     slot: nic.slot,
                     primary: nic.primary,
                 };

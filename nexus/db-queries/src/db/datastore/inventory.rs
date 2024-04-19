@@ -2067,13 +2067,13 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// This does not paginate.
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<CollectionUuid>>>;
+    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(
         &self,
-    ) -> BoxFuture<anyhow::Result<Vec<CollectionUuid>>> {
+    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()
@@ -2085,17 +2085,14 @@ impl DataStoreInventoryTest for DataStore {
                     .context("failed to allow table scan")?;
 
                 use db::schema::inv_collection::dsl;
-                let uuids = dsl::inv_collection
-                    .select(dsl::id)
+                let collections = dsl::inv_collection
+                    .select(InvCollection::as_select())
                     .order_by(dsl::time_started)
-                    .load_async::<Uuid>(&conn)
+                    .load_async(&conn)
                     .await
                     .context("failed to list collections")?;
 
-                Ok(uuids
-                    .into_iter()
-                    .map(CollectionUuid::from_untyped_uuid)
-                    .collect())
+                Ok(collections)
             })
             .await
         }
@@ -2124,6 +2121,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
 
@@ -2386,7 +2384,13 @@ mod test {
         // `collection1`, which _is_ the only one with no errors.  So we should
         // get back `collection2`.
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            &datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[
                 collection1.id,
                 collection2.id,
@@ -2410,7 +2414,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection3.id, collection4.id, collection5.id,]
         );
         // Again, we should skip over collection1 and delete the next oldest:
@@ -2420,7 +2430,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection4.id, collection5.id,]
         );
         // At this point, if we're keeping 3, we don't need to prune anything.
@@ -2429,7 +2445,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection4.id, collection5.id,]
         );
 
@@ -2446,7 +2468,13 @@ mod test {
             .await
             .expect("failed to insert collection");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection4.id, collection5.id, collection6.id,]
         );
         datastore
@@ -2454,7 +2482,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection4.id, collection5.id, collection6.id,]
         );
         // Again, at this point, we should not prune anything.
@@ -2463,7 +2497,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection4.id, collection5.id, collection6.id,]
         );
 
@@ -2484,7 +2524,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection5.id, collection6.id, collection7.id,]
         );
 
@@ -2518,7 +2564,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection6.id,]
         );
 
@@ -2528,7 +2580,7 @@ mod test {
             .inventory_delete_collection(&opctx, collection6.id)
             .await
             .expect("failed to delete collection");
-        assert_eq!(datastore.inventory_collections().await.unwrap(), &[]);
+        assert!(datastore.inventory_collections().await.unwrap().is_empty());
 
         conn.transaction_async(|conn| async move {
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();

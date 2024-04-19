@@ -7,6 +7,7 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::IpKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
@@ -16,7 +17,10 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
+use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningInputBuildError;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -26,6 +30,7 @@ use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_REDUNDANCY;
@@ -128,13 +133,34 @@ impl PlanningInputFromDb<'_> {
                 );
                 continue;
             };
+
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
+
+            let to_kind = |ip| match external_ip_row.kind {
+                IpKind::Floating => Ok(OmicronZoneExternalIpKind::Floating(ip)),
+                IpKind::SNat => {
+                    let snat = SourceNatConfig::new(
+                        ip,
+                        *external_ip_row.first_port,
+                        *external_ip_row.last_port,
+                    )
+                    .map_err(|err| {
+                        PlanningInputBuildError::BadSnatConfig { zone_id, err }
+                    })?;
+                    Ok(OmicronZoneExternalIpKind::Snat(snat))
+                }
+                IpKind::Ephemeral => Err(
+                    PlanningInputBuildError::EphemeralIpUnsupported(zone_id),
+                ),
+            };
+
             builder
                 .add_omicron_zone_external_ip_network(
                     zone_id,
                     // TODO-cleanup use `TypedUuid` everywhere
                     ExternalIpUuid::from_untyped_uuid(external_ip_row.id),
                     external_ip_row.ip,
+                    to_kind,
                 )
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -142,6 +168,22 @@ impl PlanningInputFromDb<'_> {
                          to planning input: {e}"
                     ))
                 })?;
+        }
+
+        for nic_row in self.service_nic_rows {
+            let zone_id =
+                OmicronZoneUuid::from_untyped_uuid(nic_row.service_id);
+            let nic = OmicronZoneNic::try_from(nic_row).map_err(|e| {
+                Error::internal_error(&format!(
+                    "invalid Omicron zone NIC read from database: {e}"
+                ))
+            })?;
+            builder.add_omicron_zone_nic(zone_id, nic).map_err(|e| {
+                Error::internal_error(&format!(
+                    "unexpectedly failed to add Omicron zone NIC \
+                     to planning input: {e}"
+                ))
+            })?;
         }
 
         Ok(builder.build())
@@ -210,7 +252,9 @@ pub async fn reconfigurator_state_load(
     let collection_ids = datastore
         .inventory_collections()
         .await
-        .context("listing collections")?;
+        .context("listing collections")?
+        .into_iter()
+        .map(|c| c.id());
     let collections = futures::stream::iter(collection_ids)
         .filter_map(|id| async move {
             let read = datastore

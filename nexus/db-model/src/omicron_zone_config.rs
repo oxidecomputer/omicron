@@ -81,12 +81,13 @@ impl OmicronZone {
                 nic,
                 snat_cfg,
             } => {
+                let (first_port, last_port) = snat_cfg.port_range_raw();
                 ntp_ntp_servers = Some(ntp_servers.clone());
                 ntp_dns_servers = Some(dns_servers.clone());
                 ntp_ntp_domain = domain.clone();
                 snat_ip = Some(IpNetwork::from(snat_cfg.ip));
-                snat_first_port = Some(SqlU16::from(snat_cfg.first_port));
-                snat_last_port = Some(SqlU16::from(snat_cfg.last_port));
+                snat_first_port = Some(SqlU16::from(first_port));
+                snat_last_port = Some(SqlU16::from(last_port));
                 nic_id = Some(nic.id);
                 (ZoneType::BoundaryNtp, address, None)
             }
@@ -304,11 +305,12 @@ impl OmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig {
-                            ip: ip.ip(),
-                            first_port: *first_port,
-                            last_port: *last_port,
-                        }
+                        nexus_types::inventory::SourceNatConfig::new(
+                            ip.ip(),
+                            *first_port,
+                            *last_port,
+                        )
+                        .context("bad SNAT config for boundary NTP")?
                     }
                     _ => bail!(
                         "expected non-NULL snat properties, \
