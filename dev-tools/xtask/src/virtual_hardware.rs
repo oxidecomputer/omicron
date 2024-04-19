@@ -663,10 +663,10 @@ fn zfs_list_internal(canmount: &str, mounted: &str) -> Result<Vec<String>> {
             if !dataset.starts_with("oxi_") {
                 return None;
             }
-            if canmount != cols.next()? {
+            if mounted != cols.next()? {
                 return None;
             }
-            if mounted != cols.next()? {
+            if canmount != cols.next()? {
                 return None;
             }
             return Some(dataset.to_string());
