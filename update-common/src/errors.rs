@@ -140,6 +140,8 @@ pub enum RepositoryError {
         "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
     )]
     DuplicateHashEntry(ArtifactHashId),
+    #[error("error creating reader stream")]
+    CreateReaderStream(#[source] anyhow::Error),
 }
 
 impl RepositoryError {
@@ -153,7 +155,8 @@ impl RepositoryError {
             | RepositoryError::TempFileCreate(_)
             | RepositoryError::TempFileWrite(_)
             | RepositoryError::TempFileFlush(_)
-            | RepositoryError::NamedTempFileCreate { .. } => {
+            | RepositoryError::NamedTempFileCreate { .. }
+            | RepositoryError::CreateReaderStream { .. } => {
                 HttpError::for_unavail(None, message)
             }
 
