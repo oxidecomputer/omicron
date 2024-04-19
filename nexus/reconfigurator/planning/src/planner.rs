@@ -335,7 +335,6 @@ mod test {
     use super::Planner;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
-    use crate::blueprint_builder::BlueprintBuilder;
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
@@ -348,7 +347,6 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -363,34 +361,18 @@ mod test {
         static TEST_NAME: &str = "planner_basic_add_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // For our purposes, we don't care about the DNS generations.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
-
-        // Use our example inventory collection.
+        // Use our example system.
         let mut example =
             ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-
-        // Build the initial blueprint.  We don't bother verifying it here
-        // because there's a separate test for that.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &example.collection,
-                internal_dns_version,
-                external_dns_version,
-                example.input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
-        verify_blueprint(&blueprint1);
+        let blueprint1 = &example.blueprint;
+        verify_blueprint(blueprint1);
 
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
         // fix.
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
-            &blueprint1,
+            blueprint1,
             &example.input,
             "no-op?",
             &example.collection,
@@ -400,7 +382,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        let diff = blueprint2.diff_since_blueprint(blueprint1).unwrap();
         println!("1 -> 2 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -563,14 +545,10 @@ mod test {
         static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // For our purposes, we don't care about the DNS generations.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
-
-        // Use our example inventory collection as a starting point, but strip
-        // it down to just one sled.
-        let (sled_id, collection, input) = {
-            let (mut collection, input) =
+        // Use our example system as a starting point, but strip it down to just
+        // one sled.
+        let (sled_id, blueprint1, collection, input) = {
+            let (mut collection, input, mut blueprint) =
                 example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
             // Pick one sled ID to keep and remove the rest.
@@ -583,21 +561,12 @@ mod test {
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
+            blueprint
+                .blueprint_zones
+                .retain(|k, _v| keep_sled_id.as_untyped_uuid() == k);
 
-            (keep_sled_id, collection, builder.build())
+            (keep_sled_id, blueprint, collection, builder.build())
         };
-
-        // Build the initial blueprint.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                internal_dns_version,
-                external_dns_version,
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
@@ -661,21 +630,9 @@ mod test {
             "planner_spread_additional_nexus_zones_across_sleds";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example inventory collection as a starting point.
-        let (collection, input) =
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-
-        // Build the initial blueprint.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                Generation::new(),
-                Generation::new(),
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 3);
@@ -748,25 +705,14 @@ mod test {
             "planner_nexus_allocation_skips_nonprovisionable_sleds";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example inventory collection as a starting point.
+        // Use our example system as a starting point.
         //
         // Request two extra sleds here so we test non-provisionable, expunged,
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, input) = example(&logctx.log, TEST_NAME, 5);
-
-        // Build the initial blueprint.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                Generation::new(),
-                Generation::new(),
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 5);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 5);

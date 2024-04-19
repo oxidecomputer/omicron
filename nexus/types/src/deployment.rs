@@ -311,37 +311,6 @@ pub struct BlueprintZonesConfig {
 }
 
 impl BlueprintZonesConfig {
-    /// Constructs a new [`BlueprintZonesConfig`] from a collection's zones.
-    ///
-    /// For the initial blueprint, all zones within a collection are assumed to
-    /// have the [`InService`](BlueprintZoneDisposition::InService)
-    /// disposition.
-    pub fn initial_from_collection(
-        collection: &OmicronZonesConfig,
-    ) -> Result<Self, InvalidOmicronZoneType> {
-        let zones = collection
-            .zones
-            .iter()
-            .map(|z| {
-                BlueprintZoneConfig::from_omicron_zone_config(
-                    z.clone(),
-                    BlueprintZoneDisposition::InService,
-                )
-            })
-            .collect::<Result<_, _>>()?;
-
-        let mut ret = Self {
-            // An initial `BlueprintZonesConfig` reuses the generation from
-            // `OmicronZonesConfig`.
-            generation: collection.generation,
-            zones,
-        };
-        // For testing, it's helpful for zones to be in sorted order.
-        ret.sort();
-
-        Ok(ret)
-    }
-
     /// Sorts the list of zones stored in this configuration.
     ///
     /// This is not strictly necessary. But for testing (particularly snapshot

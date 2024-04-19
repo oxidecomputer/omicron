@@ -49,7 +49,6 @@ use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
@@ -102,7 +101,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
         api.register(blueprint_target_set_enabled)?;
-        api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
         api.register(blueprint_import)?;
 
@@ -955,33 +953,6 @@ async fn blueprint_target_set_enabled(
 }
 
 // Generating blueprints
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct CollectionId {
-    collection_id: CollectionUuid,
-}
-
-/// Generates a new blueprint matching the specified inventory collection
-#[endpoint {
-    method = POST,
-    path = "/deployment/blueprints/generate-from-collection",
-}]
-async fn blueprint_generate_from_collection(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    params: TypedBody<CollectionId>,
-) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let nexus = &apictx.nexus;
-        let collection_id = params.into_inner().collection_id;
-        let result = nexus
-            .blueprint_generate_from_collection(&opctx, collection_id)
-            .await?;
-        Ok(HttpResponseOk(result))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 /// Generates a new blueprint for the current system, re-evaluating anything
 /// that's changed since the last one was generated
