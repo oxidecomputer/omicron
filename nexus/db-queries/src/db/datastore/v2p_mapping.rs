@@ -7,22 +7,9 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::V2PMappingView;
-use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-use ipnetwork::IpNetwork;
-use nexus_db_model::BgpPeerView;
-use nexus_types::external_api::params;
-use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::{
-    CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
-    ResourceType, SwitchLocation,
-};
-use ref_cast::RefCast;
-use uuid::Uuid;
+use diesel::{QueryDsl, SelectableHelper};
+use omicron_common::api::external::ListResultVec;
 
 impl DataStore {
     pub async fn v2p_mappings(

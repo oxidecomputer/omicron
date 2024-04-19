@@ -3742,7 +3742,7 @@ JOIN omicron.public.network_interface n ON n.parent_id = vmm.instance_id
 JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
 JOIN omicron.public.vpc v ON v.id = n.vpc_id
 WHERE vmm.time_deleted IS NULL
-AND n.kind = 'instance'
+AND n.kind != 'service'
 AND s.sled_policy = 'in_service'
 AND s.sled_state = 'active';
 

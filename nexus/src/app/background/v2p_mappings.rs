@@ -6,7 +6,7 @@ use nexus_db_model::{Sled, SledState};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;
 use nexus_types::{external_api::views::SledPolicy, identity::Asset};
-use omicron_common::api::external::{DataPageParams, Vni};
+use omicron_common::api::external::Vni;
 use serde_json::json;
 use sled_agent_client::types::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
