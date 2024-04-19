@@ -613,6 +613,17 @@ impl PortManager {
         Ok(mappings)
     }
 
+    #[cfg(not(target_os = "illumos"))]
+    pub fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<SetVirtualNetworkInterfaceHost>, Error> {
+        info!(
+            self.inner.log,
+            "Listing virtual nics (ignored)";
+        );
+        Ok(vec![])
+    }
+
     #[cfg(target_os = "illumos")]
     pub fn set_virtual_nic_host(
         &self,
