@@ -118,7 +118,7 @@ fn zpool_id_to_external_name(zpool_id: ZpoolUuid) -> anyhow::Result<ZpoolName> {
 ///    lifetime of a rack, to assemble the first blueprint during rack setup.
 ///    It is also common in tests. To start with a blueprint that contains an
 ///    empty zone config for some number of sleds, use
-///    [`BlueprintBuilder::empty_with_sleds`].
+///    [`BlueprintBuilder::build_empty_with_sleds`].
 ///
 /// 2. Build one _from_ another blueprint, called the "parent", making changes
 ///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
@@ -172,7 +172,7 @@ impl<'a> BlueprintBuilder<'a> {
         )
     }
 
-    /// A version of [`Self::empty_with_sleds`] that allows the
+    /// A version of [`Self::build_empty_with_sleds`] that allows the
     /// blueprint ID to be generated from a random seed.
     pub fn build_empty_with_sleds_seeded<H: Hash>(
         sled_ids: impl Iterator<Item = SledUuid>,
