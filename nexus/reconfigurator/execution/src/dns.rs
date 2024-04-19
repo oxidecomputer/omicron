@@ -465,7 +465,6 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
@@ -514,19 +513,6 @@ mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-    fn blueprint_empty() -> Blueprint {
-        let builder = CollectionBuilder::new("test-suite");
-        let collection = builder.build();
-        BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            std::iter::empty(),
-            "test-suite",
-        )
-        .expect("failed to generate empty blueprint")
-    }
-
     fn dns_config_empty() -> DnsConfigParams {
         DnsConfigParams {
             generation: 1,
@@ -541,7 +527,10 @@ mod test {
     /// test blueprint_internal_dns_config(): trivial case of an empty blueprint
     #[test]
     fn test_blueprint_internal_dns_empty() {
-        let blueprint = blueprint_empty();
+        let blueprint = BlueprintBuilder::build_empty_with_sleds(
+            std::iter::empty(),
+            "test-suite",
+        );
         let blueprint_dns = blueprint_internal_dns_config(
             &blueprint,
             &BTreeMap::new(),
@@ -829,16 +818,9 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input) = example(&logctx.log, TEST_NAME, 5);
-        let initial_external_dns_generation = Generation::new();
-        let mut blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            initial_external_dns_generation,
-            input.all_sled_ids(SledFilter::All),
-            "test suite",
-        )
-        .expect("failed to generate initial blueprint");
+        let (_, input, mut blueprint) = example(&logctx.log, TEST_NAME, 5);
+        blueprint.internal_dns_version = Generation::new();
+        blueprint.external_dns_version = Generation::new();
 
         let my_silo = Silo::new(params::SiloCreate {
             identity: IdentityMetadataCreateParams {
