@@ -190,11 +190,7 @@ impl Blueprint {
     ///
     /// Note that collections do not include information about zone
     /// disposition, so it is assumed that all zones in the collection have the
-    /// [`InService`](BlueprintZoneDisposition::InService) disposition. (This
-    /// is the same assumption made by
-    /// [`BlueprintZonesConfig::initial_from_collection`]. The logic here may
-    /// also be expanded to handle cases where not all zones in the collection
-    /// are in-service.)
+    /// [`InService`](BlueprintZoneDisposition::InService) disposition.
     pub fn diff_since_collection(
         &self,
         before: &Collection,
