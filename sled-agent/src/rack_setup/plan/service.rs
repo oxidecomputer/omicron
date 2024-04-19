@@ -24,6 +24,7 @@ use omicron_common::address::{
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
+    SourceNatConfigError,
 };
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
@@ -1118,7 +1119,14 @@ impl ServicePortBuilder {
             self.next_snat_ip = None;
         }
 
-        let snat_cfg = SourceNatConfig { ip: snat_ip, first_port, last_port };
+        let snat_cfg =
+            match SourceNatConfig::new(snat_ip, first_port, last_port) {
+                Ok(cfg) => cfg,
+                // We know our port pair is aligned, making this unreachable.
+                Err(err @ SourceNatConfigError::UnalignedPortPair { .. }) => {
+                    unreachable!("{err}");
+                }
+            };
 
         let (ip, subnet) = match snat_ip {
             IpAddr::V4(_) => (

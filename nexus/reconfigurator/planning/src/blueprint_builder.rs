@@ -1540,7 +1540,7 @@ pub mod test {
         assert_eq!(new_sled_zones.generation, Generation::new().next());
         assert_eq!(new_sled_zones.zones.len(), 1);
 
-        // Two sled was modified: existing_sled_id and control_sled_id.
+        // Two sleds were modified: existing_sled_id and control_sled_id.
         let sleds = diff.sleds_modified();
         assert_eq!(sleds.len(), 2, "2 sleds modified");
         for (sled_id, sled_modified) in sleds {

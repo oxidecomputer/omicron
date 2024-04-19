@@ -114,6 +114,10 @@ impl Sled {
     pub fn state(&self) -> SledState {
         self.state
     }
+
+    pub fn time_modified(&self) -> DateTime<Utc> {
+        self.identity.time_modified
+    }
 }
 
 impl From<Sled> for views::Sled {
