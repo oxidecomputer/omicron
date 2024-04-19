@@ -448,7 +448,7 @@ impl<'a> BlueprintBuilder<'a> {
                 })
                 .collect();
 
-            (additions, removals)
+            dbg!((additions, removals))
         };
 
         if additions.is_empty() && removals.is_empty() {

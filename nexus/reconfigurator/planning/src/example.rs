@@ -151,7 +151,8 @@ impl ExampleSystem {
     }
 }
 
-/// Returns a collection and planning input describing a pretty simple system.
+/// Returns a collection, planning input, and blueprint describing a pretty
+/// simple system.
 ///
 /// The test name is used as the RNG seed.
 ///

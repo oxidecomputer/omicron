@@ -1263,12 +1263,12 @@ mod tests {
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::PlanningInputBuilder;
-    use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
@@ -1279,7 +1279,6 @@ mod tests {
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1288,6 +1287,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
+    use slog::Logger;
     use std::mem;
     use std::net::Ipv6Addr;
 
@@ -1359,65 +1359,32 @@ mod tests {
         }
     }
 
-    // Create a `Policy` that contains all the sleds found in `collection`
-    fn policy_from_collection(collection: &Collection) -> Policy {
-        Policy {
-            service_ip_pool_ranges: Vec::new(),
-            target_nexus_zone_count: collection
-                .all_omicron_zones()
-                .filter(|z| z.zone_type.is_nexus())
-                .count(),
-        }
-    }
+    fn representative(
+        log: &Logger,
+        test_name: &str,
+    ) -> (Collection, PlanningInput, Blueprint) {
+        // We'll start with an example system.
+        let (mut base_collection, planning_input, mut blueprint) =
+            example(log, test_name, 3);
 
-    fn representative() -> (Collection, PlanningInput, Blueprint) {
-        // We'll start with a representative collection...
+        // Take a more thorough collection representative (includes SPs,
+        // etc.)...
         let mut collection =
             nexus_inventory::examples::representative().builder.build();
 
-        // ...and then mutate it such that the omicron zones it reports match
-        // the sled agent IDs it reports. Steal the sled agent info and drop the
-        // fake sled-agent IDs:
-        let mut empty_map = BTreeMap::new();
-        mem::swap(&mut empty_map, &mut collection.sled_agents);
-        let mut sled_agents = empty_map.into_values().collect::<Vec<_>>();
+        // ... and replace its sled agent and Omicron zones with those from our
+        // example system.
+        mem::swap(
+            &mut collection.sled_agents,
+            &mut base_collection.sled_agents,
+        );
+        mem::swap(
+            &mut collection.omicron_zones,
+            &mut base_collection.omicron_zones,
+        );
 
-        // Now reinsert them with IDs pulled from the omicron zones. This
-        // assumes we have more fake sled agents than omicron zones, which is
-        // currently true for the representative collection.
-        for &sled_id in collection.omicron_zones.keys() {
-            let some_sled_agent = sled_agents.pop().expect(
-                "fewer representative sled agents than \
-                 representative omicron zones sleds",
-            );
-            collection.sled_agents.insert(sled_id, some_sled_agent);
-        }
-
-        let policy = policy_from_collection(&collection);
-        let planning_input = {
-            let mut builder = PlanningInputBuilder::new(
-                policy,
-                Generation::new(),
-                Generation::new(),
-            );
-            for (sled_id, agent) in &collection.sled_agents {
-                builder
-                    .add_sled(
-                        *sled_id,
-                        fake_sled_details(Some(*agent.sled_agent_address.ip())),
-                    )
-                    .expect("failed to add sled to representative");
-            }
-            builder.build()
-        };
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            planning_input.all_sled_ids(SledFilter::All),
-            "test",
-        )
-        .unwrap();
+        // Treat this blueprint as the initial blueprint for the system.
+        blueprint.parent_blueprint_id = None;
 
         (collection, planning_input, blueprint)
     }
@@ -1442,17 +1409,11 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create an empty collection and a blueprint from it
-        let collection =
-            nexus_inventory::CollectionBuilder::new("test").build();
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
+        // Create an empty blueprint from it
+        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
             std::iter::empty(),
             "test",
-        )
-        .unwrap();
+        );
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -1471,7 +1432,7 @@ mod tests {
         let blueprint_read = datastore
             .blueprint_read(&opctx, &authz_blueprint)
             .await
-            .expect("failed to read collection back");
+            .expect("failed to read blueprint back");
         assert_eq!(blueprint1, blueprint_read);
         assert_eq!(
             blueprint_list_all_ids(&opctx, &datastore).await,
@@ -1501,13 +1462,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_representative_blueprint() {
+        const TEST_NAME: &str = "test_representative_blueprint";
         // Setup
-        let logctx = dev::test_setup_log("test_representative_blueprint");
+        let logctx = dev::test_setup_log(TEST_NAME);
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a cohesive representative collection/policy/blueprint
-        let (collection, planning_input, blueprint1) = representative();
+        let (collection, planning_input, blueprint1) =
+            representative(&logctx.log, TEST_NAME);
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
@@ -1632,10 +1595,23 @@ mod tests {
         let blueprint2 = builder.build();
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        println!("b1 -> b2: {}", diff.display());
+        println!("b1 disks: {:?}", blueprint1.blueprint_disks);
+        println!("b2 disks: {:?}", blueprint2.blueprint_disks);
         // Check that we added the new sled, as well as its disks and zones.
         assert_eq!(
-            blueprint1.blueprint_disks.len() + new_sled_zpools.len(),
-            blueprint2.blueprint_disks.len(),
+            blueprint1
+                .blueprint_disks
+                .values()
+                .map(|c| c.disks.len())
+                .sum::<usize>()
+                + new_sled_zpools.len(),
+            blueprint2
+                .blueprint_disks
+                .values()
+                .map(|c| c.disks.len())
+                .sum::<usize>()
         );
         assert_eq!(
             blueprint1.blueprint_zones.len() + 1,
@@ -1757,16 +1733,10 @@ mod tests {
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
-        let collection =
-            nexus_inventory::CollectionBuilder::new("test").build();
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
+        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
             std::iter::empty(),
             "test1",
-        )
-        .unwrap();
+        );
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -1911,16 +1881,10 @@ mod tests {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create an initial blueprint and a child.
-        let collection =
-            nexus_inventory::CollectionBuilder::new("test").build();
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
+        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
             std::iter::empty(),
             "test1",
-        )
-        .unwrap();
+        );
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
