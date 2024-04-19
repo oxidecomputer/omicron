@@ -1159,7 +1159,12 @@ impl super::Nexus {
             ));
         }
         let source_nat =
-            SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
+            SourceNatConfig::try_from(snat_ip.into_iter().next().unwrap())
+                .map_err(|err| {
+                    Error::internal_error(&format!(
+                        "read invalid SNAT config from db: {err}"
+                    ))
+                })?;
 
         // Gather the firewall rules for the VPC this instance is in.
         // The NIC info we gathered above doesn't have VPC information

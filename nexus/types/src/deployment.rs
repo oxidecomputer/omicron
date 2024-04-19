@@ -45,6 +45,7 @@ mod zone_type;
 
 pub use planning_input::DiskFilter;
 pub use planning_input::OmicronZoneExternalIp;
+pub use planning_input::OmicronZoneExternalIpKind;
 pub use planning_input::OmicronZoneNic;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;

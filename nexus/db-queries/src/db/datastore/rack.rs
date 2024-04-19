@@ -47,6 +47,8 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -61,6 +63,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
@@ -475,70 +478,62 @@ impl DataStore {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
-                let external_ip = dns_address.ip();
-                let service_kind = format!("{}", zone_type.kind());
-                let db_ip = IncompleteExternalIp::for_service_explicit(
-                    Uuid::new_v4(),
-                    &db::model::Name(nic.name.clone()),
-                    &service_kind,
-                    zone_config.id.into_untyped_uuid(),
-                    service_pool.id(),
-                    external_ip,
-                );
+                let external_ip = OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    kind: OmicronZoneExternalIpKind::Floating(dns_address.ip()),
+                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
                     DNS_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: nic.name.clone(),
-                        description: format!("{service_kind} service vNIC"),
+                        description: format!(
+                            "{} service vNIC",
+                            zone_type.kind()
+                        ),
                     },
                     nic.ip,
                     nic.mac,
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((db_ip, db_nic))
+                Some((external_ip, db_nic))
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 nic,
                 external_ip,
                 ..
             }) => {
-                let service_kind = format!("{}", zone_type.kind());
-                let db_ip = IncompleteExternalIp::for_service_explicit(
-                    Uuid::new_v4(),
-                    &db::model::Name(nic.name.clone()),
-                    &service_kind,
-                    zone_config.id.into_untyped_uuid(),
-                    service_pool.id(),
-                    *external_ip,
-                );
+                let external_ip = OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    kind: OmicronZoneExternalIpKind::Floating(*external_ip),
+                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
                     NEXUS_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: nic.name.clone(),
-                        description: format!("{service_kind} service vNIC"),
+                        description: format!(
+                            "{} service vNIC",
+                            zone_type.kind()
+                        ),
                     },
                     nic.ip,
                     nic.mac,
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((db_ip, db_nic))
+                Some((external_ip, db_nic))
             }
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { snat_cfg, nic, .. },
             ) => {
-                let db_ip = IncompleteExternalIp::for_service_explicit_snat(
-                    Uuid::new_v4(),
-                    zone_config.id.into_untyped_uuid(),
-                    service_pool.id(),
-                    snat_cfg.ip,
-                    (snat_cfg.first_port, snat_cfg.last_port),
-                );
+                let external_ip = OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    kind: OmicronZoneExternalIpKind::Snat(*snat_cfg),
+                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -555,7 +550,7 @@ impl DataStore {
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((db_ip, db_nic))
+                Some((external_ip, db_nic))
             }
             BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Clickhouse(_)
@@ -566,7 +561,7 @@ impl DataStore {
             | BlueprintZoneType::InternalDns(_)
             | BlueprintZoneType::Oximeter(_) => None,
         };
-        let Some((db_ip, db_nic)) = service_ip_nic else {
+        let Some((external_ip, db_nic)) = service_ip_nic else {
             info!(
                 log,
                 "No networking records needed for {} service",
@@ -574,6 +569,12 @@ impl DataStore {
             );
             return Ok(());
         };
+        let db_ip = IncompleteExternalIp::for_omicron_zone(
+            service_pool.id(),
+            external_ip,
+            zone_config.id,
+            zone_config.zone_type.kind(),
+        );
         Self::allocate_external_ip_on_connection(conn, db_ip).await.map_err(
             |err| {
                 error!(
@@ -1362,11 +1363,10 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig {
-                                    ip: ntp1_ip,
-                                    first_port: 16384,
-                                    last_port: 32767,
-                                },
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp1_ip, 16384, 32767,
+                                )
+                                .unwrap(),
                             },
                         },
                     ],
@@ -1430,11 +1430,10 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig {
-                                    ip: ntp2_ip,
-                                    first_port: 0,
-                                    last_port: 16383,
-                                },
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp2_ip, 0, 16383,
+                                )
+                                .unwrap(),
                             },
                         },
                     ],

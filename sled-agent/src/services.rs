@@ -1274,7 +1274,10 @@ impl ServiceManager {
         // XXX: need to revisit iff. any services get more than one
         //      address.
         let (target_ip, first_port, last_port) = match snat {
-            Some(s) => (s.ip, s.first_port, s.last_port),
+            Some(s) => {
+                let (first_port, last_port) = s.port_range_raw();
+                (s.ip, first_port, last_port)
+            }
             None => (floating_ips[0], 0, u16::MAX),
         };
 

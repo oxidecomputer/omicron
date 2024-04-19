@@ -290,7 +290,8 @@ impl From<&omicron_common::api::internal::shared::SourceNatConfig>
     fn from(
         r: &omicron_common::api::internal::shared::SourceNatConfig,
     ) -> Self {
-        Self { ip: r.ip, first_port: r.first_port, last_port: r.last_port }
+        let (first_port, last_port) = r.port_range_raw();
+        Self { ip: r.ip, first_port, last_port }
     }
 }
 

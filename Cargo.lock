@@ -4554,6 +4554,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
+ "slog",
+ "slog-error-chain",
  "steno",
  "strum",
  "thiserror",
