@@ -2089,7 +2089,7 @@ dependencies = [
  "paste",
  "percent-encoding",
  "proc-macro2",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-pemfile 2.1.2",
  "schemars",
  "serde",
@@ -3358,7 +3358,7 @@ dependencies = [
  "hyper 1.1.0",
  "hyper-util",
  "log",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
@@ -4624,7 +4624,7 @@ dependencies = [
  "rcgen",
  "ref-cast",
  "regex",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "samael",
  "schemars",
  "semver 1.0.22",
@@ -5443,7 +5443,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.8",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-pemfile 2.1.2",
  "samael",
  "schemars",
@@ -5713,7 +5713,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.8",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "slog",
  "subprocess",
  "tar",
@@ -7952,9 +7952,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.2"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87c9956bd9807afa1f77e0f7594af32566e830e088a5576d27c5b6f30f49d41"
+checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -9801,7 +9801,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
 dependencies = [
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-pki-types",
  "tokio",
 ]
