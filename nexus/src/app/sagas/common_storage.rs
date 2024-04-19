@@ -49,6 +49,7 @@ pub(crate) async fn ensure_region_in_dataset(
         cert_pem: None,
         key_pem: None,
         root_pem: None,
+        source: None,
     };
 
     let create_region = || async {
