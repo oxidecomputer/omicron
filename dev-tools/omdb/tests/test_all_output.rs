@@ -46,7 +46,6 @@ async fn test_omdb_usage_errors() {
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
-        &["db", "services"],
         &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
@@ -90,14 +89,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
         &["db", "reconfigurator-save", tmppath.as_str()],
-        &["db", "services", "list-instances"],
-        &["db", "services", "list-by-sled"],
         &["db", "sleds"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
         &["nexus", "blueprints", "list"],
         &["nexus", "blueprints", "show", &initial_blueprint_id],
+        &["nexus", "blueprints", "show", "current-target"],
+        &[
+            "nexus",
+            "blueprints",
+            "diff",
+            &initial_blueprint_id,
+            "current-target",
+        ],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.

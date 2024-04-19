@@ -150,7 +150,7 @@ impl super::Nexus {
                 // allow users to boot that. This should go away when that blob
                 // does.
                 let db_block_size = db::model::BlockSize::Traditional;
-                let block_size: u64 = db_block_size.to_bytes() as u64;
+                let block_size: u64 = u64::from(db_block_size.to_bytes());
 
                 let image_id = Uuid::new_v4();
 

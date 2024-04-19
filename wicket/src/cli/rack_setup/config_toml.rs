@@ -273,7 +273,7 @@ fn populate_network_table(
                         );
                         peer.insert(
                             "asn",
-                            Value::Integer(Formatted::new(p.asn as i64)),
+                            Value::Integer(Formatted::new(i64::from(p.asn))),
                         );
                         peer.insert(
                             "port",
@@ -326,9 +326,9 @@ fn populate_network_table(
                     let mut bgp = Table::new();
                     bgp.insert(
                         "asn",
-                        Item::Value(Value::Integer(Formatted::new(
-                            cfg.asn as i64,
-                        ))),
+                        Item::Value(Value::Integer(Formatted::new(i64::from(
+                            cfg.asn,
+                        )))),
                     );
 
                     let mut originate = Array::new();

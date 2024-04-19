@@ -294,7 +294,7 @@ impl super::Nexus {
 
         // Reject instances where the memory is not at least
         // MIN_MEMORY_BYTES_PER_INSTANCE
-        if params.memory.to_bytes() < MIN_MEMORY_BYTES_PER_INSTANCE as u64 {
+        if params.memory.to_bytes() < u64::from(MIN_MEMORY_BYTES_PER_INSTANCE) {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -306,7 +306,7 @@ impl super::Nexus {
 
         // Reject instances where the memory is not divisible by
         // MIN_MEMORY_BYTES_PER_INSTANCE
-        if (params.memory.to_bytes() % MIN_MEMORY_BYTES_PER_INSTANCE as u64)
+        if (params.memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
             != 0
         {
             return Err(Error::invalid_value(

@@ -20,6 +20,9 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_reconfigurator_execution::silo_dns_name;
+use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -191,15 +194,15 @@ impl super::Nexus {
 
         let silo_name = &request.recovery_silo.silo_name;
         let dns_records = request
-            .services
-            .iter()
-            .filter_map(|s| match &s.kind {
-                nexus_types::internal_api::params::ServiceKind::Nexus {
-                    external_address,
+            .blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
+            .filter_map(|(_, zc)| match zc.zone_type {
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    external_ip,
                     ..
-                } => Some(match external_address {
-                    IpAddr::V4(addr) => DnsRecord::A(*addr),
-                    IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
+                }) => Some(match external_ip {
+                    IpAddr::V4(addr) => DnsRecord::A(addr),
+                    IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
                 }),
                 _ => None,
             })
@@ -613,7 +616,6 @@ impl super::Nexus {
                     rack_subnet: rack_network_config.rack_subnet.into(),
                     rack_id,
                     blueprint,
-                    services: request.services,
                     physical_disks,
                     zpools,
                     datasets,
@@ -845,10 +847,6 @@ impl super::Nexus {
                 sled, allocation.rack_id
             ),
         })?;
-
-        // Trigger an inventory collection so that the newly added sled is known
-        // about.
-        self.activate_inventory_collection();
 
         Ok(())
     }

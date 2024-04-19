@@ -318,7 +318,9 @@ fn resize(rect: Rect) -> ComponentRects {
     for i in [17, 18] {
         let shelf_rect = Rect {
             x: rack_rect.x,
-            y: rack_rect.y + sled_height * 8 + other_height * (i as u16 - 16),
+            y: rack_rect.y
+                + sled_height * 8
+                + other_height * (u16::from(i) - 16),
             width: sled_width * 2,
             height: other_height,
         };
@@ -379,9 +381,9 @@ fn size_sled(
         rack.x + sled_width
     };
     let y = if index < 16 {
-        rack.y + sled_height * (index as u16 / 2)
+        rack.y + sled_height * (u16::from(index) / 2)
     } else {
-        rack.y + sled_height * (index as u16 / 2) + other_height * 4
+        rack.y + sled_height * (u16::from(index) / 2) + other_height * 4
     };
     let height = if (index == 30 || index == 31) && sled_height == 2 {
         // We saved space for a bottom border
