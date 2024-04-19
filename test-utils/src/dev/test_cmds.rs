@@ -188,6 +188,11 @@ pub fn redact_variable(input: &str) -> String {
     )
     .to_string();
 
+    let s = regex::Regex::new(r"iter \d+,")
+        .unwrap()
+        .replace_all(&s, "<REDACTED ITERATIONS>,")
+        .to_string();
+
     s
 }
 

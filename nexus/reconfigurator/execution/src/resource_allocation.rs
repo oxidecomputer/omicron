@@ -7,8 +7,6 @@
 use anyhow::bail;
 use anyhow::Context;
 use nexus_db_model::IncompleteNetworkInterface;
-use nexus_db_model::Name;
-use nexus_db_model::SqlU16;
 use nexus_db_model::VpcSubnet;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
@@ -18,17 +16,21 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_client::ZoneKind;
+use slog::error;
 use slog::info;
 use slog::warn;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use uuid::Uuid;
 
 pub(crate) async fn ensure_zone_resources_allocated(
     opctx: &OpContext,
@@ -68,7 +70,7 @@ pub(crate) async fn ensure_zone_resources_allocated(
             ) => {
                 allocator
                     .ensure_boundary_ntp_external_networking_allocated(
-                        z.id, snat_cfg, nic,
+                        z.id, *snat_cfg, nic,
                     )
                     .await?;
             }
@@ -96,16 +98,15 @@ impl<'a> ResourceAllocator<'a> {
     // already allocated to a specific service zone.
     async fn is_external_ip_already_allocated(
         &self,
-        zone_type: &'static str,
+        zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        external_ip: IpAddr,
-        port_range: Option<(u16, u16)>,
+        ip_kind: OmicronZoneExternalIpKind,
     ) -> anyhow::Result<bool> {
         // localhost is used by many components in the test suite.  We can't use
         // the normal path because normally a given external IP must only be
         // used once.  Just treat localhost in the test suite as though it's
         // already allocated.  We do the same in is_nic_already_allocated().
-        if cfg!(test) && external_ip.is_loopback() {
+        if cfg!(test) && ip_kind.ip().is_loopback() {
             return Ok(true);
         }
 
@@ -115,54 +116,77 @@ impl<'a> ResourceAllocator<'a> {
             .await
             .with_context(|| {
                 format!(
-                    "failed to look up external IPs for {zone_type} {zone_id}"
+                    "failed to look up external IPs for {zone_kind} {zone_id}"
                 )
             })?;
 
-        if !allocated_ips.is_empty() {
-            // All the service zones that want external IP addresses only expect
-            // to have a single IP. This service already has (at least) one:
-            // make sure this list includes the one we want, or return an error.
-            for allocated_ip in &allocated_ips {
-                if allocated_ip.ip.ip() == external_ip
-                    && port_range
-                        .map(|(first, last)| {
-                            allocated_ip.first_port == SqlU16(first)
-                                && allocated_ip.last_port == SqlU16(last)
-                        })
-                        .unwrap_or(true)
-                {
-                    info!(
-                        self.opctx.log, "found already-allocated external IP";
-                        "zone_type" => zone_type,
-                        "zone_id" => %zone_id,
-                        "ip" => %external_ip,
-                    );
-                    return Ok(true);
-                }
-            }
+        // We expect to find either 0 or exactly 1 IP for any given zone. If 0,
+        // we know the IP isn't allocated; if 1, we'll check that it matches
+        // below.
+        let existing_ip = match allocated_ips.as_slice() {
+            [] => {
+                info!(
+                    self.opctx.log, "external IP allocation required for zone";
+                    "zone_kind" => %zone_kind,
+                    "zone_id" => %zone_id,
+                    "ip" => ?ip_kind,
+                );
 
-            warn!(
-                self.opctx.log, "zone has unexpected IPs allocated";
-                "zone_type" => zone_type,
+                return Ok(false);
+            }
+            [ip] => ip,
+            _ => {
+                warn!(
+                    self.opctx.log, "zone has multiple IPs allocated";
+                    "zone_kind" => %zone_kind,
+                    "zone_id" => %zone_id,
+                    "want_ip" => ?ip_kind,
+                    "allocated_ips" => ?allocated_ips,
+                );
+                bail!(
+                    "zone {zone_id} already has {} IPs allocated (expected 1)",
+                    allocated_ips.len()
+                );
+            }
+        };
+
+        // We expect this to always succeed; a failure here means we've stored
+        // an Omicron zone IP in the database that can't be converted back to an
+        // Omicron zone IP!
+        let existing_ip = match OmicronZoneExternalIp::try_from(existing_ip) {
+            Ok(existing_ip) => existing_ip,
+            Err(err) => {
+                error!(
+                    self.opctx.log, "invalid IP in database for zone";
+                    "zone_kind" => %zone_kind,
+                    "zone_id" => %zone_id,
+                    "ip" => ?existing_ip,
+                    &err,
+                );
+                bail!("zone {zone_id} has invalid IP database record: {err}");
+            }
+        };
+
+        // TODO-cleanup The blueprint should store the IP ID, at which point we
+        // could check full equality here instead of only checking the kind.
+        if existing_ip.kind == ip_kind {
+            info!(
+                self.opctx.log, "found already-allocated external IP";
+                "zone_kind" => %zone_kind,
                 "zone_id" => %zone_id,
-                "want_ip" => %external_ip,
-                "allocated_ips" => ?allocated_ips,
+                "ip" => ?ip_kind,
             );
-            bail!(
-                "zone {zone_id} already has {} non-matching IP(s) allocated",
-                allocated_ips.len()
-            );
+            return Ok(true);
         }
 
-        info!(
-            self.opctx.log, "external IP allocation required for zone";
-            "zone_type" => zone_type,
+        warn!(
+            self.opctx.log, "zone has unexpected IP allocated";
+            "zone_kind" => %zone_kind,
             "zone_id" => %zone_id,
-            "ip" => %external_ip,
+            "want_ip" => ?ip_kind,
+            "allocated_ip" => ?existing_ip,
         );
-
-        Ok(false)
+        bail!("zone {zone_id} has a different IP allocated ({existing_ip:?})",);
     }
 
     // Helper function to determine whether a given NIC is already allocated to
@@ -237,14 +261,11 @@ impl<'a> ResourceAllocator<'a> {
         Ok(false)
     }
 
-    // Nexus and ExternalDns both use non-SNAT service IPs; this method is used
-    // to allocate external networking for both of them.
     async fn ensure_external_service_ip(
         &self,
-        zone_type: &'static str,
-        service_id: OmicronZoneUuid,
-        external_ip: IpAddr,
-        ip_name: &Name,
+        zone_kind: ZoneKind,
+        zone_id: OmicronZoneUuid,
+        ip_kind: OmicronZoneExternalIpKind,
     ) -> anyhow::Result<()> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
@@ -259,94 +280,32 @@ impl<'a> ResourceAllocator<'a> {
         // exactly what we want if two Nexuses try to realize the same
         // blueprint at the same time.
         if self
-            .is_external_ip_already_allocated(
-                zone_type,
-                service_id,
-                external_ip,
-                None,
-            )
+            .is_external_ip_already_allocated(zone_kind, zone_id, ip_kind)
             .await?
         {
             return Ok(());
         }
-        let ip_id = Uuid::new_v4();
-        let description = zone_type;
+        let ip_id = ExternalIpUuid::new_v4();
         self.datastore
-            .external_ip_allocate_service_explicit(
+            .external_ip_allocate_omicron_zone(
                 self.opctx,
-                ip_id,
-                ip_name,
-                description,
-                service_id.into_untyped_uuid(),
-                external_ip,
+                zone_id,
+                zone_kind,
+                OmicronZoneExternalIp { id: ip_id, kind: ip_kind },
             )
             .await
             .with_context(|| {
                 format!(
-                    "failed to allocate IP to {zone_type} {service_id}: \
-                         {external_ip}"
+                    "failed to allocate IP to {zone_kind} {zone_id}: \
+                     {ip_kind:?}"
                 )
             })?;
 
         info!(
             self.opctx.log, "successfully allocated external IP";
-            "zone_type" => zone_type,
-            "zone_id" => %service_id,
-            "ip" => %external_ip,
-            "ip_id" => %ip_id,
-        );
-
-        Ok(())
-    }
-
-    // BoundaryNtp uses a SNAT service IPs; this method is similar to
-    // `ensure_external_service_ip` but accounts for that.
-    async fn ensure_external_service_snat_ip(
-        &self,
-        zone_type: &'static str,
-        service_id: OmicronZoneUuid,
-        snat: &SourceNatConfig,
-    ) -> anyhow::Result<()> {
-        // Only attempt to allocate `external_ip` if it isn't already assigned
-        // to this zone.
-        //
-        // This is subject to the same kind of TOCTOU race as described for IP
-        // allocation in `ensure_external_service_ip`, and we believe it's okay
-        // for the same reasons as described there.
-        if self
-            .is_external_ip_already_allocated(
-                zone_type,
-                service_id,
-                snat.ip,
-                Some((snat.first_port, snat.last_port)),
-            )
-            .await?
-        {
-            return Ok(());
-        }
-
-        let ip_id = Uuid::new_v4();
-        self.datastore
-            .external_ip_allocate_service_explicit_snat(
-                self.opctx,
-                ip_id,
-                service_id.into_untyped_uuid(),
-                snat.ip,
-                (snat.first_port, snat.last_port),
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to allocate snat IP to {zone_type} {service_id}: \
-                     {snat:?}"
-                )
-            })?;
-
-        info!(
-            self.opctx.log, "successfully allocated external SNAT IP";
-            "zone_type" => zone_type,
-            "zone_id" => %service_id,
-            "snat" => ?snat,
+            "zone_kind" => %zone_kind,
+            "zone_id" => %zone_id,
+            "ip" => ?ip_kind,
             "ip_id" => %ip_id,
         );
 
@@ -461,10 +420,9 @@ impl<'a> ResourceAllocator<'a> {
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
         self.ensure_external_service_ip(
-            "nexus",
+            ZoneKind::Nexus,
             zone_id,
-            external_ip,
-            &Name(nic.name.clone()),
+            OmicronZoneExternalIpKind::Floating(external_ip),
         )
         .await?;
         self.ensure_service_nic("nexus", zone_id, nic, &NEXUS_VPC_SUBNET)
@@ -479,10 +437,9 @@ impl<'a> ResourceAllocator<'a> {
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
         self.ensure_external_service_ip(
-            "external_dns",
+            ZoneKind::ExternalDns,
             zone_id,
-            dns_address.ip(),
-            &Name(nic.name.clone()),
+            OmicronZoneExternalIpKind::Floating(dns_address.ip()),
         )
         .await?;
         self.ensure_service_nic("external_dns", zone_id, nic, &DNS_VPC_SUBNET)
@@ -493,10 +450,15 @@ impl<'a> ResourceAllocator<'a> {
     async fn ensure_boundary_ntp_external_networking_allocated(
         &self,
         zone_id: OmicronZoneUuid,
-        snat: &SourceNatConfig,
+        snat: SourceNatConfig,
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
-        self.ensure_external_service_snat_ip("ntp", zone_id, snat).await?;
+        self.ensure_external_service_ip(
+            ZoneKind::BoundaryNtp,
+            zone_id,
+            OmicronZoneExternalIpKind::Snat(snat),
+        )
+        .await?;
         self.ensure_service_nic("ntp", zone_id, nic, &NTP_VPC_SUBNET).await?;
         Ok(())
     }
@@ -506,6 +468,7 @@ impl<'a> ResourceAllocator<'a> {
 mod tests {
     use super::*;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_model::SqlU16;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -521,6 +484,7 @@ mod tests {
     use omicron_common::api::external::Vni;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -604,11 +568,12 @@ mod tests {
 
         // Boundary NTP:
         let ntp_id = OmicronZoneUuid::new_v4();
-        let ntp_snat = SourceNatConfig {
-            ip: external_ips.next().expect("exhausted external_ips"),
-            first_port: NUM_SOURCE_NAT_PORTS,
-            last_port: 2 * NUM_SOURCE_NAT_PORTS - 1,
-        };
+        let ntp_snat = SourceNatConfig::new(
+            external_ips.next().expect("exhausted external_ips"),
+            NUM_SOURCE_NAT_PORTS,
+            2 * NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
         let ntp_nic = NetworkInterface {
             id: Uuid::new_v4(),
             kind: NetworkInterfaceKind::Service {
@@ -719,8 +684,10 @@ mod tests {
         assert!(db_ntp_ips[0].is_service);
         assert_eq!(db_ntp_ips[0].parent_id, Some(ntp_id.into_untyped_uuid()));
         assert_eq!(db_ntp_ips[0].ip, ntp_snat.ip.into());
-        assert_eq!(db_ntp_ips[0].first_port, SqlU16(ntp_snat.first_port));
-        assert_eq!(db_ntp_ips[0].last_port, SqlU16(ntp_snat.last_port));
+        assert_eq!(
+            db_ntp_ips[0].first_port.0..=db_ntp_ips[0].last_port.0,
+            ntp_snat.port_range()
+        );
 
         // Check that the NIC records were created.
         let db_nexus_nics = datastore
@@ -842,7 +809,7 @@ mod tests {
                     {
                         *external_ip = bogus_ip;
                         return format!(
-                            "zone {} already has 1 non-matching IP",
+                            "zone {} has a different IP allocated",
                             zone.id
                         );
                     }
@@ -862,7 +829,7 @@ mod tests {
                     {
                         *dns_address = SocketAddr::new(bogus_ip, 0);
                         return format!(
-                            "zone {} already has 1 non-matching IP",
+                            "zone {} has a different IP allocated",
                             zone.id
                         );
                     }
@@ -879,10 +846,14 @@ mod tests {
                         },
                     ) = &mut zone.zone_type
                     {
-                        snat_cfg.first_port += NUM_SOURCE_NAT_PORTS;
-                        snat_cfg.last_port += NUM_SOURCE_NAT_PORTS;
+                        let (mut first, mut last) = snat_cfg.port_range_raw();
+                        first += NUM_SOURCE_NAT_PORTS;
+                        last += NUM_SOURCE_NAT_PORTS;
+                        *snat_cfg =
+                            SourceNatConfig::new(snat_cfg.ip, first, last)
+                                .unwrap();
                         return format!(
-                            "zone {} already has 1 non-matching IP",
+                            "zone {} has a different IP allocated",
                             zone.id
                         );
                     }

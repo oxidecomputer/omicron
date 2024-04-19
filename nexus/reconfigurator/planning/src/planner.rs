@@ -17,8 +17,6 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
-use slog::debug;
-use slog::o;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -86,15 +84,10 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
-        let mut pending_expunges = Vec::new();
-
         // Remove services from sleds marked expunged. We use `SledFilter::All`
-        // and do our own filtering here to provide clearer messages.
+        // and have a custom `needs_zone_expungement` function that allows us
+        // to produce better errors.
         for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
-            let log = self.log.new(o!(
-                "sled_id" => sled_id.to_string(),
-            ));
-
             // Does this sled need zone expungement based on the details?
             let Some(reason) =
                 needs_zone_expungement(sled_details.state, sled_details.policy)
@@ -102,47 +95,8 @@ impl<'a> Planner<'a> {
                 continue;
             };
 
-            // Are there any zones that need to be expunged?
-            let Some(pending_expunge) = self
-                .blueprint
-                .build_pending_expunge_for_sled(sled_id, reason)?
-            else {
-                debug!(
-                    log,
-                    "sled has no zones that need expungement; skipping";
-                );
-                continue;
-            };
-
-            match reason {
-                ZoneExpungeReason::SledDecommissioned => {
-                    // A sled marked as decommissioned should have no resources
-                    // allocated to it. If it does, it's an illegal state,
-                    // possibly introduced by a bug elsewhere in the system --
-                    // we need to warn on this, and also remove the zones.
-                    warn!(
-                        &log,
-                        "sled has state Decommissioned, yet has zones \
-                         allocated to it; will expunge them \
-                         (sled policy is \"{}\")", sled_details.policy;
-                    );
-                }
-                ZoneExpungeReason::SledExpunged => {
-                    // This is the expected situation.
-                    info!(
-                        &log,
-                        "expunged sled with non-expunged zones found \
-                         (will expunge all zonewith non-expungeds)";
-                    );
-                }
-            }
-
-            pending_expunges.push(pending_expunge);
-        }
-
-        // Now, actually expunge the zones.
-        for pending_expunge in pending_expunges {
-            self.blueprint.apply_pending_expunge(pending_expunge)?;
+            // Perform the expungement.
+            self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
         }
 
         Ok(())
@@ -417,7 +371,7 @@ fn needs_zone_expungement(
             // an illegal state, but representable. If we see a sled in this
             // state, we should still expunge all zones in it, but parent code
             // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned);
+            return Some(ZoneExpungeReason::SledDecommissioned { policy });
         }
     }
 
@@ -433,7 +387,7 @@ fn needs_zone_expungement(
 /// logical flow.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ZoneExpungeReason {
-    SledDecommissioned,
+    SledDecommissioned { policy: SledPolicy },
     SledExpunged,
 }
 

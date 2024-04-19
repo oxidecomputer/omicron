@@ -45,6 +45,7 @@ mod zone_type;
 
 pub use planning_input::DiskFilter;
 pub use planning_input::OmicronZoneExternalIp;
+pub use planning_input::OmicronZoneExternalIpKind;
 pub use planning_input::OmicronZoneNic;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
@@ -1276,7 +1277,7 @@ mod table_display {
 
             for (sled_id, sled_zones) in blueprint_zones {
                 let heading = format!(
-                    "{SLED_INDENT}sled {sled_id}: zones at generation {}",
+                    "{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
                     sled_zones.generation
                 );
                 builder.make_section(
@@ -1527,7 +1528,7 @@ mod table_display {
         section: &mut StSectionBuilder,
     ) {
         let heading = format!(
-            "{}{SLED_INDENT}sled {sled_id}: zones at generation {}",
+            "{}{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
             kind.prefix(),
             sled_zones.generation,
         );
@@ -1562,26 +1563,28 @@ mod table_display {
         modified: &DiffSledModified,
         section: &mut StSectionBuilder,
     ) {
-        let (generation_heading, warning) = if modified.generation_before
-            != modified.generation_after
-        {
-            (
-                format!(
-                    "zones at generation: {} -> {}",
-                    modified.generation_before, modified.generation_after,
-                ),
-                None,
-            )
-        } else {
-            // Modified sleds should always see a generation bump.
-            (
-                format!("zones at generation: {}", modified.generation_before),
-                Some(format!(
-                    "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
+        let (generation_heading, warning) =
+            if modified.generation_before != modified.generation_after {
+                (
+                    format!(
+                        "blueprint zones at generation: {} -> {}",
+                        modified.generation_before, modified.generation_after,
+                    ),
+                    None,
+                )
+            } else {
+                // Modified sleds should always see a generation bump.
+                (
+                    format!(
+                        "blueprint zones at generation: {}",
+                        modified.generation_before
+                    ),
+                    Some(format!(
+                        "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
                      warning: generation should have changed"
-                )),
-            )
-        };
+                    )),
+                )
+            };
 
         let sled_heading =
             format!("{MODIFIED_PREFIX}{SLED_INDENT}sled {sled_id}: {generation_heading}");

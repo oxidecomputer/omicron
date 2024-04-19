@@ -7,7 +7,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
                                                                                                           
   UNCHANGED SLEDS:                                                                                        
                                                                                                           
-   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9: zones at generation 2                                       
+   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9: blueprint zones at generation 2                             
      crucible       19fbc4f8-a683-4f22-8f5a-e74782b935be   in service    fd00:1122:3344:105::26           
      crucible       4f1ce8a2-d3a5-4a38-be4c-9817de52db37   in service    fd00:1122:3344:105::2c           
      crucible       6b53ab2e-d98c-485f-87a3-4d5df595390f   in service    fd00:1122:3344:105::27           
@@ -23,7 +23,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
                                                                                                           
   MODIFIED SLEDS:                                                                                         
                                                                                                           
-*  sled 48d95fef-bc9f-4f50-9a53-1e075836291d: zones at generation: 2 -> 3                                 
+*  sled 48d95fef-bc9f-4f50-9a53-1e075836291d: blueprint zones at generation: 2 -> 3                       
 -    crucible       094f27af-1acb-4d1e-ba97-1fc1377d4bf2   in service    fd00:1122:3344:103::2c  modified 
 +     ├─                                                   expunged      fd00:1122:3344:103::2c           
 *     └─ changed: disposition                                                                             
@@ -61,7 +61,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 +     ├─                                                   expunged      fd00:1122:3344:103::22           
 *     └─ changed: disposition                                                                             
                                                                                                           
-*  sled 68d24ac5-f341-49ea-a92a-0381b52ab387: zones at generation: 2 -> 3                                 
+*  sled 68d24ac5-f341-49ea-a92a-0381b52ab387: blueprint zones at generation: 2 -> 3                       
 -    crucible       3b3c14b6-a8e2-4054-a577-8d96cb576230   in service    fd00:1122:3344:102::2c  modified 
 +     ├─                                                   expunged      fd00:1122:3344:102::2c           
 *     └─ changed: disposition                                                                             
@@ -99,7 +99,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 +     ├─                                                   expunged      fd00:1122:3344:102::22           
 *     └─ changed: disposition                                                                             
                                                                                                           
-*  sled 75bc286f-2b4b-482c-9431-59272af529da: zones at generation: 2 -> 3                                 
+*  sled 75bc286f-2b4b-482c-9431-59272af529da: blueprint zones at generation: 2 -> 3                       
      crucible       15bb9def-69b8-4d2e-b04f-9fee1143387c   in service    fd00:1122:3344:104::25           
      crucible       23a8fa2b-ef3e-4017-a43f-f7a83953bd7c   in service    fd00:1122:3344:104::2c           
      crucible       621509d6-3772-4009-aca1-35eefd1098fb   in service    fd00:1122:3344:104::28           
@@ -116,7 +116,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 +    nexus          508abd03-cbfe-4654-9a6d-7f15a1ad32e5   in service    fd00:1122:3344:104::2e  added    
 +    nexus          59950bc8-1497-44dd-8cbf-b6502ba921b2   in service    fd00:1122:3344:104::2f  added    
                                                                                                           
-*  sled affab35f-600a-4109-8ea0-34a067a4e0bc: zones at generation: 2 -> 3                                 
+*  sled affab35f-600a-4109-8ea0-34a067a4e0bc: blueprint zones at generation: 2 -> 3                       
      crucible       0dfbf374-9ef9-430f-b06d-f271bf7f84c4   in service    fd00:1122:3344:101::27           
      crucible       3aa07966-5899-4789-ace5-f8eeb375c6c3   in service    fd00:1122:3344:101::24           
      crucible       4ad0e9da-08f8-4d40-b4d3-d17e711b5bbf   in service    fd00:1122:3344:101::29           

@@ -210,7 +210,7 @@ fn demount_backingfs() -> Result<()> {
     const BACKED_SERVICES: &str = "svc:/system/fmd:default";
     println!("Disabling {BACKED_SERVICES}");
     svcadm_temporary_toggle(BACKED_SERVICES, false)?;
-    for dataset in zfs_list_internal("yes", "noauto")? {
+    for dataset in zfs_list_internal("noauto", "yes")? {
         println!("unmounting: {dataset}");
         zfs_umount(&dataset)?;
     }

@@ -97,6 +97,8 @@ impl CrucibleDataInner {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
+            source: None,
+            read_only: false,
         };
 
         let old = self.regions.insert(id, region.clone());

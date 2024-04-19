@@ -53,10 +53,14 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use slog::debug;
+use slog::error;
+use slog::info;
 use slog::o;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -68,6 +72,10 @@ use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
 use uuid::Uuid;
+
+use super::zones::is_already_expunged;
+use super::zones::BuilderZoneState;
+use super::zones::BuilderZonesConfig;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -145,7 +153,7 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
-    zones: BlueprintZonesBuilder<'a>,
+    pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
 
     creator: String,
@@ -443,67 +451,91 @@ impl<'a> BlueprintBuilder<'a> {
         self.comments.push(String::from(comment));
     }
 
-    /// Builds a list of zones that are:
+    /// Expunges all zones from a sled.
     ///
-    /// * not *currently* expunged from the given sled
-    /// * but *need to be expunged* from this sled
-    ///
-    /// without actually performing the expungement.
-    ///
-    /// This method does not check whether the sled actually should be expunged
-    /// -- that is the responsibility of higher-level code.
-    pub(crate) fn build_pending_expunge_for_sled(
-        &self,
+    /// Returns a list of zone IDs expunged (excluding zones that were already
+    /// expunged). If the list is empty, then the operation was a no-op.
+    pub(crate) fn expunge_all_zones_for_sled(
+        &mut self,
         sled_id: SledUuid,
         reason: ZoneExpungeReason,
-    ) -> Result<Option<PendingExpunge>, Error> {
-        let mut zones_to_expunge = Vec::new();
+    ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
+        let log = self.log.new(o!(
+            "sled_id" => sled_id.to_string(),
+        ));
+
+        // Do any zones need to be marked expunged?
+        let mut zones_to_expunge = BTreeSet::new();
+
         let sled_zones = self.zones.current_sled_zones(sled_id);
         for (z, state) in sled_zones {
             let is_expunged =
                 is_already_expunged(z, state).map_err(|error| {
                     Error::Planner(anyhow!(error).context(format!(
-                        "for sled {sled_id}, error building pending expunge"
+                        "for sled {sled_id}, error computing zones to expunge"
                     )))
                 })?;
 
             if !is_expunged {
-                zones_to_expunge.push(z.id);
+                zones_to_expunge.insert(z.id);
             }
         }
 
-        if !zones_to_expunge.is_empty() {
-            Ok(Some(PendingExpunge { sled_id, reason, zones_to_expunge }))
-        } else {
-            Ok(None)
+        if zones_to_expunge.is_empty() {
+            debug!(
+                log,
+                "sled has no zones that need expungement; skipping";
+            );
+            return Ok(zones_to_expunge);
         }
-    }
 
-    /// Takes a [`PendingExpunge`], applying it to `self`'s internal state.
-    ///
-    /// Returns an error if the data in the pending expunge didn't match up
-    /// with `self`.
-    pub fn apply_pending_expunge(
-        &mut self,
-        pending_expunge: PendingExpunge,
-    ) -> Result<(), Error> {
-        // Ensure the sled is known.
-        self.sled_resources(pending_expunge.sled_id)?;
+        match reason {
+            ZoneExpungeReason::SledDecommissioned { policy } => {
+                // A sled marked as decommissioned should have no resources
+                // allocated to it. If it does, it's an illegal state, possibly
+                // introduced by a bug elsewhere in the system -- we need to
+                // produce a loud warning (i.e. an ERROR-level log message) on
+                // this, while still removing the zones.
+                error!(
+                    &log,
+                    "sled has state Decommissioned, yet has zones \
+                     allocated to it; will expunge them \
+                     (sled policy is \"{policy}\")"
+                );
+            }
+            ZoneExpungeReason::SledExpunged => {
+                // This is the expected situation.
+                info!(
+                    &log,
+                    "expunged sled with {} non-expunged zones found \
+                     (will expunge all zones)",
+                    zones_to_expunge.len()
+                );
+            }
+        }
 
-        let change = self.zones.change_sled_zones(pending_expunge.sled_id);
-        change.expunge_zones(&pending_expunge.zones_to_expunge).map_err(
-            |error| {
-                anyhow!(error).context(format!(
-                    "for sled {}, error applying \
-                     pending expunge to blueprint",
-                    pending_expunge.sled_id
-                ))
-            },
-        )?;
+        // Now expunge all the zones that need it.
+        let change = self.zones.change_sled_zones(sled_id);
+        change.expunge_zones(zones_to_expunge.clone()).map_err(|error| {
+            anyhow!(error)
+                .context(format!("for sled {sled_id}, error expunging zones"))
+        })?;
 
-        self.comment(pending_expunge.to_comment());
+        // Finally, add a comment describing what happened.
+        let reason = match reason {
+            ZoneExpungeReason::SledDecommissioned { .. } => {
+                "sled state is decommissioned"
+            }
+            ZoneExpungeReason::SledExpunged => "sled policy is expunged",
+        };
 
-        Ok(())
+        self.comment(format!(
+            "sled {} ({reason}): {} zones expunged",
+            sled_id,
+            zones_to_expunge.len(),
+        ));
+
+        Ok(zones_to_expunge)
     }
 
     /// Ensures that the blueprint contains disks for a sled which already
@@ -939,33 +971,6 @@ impl<T: Hash + Eq> Iterator for AvailableIterator<'_, T> {
     }
 }
 
-/// Represents the resources allocated to a sled that is expunged, and needs to
-/// be cleaned up as a result.
-#[derive(Debug)]
-#[must_use = "PendingExpunge does nothing unless used"]
-pub struct PendingExpunge {
-    sled_id: SledUuid,
-    reason: ZoneExpungeReason,
-    zones_to_expunge: Vec<OmicronZoneUuid>,
-}
-
-impl PendingExpunge {
-    /// Returns a comment that can go in the blueprint.
-    fn to_comment(&self) -> String {
-        let reason = match self.reason {
-            ZoneExpungeReason::SledDecommissioned => {
-                "sled state is decommissioned"
-            }
-            ZoneExpungeReason::SledExpunged => "sled policy is expunged",
-        };
-        format!(
-            "sled {} ({reason}): {} zones expunged",
-            self.sled_id,
-            self.zones_to_expunge.len(),
-        )
-    }
-}
-
 #[derive(Debug)]
 struct BlueprintBuilderRng {
     // Have separate RNGs for the different kinds of UUIDs we might add,
@@ -1009,7 +1014,7 @@ impl BlueprintBuilderRng {
 /// blueprint.  We do this by keeping a copy of any [`BlueprintZonesConfig`]
 /// that we've changed and a _reference_ to the parent blueprint's zones.  This
 /// struct makes it easy for callers iterate over the right set of zones.
-struct BlueprintZonesBuilder<'a> {
+pub(super) struct BlueprintZonesBuilder<'a> {
     changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
     // Temporarily make a clone of the parent blueprint's zones so we can use
     // typed UUIDs everywhere. Once we're done migrating, this `Cow` can be
@@ -1097,175 +1102,6 @@ impl<'a> BlueprintZonesBuilder<'a> {
             .collect()
     }
 }
-
-// This is a sub-module to hide implementation details from the rest of
-// blueprint_builder.
-mod builder_zones {
-    use super::*;
-
-    #[derive(Debug)]
-    #[must_use]
-    pub(crate) struct BuilderZonesConfig {
-        // The current generation -- this is bumped at blueprint build time and is
-        // otherwise not exposed to callers.
-        generation: Generation,
-
-        // The list of zones, along with their state.
-        zones: Vec<BuilderZoneConfig>,
-    }
-
-    impl BuilderZonesConfig {
-        pub(super) fn new() -> Self {
-            Self {
-                // Note that the first generation is reserved to mean the one
-                // containing no zones. See
-                // OmicronZonesConfig::INITIAL_GENERATION.
-                //
-                // Since we're currently assuming that creating a new
-                // `BuilderZonesConfig` means that we're going to add new zones
-                // shortly, we start with Generation::new() here. It'll get
-                // bumped up to the next one in `Self::build`.
-                generation: Generation::new(),
-                zones: vec![],
-            }
-        }
-
-        pub(super) fn from_parent(parent: &BlueprintZonesConfig) -> Self {
-            Self {
-                // We'll bump this up at build time.
-                generation: parent.generation,
-
-                zones: parent
-                    .zones
-                    .iter()
-                    .map(|zone| BuilderZoneConfig {
-                        zone: zone.clone(),
-                        state: BuilderZoneState::Unchanged,
-                    })
-                    .collect(),
-            }
-        }
-
-        pub(super) fn add_zone(
-            &mut self,
-            zone: BlueprintZoneConfig,
-        ) -> Result<(), BuilderZonesConfigError> {
-            if self.zones.iter().any(|z| z.zone.id == zone.id) {
-                // We shouldn't be trying to add zones that already exist --
-                // something went wrong in the planner logic.
-                return Err(BuilderZonesConfigError::AddExistingZone {
-                    zone_id: zone.id,
-                });
-            };
-
-            self.zones.push(BuilderZoneConfig {
-                zone,
-                state: BuilderZoneState::Added,
-            });
-            Ok(())
-        }
-
-        pub(super) fn expunge_zones(
-            &mut self,
-            zones: &[OmicronZoneUuid],
-        ) -> Result<(), BuilderZonesConfigError> {
-            for zone_id in zones {
-                // A linear search for each zone is fine, each sled has a pretty
-                // small number of zones.
-                if let Some(zone) =
-                    self.zones.iter_mut().find(|z| z.zone.id == *zone_id)
-                {
-                    // Just check that the zone is still expungeable.
-                    is_already_expunged(&zone.zone, zone.state)?;
-                    zone.zone.disposition = BlueprintZoneDisposition::Expunged;
-                    zone.state = BuilderZoneState::Modified;
-                }
-            }
-
-            Ok(())
-        }
-
-        pub(super) fn iter_zones(
-            &self,
-        ) -> impl Iterator<Item = &BuilderZoneConfig> {
-            self.zones.iter()
-        }
-
-        pub(super) fn build(self) -> BlueprintZonesConfig {
-            let mut ret = BlueprintZonesConfig {
-                // Something we could do here is to check if any zones have
-                // actually been modified, and if not, return the parent's
-                // generation. For now, we depend on callers to only call
-                // `BlueprintZonesBuilder::change_sled_zones` when they really
-                // mean it.
-                generation: self.generation.next(),
-                zones: self.zones.into_iter().map(|z| z.zone).collect(),
-            };
-            ret.sort();
-            ret
-        }
-    }
-
-    pub(super) fn is_already_expunged(
-        zone: &BlueprintZoneConfig,
-        state: BuilderZoneState,
-    ) -> Result<bool, BuilderZonesConfigError> {
-        if state != BuilderZoneState::Unchanged {
-            // We shouldn't be trying to expunge zones that have also been
-            // changed in this blueprint -- something went wrong in the planner
-            // logic.
-            return Err(BuilderZonesConfigError::ExpungeModifiedZone {
-                zone_id: zone.id,
-                state,
-            });
-        }
-
-        match zone.disposition {
-            BlueprintZoneDisposition::InService
-            | BlueprintZoneDisposition::Quiesced => Ok(false),
-            BlueprintZoneDisposition::Expunged => Ok(true),
-        }
-    }
-
-    #[derive(Debug)]
-    pub(crate) struct BuilderZoneConfig {
-        zone: BlueprintZoneConfig,
-        state: BuilderZoneState,
-    }
-
-    impl BuilderZoneConfig {
-        pub(super) fn zone(&self) -> &BlueprintZoneConfig {
-            &self.zone
-        }
-
-        pub(super) fn state(&self) -> BuilderZoneState {
-            self.state
-        }
-    }
-
-    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-    pub(crate) enum BuilderZoneState {
-        Unchanged,
-        Modified,
-        Added,
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq, Error)]
-    pub(super) enum BuilderZonesConfigError {
-        #[error("attempted to add zone that already exists: {zone_id}")]
-        AddExistingZone { zone_id: OmicronZoneUuid },
-        #[error(
-            "attempted to expunge zone {zone_id} that was in state {state:?} \
-             (can only expunge unchanged zones)"
-        )]
-        ExpungeModifiedZone {
-            zone_id: OmicronZoneUuid,
-            state: BuilderZoneState,
-        },
-    }
-}
-
-use builder_zones::*;
 
 /// Helper for working with sets of disks on each sled
 ///
@@ -1368,13 +1204,8 @@ pub mod test {
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_types::deployment::BlueprintZoneFilter;
-    use nexus_types::deployment::SledDetails;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledState;
     use omicron_common::address::IpRange;
-    use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_agent_client::types::OmicronZoneType;
     use std::collections::BTreeSet;
     use test_strategy::proptest;
@@ -1586,198 +1417,6 @@ pub mod test {
                 .map(|id| { zpool_id_to_external_name(*id).unwrap() })
                 .collect()
         );
-
-        logctx.cleanup_successful();
-    }
-
-    /// A test focusing on `BlueprintZonesBuilder` and its internal logic.
-    #[test]
-    fn test_builder_zones() {
-        static TEST_NAME: &str = "blueprint_test_builder_zones";
-        let logctx = test_setup_log(TEST_NAME);
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint_initial =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &example.collection,
-                Generation::new(),
-                Generation::new(),
-                example.input.all_sled_ids(SledFilter::All),
-                "the_test",
-                TEST_NAME,
-            )
-            .expect("creating initial blueprint");
-
-        // Add a completely bare sled to the input.
-        let (new_sled_id, input2) = {
-            let mut input = example.input.clone().into_builder();
-            let new_sled_id = example.sled_rng.next();
-            input
-                .add_sled(
-                    new_sled_id,
-                    SledDetails {
-                        policy: SledPolicy::provisionable(),
-                        state: SledState::Active,
-                        resources: SledResources {
-                            subnet: Ipv6Subnet::new(
-                                "fd00:1::".parse().unwrap(),
-                            ),
-                            zpools: BTreeMap::new(),
-                        },
-                    },
-                )
-                .expect("adding new sled");
-
-            (new_sled_id, input.build())
-        };
-
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint_initial,
-            &input2,
-            "the_test",
-        )
-        .expect("creating blueprint builder");
-        builder.set_rng_seed((TEST_NAME, "bp2"));
-
-        // Test adding a new sled with an NTP zone.
-        assert_eq!(
-            builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
-            Ensure::Added
-        );
-
-        // Iterate over the zones for the sled and ensure that the NTP zone is
-        // present.
-        {
-            let mut zones = builder.zones.current_sled_zones(new_sled_id);
-            let (_, state) = zones.next().expect("exactly one zone for sled");
-            assert!(zones.next().is_none(), "exactly one zone for sled");
-            assert_eq!(
-                state,
-                BuilderZoneState::Added,
-                "NTP zone should have been added"
-            );
-        }
-
-        // Now, test adding a new zone (Oximeter, picked arbitrarily) to an
-        // existing sled.
-        let existing_sled_id = example
-            .input
-            .all_sled_ids(SledFilter::All)
-            .next()
-            .expect("at least one sled present");
-        let change = builder.zones.change_sled_zones(existing_sled_id);
-
-        let new_zone_id = OmicronZoneUuid::new_v4();
-        change
-            .add_zone(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: new_zone_id,
-                underlay_address: Ipv6Addr::UNSPECIFIED,
-                zone_type: BlueprintZoneType::Oximeter(
-                    blueprint_zone_type::Oximeter {
-                        address: SocketAddrV6::new(
-                            Ipv6Addr::UNSPECIFIED,
-                            0,
-                            0,
-                            0,
-                        ),
-                    },
-                ),
-            })
-            .expect("adding new zone");
-
-        {
-            // Iterate over the zones and ensure that the Oximeter zone is
-            // present, and marked added.
-            let mut zones = builder.zones.current_sled_zones(existing_sled_id);
-            zones
-                .find_map(|(z, state)| {
-                    if z.id == new_zone_id {
-                        assert_eq!(
-                            state,
-                            BuilderZoneState::Added,
-                            "new zone ID {new_zone_id} should be marked added"
-                        );
-                        Some(())
-                    } else {
-                        None
-                    }
-                })
-                .expect("new zone ID should be present");
-        }
-
-        // Also call change_sled_zones without making any changes. This
-        // currently bumps the generation number, but in the future might
-        // become smarter.
-        let control_sled_id = example
-            .input
-            .all_sled_ids(SledFilter::All)
-            .nth(2)
-            .expect("at least 2 sleds present");
-        _ = builder.zones.change_sled_zones(control_sled_id);
-
-        // Attempt to expunge the newly added Oximeter zone. This should fail
-        // because we only support expunging zones that are unchanged from the
-        // parent blueprint.
-        let error = builder
-            .zones
-            .change_sled_zones(existing_sled_id)
-            .expunge_zones(&[new_zone_id])
-            .expect_err("expunging a new zone should fail");
-        assert_eq!(
-            error,
-            BuilderZonesConfigError::ExpungeModifiedZone {
-                zone_id: new_zone_id,
-                state: BuilderZoneState::Added
-            }
-        );
-
-        // Now build the blueprint and ensure that all the changes we described
-        // above are present.
-        let blueprint = builder.build();
-        verify_blueprint(&blueprint);
-        let diff = blueprint.diff_since_blueprint(&blueprint_initial).unwrap();
-        println!("expecting new NTP and Oximeter zones:\n{}", diff.display());
-
-        // No sleds were removed.
-        assert_eq!(diff.sleds_removed().len(), 0);
-
-        // One sled was added.
-        let sleds: Vec<_> = diff.sleds_added().collect();
-        assert_eq!(sleds.len(), 1);
-        let (sled_id, new_sled_zones) = sleds[0];
-        assert_eq!(sled_id, new_sled_id);
-        // The generation number should be newer than the initial default.
-        assert_eq!(new_sled_zones.generation, Generation::new().next());
-        assert_eq!(new_sled_zones.zones.len(), 1);
-
-        // Two sled was modified: existing_sled_id and control_sled_id.
-        let sleds = diff.sleds_modified();
-        assert_eq!(sleds.len(), 2, "2 sleds modified");
-        for (sled_id, sled_modified) in sleds {
-            if sled_id == existing_sled_id {
-                assert_eq!(
-                    sled_modified.generation_after,
-                    sled_modified.generation_before.next()
-                );
-                assert_eq!(sled_modified.zones_added().len(), 1);
-                let added_zone = sled_modified.zones_added().next().unwrap();
-                assert_eq!(added_zone.id, new_zone_id);
-            } else {
-                assert_eq!(sled_id, control_sled_id);
-
-                // The generation number is bumped, but nothing else.
-                assert_eq!(
-                    sled_modified.generation_after,
-                    sled_modified.generation_before.next(),
-                    "control sled has generation number bumped"
-                );
-                assert_eq!(sled_modified.zones_added().len(), 0);
-                assert_eq!(sled_modified.zones_removed().len(), 0);
-                assert_eq!(sled_modified.zones_modified().count(), 0);
-            }
-        }
 
         logctx.cleanup_successful();
     }
