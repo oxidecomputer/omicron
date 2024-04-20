@@ -13,6 +13,8 @@ use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::{info, warn, Logger};
@@ -72,9 +74,35 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
-        // The only thing this planner currently knows how to do is add services
-        // to a sled that's missing them.  So let's see if we're in that case.
+        // We perform planning in two loops: the first one turns expunged sleds
+        // into expunged zones, and the second one adds services.
 
+        self.do_plan_expunge()?;
+        self.do_plan_add()?;
+
+        Ok(())
+    }
+
+    fn do_plan_expunge(&mut self) -> Result<(), Error> {
+        // Remove services from sleds marked expunged. We use `SledFilter::All`
+        // and have a custom `needs_zone_expungement` function that allows us
+        // to produce better errors.
+        for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
+            // Does this sled need zone expungement based on the details?
+            let Some(reason) =
+                needs_zone_expungement(sled_details.state, sled_details.policy)
+            else {
+                continue;
+            };
+
+            // Perform the expungement.
+            self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+        }
+
+        Ok(())
+    }
+
+    fn do_plan_add(&mut self) -> Result<(), Error> {
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
         // functioning.  At some point, this function will have to grow the
@@ -330,6 +358,39 @@ impl<'a> Planner<'a> {
     }
 }
 
+/// Returns `Some(reason)` if the sled needs its zones to be expunged,
+/// based on the policy and state.
+fn needs_zone_expungement(
+    state: SledState,
+    policy: SledPolicy,
+) -> Option<ZoneExpungeReason> {
+    match state {
+        SledState::Active => {}
+        SledState::Decommissioned => {
+            // A decommissioned sled that still has resources attached to it is
+            // an illegal state, but representable. If we see a sled in this
+            // state, we should still expunge all zones in it, but parent code
+            // should warn on it.
+            return Some(ZoneExpungeReason::SledDecommissioned { policy });
+        }
+    }
+
+    match policy {
+        SledPolicy::InService { .. } => None,
+        SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
+    }
+}
+
+/// The reason a sled's zones need to be expunged.
+///
+/// This is used only for introspection and logging -- it's not part of the
+/// logical flow.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum ZoneExpungeReason {
+    SledDecommissioned { policy: SledPolicy },
+    SledExpunged,
+}
+
 #[cfg(test)]
 mod test {
     use super::Planner;
@@ -348,6 +409,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::DiffSledModified;
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
@@ -356,6 +418,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
+    use std::collections::HashMap;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -840,18 +903,41 @@ mod test {
         );
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
+        println!(
+            "1 -> 2 (added additional Nexus zones, take 2 sleds out of service):\n{}",
+            diff.display()
+        );
         assert_contents(
             "tests/output/planner_nonprovisionable_1_2.txt",
             &diff.display().to_string(),
         );
+
+        // The expunged and decommissioned sleds should have had all zones be
+        // marked as expunged. (Not removed! Just marked as expunged.)
+        //
+        // Note that at this point we're neither removing zones from the
+        // blueprint nor marking sleds as decommissioned -- we still need to do
+        // cleanup, and we aren't performing garbage collection on zones or
+        // sleds at the moment.
+
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
-        let sleds = diff.sleds_modified().collect::<Vec<_>>();
+        let mut sleds = diff.sleds_modified().collect::<HashMap<_, _>>();
 
-        // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
-        // total of 6 new Nexus zones, which should be split evenly between the
-        // two sleds, while the non-provisionable sled should be unchanged.
+        let expunged_modified = sleds.remove(&expunged_sled_id).unwrap();
+        assert_all_zones_expunged(&expunged_modified, "expunged sled");
+
+        let decommissioned_modified =
+            sleds.remove(&decommissioned_sled_id).unwrap();
+        assert_all_zones_expunged(
+            &decommissioned_modified,
+            "decommissioned sled",
+        );
+
+        // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
+        // should get additional Nexus zones. We expect a total of 6 new Nexus
+        // zones, which should be split evenly between the two sleds, while the
+        // non-provisionable sled should be unchanged.
         assert_eq!(sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
         for (sled_id, sled_changes) in sleds {
@@ -970,5 +1056,41 @@ mod test {
         // ---
 
         logctx.cleanup_successful();
+    }
+
+    fn assert_all_zones_expunged(modified: &DiffSledModified, desc: &str) {
+        assert_eq!(
+            modified.generation_before.next(),
+            modified.generation_after,
+            "for {desc}, generation should have been bumped"
+        );
+
+        assert_eq!(
+            modified.zones_added().count(),
+            0,
+            "for {desc}, no zones should have been added to blueprint"
+        );
+
+        // A zone disposition going to expunged *does not* mean that the
+        // zone is actually removed, i.e. `zones_removed` is still 0. Any
+        // zone removal will be part of some future garbage collection
+        // process that isn't currently defined.
+
+        assert_eq!(
+            modified.zones_removed().len(),
+            0,
+            "for {desc}, no zones should have been removed from blueprint"
+        );
+
+        // Run through all the common zones and ensure that all of them
+        // have been marked expunged.
+        for zone in modified.zones_modified() {
+            assert_eq!(
+                zone.zone_after.disposition,
+                BlueprintZoneDisposition::Expunged,
+                "for {desc}, zone {} should have been marked expunged",
+                zone.zone_after.id
+            );
+        }
     }
 }
