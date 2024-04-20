@@ -457,10 +457,10 @@ parent:    <none>
     zone type         zone ID                                disposition  underlay IP      
   -----------------------------------------------------------------------------------------
                                                                                            
-  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
    (no zones)                                                                              
                                                                                            
-  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
     clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
     cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
     crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
@@ -490,10 +490,10 @@ parent:    <none>
     zone type         zone ID                                disposition  underlay IP      
   -----------------------------------------------------------------------------------------
                                                                                            
-  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
    (no zones)                                                                              
                                                                                            
-  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
+  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
     clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
     cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
     crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
@@ -525,7 +525,7 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
                                                                                                      
   UNCHANGED SLEDS:                                                                                   
                                                                                                      
-   sled ..........<REDACTED_UUID>...........: zones at generation 2                                  
+   sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2                        
      clickhouse        ..........<REDACTED_UUID>...........   in service    ::1                      
      cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1                      
      crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1                      
