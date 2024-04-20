@@ -203,11 +203,7 @@ impl Blueprint {
     ///
     /// Note that collections do not include information about zone
     /// disposition, so it is assumed that all zones in the collection have the
-    /// [`InService`](BlueprintZoneDisposition::InService) disposition. (This
-    /// is the same assumption made by
-    /// [`BlueprintZonesConfig::initial_from_collection`]. The logic here may
-    /// also be expanded to handle cases where not all zones in the collection
-    /// are in-service.)
+    /// [`InService`](BlueprintZoneDisposition::InService) disposition.
     pub fn diff_since_collection(
         &self,
         before: &Collection,
@@ -324,37 +320,6 @@ pub struct BlueprintZonesConfig {
 }
 
 impl BlueprintZonesConfig {
-    /// Constructs a new [`BlueprintZonesConfig`] from a collection's zones.
-    ///
-    /// For the initial blueprint, all zones within a collection are assumed to
-    /// have the [`InService`](BlueprintZoneDisposition::InService)
-    /// disposition.
-    pub fn initial_from_collection(
-        collection: &OmicronZonesConfig,
-    ) -> Result<Self, InvalidOmicronZoneType> {
-        let zones = collection
-            .zones
-            .iter()
-            .map(|z| {
-                BlueprintZoneConfig::from_omicron_zone_config(
-                    z.clone(),
-                    BlueprintZoneDisposition::InService,
-                )
-            })
-            .collect::<Result<_, _>>()?;
-
-        let mut ret = Self {
-            // An initial `BlueprintZonesConfig` reuses the generation from
-            // `OmicronZonesConfig`.
-            generation: collection.generation,
-            zones,
-        };
-        // For testing, it's helpful for zones to be in sorted order.
-        ret.sort();
-
-        Ok(ret)
-    }
-
     /// Sorts the list of zones stored in this configuration.
     ///
     /// This is not strictly necessary. But for testing (particularly snapshot

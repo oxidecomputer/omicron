@@ -217,16 +217,7 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let mut example =
             ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint_initial =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &example.collection,
-                Generation::new(),
-                Generation::new(),
-                example.input.all_sled_ids(SledFilter::All),
-                "the_test",
-                TEST_NAME,
-            )
-            .expect("creating initial blueprint");
+        let blueprint_initial = example.blueprint;
 
         // Add a completely bare sled to the input.
         let (new_sled_id, input2) = {

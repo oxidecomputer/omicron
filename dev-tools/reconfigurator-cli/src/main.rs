@@ -314,9 +314,6 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
-        Commands::BlueprintFromInventory(args) => {
-            cmd_blueprint_from_inventory(sim, args)
-        }
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
@@ -374,8 +371,6 @@ enum Commands {
 
     /// list all blueprints
     BlueprintList,
-    /// generate a blueprint that represents the contents of an inventory
-    BlueprintFromInventory(InventoryArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
     /// edit contents of a blueprint directly
@@ -716,38 +711,6 @@ fn cmd_blueprint_list(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     Ok(Some(table))
-}
-
-fn cmd_blueprint_from_inventory(
-    sim: &mut ReconfiguratorSim,
-    args: InventoryArgs,
-) -> anyhow::Result<Option<String>> {
-    let collection_id = args.collection_id;
-    let collection = sim
-        .collections
-        .get(&collection_id)
-        .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-    let dns_version = Generation::new();
-    let planning_input = sim
-        .system
-        .to_planning_input_builder()
-        .context("generating planning_input builder")?
-        .build();
-    let creator = "reconfigurator-sim";
-    let blueprint = BlueprintBuilder::build_initial_from_collection(
-        collection,
-        dns_version,
-        dns_version,
-        planning_input.all_sled_ids(SledFilter::All),
-        creator,
-    )
-    .context("building collection")?;
-    let rv = format!(
-        "generated blueprint {} from inventory collection {}",
-        blueprint.id, collection_id
-    );
-    sim.blueprint_insert_new(blueprint);
-    Ok(Some(rv))
 }
 
 fn cmd_blueprint_plan(
