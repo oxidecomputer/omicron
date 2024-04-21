@@ -102,15 +102,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
-name = "ansi_term"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "anstream"
 version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -482,9 +473,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7#dd788a311a382b09ce1d3e35f7777b378e09fdf7"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7)",
  "libc",
  "strum",
 ]
@@ -501,7 +492,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7#dd788a311a382b09ce1d3e35f7777b378e09fdf7"
 dependencies = [
  "libc",
  "strum",
@@ -1027,21 +1018,6 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "2.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0610544180c38b88101fecf2dd634b174a62eef6946f84dfc6a7127512b381c"
-dependencies = [
- "ansi_term",
- "atty",
- "bitflags 1.3.2",
- "strsim 0.8.0",
- "textwrap 0.11.0",
- "unicode-width",
- "vec_map",
-]
-
-[[package]]
-name = "clap"
 version = "4.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90bc066a67923782aa8515dbaea16946c5bcc5addbd668bb80af688e53e548a0"
@@ -1314,7 +1290,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.4",
+ "clap",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1415,7 +1391,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=5677c7be81b60d9ba9c30991d10376f279a1d3b7#5677c7be81b60d9ba9c30991d10376f279a1d3b7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=1ef72f3c935e7dc936bf43310c04668fb60d7a20#1ef72f3c935e7dc936bf43310c04668fb60d7a20"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1431,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=5677c7be81b60d9ba9c30991d10376f279a1d3b7#5677c7be81b60d9ba9c30991d10376f279a1d3b7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=1ef72f3c935e7dc936bf43310c04668fb60d7a20#1ef72f3c935e7dc936bf43310c04668fb60d7a20"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1448,7 +1424,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=5677c7be81b60d9ba9c30991d10376f279a1d3b7#5677c7be81b60d9ba9c30991d10376f279a1d3b7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=1ef72f3c935e7dc936bf43310c04668fb60d7a20#1ef72f3c935e7dc936bf43310c04668fb60d7a20"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -1805,9 +1781,9 @@ checksum = "a7993efb860416547839c115490d4951c6d0f8ec04a3594d9dd99d50ed7ec170"
 
 [[package]]
 name = "diesel"
-version = "2.1.5"
+version = "2.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03fc05c17098f21b89bc7d98fe1dd3cce2c11c2ad8e145f2a44fe08ed28eb559"
+checksum = "ff236accb9a5069572099f0b350a92e9560e8e63a9b8d546162f4a5e03026bb2"
 dependencies = [
  "bitflags 2.4.2",
  "byteorder",
@@ -1957,7 +1933,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -2089,7 +2065,7 @@ dependencies = [
  "paste",
  "percent-encoding",
  "proc-macro2",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-pemfile 2.1.2",
  "schemars",
  "serde",
@@ -2264,7 +2240,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.0",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "colored",
  "dhcproto",
  "http 0.2.12",
@@ -2686,7 +2662,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.4",
+ "clap",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3358,7 +3334,7 @@ dependencies = [
  "hyper 1.1.0",
  "hyper-util",
  "log",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
@@ -3499,7 +3475,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -3609,7 +3585,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.5.4",
+ "clap",
  "display-error-chain",
  "futures",
  "hex",
@@ -3670,7 +3646,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "expectorate",
  "hyper 0.14.28",
@@ -3752,7 +3728,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "internal-dns",
  "omicron-common",
@@ -3993,7 +3969,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "camino",
- "clap 4.5.4",
+ "clap",
  "colored",
  "futures",
  "libc",
@@ -4103,7 +4079,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fefdf21230d6143476a28adbee3d930e2b68a3d56443c777cae3fe9340eebff9"
 dependencies = [
- "clap 4.5.4",
+ "clap",
  "escape8259",
  "termcolor",
  "threadpool",
@@ -4160,7 +4136,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
 dependencies = [
  "bitfield",
- "clap 4.5.4",
+ "clap",
  "packed_struct",
  "serde",
 ]
@@ -4554,6 +4530,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
+ "slog",
+ "slog-error-chain",
  "steno",
  "strum",
  "thiserror",
@@ -4622,7 +4600,7 @@ dependencies = [
  "rcgen",
  "ref-cast",
  "regex",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "samael",
  "schemars",
  "semver 1.0.22",
@@ -4781,6 +4759,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "debug-ignore",
  "expectorate",
  "gateway-client",
  "illumos-utils",
@@ -4788,6 +4767,7 @@ dependencies = [
  "internal-dns",
  "ipnet",
  "ipnetwork",
+ "maplit",
  "nexus-config",
  "nexus-inventory",
  "nexus-types",
@@ -4795,9 +4775,11 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "proptest",
  "rand 0.8.5",
  "sled-agent-client",
  "slog",
+ "test-strategy",
  "thiserror",
  "typed-rng",
  "uuid 1.8.0",
@@ -5281,7 +5263,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "expectorate",
  "futures",
@@ -5315,7 +5297,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.0",
  "camino",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "expectorate",
  "futures",
@@ -5366,7 +5348,7 @@ dependencies = [
  "camino-tempfile",
  "cancel-safe-futures",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",
@@ -5434,14 +5416,14 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
  "regex",
  "reqwest",
  "ring 0.17.8",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-pemfile 2.1.2",
  "samael",
  "schemars",
@@ -5483,7 +5465,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "crossterm",
  "crucible-agent-client",
  "csv",
@@ -5525,7 +5507,7 @@ dependencies = [
  "strum",
  "subprocess",
  "tabled",
- "textwrap 0.16.1",
+ "textwrap",
  "tokio",
  "unicode-width",
  "uuid 1.8.0",
@@ -5537,7 +5519,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "clap 4.5.4",
+ "clap",
  "expectorate",
  "futures",
  "hex",
@@ -5604,7 +5586,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
@@ -5648,7 +5630,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -5711,7 +5693,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.8",
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "slog",
  "subprocess",
  "tar",
@@ -5752,7 +5734,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cipher",
- "clap 4.5.4",
+ "clap",
  "clap_builder",
  "console",
  "const-oid",
@@ -6131,7 +6113,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "expectorate",
  "futures",
@@ -6175,7 +6157,7 @@ dependencies = [
  "bytes",
  "camino",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "crossterm",
  "dropshot",
  "expectorate",
@@ -6248,7 +6230,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "nexus-client",
  "omicron-common",
@@ -6270,7 +6252,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "omicron-workspace-hack",
  "sigpipe",
  "uuid 1.8.0",
@@ -7092,7 +7074,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7#dd788a311a382b09ce1d3e35f7777b378e09fdf7"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7113,17 +7095,17 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7#dd788a311a382b09ce1d3e35f7777b378e09fdf7"
 dependencies = [
  "anyhow",
  "atty",
  "base64 0.21.7",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7164,7 +7146,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361#8ff3ab62246fa1f8b8a5bfab0a7b8e1000926361"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dd788a311a382b09ce1d3e35f7777b378e09fdf7#dd788a311a382b09ce1d3e35f7777b378e09fdf7"
 dependencies = [
  "schemars",
  "serde",
@@ -7407,7 +7389,7 @@ dependencies = [
  "assert_matches",
  "camino",
  "camino-tempfile",
- "clap 4.5.4",
+ "clap",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -7950,9 +7932,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.2"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87c9956bd9807afa1f77e0f7594af32566e830e088a5576d27c5b6f30f49d41"
+checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -8968,7 +8950,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -9148,12 +9130,6 @@ dependencies = [
 
 [[package]]
 name = "strsim"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
-
-[[package]]
-name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
@@ -9208,30 +9184,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.59",
-]
-
-[[package]]
-name = "structopt"
-version = "0.3.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c6b5c64445ba8094a6ab0c3cd2ad323e07171012d9c98b0b15651daf1787a10"
-dependencies = [
- "clap 2.34.0",
- "lazy_static",
- "structopt-derive",
-]
-
-[[package]]
-name = "structopt-derive"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcb5ae327f9cc13b68763b5749770cb9e048a99bd9dfdfa58d0cf05d5f64afe0"
-dependencies = [
- "heck 0.3.3",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -9519,15 +9471,6 @@ dependencies = [
 
 [[package]]
 name = "textwrap"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d326610f408c7a4eb6f51c37c330e496b08506c9457c9d34287ecc38809fb060"
-dependencies = [
- "unicode-width",
-]
-
-[[package]]
-name = "textwrap"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23d434d3f8967a09480fb04132ebe0a3e088c173e6d0ee7897abbdf4eab0f8b9"
@@ -9708,13 +9651,11 @@ dependencies = [
 [[package]]
 name = "tofino"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/tofino?branch=main#8283f8021068f055484b653f0cc6b4d5c0979dc1"
+source = "git+http://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
 dependencies = [
  "anyhow",
  "cc",
- "chrono",
  "illumos-devinfo",
- "structopt",
 ]
 
 [[package]]
@@ -9799,7 +9740,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
 dependencies = [
- "rustls 0.22.2",
+ "rustls 0.22.4",
  "rustls-pki-types",
  "tokio",
 ]
@@ -10150,7 +10091,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "console",
  "datatest-stable",
  "fs-err",
@@ -10427,7 +10368,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.4",
+ "clap",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -10458,7 +10399,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
- "clap 4.5.4",
+ "clap",
  "debug-ignore",
  "derive-where",
  "either",
@@ -10653,12 +10594,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "vec_map"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"
@@ -10902,7 +10837,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.5.4",
+ "clap",
  "crossterm",
  "futures",
  "humantime",
@@ -10927,7 +10862,7 @@ dependencies = [
  "slog-term",
  "supports-color",
  "tempfile",
- "textwrap 0.16.1",
+ "textwrap",
  "tokio",
  "tokio-util",
  "toml 0.8.12",
@@ -10963,7 +10898,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.5.4",
+ "clap",
  "crossterm",
  "omicron-workspace-hack",
  "reedline",
@@ -10988,7 +10923,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.5.4",
+ "clap",
  "debug-ignore",
  "display-error-chain",
  "dpd-client",
@@ -11314,7 +11249,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.5.4",
+ "clap",
  "fs-err",
  "macaddr",
  "serde",
@@ -11462,7 +11397,7 @@ name = "zone-network-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.4",
+ "clap",
  "dropshot",
  "illumos-utils",
  "omicron-common",

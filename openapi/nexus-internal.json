@@ -455,40 +455,6 @@
         }
       }
     },
-    "/deployment/blueprints/generate-from-collection": {
-      "post": {
-        "summary": "Generates a new blueprint matching the specified inventory collection",
-        "operationId": "blueprint_generate_from_collection",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CollectionId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Blueprint"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/deployment/blueprints/import": {
       "post": {
         "summary": "Imports a client-provided blueprint",
@@ -3197,17 +3163,6 @@
         "required": [
           "cert",
           "key"
-        ]
-      },
-      "CollectionId": {
-        "type": "object",
-        "properties": {
-          "collection_id": {
-            "$ref": "#/components/schemas/TypedUuidForCollectionKind"
-          }
-        },
-        "required": [
-          "collection_id"
         ]
       },
       "Cumulativedouble": {
@@ -7177,10 +7132,6 @@
       },
       "SwitchPutResponse": {
         "type": "object"
-      },
-      "TypedUuidForCollectionKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "TypedUuidForDownstairsRegionKind": {
         "type": "string",

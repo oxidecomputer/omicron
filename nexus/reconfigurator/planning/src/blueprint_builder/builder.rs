@@ -5,8 +5,10 @@
 //! Low-level facility for generating Blueprints
 
 use crate::ip_allocator::IpAllocator;
+use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
 use anyhow::bail;
+use debug_ignore::DebugIgnore;
 use internal_dns::config::Host;
 use internal_dns::config::Zone;
 use ipnet::IpAdd;
@@ -22,13 +24,11 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::InvalidOmicronZoneType;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
-use nexus_types::inventory::Collection;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
@@ -45,15 +45,20 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use slog::debug;
+use slog::error;
+use slog::info;
 use slog::o;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -65,6 +70,10 @@ use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
 use uuid::Uuid;
+
+use super::zones::is_already_expunged;
+use super::zones::BuilderZoneState;
+use super::zones::BuilderZonesConfig;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -81,8 +90,6 @@ pub enum Error {
     ExhaustedNexusIps,
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
-    #[error("invalid OmicronZoneType in collection")]
-    InvalidOmicronZoneType(#[from] InvalidOmicronZoneType),
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -118,11 +125,11 @@ fn zpool_id_to_external_name(zpool_id: ZpoolUuid) -> anyhow::Result<ZpoolName> {
 ///
 /// There are two basic ways to assemble a new blueprint:
 ///
-/// 1. Build one directly from a collection.  Such blueprints have no parent
-///    blueprint.  They are not customizable.  Use
-///    [`BlueprintBuilder::build_initial_from_collection`] for this.  This would
-///    generally only be used once in the lifetime of a rack, to assemble the
-///    first blueprint.
+/// 1. Build one directly. This would generally only be used once in the
+///    lifetime of a rack, to assemble the first blueprint during rack setup.
+///    It is also common in tests. To start with a blueprint that contains an
+///    empty zone config for some number of sleds, use
+///    [`BlueprintBuilder::build_empty_with_sleds`].
 ///
 /// 2. Build one _from_ another blueprint, called the "parent", making changes
 ///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
@@ -142,123 +149,78 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
-    zones: BlueprintZonesBuilder<'a>,
+    pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
 
     creator: String,
     comments: Vec<String>,
 
     // These fields mirror how RSS chooses addresses for zone NICs.
-    nexus_v4_ips: Box<dyn Iterator<Item = Ipv4Addr> + Send>,
-    nexus_v6_ips: Box<dyn Iterator<Item = Ipv6Addr> + Send>,
+    nexus_v4_ips: AvailableIterator<'static, Ipv4Addr>,
+    nexus_v6_ips: AvailableIterator<'static, Ipv6Addr>,
 
     // Iterator of available external IPs for service zones
-    available_external_ips: Box<dyn Iterator<Item = IpAddr> + Send + 'a>,
+    available_external_ips: AvailableIterator<'a, IpAddr>,
 
     // Iterator of available MAC addresses in the system address range
-    available_system_macs: Box<dyn Iterator<Item = MacAddr>>,
+    available_system_macs: AvailableIterator<'a, MacAddr>,
 
     // Random number generator for new UUIDs
     rng: BlueprintBuilderRng,
 }
 
 impl<'a> BlueprintBuilder<'a> {
-    /// Directly construct a `Blueprint` from the contents of a particular
-    /// collection (representing no changes from the collection state)
-    pub fn build_initial_from_collection(
-        collection: &Collection,
-        internal_dns_version: Generation,
-        external_dns_version: Generation,
-        all_sleds: impl Iterator<Item = SledUuid>,
+    /// Directly construct a `Blueprint` that contains an empty zone config for
+    /// the given sleds.
+    pub fn build_empty_with_sleds(
+        sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
-    ) -> Result<Blueprint, Error> {
-        Self::build_initial_impl(
-            collection,
-            internal_dns_version,
-            external_dns_version,
-            all_sleds,
+    ) -> Blueprint {
+        Self::build_empty_with_sleds_impl(
+            sled_ids,
             creator,
             BlueprintBuilderRng::new(),
         )
     }
 
-    /// A version of [`Self::build_initial_from_collection`] that allows the
+    /// A version of [`Self::build_empty_with_sleds`] that allows the
     /// blueprint ID to be generated from a random seed.
-    pub fn build_initial_from_collection_seeded<H: Hash>(
-        collection: &Collection,
-        internal_dns_version: Generation,
-        external_dns_version: Generation,
-        all_sleds: impl Iterator<Item = SledUuid>,
+    pub fn build_empty_with_sleds_seeded<H: Hash>(
+        sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
         seed: H,
-    ) -> Result<Blueprint, Error> {
+    ) -> Blueprint {
         let mut rng = BlueprintBuilderRng::new();
         rng.set_seed(seed);
-        Self::build_initial_impl(
-            collection,
-            internal_dns_version,
-            external_dns_version,
-            all_sleds,
-            creator,
-            rng,
-        )
+        Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
     }
 
-    fn build_initial_impl(
-        collection: &Collection,
-        internal_dns_version: Generation,
-        external_dns_version: Generation,
-        all_sleds: impl Iterator<Item = SledUuid>,
+    fn build_empty_with_sleds_impl(
+        sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
         mut rng: BlueprintBuilderRng,
-    ) -> Result<Blueprint, Error> {
-        let blueprint_zones = all_sleds
+    ) -> Blueprint {
+        let blueprint_zones = sled_ids
             .map(|sled_id| {
-                let zones = collection
-                    .omicron_zones
-                    .get(&sled_id)
-                    .map(|z| &z.zones)
-                    .ok_or_else(|| {
-                        // We should not find a sled that's supposed to be
-                        // in-service but is not part of the inventory.  It's
-                        // not that that can't ever happen.  This could happen
-                        // when a sled is first being added to the system.  Of
-                        // course it could also happen if this sled agent failed
-                        // our inventory request.  But this is the initial
-                        // blueprint (so this shouldn't be the "add sled" case)
-                        // and we want to get it right (so we don't want to
-                        // leave out sleds whose sled agent happened to be down
-                        // when we tried to do this).  The operator (or, more
-                        // likely, a support person) will have to sort out
-                        // what's going on if this happens.
-                        Error::Planner(anyhow!(
-                            "building initial blueprint: sled {:?} is \
-                            supposed to be in service but has no zones \
-                            in inventory",
-                            sled_id
-                        ))
-                    })?;
-                let config =
-                    BlueprintZonesConfig::initial_from_collection(&zones)?;
-
-                Ok((
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    sled_id.into_untyped_uuid(),
-                    config,
-                ))
+                let config = BlueprintZonesConfig {
+                    generation: Generation::new(),
+                    zones: Vec::new(),
+                };
+                (sled_id.into_untyped_uuid(), config)
             })
-            .collect::<Result<_, Error>>()?;
-        Ok(Blueprint {
+            .collect::<BTreeMap<_, _>>();
+        let num_sleds = blueprint_zones.len();
+        Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
-            internal_dns_version,
-            external_dns_version,
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
             time_created: now_db_precision(),
             creator: creator.to_owned(),
-            comment: format!("from collection {}", collection.id),
-        })
+            comment: format!("starting blueprint with {num_sleds} empty sleds"),
+        }
     }
 
     /// Construct a new `BlueprintBuilder` based on a previous blueprint,
@@ -279,17 +241,17 @@ impl<'a> BlueprintBuilder<'a> {
         // need to allocate new resources to that zone. However, allocation at
         // this point is entirely optimistic and theoretical: our caller may
         // discard the blueprint we create without ever making it the new
-        // target, or it might be an arbitrarily long time before it becomes the
-        // target. We need to be able to make allocation decisions that we
+        // target, or it might be an arbitrarily long time before it becomes
+        // the target. We need to be able to make allocation decisions that we
         // expect the blueprint executor to be able to realize successfully if
         // and when we become the target, but we cannot _actually_ perform
         // resource allocation.
         //
         // To do this, we look at our parent blueprint's used resources, and
-        // then choose new resources that aren't already in use (if possible; if
-        // we need to allocate a new resource and the parent blueprint appears
-        // to be using all the resources of that kind, our blueprint generation
-        // will fail).
+        // then choose new resources that aren't already in use (if possible;
+        // if we need to allocate a new resource and the parent blueprint
+        // appears to be using all the resources of that kind, our blueprint
+        // generation will fail).
         //
         // For example, RSS assigns Nexus NIC IPs by stepping through a list of
         // addresses based on `NEXUS_OPTE_IPVx_SUBNET` (as in the iterators
@@ -300,12 +262,19 @@ impl<'a> BlueprintBuilder<'a> {
         // Note that by building these iterators up front based on
         // `parent_blueprint`, we cannot reuse resources in a case where we
         // remove a zone that used a resource and then add another zone that
-        // wants the same kind of resource. We don't support zone removal yet,
-        // but expect this to be okay: we don't anticipate removal and addition
-        // to frequently be combined into the exact same blueprint, particularly
-        // in a way that expects the addition to reuse resources from the
-        // removal; we won't want to attempt to reuse resources from a zone
-        // until we know it's been fully removed.
+        // wants the same kind of resource. That is mostly okay, but there are
+        // some cases in which we may have to do that -- particularly external
+        // DNS zones, which tend to have a small number of fixed IPs. Solving
+        // that is a TODO.
+        //
+        // Also note that currently, we don't perform any kind of garbage
+        // collection on sleds and zones that no longer have any attached
+        // resources. Once a sled or zone is marked expunged, it will always
+        // stay in that state.
+        // https://github.com/oxidecomputer/omicron/issues/5552 tracks
+        // implementing this kind of garbage collection, and we should do it
+        // very soon.
+
         let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
@@ -340,6 +309,7 @@ impl<'a> BlueprintBuilder<'a> {
                     bail!("duplicate external IP: {external_ip}");
                 }
             }
+
             if let Some(nic) = zone_type.opte_vnic() {
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
@@ -353,30 +323,26 @@ impl<'a> BlueprintBuilder<'a> {
         // of Nexus instances), but wouldn't be ideal if we have many resources
         // we need to skip. We could do something smarter here based on the sets
         // of used resources we built above if needed.
-        let nexus_v4_ips = Box::new(
+        let nexus_v4_ips = AvailableIterator::new(
             NEXUS_OPTE_IPV4_SUBNET
                 .0
                 .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                .filter(move |ip| !existing_nexus_v4_ips.contains(ip)),
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_nexus_v4_ips,
         );
-        let nexus_v6_ips = Box::new(
+        let nexus_v6_ips = AvailableIterator::new(
             NEXUS_OPTE_IPV6_SUBNET
                 .0
                 .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                .filter(move |ip| !existing_nexus_v6_ips.contains(ip)),
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_nexus_v6_ips,
         );
-        let available_external_ips = Box::new(
-            input
-                .service_ip_pool_ranges()
-                .iter()
-                .flat_map(|r| r.iter())
-                .filter(move |ip| !used_external_ips.contains(ip)),
+        let available_external_ips = AvailableIterator::new(
+            input.service_ip_pool_ranges().iter().flat_map(|r| r.iter()),
+            used_external_ips,
         );
-        let available_system_macs = Box::new(
-            MacAddr::iter_system().filter(move |mac| !used_macs.contains(mac)),
-        );
+        let available_system_macs =
+            AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
         Ok(BlueprintBuilder {
             log,
@@ -434,6 +400,93 @@ impl<'a> BlueprintBuilder<'a> {
         String: From<S>,
     {
         self.comments.push(String::from(comment));
+    }
+
+    /// Expunges all zones from a sled.
+    ///
+    /// Returns a list of zone IDs expunged (excluding zones that were already
+    /// expunged). If the list is empty, then the operation was a no-op.
+    pub(crate) fn expunge_all_zones_for_sled(
+        &mut self,
+        sled_id: SledUuid,
+        reason: ZoneExpungeReason,
+    ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
+        let log = self.log.new(o!(
+            "sled_id" => sled_id.to_string(),
+        ));
+
+        // Do any zones need to be marked expunged?
+        let mut zones_to_expunge = BTreeSet::new();
+
+        let sled_zones = self.zones.current_sled_zones(sled_id);
+        for (z, state) in sled_zones {
+            let is_expunged =
+                is_already_expunged(z, state).map_err(|error| {
+                    Error::Planner(anyhow!(error).context(format!(
+                        "for sled {sled_id}, error computing zones to expunge"
+                    )))
+                })?;
+
+            if !is_expunged {
+                zones_to_expunge.insert(z.id);
+            }
+        }
+
+        if zones_to_expunge.is_empty() {
+            debug!(
+                log,
+                "sled has no zones that need expungement; skipping";
+            );
+            return Ok(zones_to_expunge);
+        }
+
+        match reason {
+            ZoneExpungeReason::SledDecommissioned { policy } => {
+                // A sled marked as decommissioned should have no resources
+                // allocated to it. If it does, it's an illegal state, possibly
+                // introduced by a bug elsewhere in the system -- we need to
+                // produce a loud warning (i.e. an ERROR-level log message) on
+                // this, while still removing the zones.
+                error!(
+                    &log,
+                    "sled has state Decommissioned, yet has zones \
+                     allocated to it; will expunge them \
+                     (sled policy is \"{policy}\")"
+                );
+            }
+            ZoneExpungeReason::SledExpunged => {
+                // This is the expected situation.
+                info!(
+                    &log,
+                    "expunged sled with {} non-expunged zones found \
+                     (will expunge all zones)",
+                    zones_to_expunge.len()
+                );
+            }
+        }
+
+        // Now expunge all the zones that need it.
+        let change = self.zones.change_sled_zones(sled_id);
+        change.expunge_zones(zones_to_expunge.clone()).map_err(|error| {
+            anyhow!(error)
+                .context(format!("for sled {sled_id}, error expunging zones"))
+        })?;
+
+        // Finally, add a comment describing what happened.
+        let reason = match reason {
+            ZoneExpungeReason::SledDecommissioned { .. } => {
+                "sled state is decommissioned"
+            }
+            ZoneExpungeReason::SledExpunged => "sled policy is expunged",
+        };
+
+        self.comment(format!(
+            "sled {} ({reason}): {} zones expunged",
+            sled_id,
+            zones_to_expunge.len(),
+        ));
+
+        Ok(zones_to_expunge)
     }
 
     /// Ensures that the blueprint contains disks for a sled which already
@@ -519,7 +572,7 @@ impl<'a> BlueprintBuilder<'a> {
         let has_ntp = self
             .zones
             .current_sled_zones(sled_id)
-            .any(|z| z.zone_type.is_ntp());
+            .any(|(z, _)| z.zone_type.is_ntp());
         if has_ntp {
             return Ok(Ensure::NotNeeded);
         }
@@ -583,7 +636,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
-            self.zones.current_sled_zones(sled_id).any(|z| {
+            self.zones.current_sled_zones(sled_id).any(|(z, _)| {
                 matches!(
                     &z.zone_type,
                     BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
@@ -634,7 +687,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_num_nexus_zones(&self, sled_id: SledUuid) -> usize {
         self.zones
             .current_sled_zones(sled_id)
-            .filter(|z| z.zone_type.is_nexus())
+            .filter(|(z, _)| z.zone_type.is_nexus())
             .count()
     }
 
@@ -770,15 +823,11 @@ impl<'a> BlueprintBuilder<'a> {
         let _ = self.sled_resources(sled_id)?;
 
         let sled_zones = self.zones.change_sled_zones(sled_id);
-        // A sled should have a small number (< 20) of zones so a linear search
-        // should be very fast.
-        if sled_zones.zones.iter().any(|z| z.id == zone.id) {
-            return Err(Error::Planner(anyhow!(
-                "attempted to add zone that already exists: {}",
-                zone.id
-            )));
-        }
-        sled_zones.zones.push(zone);
+        sled_zones.add_zone(zone).map_err(|error| {
+            anyhow!(error)
+                .context(format!("error adding zone to sled {sled_id}"))
+        })?;
+
         Ok(())
     }
 
@@ -811,7 +860,7 @@ impl<'a> BlueprintBuilder<'a> {
 
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
-                for z in self.zones.current_sled_zones(sled_id) {
+                for (z, _) in self.zones.current_sled_zones(sled_id) {
                     allocator.reserve(z.underlay_address);
                 }
 
@@ -827,10 +876,49 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<&SledResources, Error> {
         self.input.sled_resources(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
-                "attempted to use sled that is not in service: {}",
+                "attempted to use sled that is not currently known: {}",
                 sled_id
             ))
         })
+    }
+}
+
+/// Combines a base iterator with an `in_use` set, filtering out any elements
+/// that are in the "in_use" set.
+///
+/// This can be done with a chained `.filter` on the iterator, but
+/// `AvailableIterator` also allows for inspection of the `in_use` set.
+///
+/// Note that this is a stateful iterator -- i.e. it implements `Iterator`, not
+/// `IntoIterator`. That's what we currently need in the planner.
+#[derive(Debug)]
+pub struct AvailableIterator<'a, T> {
+    base: DebugIgnore<Box<dyn Iterator<Item = T> + Send + 'a>>,
+    in_use: HashSet<T>,
+}
+
+impl<'a, T: Hash + Eq> AvailableIterator<'a, T> {
+    /// Creates a new `AvailableIterator` from a base iterator and a set of
+    /// elements that are in use.
+    pub fn new<I>(base: I, in_use: impl IntoIterator<Item = T>) -> Self
+    where
+        I: Iterator<Item = T> + Send + 'a,
+    {
+        let in_use = in_use.into_iter().collect();
+        AvailableIterator { base: DebugIgnore(Box::new(base)), in_use }
+    }
+
+    /// Returns the in-use set.
+    pub fn in_use(&self) -> &HashSet<T> {
+        &self.in_use
+    }
+}
+
+impl<T: Hash + Eq> Iterator for AvailableIterator<'_, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        self.base.find(|item| !self.in_use.contains(item))
     }
 }
 
@@ -877,8 +965,8 @@ impl BlueprintBuilderRng {
 /// blueprint.  We do this by keeping a copy of any [`BlueprintZonesConfig`]
 /// that we've changed and a _reference_ to the parent blueprint's zones.  This
 /// struct makes it easy for callers iterate over the right set of zones.
-struct BlueprintZonesBuilder<'a> {
-    changed_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+pub(super) struct BlueprintZonesBuilder<'a> {
+    changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
     // Temporarily make a clone of the parent blueprint's zones so we can use
     // typed UUIDs everywhere. Once we're done migrating, this `Cow` can be
     // removed.
@@ -900,37 +988,33 @@ impl<'a> BlueprintZonesBuilder<'a> {
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
-    ) -> &mut BlueprintZonesConfig {
+    ) -> &mut BuilderZonesConfig {
         self.changed_zones.entry(sled_id).or_insert_with(|| {
             if let Some(old_sled_zones) = self.parent_zones.get(&sled_id) {
-                BlueprintZonesConfig {
-                    generation: old_sled_zones.generation.next(),
-                    zones: old_sled_zones.zones.clone(),
-                }
+                BuilderZonesConfig::from_parent(old_sled_zones)
             } else {
-                // The first generation is reserved to mean the one containing
-                // no zones.  See OmicronZonesConfig::INITIAL_GENERATION.  So
-                // we start with the next one.
-                BlueprintZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![],
-                }
+                BuilderZonesConfig::new()
             }
         })
     }
 
     /// Iterates over the list of Omicron zones currently configured for this
-    /// sled in the blueprint that's being built
+    /// sled in the blueprint that's being built, along with each zone's state
+    /// in the builder.
     pub fn current_sled_zones(
         &self,
         sled_id: SledUuid,
-    ) -> Box<dyn Iterator<Item = &BlueprintZoneConfig> + '_> {
-        if let Some(sled_zones) = self
-            .changed_zones
-            .get(&sled_id)
-            .or_else(|| self.parent_zones.get(&sled_id))
-        {
-            Box::new(sled_zones.zones.iter())
+    ) -> Box<dyn Iterator<Item = (&BlueprintZoneConfig, BuilderZoneState)> + '_>
+    {
+        if let Some(sled_zones) = self.changed_zones.get(&sled_id) {
+            Box::new(sled_zones.iter_zones().map(|z| (z.zone(), z.state())))
+        } else if let Some(parent_zones) = self.parent_zones.get(&sled_id) {
+            Box::new(
+                parent_zones
+                    .zones
+                    .iter()
+                    .map(|z| (z, BuilderZoneState::Unchanged)),
+            )
         } else {
             Box::new(std::iter::empty())
         }
@@ -945,24 +1029,26 @@ impl<'a> BlueprintZonesBuilder<'a> {
             .map(|sled_id| {
                 // Start with self.changed_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
-                let mut zones = self
-                    .changed_zones
-                    .remove(&sled_id)
-                    // If it's not there, use the config from the parent
-                    // blueprint.
-                    .or_else(|| self.parent_zones.get(&sled_id).cloned())
-                    // If it's not there either, then this must be a new sled
-                    // and we haven't added any zones to it yet.  Use the
+                if let Some(zones) = self.changed_zones.remove(&sled_id) {
+                    (sled_id.into_untyped_uuid(), zones.build())
+                }
+                // Next, check self.parent_zones, to represent an unchanged sled.
+                else if let Some(parent_zones) =
+                    self.parent_zones.get(&sled_id)
+                {
+                    (sled_id.into_untyped_uuid(), parent_zones.clone())
+                } else {
+                    // If the sled is not in self.parent_zones, then it must be a
+                    // new sled and we haven't added any zones to it yet.  Use the
                     // standard initial config.
-                    .unwrap_or_else(|| BlueprintZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![],
-                    });
-
-                zones.sort();
-
-                // TODO-cleanup use `TypedUuid` everywhere
-                (sled_id.into_untyped_uuid(), zones)
+                    (
+                        sled_id.into_untyped_uuid(),
+                        BlueprintZonesConfig {
+                            generation: Generation::new(),
+                            zones: vec![],
+                        },
+                    )
+                }
             })
             .collect()
     }
@@ -1071,8 +1157,8 @@ pub mod test {
     use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_client::types::OmicronZoneType;
     use std::collections::BTreeSet;
+    use test_strategy::proptest;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
@@ -1103,18 +1189,8 @@ pub mod test {
         // describes no changes.
         static TEST_NAME: &str = "blueprint_builder_test_initial";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input) =
+        let (collection, input, blueprint_initial) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint_initial =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                Generation::new(),
-                Generation::new(),
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                TEST_NAME,
-            )
-            .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint_initial);
 
         let diff =
@@ -1289,21 +1365,14 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
-        // We don't care about the DNS versions here.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
-        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
-            &collection,
-            internal_dns_version,
-            external_dns_version,
+        // Start with an empty blueprint (sleds with no zones).
+        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
-        )
-        .expect("failed to create initial blueprint");
+        );
 
         {
             // We start empty, and can add a disk
@@ -1341,33 +1410,19 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input) =
+
+        // Discard the example blueprint and start with an empty one.
+        let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-
-        // We don't care about the DNS versions here.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
-
-        // Adding a new Nexus zone currently requires copying settings from an
-        // existing Nexus zone. If we remove all Nexus zones from the
-        // collection, create a blueprint, then try to add a Nexus zone, it
-        // should fail.
-        for zones in collection.omicron_zones.values_mut() {
-            zones.zones.zones.retain(|z| {
-                !matches!(z.zone_type, OmicronZoneType::Nexus { .. })
-            });
-        }
-
-        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
-            &collection,
-            internal_dns_version,
-            external_dns_version,
+        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::All),
             "test",
             TEST_NAME,
-        )
-        .expect("failed to create initial blueprint");
+        );
 
+        // Adding a new Nexus zone currently requires copying settings from an
+        // existing Nexus zone. `parent` has no zones, so we should fail if we
+        // try to add a Nexus zone.
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
@@ -1400,12 +1455,8 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input) =
+        let (mut collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-
-        // We don't care about the DNS versions here.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
 
         // Remove the Nexus zone from one of the sleds so that
         // `sled_ensure_zone_nexus` can attempt to add a Nexus zone to
@@ -1414,26 +1465,21 @@ pub mod test {
             let mut selected_sled_id = None;
             for (sled_id, zones) in &mut collection.omicron_zones {
                 let nzones_before_retain = zones.zones.zones.len();
-                zones.zones.zones.retain(|z| {
-                    !matches!(z.zone_type, OmicronZoneType::Nexus { .. })
-                });
+                zones.zones.zones.retain(|z| !z.zone_type.is_nexus());
                 if zones.zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
+                    // Also remove this zone from the blueprint.
+                    parent
+                        .blueprint_zones
+                        .get_mut(sled_id.as_untyped_uuid())
+                        .expect("missing sled")
+                        .zones
+                        .retain(|z| !z.zone_type.is_nexus());
                     break;
                 }
             }
             selected_sled_id.expect("found no sleds with Nexus zone")
         };
-
-        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
-            &collection,
-            internal_dns_version,
-            external_dns_version,
-            input.all_sled_ids(SledFilter::All),
-            "test",
-            TEST_NAME,
-        )
-        .expect("failed to create initial blueprint");
 
         {
             // Attempting to add Nexus to the sled we removed it from (with no
@@ -1521,7 +1567,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_external_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input) =
+        let (_, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1531,10 +1577,12 @@ pub mod test {
         let mut found_second_nexus_zone = false;
         let mut nexus_external_ip = None;
 
-        'outer: for zones in collection.omicron_zones.values_mut() {
-            for z in zones.zones.zones.iter_mut() {
-                if let OmicronZoneType::Nexus { external_ip, .. } =
-                    &mut z.zone_type
+        'outer: for zones in parent.blueprint_zones.values_mut() {
+            for z in zones.zones.iter_mut() {
+                if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    external_ip,
+                    ..
+                }) = &mut z.zone_type
                 {
                     if let Some(ip) = nexus_external_ip {
                         *external_ip = ip;
@@ -1548,16 +1596,6 @@ pub mod test {
             }
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
-
-        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            input.all_sled_ids(SledFilter::All),
-            "test",
-            TEST_NAME,
-        )
-        .unwrap();
 
         match BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -1581,7 +1619,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_nexus_zones_with_same_nic_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input) =
+        let (_, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1591,9 +1629,13 @@ pub mod test {
         let mut found_second_nexus_zone = false;
         let mut nexus_nic_ip = None;
 
-        'outer: for zones in collection.omicron_zones.values_mut() {
-            for z in zones.zones.zones.iter_mut() {
-                if let OmicronZoneType::Nexus { nic, .. } = &mut z.zone_type {
+        'outer: for zones in parent.blueprint_zones.values_mut() {
+            for z in zones.zones.iter_mut() {
+                if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    nic,
+                    ..
+                }) = &mut z.zone_type
+                {
                     if let Some(ip) = nexus_nic_ip {
                         nic.ip = ip;
                         found_second_nexus_zone = true;
@@ -1606,16 +1648,6 @@ pub mod test {
             }
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
-
-        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            input.all_sled_ids(SledFilter::All),
-            "test",
-            TEST_NAME,
-        )
-        .unwrap();
 
         match BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -1639,7 +1671,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_vnic_mac";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input) =
+        let (_, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1649,9 +1681,13 @@ pub mod test {
         let mut found_second_nexus_zone = false;
         let mut nexus_nic_mac = None;
 
-        'outer: for zones in collection.omicron_zones.values_mut() {
-            for z in zones.zones.zones.iter_mut() {
-                if let OmicronZoneType::Nexus { nic, .. } = &mut z.zone_type {
+        'outer: for zones in parent.blueprint_zones.values_mut() {
+            for z in zones.zones.iter_mut() {
+                if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    nic,
+                    ..
+                }) = &mut z.zone_type
+                {
                     if let Some(mac) = nexus_nic_mac {
                         nic.mac = mac;
                         found_second_nexus_zone = true;
@@ -1664,16 +1700,6 @@ pub mod test {
             }
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
-
-        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            input.all_sled_ids(SledFilter::All),
-            "test",
-            TEST_NAME,
-        )
-        .unwrap();
 
         match BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -1689,5 +1715,32 @@ pub mod test {
         };
 
         logctx.cleanup_successful();
+    }
+
+    /// Test that `AvailableIterator` correctly filters out items that are in
+    /// use.
+    #[proptest]
+    fn test_available_iterator(items: HashSet<(i32, bool)>) {
+        let mut in_use_map = HashSet::new();
+        let mut expected_available = Vec::new();
+        let items: Vec<_> = items
+            .into_iter()
+            .map(|(item, in_use)| {
+                if in_use {
+                    in_use_map.insert(item);
+                } else {
+                    expected_available.push(item);
+                }
+                item
+            })
+            .collect();
+
+        let available = AvailableIterator::new(items.into_iter(), in_use_map);
+        let actual_available = available.collect::<Vec<_>>();
+
+        assert_eq!(
+            expected_available, actual_available,
+            "available items match"
+        );
     }
 }

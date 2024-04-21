@@ -155,14 +155,16 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 ipnetwork::Ipv4Network::new(external_ip, 32)
                                     .unwrap();
 
+                            let (snat_first_port, snat_last_port) =
+                                snat_cfg.port_range_raw();
                             let nat_value = Ipv4NatValues {
                                 external_address: nexus_db_model::Ipv4Net(
                                     omicron_common::api::external::Ipv4Net(
                                         external_address,
                                     ),
                                 ),
-                                first_port: snat_cfg.first_port.into(),
-                                last_port: snat_cfg.last_port.into(),
+                                first_port: snat_first_port.into(),
+                                last_port: snat_last_port.into(),
                                 sled_address: sled_address.into(),
                                 vni: nexus_db_model::Vni(nic.vni),
                                 mac: nexus_db_model::MacAddr(nic.mac),

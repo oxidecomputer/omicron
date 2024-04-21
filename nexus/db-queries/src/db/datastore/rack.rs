@@ -47,6 +47,8 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -61,6 +63,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
@@ -475,70 +478,62 @@ impl DataStore {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
-                let external_ip = dns_address.ip();
-                let service_kind = format!("{}", zone_type.kind());
-                let db_ip = IncompleteExternalIp::for_service_explicit(
-                    Uuid::new_v4(),
-                    &db::model::Name(nic.name.clone()),
-                    &service_kind,
-                    zone_config.id.into_untyped_uuid(),
-                    service_pool.id(),
-                    external_ip,
-                );
+                let external_ip = OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    kind: OmicronZoneExternalIpKind::Floating(dns_address.ip()),
+                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
                     DNS_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: nic.name.clone(),
-                        description: format!("{service_kind} service vNIC"),
+                        description: format!(
+                            "{} service vNIC",
+                            zone_type.kind()
+                        ),
                     },
                     nic.ip,
                     nic.mac,
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((db_ip, db_nic))
+                Some((external_ip, db_nic))
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 nic,
                 external_ip,
                 ..
             }) => {
-                let service_kind = format!("{}", zone_type.kind());
-                let db_ip = IncompleteExternalIp::for_service_explicit(
-                    Uuid::new_v4(),
-                    &db::model::Name(nic.name.clone()),
-                    &service_kind,
-                    zone_config.id.into_untyped_uuid(),
-                    service_pool.id(),
-                    *external_ip,
-                );
+                let external_ip = OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    kind: OmicronZoneExternalIpKind::Floating(*external_ip),
+                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
                     NEXUS_VPC_SUBNET.clone(),
                     IdentityMetadataCreateParams {
                         name: nic.name.clone(),
-                        description: format!("{service_kind} service vNIC"),
+                        description: format!(
+                            "{} service vNIC",
+                            zone_type.kind()
+                        ),
                     },
                     nic.ip,
                     nic.mac,
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((db_ip, db_nic))
+                Some((external_ip, db_nic))
             }
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { snat_cfg, nic, .. },
             ) => {
-                let db_ip = IncompleteExternalIp::for_service_explicit_snat(
-                    Uuid::new_v4(),
-                    zone_config.id.into_untyped_uuid(),
-                    service_pool.id(),
-                    snat_cfg.ip,
-                    (snat_cfg.first_port, snat_cfg.last_port),
-                );
+                let external_ip = OmicronZoneExternalIp {
+                    id: ExternalIpUuid::new_v4(),
+                    kind: OmicronZoneExternalIpKind::Snat(*snat_cfg),
+                };
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -555,7 +550,7 @@ impl DataStore {
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((db_ip, db_nic))
+                Some((external_ip, db_nic))
             }
             BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Clickhouse(_)
@@ -566,7 +561,7 @@ impl DataStore {
             | BlueprintZoneType::InternalDns(_)
             | BlueprintZoneType::Oximeter(_) => None,
         };
-        let Some((db_ip, db_nic)) = service_ip_nic else {
+        let Some((external_ip, db_nic)) = service_ip_nic else {
             info!(
                 log,
                 "No networking records needed for {} service",
@@ -574,6 +569,12 @@ impl DataStore {
             );
             return Ok(());
         };
+        let db_ip = IncompleteExternalIp::for_omicron_zone(
+            service_pool.id(),
+            external_ip,
+            zone_config.id,
+            zone_config.zone_type.kind(),
+        );
         Self::allocate_external_ip_on_connection(conn, db_ip).await.map_err(
             |err| {
                 error!(
@@ -958,20 +959,19 @@ mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, SledUpdate};
-    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
     };
     use nexus_test_utils::db::test_setup_database;
-    use nexus_types::deployment::OmicronZoneConfig;
-    use nexus_types::deployment::OmicronZonesConfig;
-    use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
-    use nexus_types::inventory::OmicronZoneType;
     use omicron_common::address::{
         DNS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV4_SUBNET, NTP_OPTE_IPV4_SUBNET,
     };
@@ -981,8 +981,9 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::TypedUuid;
-    use omicron_uuid_kinds::{GenericUuid, SledUuid, ZpoolUuid};
+    use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -1269,61 +1270,52 @@ mod test {
                 SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled3.id())),
             )
             .expect("failed to add sled3");
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("failed to make planning input")
-            .build();
-        let mut inventory_builder = system
-            .to_collection_builder()
-            .expect("failed to make collection builder");
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
-        let external_dns_id = Uuid::new_v4();
+        let external_dns_id = OmicronZoneUuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
-        let nexus_id = Uuid::new_v4();
+        let nexus_id = OmicronZoneUuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp1_pip = NTP_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
-        let ntp1_id = Uuid::new_v4();
+        let ntp1_id = OmicronZoneUuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp2_pip = NTP_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
             .unwrap();
-        let ntp2_id = Uuid::new_v4();
-        let ntp3_id = Uuid::new_v4();
+        let ntp2_id = OmicronZoneUuid::new_v4();
+        let ntp3_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
 
-        // Add services for our sleds to the inventory (which will cause them to
-        // be present in the blueprint we'll generate from it).
-        inventory_builder
-            .found_sled_omicron_zones(
-                "sled1",
-                SledUuid::from_untyped_uuid(sled1.id()),
-                OmicronZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![
-                        OmicronZoneConfig {
-                            id: external_dns_id,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::ExternalDns {
+        let mut blueprint_zones = BTreeMap::new();
+        blueprint_zones.insert(
+            sled1.id(),
+            BlueprintZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: external_dns_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::ExternalDns(
+                            blueprint_zone_type::ExternalDns {
                                 dataset: random_dataset(),
-                                http_address: "[::1]:80".to_string(),
+                                http_address: "[::1]:80".parse().unwrap(),
                                 dns_address: SocketAddr::new(
                                     external_dns_ip,
                                     53,
-                                )
-                                .to_string(),
+                                ),
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: external_dns_id,
+                                        id: external_dns_id.into_untyped_uuid(),
                                     },
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
@@ -1337,19 +1329,22 @@ mod test {
                                     slot: 0,
                                 },
                             },
-                        },
-                        OmicronZoneConfig {
-                            id: ntp1_id,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::BoundaryNtp {
-                                address: "[::1]:80".to_string(),
+                        ),
+                    },
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: ntp1_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::BoundaryNtp(
+                            blueprint_zone_type::BoundaryNtp {
+                                address: "[::1]:80".parse().unwrap(),
                                 ntp_servers: vec![],
                                 dns_servers: vec![],
                                 domain: None,
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: ntp1_id,
+                                        id: ntp1_id.into_untyped_uuid(),
                                     },
                                     name: "ntp1".parse().unwrap(),
                                     ip: ntp1_pip.into(),
@@ -1362,36 +1357,35 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig {
-                                    ip: ntp1_ip,
-                                    first_port: 16384,
-                                    last_port: 32767,
-                                },
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp1_ip, 16384, 32767,
+                                )
+                                .unwrap(),
                             },
-                        },
-                    ],
-                },
-            )
-            .expect("recording Omicron zones");
-        inventory_builder
-            .found_sled_omicron_zones(
-                "sled2",
-                SledUuid::from_untyped_uuid(sled2.id()),
-                OmicronZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![
-                        OmicronZoneConfig {
-                            id: nexus_id,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::Nexus {
-                                internal_address: "[::1]:80".to_string(),
+                        ),
+                    },
+                ],
+            },
+        );
+        blueprint_zones.insert(
+            sled2.id(),
+            BlueprintZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: nexus_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus {
+                                internal_address: "[::1]:80".parse().unwrap(),
                                 external_ip: nexus_ip,
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id,
+                                        id: nexus_id.into_untyped_uuid(),
                                     },
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
@@ -1405,19 +1399,22 @@ mod test {
                                     slot: 0,
                                 },
                             },
-                        },
-                        OmicronZoneConfig {
-                            id: ntp2_id,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::BoundaryNtp {
-                                address: "[::1]:80".to_string(),
+                        ),
+                    },
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: ntp2_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::BoundaryNtp(
+                            blueprint_zone_type::BoundaryNtp {
+                                address: "[::1]:80".parse().unwrap(),
                                 ntp_servers: vec![],
                                 dns_servers: vec![],
                                 domain: None,
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: ntp2_id,
+                                        id: ntp2_id.into_untyped_uuid(),
                                     },
                                     name: "ntp2".parse().unwrap(),
                                     ip: ntp2_pip.into(),
@@ -1430,45 +1427,49 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig {
-                                    ip: ntp2_ip,
-                                    first_port: 0,
-                                    last_port: 16383,
-                                },
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp2_ip, 0, 16383,
+                                )
+                                .unwrap(),
                             },
-                        },
-                    ],
-                },
-            )
-            .expect("recording Omicron zones");
-        inventory_builder
-            .found_sled_omicron_zones(
-                "sled3",
-                SledUuid::from_untyped_uuid(sled3.id()),
-                OmicronZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![OmicronZoneConfig {
-                        id: ntp3_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::InternalNtp {
-                            address: "[::1]:80".to_string(),
+                        ),
+                    },
+                ],
+            },
+        );
+        blueprint_zones.insert(
+            sled3.id(),
+            BlueprintZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: ntp3_id,
+                    underlay_address: Ipv6Addr::LOCALHOST,
+                    zone_type: BlueprintZoneType::InternalNtp(
+                        blueprint_zone_type::InternalNtp {
+                            address: "[::1]:80".parse().unwrap(),
                             ntp_servers: vec![],
                             dns_servers: vec![],
                             domain: None,
                         },
-                    }],
-                },
-            )
-            .expect("recording Omicron zones");
-        let blueprint = BlueprintBuilder::build_initial_from_collection_seeded(
-            &inventory_builder.build(),
-            *Generation::new(),
-            *Generation::new(),
-            planning_input.all_sled_ids(SledFilter::All),
-            "test suite",
-            (test_name, "initial blueprint"),
-        )
-        .expect("failed to build blueprint");
+                    ),
+                }],
+            },
+        );
+        for zone_config in blueprint_zones.values_mut() {
+            zone_config.sort();
+        }
+        let blueprint = Blueprint {
+            id: Uuid::new_v4(),
+            blueprint_zones,
+            blueprint_disks: BTreeMap::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: *Generation::new(),
+            external_dns_version: *Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+        };
 
         let rack = datastore
             .rack_set_initialized(
@@ -1498,23 +1499,23 @@ mod test {
         assert_eq!(observed_external_ips.len(), 4);
         let dns_external_ip = observed_external_ips
             .iter()
-            .find(|e| e.parent_id == Some(external_dns_id))
+            .find(|e| e.parent_id == Some(external_dns_id.into_untyped_uuid()))
             .unwrap();
         let nexus_external_ip = observed_external_ips
             .iter()
-            .find(|e| e.parent_id == Some(nexus_id))
+            .find(|e| e.parent_id == Some(nexus_id.into_untyped_uuid()))
             .unwrap();
         let ntp1_external_ip = observed_external_ips
             .iter()
-            .find(|e| e.parent_id == Some(ntp1_id))
+            .find(|e| e.parent_id == Some(ntp1_id.into_untyped_uuid()))
             .unwrap();
         let ntp2_external_ip = observed_external_ips
             .iter()
-            .find(|e| e.parent_id == Some(ntp2_id))
+            .find(|e| e.parent_id == Some(ntp2_id.into_untyped_uuid()))
             .unwrap();
         assert!(!observed_external_ips
             .iter()
-            .any(|e| e.parent_id == Some(ntp3_id)));
+            .any(|e| e.parent_id == Some(ntp3_id.into_untyped_uuid())));
 
         assert!(dns_external_ip.is_service);
         assert_eq!(dns_external_ip.kind, IpKind::Floating);
@@ -1601,16 +1602,9 @@ mod test {
                 SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
             )
             .expect("failed to add sled");
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("failed to make planning input")
-            .build();
-        let mut inventory_builder = system
-            .to_collection_builder()
-            .expect("failed to make collection builder");
 
-        let nexus_id1 = Uuid::new_v4();
-        let nexus_id2 = Uuid::new_v4();
+        let nexus_id1 = OmicronZoneUuid::new_v4();
+        let nexus_id2 = OmicronZoneUuid::new_v4();
         let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
@@ -1619,25 +1613,26 @@ mod test {
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
-        inventory_builder
-            .found_sled_omicron_zones(
-                "sled",
-                SledUuid::from_untyped_uuid(sled.id()),
-                OmicronZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![
-                        OmicronZoneConfig {
-                            id: nexus_id1,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::Nexus {
-                                internal_address: "[::1]:80".to_string(),
+        let mut blueprint_zones = BTreeMap::new();
+        blueprint_zones.insert(
+            sled.id(),
+            BlueprintZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: nexus_id1,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus {
+                                internal_address: "[::1]:80".parse().unwrap(),
                                 external_ip: nexus_ip_start.into(),
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id1,
+                                        id: nexus_id1.into_untyped_uuid(),
                                     },
                                     name: "nexus1".parse().unwrap(),
                                     ip: nexus_pip1.into(),
@@ -1651,19 +1646,22 @@ mod test {
                                     slot: 0,
                                 },
                             },
-                        },
-                        OmicronZoneConfig {
-                            id: nexus_id2,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::Nexus {
-                                internal_address: "[::1]:80".to_string(),
+                        ),
+                    },
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: nexus_id2,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus {
+                                internal_address: "[::1]:80".parse().unwrap(),
                                 external_ip: nexus_ip_end.into(),
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id2,
+                                        id: nexus_id2.into_untyped_uuid(),
                                     },
                                     name: "nexus2".parse().unwrap(),
                                     ip: nexus_pip2.into(),
@@ -1677,11 +1675,11 @@ mod test {
                                     slot: 0,
                                 },
                             },
-                        },
-                    ],
-                },
-            )
-            .expect("recording Omicron zones");
+                        ),
+                    },
+                ],
+            },
+        );
 
         let datasets = vec![];
 
@@ -1707,15 +1705,20 @@ mod test {
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
-        let blueprint = BlueprintBuilder::build_initial_from_collection_seeded(
-            &inventory_builder.build(),
-            *Generation::new(),
-            *Generation::new(),
-            planning_input.all_sled_ids(SledFilter::All),
-            "test suite",
-            (test_name, "initial blueprint"),
-        )
-        .expect("failed to build blueprint");
+        for zone_config in blueprint_zones.values_mut() {
+            zone_config.sort();
+        }
+        let blueprint = Blueprint {
+            id: Uuid::new_v4(),
+            blueprint_zones,
+            blueprint_disks: BTreeMap::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: *Generation::new(),
+            external_dns_version: *Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+        };
 
         let rack = datastore
             .rack_set_initialized(
@@ -1867,38 +1870,32 @@ mod test {
                 SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
             )
             .expect("failed to add sled");
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("failed to make planning input")
-            .build();
-        let mut inventory_builder = system
-            .to_collection_builder()
-            .expect("failed to make collection builder");
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
-        let nexus_id = Uuid::new_v4();
+        let nexus_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
-        inventory_builder
-            .found_sled_omicron_zones(
-                "sled",
-                SledUuid::from_untyped_uuid(sled.id()),
-                OmicronZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![OmicronZoneConfig {
-                        id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::Nexus {
-                            internal_address: "[::1]:80".to_string(),
+        let mut blueprint_zones = BTreeMap::new();
+        blueprint_zones.insert(
+            sled.id(),
+            BlueprintZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: nexus_id,
+                    underlay_address: Ipv6Addr::LOCALHOST,
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:80".parse().unwrap(),
                             external_ip: nexus_ip,
                             external_tls: false,
                             external_dns_servers: vec![],
                             nic: NetworkInterface {
                                 id: Uuid::new_v4(),
                                 kind: NetworkInterfaceKind::Service {
-                                    id: nexus_id,
+                                    id: nexus_id.into_untyped_uuid(),
                                 },
                                 name: "nexus".parse().unwrap(),
                                 ip: nexus_pip.into(),
@@ -1912,20 +1909,24 @@ mod test {
                                 slot: 0,
                             },
                         },
-                    }],
-                },
-            )
-            .expect("recording Omicron zones");
-
-        let blueprint = BlueprintBuilder::build_initial_from_collection_seeded(
-            &inventory_builder.build(),
-            *Generation::new(),
-            *Generation::new(),
-            planning_input.all_sled_ids(SledFilter::All),
-            "test suite",
-            (test_name, "initial blueprint"),
-        )
-        .expect("failed to build blueprint");
+                    ),
+                }],
+            },
+        );
+        for zone_config in blueprint_zones.values_mut() {
+            zone_config.sort();
+        }
+        let blueprint = Blueprint {
+            id: Uuid::new_v4(),
+            blueprint_zones,
+            blueprint_disks: BTreeMap::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: *Generation::new(),
+            external_dns_version: *Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+        };
 
         let result = datastore
             .rack_set_initialized(
@@ -1965,44 +1966,37 @@ mod test {
                 SledBuilder::new().id(TypedUuid::from_untyped_uuid(sled.id())),
             )
             .expect("failed to add sled");
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("failed to make planning input")
-            .build();
-        let mut inventory_builder = system
-            .to_collection_builder()
-            .expect("failed to make collection builder");
 
         // Request two services which happen to be using the same IP address.
-        let external_dns_id = Uuid::new_v4();
+        let external_dns_id = OmicronZoneUuid::new_v4();
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
-        let nexus_id = Uuid::new_v4();
+        let nexus_id = OmicronZoneUuid::new_v4();
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
-        inventory_builder
-            .found_sled_omicron_zones(
-                "sled",
-                SledUuid::from_untyped_uuid(sled.id()),
-                OmicronZonesConfig {
-                    generation: Generation::new().next(),
-                    zones: vec![
-                        OmicronZoneConfig {
-                            id: external_dns_id,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::ExternalDns {
+        let mut blueprint_zones = BTreeMap::new();
+        blueprint_zones.insert(
+            sled.id(),
+            BlueprintZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: external_dns_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::ExternalDns(
+                            blueprint_zone_type::ExternalDns {
                                 dataset: random_dataset(),
-                                http_address: "[::1]:80".to_string(),
-                                dns_address: SocketAddr::new(ip, 53)
-                                    .to_string(),
+                                http_address: "[::1]:80".parse().unwrap(),
+                                dns_address: SocketAddr::new(ip, 53),
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: external_dns_id,
+                                        id: external_dns_id.into_untyped_uuid(),
                                     },
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
@@ -2016,19 +2010,22 @@ mod test {
                                     slot: 0,
                                 },
                             },
-                        },
-                        OmicronZoneConfig {
-                            id: nexus_id,
-                            underlay_address: Ipv6Addr::LOCALHOST,
-                            zone_type: OmicronZoneType::Nexus {
-                                internal_address: "[::1]:80".to_string(),
+                        ),
+                    },
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: nexus_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus {
+                                internal_address: "[::1]:80".parse().unwrap(),
                                 external_ip: ip,
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id,
+                                        id: nexus_id.into_untyped_uuid(),
                                     },
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
@@ -2042,21 +2039,26 @@ mod test {
                                     slot: 0,
                                 },
                             },
-                        },
-                    ],
-                },
-            )
-            .expect("recording Omicron zones");
+                        ),
+                    },
+                ],
+            },
+        );
 
-        let blueprint = BlueprintBuilder::build_initial_from_collection_seeded(
-            &inventory_builder.build(),
-            *Generation::new(),
-            *Generation::new(),
-            planning_input.all_sled_ids(SledFilter::All),
-            "test suite",
-            (test_name, "initial blueprint"),
-        )
-        .expect("failed to build blueprint");
+        for zone_config in blueprint_zones.values_mut() {
+            zone_config.sort();
+        }
+        let blueprint = Blueprint {
+            id: Uuid::new_v4(),
+            blueprint_zones,
+            blueprint_disks: BTreeMap::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: *Generation::new(),
+            external_dns_version: *Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+        };
 
         let result = datastore
             .rack_set_initialized(

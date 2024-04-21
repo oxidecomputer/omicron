@@ -1,5 +1,5 @@
 from: collection 094d362b-7d79-49e7-a244-134276cca8fe
-to:   blueprint  9d2c007b-46f1-4ff2-8b4c-8a5767030f76
+to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
 
   ------------------------------------------------------------------------------------------------------
      zone type      zone ID                                disposition   underlay IP             status 
@@ -7,7 +7,7 @@ to:   blueprint  9d2c007b-46f1-4ff2-8b4c-8a5767030f76
                                                                                                         
   UNCHANGED SLEDS:                                                                                      
                                                                                                         
-   sled 08c7046b-c9c4-4368-881f-19a72df22143: zones at generation 2                                     
+   sled 08c7046b-c9c4-4368-881f-19a72df22143: blueprint zones at generation 2                           
      crucible       44afce85-3377-4b20-a398-517c1579df4d   in service    fd00:1122:3344:103::23         
      crucible       4644ea0c-0ec3-41be-a356-660308e1c3fc   in service    fd00:1122:3344:103::2c         
      crucible       55f4d117-0b9d-4256-a2c0-f46d3ed5fff9   in service    fd00:1122:3344:103::25         
@@ -21,7 +21,7 @@ to:   blueprint  9d2c007b-46f1-4ff2-8b4c-8a5767030f76
      internal_ntp   c81c9d4a-36d7-4796-9151-f564d3735152   in service    fd00:1122:3344:103::21         
      nexus          b2573120-9c91-4ed7-8b4f-a7bfe8dbc807   in service    fd00:1122:3344:103::22         
                                                                                                         
-   sled 84ac367e-9b03-4e9d-a846-df1a08deee6c: zones at generation 2                                     
+   sled 84ac367e-9b03-4e9d-a846-df1a08deee6c: blueprint zones at generation 2                           
      crucible       0faa9350-2c02-47c7-a0a6-9f4afd69152c   in service    fd00:1122:3344:101::2c         
      crucible       5b44003e-1a3d-4152-b606-872c72efce0e   in service    fd00:1122:3344:101::25         
      crucible       943fea7a-9458-4935-9dc7-01ee5cfe5a02   in service    fd00:1122:3344:101::29         
@@ -35,7 +35,7 @@ to:   blueprint  9d2c007b-46f1-4ff2-8b4c-8a5767030f76
      internal_ntp   38b047ea-e3de-4859-b8e0-70cac5871446   in service    fd00:1122:3344:101::21         
      nexus          fb36b9dc-273a-4bc3-aaa9-19ee4d0ef552   in service    fd00:1122:3344:101::22         
                                                                                                         
-   sled be7f4375-2a6b-457f-b1a4-3074a715e5fe: zones at generation 2                                     
+   sled be7f4375-2a6b-457f-b1a4-3074a715e5fe: blueprint zones at generation 2                           
      crucible       248db330-56e6-4c7e-b5ff-9cd6cbcb210a   in service    fd00:1122:3344:102::2c         
      crucible       353b0aff-4c71-4fae-a6bd-adcb1d2a1a1d   in service    fd00:1122:3344:102::29         
      crucible       4330134c-41b9-4097-aa0b-3eaefa06d473   in service    fd00:1122:3344:102::24         

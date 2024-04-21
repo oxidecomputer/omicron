@@ -45,6 +45,7 @@ mod zone_type;
 
 pub use planning_input::DiskFilter;
 pub use planning_input::OmicronZoneExternalIp;
+pub use planning_input::OmicronZoneExternalIpKind;
 pub use planning_input::OmicronZoneNic;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
@@ -158,6 +159,19 @@ impl Blueprint {
         })
     }
 
+    // Temporary method that provides the list of Omicron zones using
+    // `TypedUuid`.
+    //
+    // In the future, `all_omicron_zones` will return `SledUuid`,
+    // and this method will go away.
+    pub fn all_omicron_zones_typed(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        self.all_omicron_zones(filter)
+            .map(|(sled_id, z)| (SledUuid::from_untyped_uuid(sled_id), z))
+    }
+
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
         self.blueprint_zones.keys().copied().map(SledUuid::from_untyped_uuid)
@@ -189,11 +203,7 @@ impl Blueprint {
     ///
     /// Note that collections do not include information about zone
     /// disposition, so it is assumed that all zones in the collection have the
-    /// [`InService`](BlueprintZoneDisposition::InService) disposition. (This
-    /// is the same assumption made by
-    /// [`BlueprintZonesConfig::initial_from_collection`]. The logic here may
-    /// also be expanded to handle cases where not all zones in the collection
-    /// are in-service.)
+    /// [`InService`](BlueprintZoneDisposition::InService) disposition.
     pub fn diff_since_collection(
         &self,
         before: &Collection,
@@ -310,37 +320,6 @@ pub struct BlueprintZonesConfig {
 }
 
 impl BlueprintZonesConfig {
-    /// Constructs a new [`BlueprintZonesConfig`] from a collection's zones.
-    ///
-    /// For the initial blueprint, all zones within a collection are assumed to
-    /// have the [`InService`](BlueprintZoneDisposition::InService)
-    /// disposition.
-    pub fn initial_from_collection(
-        collection: &OmicronZonesConfig,
-    ) -> Result<Self, InvalidOmicronZoneType> {
-        let zones = collection
-            .zones
-            .iter()
-            .map(|z| {
-                BlueprintZoneConfig::from_omicron_zone_config(
-                    z.clone(),
-                    BlueprintZoneDisposition::InService,
-                )
-            })
-            .collect::<Result<_, _>>()?;
-
-        let mut ret = Self {
-            // An initial `BlueprintZonesConfig` reuses the generation from
-            // `OmicronZonesConfig`.
-            generation: collection.generation,
-            zones,
-        };
-        // For testing, it's helpful for zones to be in sorted order.
-        ret.sort();
-
-        Ok(ret)
-    }
-
     /// Sorts the list of zones stored in this configuration.
     ///
     /// This is not strictly necessary. But for testing (particularly snapshot
@@ -1263,7 +1242,7 @@ mod table_display {
 
             for (sled_id, sled_zones) in blueprint_zones {
                 let heading = format!(
-                    "{SLED_INDENT}sled {sled_id}: zones at generation {}",
+                    "{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
                     sled_zones.generation
                 );
                 builder.make_section(
@@ -1514,7 +1493,7 @@ mod table_display {
         section: &mut StSectionBuilder,
     ) {
         let heading = format!(
-            "{}{SLED_INDENT}sled {sled_id}: zones at generation {}",
+            "{}{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
             kind.prefix(),
             sled_zones.generation,
         );
@@ -1549,26 +1528,28 @@ mod table_display {
         modified: &DiffSledModified,
         section: &mut StSectionBuilder,
     ) {
-        let (generation_heading, warning) = if modified.generation_before
-            != modified.generation_after
-        {
-            (
-                format!(
-                    "zones at generation: {} -> {}",
-                    modified.generation_before, modified.generation_after,
-                ),
-                None,
-            )
-        } else {
-            // Modified sleds should always see a generation bump.
-            (
-                format!("zones at generation: {}", modified.generation_before),
-                Some(format!(
-                    "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
+        let (generation_heading, warning) =
+            if modified.generation_before != modified.generation_after {
+                (
+                    format!(
+                        "blueprint zones at generation: {} -> {}",
+                        modified.generation_before, modified.generation_after,
+                    ),
+                    None,
+                )
+            } else {
+                // Modified sleds should always see a generation bump.
+                (
+                    format!(
+                        "blueprint zones at generation: {}",
+                        modified.generation_before
+                    ),
+                    Some(format!(
+                        "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
                      warning: generation should have changed"
-                )),
-            )
-        };
+                    )),
+                )
+            };
 
         let sled_heading =
             format!("{MODIFIED_PREFIX}{SLED_INDENT}sled {sled_id}: {generation_heading}");

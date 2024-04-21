@@ -17,6 +17,8 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -97,15 +99,33 @@ impl SledResources {
     }
 }
 
+/// External IP variants possible for Omicron-managed zones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OmicronZoneExternalIpKind {
+    Floating(IpAddr),
+    Snat(SourceNatConfig),
+    // We should probably have `Ephemeral(IpAddr)` too (for Nexus), but
+    // currently we record Nexus as Floating.
+}
+
+impl OmicronZoneExternalIpKind {
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            OmicronZoneExternalIpKind::Floating(ip) => *ip,
+            OmicronZoneExternalIpKind::Snat(snat) => snat.ip,
+        }
+    }
+}
+
 /// External IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneExternalIp {
     pub id: ExternalIpUuid,
-    pub ip: IpAddr,
+    pub kind: OmicronZoneExternalIpKind,
 }
 
 /// Network interface allocated to an Omicron-managed zone.
@@ -116,7 +136,7 @@ pub struct OmicronZoneExternalIp {
 pub struct OmicronZoneNic {
     pub id: Uuid,
     pub mac: MacAddr,
-    pub ip: IpNetwork,
+    pub ip: IpAddr,
     pub slot: u8,
     pub primary: bool,
 }
@@ -404,12 +424,20 @@ impl PlanningInput {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
-    #[error("Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported")]
+    #[error("Omicron zone {zone_id} has a range of IPs ({ip}); only a single IP is supported")]
     NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
     DuplicateOmicronZoneExternalIp {
         zone_id: OmicronZoneUuid,
         ip: OmicronZoneExternalIp,
+    },
+    #[error("Omicron zone {0} has an ephemeral IP (unsupported)")]
+    EphemeralIpUnsupported(OmicronZoneUuid),
+    #[error("Omicron zone {zone_id} has a bad SNAT config")]
+    BadSnatConfig {
+        zone_id: OmicronZoneUuid,
+        #[source]
+        err: SourceNatConfigError,
     },
     #[error("Omicron zone {zone_id} already has a NIC ({nic:?})")]
     DuplicateOmicronZoneNic { zone_id: OmicronZoneUuid, nic: OmicronZoneNic },
@@ -474,12 +502,19 @@ impl PlanningInputBuilder {
 
     /// Like `add_omicron_zone_external_ip`, but can accept an [`IpNetwork`],
     /// validating that the IP is a single address.
-    pub fn add_omicron_zone_external_ip_network(
+    pub fn add_omicron_zone_external_ip_network<F>(
         &mut self,
         zone_id: OmicronZoneUuid,
         ip_id: ExternalIpUuid,
         ip: IpNetwork,
-    ) -> Result<(), PlanningInputBuildError> {
+        to_kind: F,
+    ) -> Result<(), PlanningInputBuildError>
+    where
+        F: FnOnce(
+            IpAddr,
+        )
+            -> Result<OmicronZoneExternalIpKind, PlanningInputBuildError>,
+    {
         let size = match ip.size() {
             NetworkSize::V4(n) => u128::from(n),
             NetworkSize::V6(n) => n,
@@ -487,10 +522,11 @@ impl PlanningInputBuilder {
         if size != 1 {
             return Err(PlanningInputBuildError::NotSingleIp { zone_id, ip });
         }
+        let kind = to_kind(ip.ip())?;
 
         self.add_omicron_zone_external_ip(
             zone_id,
-            OmicronZoneExternalIp { id: ip_id, ip: ip.ip() },
+            OmicronZoneExternalIp { id: ip_id, kind },
         )
     }
 
@@ -507,7 +543,7 @@ impl PlanningInputBuilder {
             Entry::Occupied(prev) => {
                 Err(PlanningInputBuildError::DuplicateOmicronZoneExternalIp {
                     zone_id,
-                    ip: prev.get().clone(),
+                    ip: *prev.get(),
                 })
             }
         }

@@ -97,8 +97,6 @@ enum BlueprintsCommands {
     Delete(BlueprintIdArgs),
     /// Interact with the current target blueprint
     Target(BlueprintsTargetArgs),
-    /// Generate an initial blueprint from a specific inventory collection
-    GenerateFromCollection(CollectionIdArgs),
     /// Generate a new blueprint
     Regenerate,
     /// Import a blueprint
@@ -360,15 +358,6 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_regenerate(&client, token).await
-            }
-            NexusCommands::Blueprints(BlueprintsArgs {
-                command: BlueprintsCommands::GenerateFromCollection(args),
-            }) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_generate_from_collection(
-                    &client, args, token,
-                )
-                .await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Import(args),
@@ -1131,26 +1120,6 @@ async fn cmd_nexus_blueprints_target_set_enabled(
             format!("setting blueprint {blueprint_id} to {description}")
         })?;
     eprintln!("set target blueprint {blueprint_id} to {description}");
-    Ok(())
-}
-
-async fn cmd_nexus_blueprints_generate_from_collection(
-    client: &nexus_client::Client,
-    args: &CollectionIdArgs,
-    _destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let blueprint = client
-        .blueprint_generate_from_collection(
-            &nexus_client::types::CollectionId {
-                collection_id: args.collection_id,
-            },
-        )
-        .await
-        .context("creating blueprint from collection id")?;
-    eprintln!(
-        "created blueprint {} from collection id {}",
-        blueprint.id, args.collection_id
-    );
     Ok(())
 }
 

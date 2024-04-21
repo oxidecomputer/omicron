@@ -7,7 +7,6 @@
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
@@ -15,7 +14,6 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::CreateResult;
@@ -26,7 +24,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_uuid_kinds::CollectionUuid;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -203,35 +200,6 @@ impl super::Nexus {
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
         self.db_datastore.blueprint_insert(opctx, blueprint).await
-    }
-
-    pub async fn blueprint_generate_from_collection(
-        &self,
-        opctx: &OpContext,
-        collection_id: CollectionUuid,
-    ) -> CreateResult<Blueprint> {
-        let collection = self
-            .datastore()
-            .inventory_collection_read(opctx, collection_id)
-            .await?;
-        let planning_context = self.blueprint_planning_context(opctx).await?;
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            planning_context.planning_input.internal_dns_version(),
-            planning_context.planning_input.external_dns_version(),
-            planning_context.planning_input.all_sled_ids(SledFilter::All),
-            &planning_context.creator,
-        )
-        .map_err(|error| {
-            Error::internal_error(&format!(
-                "error generating initial blueprint from collection {}: {}",
-                collection_id,
-                InlineErrorChain::new(&error)
-            ))
-        })?;
-
-        self.blueprint_add(&opctx, &blueprint).await?;
-        Ok(blueprint)
     }
 
     pub async fn blueprint_create_regenerate(

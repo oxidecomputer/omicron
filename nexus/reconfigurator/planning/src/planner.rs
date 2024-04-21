@@ -13,6 +13,8 @@ use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::{info, warn, Logger};
@@ -72,9 +74,35 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
-        // The only thing this planner currently knows how to do is add services
-        // to a sled that's missing them.  So let's see if we're in that case.
+        // We perform planning in two loops: the first one turns expunged sleds
+        // into expunged zones, and the second one adds services.
 
+        self.do_plan_expunge()?;
+        self.do_plan_add()?;
+
+        Ok(())
+    }
+
+    fn do_plan_expunge(&mut self) -> Result<(), Error> {
+        // Remove services from sleds marked expunged. We use `SledFilter::All`
+        // and have a custom `needs_zone_expungement` function that allows us
+        // to produce better errors.
+        for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
+            // Does this sled need zone expungement based on the details?
+            let Some(reason) =
+                needs_zone_expungement(sled_details.state, sled_details.policy)
+            else {
+                continue;
+            };
+
+            // Perform the expungement.
+            self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+        }
+
+        Ok(())
+    }
+
+    fn do_plan_add(&mut self) -> Result<(), Error> {
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
         // functioning.  At some point, this function will have to grow the
@@ -330,12 +358,44 @@ impl<'a> Planner<'a> {
     }
 }
 
+/// Returns `Some(reason)` if the sled needs its zones to be expunged,
+/// based on the policy and state.
+fn needs_zone_expungement(
+    state: SledState,
+    policy: SledPolicy,
+) -> Option<ZoneExpungeReason> {
+    match state {
+        SledState::Active => {}
+        SledState::Decommissioned => {
+            // A decommissioned sled that still has resources attached to it is
+            // an illegal state, but representable. If we see a sled in this
+            // state, we should still expunge all zones in it, but parent code
+            // should warn on it.
+            return Some(ZoneExpungeReason::SledDecommissioned { policy });
+        }
+    }
+
+    match policy {
+        SledPolicy::InService { .. } => None,
+        SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
+    }
+}
+
+/// The reason a sled's zones need to be expunged.
+///
+/// This is used only for introspection and logging -- it's not part of the
+/// logical flow.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum ZoneExpungeReason {
+    SledDecommissioned { policy: SledPolicy },
+    SledExpunged,
+}
+
 #[cfg(test)]
 mod test {
     use super::Planner;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
-    use crate::blueprint_builder::BlueprintBuilder;
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
@@ -348,7 +408,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::DiffSledModified;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -356,6 +416,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
+    use std::collections::HashMap;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -363,34 +424,18 @@ mod test {
         static TEST_NAME: &str = "planner_basic_add_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // For our purposes, we don't care about the DNS generations.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
-
-        // Use our example inventory collection.
+        // Use our example system.
         let mut example =
             ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-
-        // Build the initial blueprint.  We don't bother verifying it here
-        // because there's a separate test for that.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &example.collection,
-                internal_dns_version,
-                external_dns_version,
-                example.input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
-        verify_blueprint(&blueprint1);
+        let blueprint1 = &example.blueprint;
+        verify_blueprint(blueprint1);
 
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
         // fix.
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
-            &blueprint1,
+            blueprint1,
             &example.input,
             "no-op?",
             &example.collection,
@@ -400,7 +445,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        let diff = blueprint2.diff_since_blueprint(blueprint1).unwrap();
         println!("1 -> 2 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -563,14 +608,10 @@ mod test {
         static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // For our purposes, we don't care about the DNS generations.
-        let internal_dns_version = Generation::new();
-        let external_dns_version = Generation::new();
-
-        // Use our example inventory collection as a starting point, but strip
-        // it down to just one sled.
-        let (sled_id, collection, input) = {
-            let (mut collection, input) =
+        // Use our example system as a starting point, but strip it down to just
+        // one sled.
+        let (sled_id, blueprint1, collection, input) = {
+            let (mut collection, input, mut blueprint) =
                 example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
             // Pick one sled ID to keep and remove the rest.
@@ -583,21 +624,12 @@ mod test {
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
+            blueprint
+                .blueprint_zones
+                .retain(|k, _v| keep_sled_id.as_untyped_uuid() == k);
 
-            (keep_sled_id, collection, builder.build())
+            (keep_sled_id, blueprint, collection, builder.build())
         };
-
-        // Build the initial blueprint.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                internal_dns_version,
-                external_dns_version,
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
@@ -661,21 +693,9 @@ mod test {
             "planner_spread_additional_nexus_zones_across_sleds";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example inventory collection as a starting point.
-        let (collection, input) =
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-
-        // Build the initial blueprint.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                Generation::new(),
-                Generation::new(),
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 3);
@@ -748,25 +768,14 @@ mod test {
             "planner_nexus_allocation_skips_nonprovisionable_sleds";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example inventory collection as a starting point.
+        // Use our example system as a starting point.
         //
         // Request two extra sleds here so we test non-provisionable, expunged,
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, input) = example(&logctx.log, TEST_NAME, 5);
-
-        // Build the initial blueprint.
-        let blueprint1 =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &collection,
-                Generation::new(),
-                Generation::new(),
-                input.all_sled_ids(SledFilter::All),
-                "the_test",
-                (TEST_NAME, "bp1"),
-            )
-            .expect("failed to create initial blueprint");
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 5);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 5);
@@ -840,18 +849,41 @@ mod test {
         );
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
+        println!(
+            "1 -> 2 (added additional Nexus zones, take 2 sleds out of service):\n{}",
+            diff.display()
+        );
         assert_contents(
             "tests/output/planner_nonprovisionable_1_2.txt",
             &diff.display().to_string(),
         );
+
+        // The expunged and decommissioned sleds should have had all zones be
+        // marked as expunged. (Not removed! Just marked as expunged.)
+        //
+        // Note that at this point we're neither removing zones from the
+        // blueprint nor marking sleds as decommissioned -- we still need to do
+        // cleanup, and we aren't performing garbage collection on zones or
+        // sleds at the moment.
+
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
-        let sleds = diff.sleds_modified().collect::<Vec<_>>();
+        let mut sleds = diff.sleds_modified().collect::<HashMap<_, _>>();
 
-        // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
-        // total of 6 new Nexus zones, which should be split evenly between the
-        // two sleds, while the non-provisionable sled should be unchanged.
+        let expunged_modified = sleds.remove(&expunged_sled_id).unwrap();
+        assert_all_zones_expunged(&expunged_modified, "expunged sled");
+
+        let decommissioned_modified =
+            sleds.remove(&decommissioned_sled_id).unwrap();
+        assert_all_zones_expunged(
+            &decommissioned_modified,
+            "decommissioned sled",
+        );
+
+        // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
+        // should get additional Nexus zones. We expect a total of 6 new Nexus
+        // zones, which should be split evenly between the two sleds, while the
+        // non-provisionable sled should be unchanged.
         assert_eq!(sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
         for (sled_id, sled_changes) in sleds {
@@ -970,5 +1002,41 @@ mod test {
         // ---
 
         logctx.cleanup_successful();
+    }
+
+    fn assert_all_zones_expunged(modified: &DiffSledModified, desc: &str) {
+        assert_eq!(
+            modified.generation_before.next(),
+            modified.generation_after,
+            "for {desc}, generation should have been bumped"
+        );
+
+        assert_eq!(
+            modified.zones_added().count(),
+            0,
+            "for {desc}, no zones should have been added to blueprint"
+        );
+
+        // A zone disposition going to expunged *does not* mean that the
+        // zone is actually removed, i.e. `zones_removed` is still 0. Any
+        // zone removal will be part of some future garbage collection
+        // process that isn't currently defined.
+
+        assert_eq!(
+            modified.zones_removed().len(),
+            0,
+            "for {desc}, no zones should have been removed from blueprint"
+        );
+
+        // Run through all the common zones and ensure that all of them
+        // have been marked expunged.
+        for zone in modified.zones_modified() {
+            assert_eq!(
+                zone.zone_after.disposition,
+                BlueprintZoneDisposition::Expunged,
+                "for {desc}, zone {} should have been marked expunged",
+                zone.zone_after.id
+            );
+        }
     }
 }
