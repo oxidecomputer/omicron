@@ -10590,6 +10590,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uzers"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76d283dc7e8c901e79e32d077866eaf599156cbf427fffa8289aecc52c5c3f63"
+dependencies = [
+ "libc",
+ "log",
+]
+
+[[package]]
 name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11393,7 +11403,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zone-network-setup"
+name = "zone-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -11404,6 +11414,7 @@ dependencies = [
  "omicron-workspace-hack",
  "slog",
  "tokio",
+ "uzers",
  "zone 0.3.0",
 ]
 
