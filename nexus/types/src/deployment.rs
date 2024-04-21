@@ -1089,7 +1089,7 @@ pub enum BlueprintOrCollectionZonesConfig {
 }
 
 impl BlueprintOrCollectionZonesConfig {
-    fn sort(&mut self) {
+    pub fn sort(&mut self) {
         match self {
             BlueprintOrCollectionZonesConfig::Collection(z) => {
                 z.zones.sort_unstable_by_key(zone_sort_key)
@@ -1098,14 +1098,14 @@ impl BlueprintOrCollectionZonesConfig {
         }
     }
 
-    fn generation(&self) -> Generation {
+    pub fn generation(&self) -> Generation {
         match self {
             BlueprintOrCollectionZonesConfig::Collection(z) => z.generation,
             BlueprintOrCollectionZonesConfig::Blueprint(z) => z.generation,
         }
     }
 
-    fn zones(
+    pub fn zones(
         &self,
     ) -> Box<dyn Iterator<Item = BlueprintOrCollectionZoneConfig> + '_> {
         match self {
@@ -1168,21 +1168,21 @@ impl From<BlueprintZoneConfig> for BlueprintOrCollectionZoneConfig {
 }
 
 impl BlueprintOrCollectionZoneConfig {
-    fn id(&self) -> OmicronZoneUuid {
+    pub fn id(&self) -> OmicronZoneUuid {
         match self {
             BlueprintOrCollectionZoneConfig::Collection(z) => z.id(),
             BlueprintOrCollectionZoneConfig::Blueprint(z) => z.id(),
         }
     }
 
-    fn kind(&self) -> ZoneKind {
+    pub fn kind(&self) -> ZoneKind {
         match self {
             BlueprintOrCollectionZoneConfig::Collection(z) => z.kind(),
             BlueprintOrCollectionZoneConfig::Blueprint(z) => z.kind(),
         }
     }
 
-    fn disposition(&self) -> BlueprintZoneDisposition {
+    pub fn disposition(&self) -> BlueprintZoneDisposition {
         match self {
             // All zones from inventory collection are assumed to be in-service.
             BlueprintOrCollectionZoneConfig::Collection(_) => {
@@ -1192,7 +1192,7 @@ impl BlueprintOrCollectionZoneConfig {
         }
     }
 
-    fn underlay_address(&self) -> Ipv6Addr {
+    pub fn underlay_address(&self) -> Ipv6Addr {
         match self {
             BlueprintOrCollectionZoneConfig::Collection(z) => {
                 z.underlay_address
@@ -1201,7 +1201,7 @@ impl BlueprintOrCollectionZoneConfig {
         }
     }
 
-    fn is_zone_type_equal(&self, other: &BlueprintZoneType) -> bool {
+    pub fn is_zone_type_equal(&self, other: &BlueprintZoneType) -> bool {
         match self {
             BlueprintOrCollectionZoneConfig::Collection(z) => {
                 // BlueprintZoneType contains more information than
