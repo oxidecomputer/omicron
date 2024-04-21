@@ -17,7 +17,6 @@ use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
-pub const CHRONYD: &str = "/usr/sbin/chronyd";
 const DLADM: &str = "/usr/sbin/dladm";
 pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
