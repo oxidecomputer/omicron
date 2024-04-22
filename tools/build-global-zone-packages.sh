@@ -13,6 +13,7 @@ out_dir="$(readlink -f "${2:-"$tarball_src_dir"}")"
 deps=(
     "$tarball_src_dir/omicron-sled-agent.tar"
     "$tarball_src_dir/mg-ddm-gz.tar"
+    "$tarball_src_dir/pumpkind-gz.tar"
     "$tarball_src_dir/propolis-server.tar.gz"
     "$tarball_src_dir/overlay.tar.gz"
     "$tarball_src_dir/oxlog.tar"
@@ -48,6 +49,12 @@ pkg_dir="$tmp_gz/root/opt/oxide/mg-ddm"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
 tar -xvfz "$tarball_src_dir/mg-ddm-gz.tar"
+cd -
+# Extract the pumpkind tarball for re-packaging into the layered GZ archive.
+pkg_dir="$tmp_gz/root/opt/oxide/pumpkind"
+mkdir -p "$pkg_dir"
+cd "$pkg_dir"
+tar -xvfz "$tarball_src_dir/pumpkind-gz.tar"
 cd -
 # Extract the oxlog tarball for re-packaging into the layered GZ archive.
 pkg_dir="$tmp_gz/root/opt/oxide/oxlog"

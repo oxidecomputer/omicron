@@ -6,7 +6,6 @@ set -e
 mkdir -p /softnpu-zone
 mkdir -p /opt/oxide/softnpu/stuff
 cp tools/scrimlet/softnpu.toml /opt/oxide/softnpu/stuff/
-cp tools/scrimlet/softnpu-init.sh /opt/oxide/softnpu/stuff/
 cp out/softnpu/libsidecar_lite.so /opt/oxide/softnpu/stuff/
 cp out/softnpu/softnpu /opt/oxide/softnpu/stuff/
 cp out/softnpu/scadm /opt/oxide/softnpu/stuff/

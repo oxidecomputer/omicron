@@ -13,6 +13,4 @@ The `softnpu` zone will be configured and launched during
 Once the control plane is running, `softnpu` can be configured via `dendrite`
 using the `swadm` binary located in the `oxz_switch` zone. This is not necessary
 under normal operation, as the switch state will be managed automatically by the
-control plane and networking daemons.  An example script is provided in
-`tools/scrimlet/softnpu-init.sh`.  This script should work without modification
-for basic development setups, but feel free to tweak it as needed.
+control plane and networking daemons.
