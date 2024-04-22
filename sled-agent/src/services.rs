@@ -2290,156 +2290,213 @@ impl ServiceManager {
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
-            _ => {} //            ZoneArgs::Switch(SwitchZoneConfigLocal {
-                    //                zone:
-                    //                    SwitchZoneConfig {
-                    //                        id,
-                    //                        services,
-                    //                        addresses,
-                    //                        ..
-                    //                    },
-                    //                ..
-                    //            }) => {
-                    //                let Some(info) = self.inner.sled_info.get() else {
-                    //                    return Err(Error::SledAgentNotReady);
-                    //                };
-                    //
-                    //              //  let static_addr = addresses;
-                    //
-                    //                let nw_setup_service = Self::zone_network_setup_install(
-                    //                    &info.underlay_address,
-                    //                    &installed_zone,
-                    //                    addresses,
-                    //                )?;
-                    //
-                    //                let oximeter_config = PropertyGroupBuilder::new("config")
-                    //                    .add_property("id", "astring", &id.to_string());
-                    //                let oximeter_service = ServiceBuilder::new("oxide/oximeter")
-                    //                    .add_instance(
-                    //                        ServiceInstanceBuilder::new("default")
-                    //                            .add_property_group(oximeter_config),
-                    //                    );
-                    //
-                    //                let profile = ProfileBuilder::new("omicron")
-                    //                    .add_service(nw_setup_service)
-                    //                    .add_service(disabled_ssh_service)
-                    //                    .add_service(oximeter_service)
-                    //                    .add_service(disabled_dns_client_service);
-                    //                profile
-                    //                    .add_to_zone(&self.inner.log, &installed_zone)
-                    //                    .await
-                    //                    .map_err(|err| {
-                    //                        Error::io("Failed to setup Oximeter profile", err)
-                    //                    })?;
-                    //                return Ok(RunningZone::boot(installed_zone).await?);
-                    //            }
-        }
-
-        let running_zone = RunningZone::boot(installed_zone).await?;
-
-        for (link, needs_link_local) in
-            running_zone.links().iter().zip(links_need_link_local)
-        {
-            if needs_link_local {
-                info!(
-                    self.inner.log,
-                    "Ensuring {}/{} exists in zone",
-                    link.name(),
-                    IPV6_LINK_LOCAL_NAME
-                );
-                Zones::ensure_has_link_local_v6_address(
-                    Some(running_zone.name()),
-                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
-                        .unwrap(),
-                )?;
-            }
-        }
-
-        if let Some((bootstrap_name, bootstrap_address)) =
-            bootstrap_name_and_address.as_ref()
-        {
-            info!(
-                self.inner.log,
-                "Ensuring bootstrap address {} exists in {} zone",
-                bootstrap_address.to_string(),
-                &zone_type_str,
-            );
-            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
-            info!(
-                self.inner.log,
-                "Forwarding bootstrap traffic via {} to {}",
-                bootstrap_name,
-                self.inner.global_zone_bootstrap_link_local_address,
-            );
-            running_zone
-                .add_bootstrap_route(
-                    BOOTSTRAP_PREFIX,
-                    self.inner.global_zone_bootstrap_link_local_address,
-                    bootstrap_name,
-                )
-                .map_err(|err| Error::ZoneCommand {
-                    intent: "add bootstrap network route".to_string(),
-                    err,
-                })?;
-        }
-
-        let addresses = match &request {
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone: OmicronZoneConfig { underlay_address, .. },
+            ZoneArgs::Switch(SwitchZoneConfigLocal {
+                zone: SwitchZoneConfig { id, services, addresses, .. },
                 ..
-            }) => std::slice::from_ref(underlay_address),
-            ZoneArgs::Switch(req) => &req.zone.addresses,
-        };
-        for addr in addresses {
-            if *addr == Ipv6Addr::LOCALHOST {
-                continue;
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    &info.underlay_address,
+                    &installed_zone,
+                    addresses,
+                )?;
+
+                let sidecar_revision = match &self.inner.sidecar_revision {
+                    SidecarRevision::Physical(rev) => rev.to_string(),
+                    SidecarRevision::SoftZone(rev)
+                    | SidecarRevision::SoftPropolis(rev) => format!(
+                        "softnpu_front_{}_rear_{}",
+                        rev.front_port_count, rev.rear_port_count
+                    ),
+                };
+
+                // Define all services in the switch zone
+                let mut mgs_service = ServiceBuilder::new("oxide/mgs");
+
+                // Set properties for each service
+                for service in services {
+                    match service {
+                        SwitchService::ManagementGatewayService => {
+                            let mut mgs_config =
+                                PropertyGroupBuilder::new("config")
+                                    // Always tell MGS to listen on localhost so wicketd
+                                    // can contact it even before we have an underlay
+                                    // network.
+                                    .add_property(
+                                        "address",
+                                        "astring",
+                                        &format!("[::1]:{MGS_PORT}"),
+                                    )
+                                    .add_property(
+                                        "id",
+                                        "astring",
+                                        &id.to_string(),
+                                    )
+                                    .add_property(
+                                        "rack_id",
+                                        "astring",
+                                        &info.rack_id.to_string(),
+                                    );
+
+                            if let Some(address) = addresses.get(0) {
+                                // Don't use localhost twice
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    mgs_config = mgs_config.add_property(
+                                        "address",
+                                        "astring",
+                                        &format!("[{address}]:{MGS_PORT}"),
+                                    );
+                                }
+                            }
+                            mgs_service = mgs_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(mgs_config),
+                            );
+                        }
+                        SwitchService::SpSim => {}
+                        SwitchService::Wicketd { baseboard } => {}
+                        SwitchService::Dendrite { asic } => match asic {
+                            DendriteAsic::TofinoAsic => {}
+                            DendriteAsic::TofinoStub => {}
+                            asic @ (DendriteAsic::SoftNpuZone
+                            | DendriteAsic::SoftNpuPropolisDevice) => {}
+                        },
+                        SwitchService::Tfport { pkt_source, asic } => {}
+                        SwitchService::Lldpd { baseboard } => {}
+                        SwitchService::Uplink => {
+                            // Nothing to do here - this service is special and
+                            // configured in
+                            // `ensure_switch_zone_uplinks_configured`
+                        }
+                        SwitchService::Mgd => {}
+                        SwitchService::MgDdm { mode } => {}
+                    }
+                }
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(mgs_service)
+                    .add_service(disabled_dns_client_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Oximeter profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
             }
-            info!(
-                self.inner.log,
-                "Ensuring address {} exists",
-                addr.to_string()
-            );
-            let addr_request =
-                AddressRequest::new_static(IpAddr::V6(*addr), None);
-            running_zone.ensure_address(addr_request).await?;
-            info!(
-                self.inner.log,
-                "Ensuring address {} exists - OK",
-                addr.to_string()
-            );
         }
 
-        let maybe_gateway = if let Some(info) = self.inner.sled_info.get() {
-            // Only consider a route to the sled's underlay address if the
-            // underlay is up.
-            let sled_underlay_subnet =
-                Ipv6Subnet::<SLED_PREFIX>::new(info.underlay_address);
+        // TODO: Remove from here until end
+        let running_zone = RunningZone::boot(installed_zone).await?;
+        //
+        //        for (link, needs_link_local) in
+        //            running_zone.links().iter().zip(links_need_link_local)
+        //        {
+        //            if needs_link_local {
+        //                info!(
+        //                    self.inner.log,
+        //                    "Ensuring {}/{} exists in zone",
+        //                    link.name(),
+        //                    IPV6_LINK_LOCAL_NAME
+        //                );
+        //                Zones::ensure_has_link_local_v6_address(
+        //                    Some(running_zone.name()),
+        //                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
+        //                        .unwrap(),
+        //                )?;
+        //            }
+        //        }
 
-            if addresses
-                .iter()
-                .any(|ip| sled_underlay_subnet.net().contains(*ip))
-            {
-                // If the underlay is up, provide a route to it through an
-                // existing address in the Zone on the same subnet.
-                info!(self.inner.log, "Zone using sled underlay as gateway");
-                Some(info.underlay_address)
-            } else {
-                // If no such address exists in the sled's subnet, don't route
-                // to anything.
-                info!(
-                    self.inner.log,
-                    "Zone not using gateway (even though underlay is up)"
-                );
-                None
-            }
-        } else {
-            // If the underlay doesn't exist, no routing occurs.
-            info!(
-                self.inner.log,
-                "Zone not using gateway (underlay is not up)"
-            );
-            None
-        };
+        //        if let Some((bootstrap_name, bootstrap_address)) =
+        //            bootstrap_name_and_address.as_ref()
+        //        {
+        //            info!(
+        //                self.inner.log,
+        //                "Ensuring bootstrap address {} exists in {} zone",
+        //                bootstrap_address.to_string(),
+        //                &zone_type_str,
+        //            );
+        //            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+        //            info!(
+        //                self.inner.log,
+        //                "Forwarding bootstrap traffic via {} to {}",
+        //                bootstrap_name,
+        //                self.inner.global_zone_bootstrap_link_local_address,
+        //            );
+        //            running_zone
+        //                .add_bootstrap_route(
+        //                    BOOTSTRAP_PREFIX,
+        //                    self.inner.global_zone_bootstrap_link_local_address,
+        //                    bootstrap_name,
+        //                )
+        //                .map_err(|err| Error::ZoneCommand {
+        //                    intent: "add bootstrap network route".to_string(),
+        //                    err,
+        //                })?;
+        //        }
+
+        //        let addresses = match &request {
+        //            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+        //                zone: OmicronZoneConfig { underlay_address, .. },
+        //                ..
+        //            }) => std::slice::from_ref(underlay_address),
+        //            ZoneArgs::Switch(req) => &req.zone.addresses,
+        //        };
+        //        for addr in addresses {
+        //            if *addr == Ipv6Addr::LOCALHOST {
+        //                continue;
+        //            }
+        //            info!(
+        //                self.inner.log,
+        //                "Ensuring address {} exists",
+        //                addr.to_string()
+        //            );
+        //            let addr_request =
+        //                AddressRequest::new_static(IpAddr::V6(*addr), None);
+        //            running_zone.ensure_address(addr_request).await?;
+        //            info!(
+        //                self.inner.log,
+        //                "Ensuring address {} exists - OK",
+        //                addr.to_string()
+        //            );
+        //        }
+
+        //        let maybe_gateway = if let Some(info) = self.inner.sled_info.get() {
+        //            // Only consider a route to the sled's underlay address if the
+        //            // underlay is up.
+        //            let sled_underlay_subnet =
+        //                Ipv6Subnet::<SLED_PREFIX>::new(info.underlay_address);
+        //
+        //            if addresses
+        //                .iter()
+        //                .any(|ip| sled_underlay_subnet.net().contains(*ip))
+        //            {
+        //                // If the underlay is up, provide a route to it through an
+        //                // existing address in the Zone on the same subnet.
+        //                info!(self.inner.log, "Zone using sled underlay as gateway");
+        //                Some(info.underlay_address)
+        //            } else {
+        //                // If no such address exists in the sled's subnet, don't route
+        //                // to anything.
+        //                info!(
+        //                    self.inner.log,
+        //                    "Zone not using gateway (even though underlay is up)"
+        //                );
+        //                None
+        //            }
+        //        } else {
+        //            // If the underlay doesn't exist, no routing occurs.
+        //            info!(
+        //                self.inner.log,
+        //                "Zone not using gateway (underlay is not up)"
+        //            );
+        //            None
+        //        };
 
         let sidecar_revision = match &self.inner.sidecar_revision {
             SidecarRevision::Physical(rev) => rev.to_string(),
@@ -2450,11 +2507,11 @@ impl ServiceManager {
             ),
         };
 
-        if let Some(gateway) = maybe_gateway {
-            running_zone.add_default_route(gateway).map_err(|err| {
-                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
-            })?;
-        }
+        //        if let Some(gateway) = maybe_gateway {
+        //            running_zone.add_default_route(gateway).map_err(|err| {
+        //                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+        //            })?;
+        //        }
 
         match &request {
             ZoneArgs::Omicron(zone_config) => {
