@@ -481,6 +481,7 @@ enum SwitchService {
     Wicketd { baseboard: Baseboard },
     Dendrite { asic: DendriteAsic },
     Lldpd { baseboard: Baseboard },
+    Pumpkind { asic: DendriteAsic },
     Tfport { pkt_source: String, asic: DendriteAsic },
     Uplink,
     MgDdm { mode: String },
@@ -495,6 +496,7 @@ impl crate::smf_helper::Service for SwitchService {
             SwitchService::Wicketd { .. } => "wicketd",
             SwitchService::Dendrite { .. } => "dendrite",
             SwitchService::Lldpd { .. } => "lldpd",
+            SwitchService::Pumpkind { .. } => "pumpkind",
             SwitchService::Tfport { .. } => "tfport",
             SwitchService::Uplink { .. } => "uplink",
             SwitchService::MgDdm { .. } => "mg-ddm",
@@ -2764,6 +2766,18 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                         }
+                        SwitchService::Pumpkind { asic } => {
+                            // The pumpkin daemon is only needed when running on
+                            // with real sidecar.
+                            if asic == &DendriteAsic::TofinoAsic {
+                                info!(
+                                    self.inner.log,
+                                    "Setting up pumpkind service"
+                                );
+                                smfh.setprop("config/mode", "switch")?;
+                                smfh.refresh()?;
+                            }
+                        }
                         SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
                             // configured in
@@ -3620,6 +3634,7 @@ impl ServiceManager {
                     SwitchService::Dendrite { asic: DendriteAsic::TofinoAsic },
                     SwitchService::Lldpd { baseboard: baseboard.clone() },
                     SwitchService::ManagementGatewayService,
+                    SwitchService::Pumpkind { asic: DendriteAsic::TofinoAsic },
                     SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic: DendriteAsic::TofinoAsic,
@@ -4011,6 +4026,11 @@ impl ServiceManager {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be
                             // restarted.
+                        }
+                        SwitchService::Pumpkind { .. } => {
+                            // Unless we want to plumb through the "only log
+                            // errors, don't react" option, there are no user
+                            // serviceable parts for this daemon.
                         }
                         SwitchService::Uplink { .. } => {
                             // Only configured in
