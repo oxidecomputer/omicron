@@ -189,7 +189,11 @@ impl Blueprint {
     ) -> Result<BlueprintDiff, BlueprintDiffError> {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            before.typed_blueprint_zones(),
+            before
+                .typed_blueprint_zones()
+                .into_iter()
+                .map(|(sled_id, zones)| (sled_id, zones.into()))
+                .collect(),
             self.metadata(),
             self.typed_blueprint_zones(),
         )
@@ -212,33 +216,9 @@ impl Blueprint {
             .omicron_zones
             .iter()
             .map(|(sled_id, zones_found)| {
-                let zones = zones_found
-                    .zones
-                    .zones
-                    .iter()
-                    .map(|z| {
-                        BlueprintZoneConfig::from_omicron_zone_config(
-                            z.clone(),
-                            BlueprintZoneDisposition::InService,
-                        )
-                        .map_err(|err| {
-                            BlueprintDiffError {
-                                before_meta: DiffBeforeMetadata::Collection {
-                                    id: before.id,
-                                },
-                                after_meta: Box::new(self.metadata()),
-                                errors: vec![BlueprintDiffSingleError::InvalidOmicronZoneType(err)],
-                            }
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let zones = BlueprintZonesConfig {
-                    generation: zones_found.zones.generation,
-                    zones,
-                };
-                Ok((*sled_id, zones))
+                (*sled_id, zones_found.zones.clone().into())
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
@@ -319,6 +299,15 @@ pub struct BlueprintZonesConfig {
     pub zones: Vec<BlueprintZoneConfig>,
 }
 
+impl From<BlueprintZonesConfig> for OmicronZonesConfig {
+    fn from(config: BlueprintZonesConfig) -> Self {
+        Self {
+            generation: config.generation,
+            zones: config.zones.into_iter().map(From::from).collect(),
+        }
+    }
+}
+
 impl BlueprintZonesConfig {
     /// Sorts the list of zones stored in this configuration.
     ///
@@ -350,10 +339,45 @@ impl BlueprintZonesConfig {
     }
 }
 
-fn zone_sort_key(z: &BlueprintZoneConfig) -> impl Ord {
+trait ZoneSortKey {
+    fn kind(&self) -> ZoneKind;
+    fn id(&self) -> OmicronZoneUuid;
+}
+
+impl ZoneSortKey for BlueprintZoneConfig {
+    fn kind(&self) -> ZoneKind {
+        self.zone_type.kind()
+    }
+
+    fn id(&self) -> OmicronZoneUuid {
+        self.id
+    }
+}
+
+impl ZoneSortKey for OmicronZoneConfig {
+    fn kind(&self) -> ZoneKind {
+        self.zone_type.kind()
+    }
+
+    fn id(&self) -> OmicronZoneUuid {
+        OmicronZoneUuid::from_untyped_uuid(self.id)
+    }
+}
+
+impl ZoneSortKey for BlueprintOrCollectionZoneConfig {
+    fn kind(&self) -> ZoneKind {
+        BlueprintOrCollectionZoneConfig::kind(self)
+    }
+
+    fn id(&self) -> OmicronZoneUuid {
+        BlueprintOrCollectionZoneConfig::id(self)
+    }
+}
+
+fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
-    (z.zone_type.kind(), z.id)
+    (z.kind(), z.id())
 }
 
 /// "Should never happen" errors from converting an [`OmicronZoneType`] into a
@@ -812,7 +836,7 @@ impl BlueprintDiff {
     /// data is valid.
     fn new(
         before_meta: DiffBeforeMetadata,
-        before_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
         after_meta: BlueprintMetadata,
         after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
     ) -> Result<Self, BlueprintDiffError> {
@@ -852,8 +876,9 @@ impl BlueprintDiff {
     /// Iterate over sleds only present in the first blueprint of a diff
     pub fn sleds_removed(
         &self,
-    ) -> impl ExactSizeIterator<Item = (SledUuid, &BlueprintZonesConfig)> + '_
-    {
+    ) -> impl ExactSizeIterator<
+        Item = (SledUuid, &BlueprintOrCollectionZonesConfig),
+    > + '_ {
         self.sleds.removed.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
@@ -882,7 +907,7 @@ impl BlueprintDiff {
 #[derive(Debug)]
 struct DiffSleds {
     added: BTreeMap<SledUuid, BlueprintZonesConfig>,
-    removed: BTreeMap<SledUuid, BlueprintZonesConfig>,
+    removed: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
     modified: BTreeMap<SledUuid, DiffSledModified>,
     unchanged: BTreeMap<SledUuid, BlueprintZonesConfig>,
 }
@@ -894,7 +919,7 @@ impl DiffSleds {
     /// The return value only contains the sleds that are present in both
     /// blueprints.
     fn new(
-        before: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        before: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
         mut after: BTreeMap<SledUuid, BlueprintZonesConfig>,
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
@@ -909,7 +934,7 @@ impl DiffSleds {
                 after_z.sort();
 
                 if before_z == after_z {
-                    unchanged.insert(sled_id, before_z);
+                    unchanged.insert(sled_id, after_z);
                 } else {
                     let sled_modified = DiffSledModified::new(
                         sled_id, before_z, after_z, errors,
@@ -1054,6 +1079,144 @@ impl DiffBeforeMetadata {
     }
 }
 
+/// Single sled's zones config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug)]
+pub enum BlueprintOrCollectionZonesConfig {
+    /// The diff was made from a collection.
+    Collection(OmicronZonesConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintZonesConfig),
+}
+
+impl BlueprintOrCollectionZonesConfig {
+    pub fn sort(&mut self) {
+        match self {
+            BlueprintOrCollectionZonesConfig::Collection(z) => {
+                z.zones.sort_unstable_by_key(zone_sort_key)
+            }
+            BlueprintOrCollectionZonesConfig::Blueprint(z) => z.sort(),
+        }
+    }
+
+    pub fn generation(&self) -> Generation {
+        match self {
+            BlueprintOrCollectionZonesConfig::Collection(z) => z.generation,
+            BlueprintOrCollectionZonesConfig::Blueprint(z) => z.generation,
+        }
+    }
+
+    pub fn zones(
+        &self,
+    ) -> Box<dyn Iterator<Item = BlueprintOrCollectionZoneConfig> + '_> {
+        match self {
+            BlueprintOrCollectionZonesConfig::Collection(zc) => {
+                Box::new(zc.zones.iter().map(|z| z.clone().into()))
+            }
+            BlueprintOrCollectionZonesConfig::Blueprint(zc) => {
+                Box::new(zc.zones.iter().map(|z| z.clone().into()))
+            }
+        }
+    }
+}
+
+impl From<OmicronZonesConfig> for BlueprintOrCollectionZonesConfig {
+    fn from(zc: OmicronZonesConfig) -> Self {
+        Self::Collection(zc)
+    }
+}
+
+impl From<BlueprintZonesConfig> for BlueprintOrCollectionZonesConfig {
+    fn from(zc: BlueprintZonesConfig) -> Self {
+        Self::Blueprint(zc)
+    }
+}
+
+impl PartialEq<BlueprintZonesConfig> for BlueprintOrCollectionZonesConfig {
+    fn eq(&self, other: &BlueprintZonesConfig) -> bool {
+        match self {
+            BlueprintOrCollectionZonesConfig::Collection(z) => {
+                // BlueprintZonesConfig contains more information than
+                // OmicronZonesConfig. We compare them by lowering the
+                // BlueprintZonesConfig into an OmicronZonesConfig.
+                let lowered = OmicronZonesConfig::from(other.clone());
+                z.eq(&lowered)
+            }
+            BlueprintOrCollectionZonesConfig::Blueprint(z) => z.eq(other),
+        }
+    }
+}
+
+/// Single zone config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug)]
+pub enum BlueprintOrCollectionZoneConfig {
+    /// The diff was made from a collection.
+    Collection(OmicronZoneConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintZoneConfig),
+}
+
+impl From<OmicronZoneConfig> for BlueprintOrCollectionZoneConfig {
+    fn from(zc: OmicronZoneConfig) -> Self {
+        Self::Collection(zc)
+    }
+}
+
+impl From<BlueprintZoneConfig> for BlueprintOrCollectionZoneConfig {
+    fn from(zc: BlueprintZoneConfig) -> Self {
+        Self::Blueprint(zc)
+    }
+}
+
+impl BlueprintOrCollectionZoneConfig {
+    pub fn id(&self) -> OmicronZoneUuid {
+        match self {
+            BlueprintOrCollectionZoneConfig::Collection(z) => z.id(),
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.id(),
+        }
+    }
+
+    pub fn kind(&self) -> ZoneKind {
+        match self {
+            BlueprintOrCollectionZoneConfig::Collection(z) => z.kind(),
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.kind(),
+        }
+    }
+
+    pub fn disposition(&self) -> BlueprintZoneDisposition {
+        match self {
+            // All zones from inventory collection are assumed to be in-service.
+            BlueprintOrCollectionZoneConfig::Collection(_) => {
+                BlueprintZoneDisposition::InService
+            }
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.disposition,
+        }
+    }
+
+    pub fn underlay_address(&self) -> Ipv6Addr {
+        match self {
+            BlueprintOrCollectionZoneConfig::Collection(z) => {
+                z.underlay_address
+            }
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.underlay_address,
+        }
+    }
+
+    pub fn is_zone_type_equal(&self, other: &BlueprintZoneType) -> bool {
+        match self {
+            BlueprintOrCollectionZoneConfig::Collection(z) => {
+                // BlueprintZoneType contains more information than
+                // OmicronZoneType. We compare them by lowering the
+                // BlueprintZoneType into an OmicronZoneType.
+                let lowered = OmicronZoneType::from(other.clone());
+                z.zone_type == lowered
+            }
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => {
+                z.zone_type == *other
+            }
+        }
+    }
+}
+
 /// Describes a sled that appeared on both sides of a diff and is changed.
 #[derive(Clone, Debug)]
 pub struct DiffSledModified {
@@ -1064,20 +1227,20 @@ pub struct DiffSledModified {
     /// generation of the "zones" configuration on the right side
     pub generation_after: Generation,
     zones_added: Vec<BlueprintZoneConfig>,
-    zones_removed: Vec<BlueprintZoneConfig>,
+    zones_removed: Vec<BlueprintOrCollectionZoneConfig>,
     zones_common: Vec<DiffZoneCommon>,
 }
 
 impl DiffSledModified {
     fn new(
         sled_id: SledUuid,
-        before: BlueprintZonesConfig,
+        before: BlueprintOrCollectionZonesConfig,
         after: BlueprintZonesConfig,
         errors: &mut Vec<BlueprintDiffSingleError>,
     ) -> Self {
         // Assemble separate summaries of the zones, indexed by zone id.
         let before_by_id: HashMap<_, _> =
-            before.zones.into_iter().map(|zone| (zone.id, zone)).collect();
+            before.zones().map(|zone| (zone.id(), zone)).collect();
         let mut after_by_id: HashMap<_, _> =
             after.zones.into_iter().map(|zone| (zone.id, zone)).collect();
 
@@ -1087,7 +1250,7 @@ impl DiffSledModified {
         // Now go through each zone and compare them.
         for (zone_id, zone_before) in before_by_id {
             if let Some(zone_after) = after_by_id.remove(&zone_id) {
-                let before_kind = zone_before.zone_type.kind();
+                let before_kind = zone_before.kind();
                 let after_kind = zone_after.zone_type.kind();
 
                 if before_kind != after_kind {
@@ -1123,7 +1286,7 @@ impl DiffSledModified {
 
         Self {
             sled_id,
-            generation_before: before.generation,
+            generation_before: before.generation(),
             generation_after: after.generation,
             zones_added,
             zones_removed,
@@ -1141,7 +1304,8 @@ impl DiffSledModified {
     /// Iterate over zones removed between the blueprints
     pub fn zones_removed(
         &self,
-    ) -> impl ExactSizeIterator<Item = &BlueprintZoneConfig> + '_ {
+    ) -> impl ExactSizeIterator<Item = &BlueprintOrCollectionZoneConfig> + '_
+    {
         self.zones_removed.iter()
     }
 
@@ -1169,7 +1333,7 @@ impl DiffSledModified {
 #[derive(Debug, Clone)]
 pub struct DiffZoneCommon {
     /// full zone configuration before
-    pub zone_before: BlueprintZoneConfig,
+    pub zone_before: BlueprintOrCollectionZoneConfig,
     /// full zone configuration after
     pub zone_after: BlueprintZoneConfig,
 }
@@ -1189,14 +1353,14 @@ impl DiffZoneCommon {
     /// changed.
     #[inline]
     pub fn config_changed(&self) -> bool {
-        self.zone_before.underlay_address != self.zone_after.underlay_address
-            || self.zone_before.zone_type != self.zone_after.zone_type
+        self.zone_before.underlay_address() != self.zone_after.underlay_address
+            || !self.zone_before.is_zone_type_equal(&self.zone_after.zone_type)
     }
 
     /// Returns true if the [`BlueprintZoneDisposition`] for the zone changed.
     #[inline]
     pub fn disposition_changed(&self) -> bool {
-        self.zone_before.disposition != self.zone_after.disposition
+        self.zone_before.disposition() != self.zone_after.disposition
     }
 }
 
@@ -1252,7 +1416,7 @@ mod table_display {
                         for zone in &sled_zones.zones {
                             add_zone_record(
                                 ZONE_INDENT.to_string(),
-                                zone,
+                                &zone.clone().into(),
                                 section,
                             );
                         }
@@ -1352,7 +1516,7 @@ mod table_display {
                     for (sled_id, sled_zones) in diff.sleds_unchanged() {
                         add_whole_sled_records(
                             sled_id,
-                            sled_zones,
+                            &sled_zones.clone().into(),
                             WholeSledKind::Unchanged,
                             section,
                         );
@@ -1396,7 +1560,7 @@ mod table_display {
                     for (sled_id, sled_zones) in diff.sleds_added() {
                         add_whole_sled_records(
                             sled_id,
-                            sled_zones,
+                            &sled_zones.clone().into(),
                             WholeSledKind::Added,
                             section,
                         );
@@ -1488,25 +1652,25 @@ mod table_display {
 
     fn add_whole_sled_records(
         sled_id: SledUuid,
-        sled_zones: &BlueprintZonesConfig,
+        sled_zones: &BlueprintOrCollectionZonesConfig,
         kind: WholeSledKind,
         section: &mut StSectionBuilder,
     ) {
         let heading = format!(
             "{}{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
             kind.prefix(),
-            sled_zones.generation,
+            sled_zones.generation(),
         );
         let prefix = kind.prefix();
         let status = kind.status();
         section.make_subsection(SectionSpacing::Always, heading, |s2| {
             // Also add another section for zones.
-            for zone in &sled_zones.zones {
+            for zone in sled_zones.zones() {
                 match status {
                     Some(status) => {
                         add_zone_record_with_status(
                             format!("{prefix}{ZONE_INDENT}"),
-                            zone,
+                            &zone,
                             status,
                             s2,
                         );
@@ -1514,7 +1678,7 @@ mod table_display {
                     None => {
                         add_zone_record(
                             format!("{prefix}{ZONE_INDENT}"),
-                            zone,
+                            &zone,
                             s2,
                         );
                     }
@@ -1601,7 +1765,7 @@ mod table_display {
             for zone in modified.zones_added() {
                 add_zone_record_with_status(
                     format!("{ADDED_PREFIX}{ZONE_INDENT}"),
-                    zone,
+                    &zone.clone().into(),
                     ADDED,
                     s2,
                 );
@@ -1625,30 +1789,30 @@ mod table_display {
     /// This is the meat-and-potatoes of the diff display.
     fn add_zone_record(
         first_column: String,
-        zone: &BlueprintZoneConfig,
+        zone: &BlueprintOrCollectionZoneConfig,
         section: &mut StSectionBuilder,
     ) {
         section.push_record(vec![
             first_column,
-            zone.zone_type.kind().to_string(),
-            zone.id.to_string(),
-            zone.disposition.to_string(),
-            zone.underlay_address.to_string(),
+            zone.kind().to_string(),
+            zone.id().to_string(),
+            zone.disposition().to_string(),
+            zone.underlay_address().to_string(),
         ]);
     }
 
     fn add_zone_record_with_status(
         first_column: String,
-        zone: &BlueprintZoneConfig,
+        zone: &BlueprintOrCollectionZoneConfig,
         status: &str,
         section: &mut StSectionBuilder,
     ) {
         section.push_record(vec![
             first_column,
-            zone.zone_type.kind().to_string(),
-            zone.id.to_string(),
-            zone.disposition.to_string(),
-            zone.underlay_address.to_string(),
+            zone.kind().to_string(),
+            zone.id().to_string(),
+            zone.disposition().to_string(),
+            zone.underlay_address().to_string(),
             status.to_string(),
         ]);
     }
@@ -1674,13 +1838,13 @@ mod table_display {
         );
 
         let mut what_changed = Vec::new();
-        if before.zone_type != after.zone_type {
+        if !before.is_zone_type_equal(&after.zone_type) {
             what_changed.push(ZONE_TYPE_CONFIG);
         }
-        if before.disposition != after.disposition {
+        if before.disposition() != after.disposition {
             what_changed.push(DISPOSITION);
         }
-        if before.underlay_address != after.underlay_address {
+        if before.underlay_address() != after.underlay_address {
             what_changed.push(UNDERLAY_IP);
         }
         debug_assert!(

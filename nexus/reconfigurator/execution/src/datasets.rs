@@ -141,8 +141,10 @@ mod tests {
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::types::OmicronZoneDataset;
@@ -156,6 +158,8 @@ mod tests {
     async fn test_ensure_crucible_dataset_records_exist(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        const TEST_NAME: &str = "test_ensure_crucible_dataset_records_exist";
+
         // Set up.
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
@@ -165,9 +169,8 @@ mod tests {
         );
         let opctx = &opctx;
 
-        // Use the standard representative inventory collection.
-        let representative = nexus_inventory::examples::representative();
-        let collection = representative.builder.build();
+        // Use the standard example system.
+        let (collection, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
 
         // Record the sleds and zpools contained in this collection.
         let rack_id = Uuid::new_v4();
@@ -226,22 +229,16 @@ mod tests {
             0
         );
 
-        // Convert the collection zones into blueprint zones.
-        let all_omicron_zones = collection
-            .all_omicron_zones()
-            .map(|z| {
-                BlueprintZoneConfig::from_omicron_zone_config(
-                    z.clone(),
-                    BlueprintZoneDisposition::InService,
-                )
-                .expect("failed to convert to blueprint zone config")
-            })
+        // Collect all the blueprint zones.
+        let all_omicron_zones = blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .map(|(_, zone)| zone)
             .collect::<Vec<_>>();
 
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            all_omicron_zones.iter(),
+            all_omicron_zones.iter().copied(),
         )
         .await
         .expect("failed to ensure crucible datasets");
@@ -262,7 +259,7 @@ mod tests {
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            all_omicron_zones.iter(),
+            all_omicron_zones.iter().copied(),
         )
         .await
         .expect("failed to ensure crucible datasets");
@@ -312,7 +309,7 @@ mod tests {
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            all_omicron_zones.iter().chain(std::iter::once(&new_zone)),
+            all_omicron_zones.iter().copied().chain(std::iter::once(&new_zone)),
         )
         .await
         .expect("failed to ensure crucible datasets");
