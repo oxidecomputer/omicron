@@ -11,6 +11,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -120,7 +121,7 @@ where
     .map_err(|err| vec![err])?;
 
     let sleds_by_id: BTreeMap<SledUuid, _> = datastore
-        .sled_list_all_batched(&opctx)
+        .sled_list_all_batched(&opctx, SledFilter::InService)
         .await
         .context("listing all sleds")
         .map_err(|e| vec![e])?

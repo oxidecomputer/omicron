@@ -129,11 +129,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
+        sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
+            .sled_filter(sled_filter)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -147,6 +149,7 @@ impl DataStore {
     pub async fn sled_list_all_batched(
         &self,
         opctx: &OpContext,
+        sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
@@ -154,7 +157,9 @@ impl DataStore {
         let mut all_sleds = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch = self.sled_list(opctx, &p.current_pagparams()).await?;
+            let batch = self
+                .sled_list(opctx, &p.current_pagparams(), sled_filter)
+                .await?;
             paginator =
                 p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
             all_sleds.extend(batch);
@@ -1447,7 +1452,7 @@ mod test {
         assert_eq!(ninserted, size);
 
         let sleds = datastore
-            .sled_list_all_batched(&opctx)
+            .sled_list_all_batched(&opctx, SledFilter::All)
             .await
             .expect("failed to list all sleds");
         // We don't need to sort these ids because the sleds are enumerated in

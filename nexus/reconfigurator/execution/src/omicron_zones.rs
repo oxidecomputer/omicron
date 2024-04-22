@@ -10,6 +10,7 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_uuid_kinds::GenericUuid;
@@ -33,6 +34,16 @@ pub(crate) async fn deploy_zones(
             {
                 Some(sled) => sled,
                 None => {
+                    if config.zones.iter().all(|c| {
+                        c.disposition == BlueprintZoneDisposition::Expunged
+                    }) {
+                        info!(
+                            opctx.log,
+                            "Skipping zone deployment to expunged sled";
+                            "sled_id" => %sled_id
+                        );
+                        return None;
+                    }
                     let err = anyhow!("sled not found in db list: {}", sled_id);
                     warn!(opctx.log, "{err:#}");
                     return Some(err);

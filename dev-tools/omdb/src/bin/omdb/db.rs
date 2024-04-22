@@ -81,6 +81,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -1438,7 +1439,7 @@ async fn cmd_db_sleds(
 ) -> Result<(), anyhow::Error> {
     let limit = fetch_opts.fetch_limit;
     let sleds = datastore
-        .sled_list(&opctx, &first_page(limit))
+        .sled_list(&opctx, &first_page(limit), SledFilter::All)
         .await
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));

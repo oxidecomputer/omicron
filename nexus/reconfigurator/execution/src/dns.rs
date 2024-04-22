@@ -477,6 +477,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::identity::Resource;
@@ -1182,7 +1183,10 @@ mod test {
         // Now, go through the motions of provisioning a new Nexus zone.
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
-        let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
+        let sled_rows = datastore
+            .sled_list_all_batched(&opctx, SledFilter::All)
+            .await
+            .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows = {
