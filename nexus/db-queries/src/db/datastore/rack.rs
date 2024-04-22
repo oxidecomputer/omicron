@@ -48,8 +48,9 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
+use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -479,10 +480,12 @@ impl DataStore {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
-                let external_ip = OmicronZoneExternalIp {
-                    id: ExternalIpUuid::new_v4(),
-                    kind: OmicronZoneExternalIpKind::Floating(dns_address.ip()),
-                };
+                let external_ip = OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: dns_address.ip(),
+                    },
+                );
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -506,10 +509,12 @@ impl DataStore {
                 external_ip,
                 ..
             }) => {
-                let external_ip = OmicronZoneExternalIp {
-                    id: ExternalIpUuid::new_v4(),
-                    kind: OmicronZoneExternalIpKind::Floating(*external_ip),
-                };
+                let external_ip = OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: *external_ip,
+                    },
+                );
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -531,10 +536,11 @@ impl DataStore {
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { snat_cfg, nic, .. },
             ) => {
-                let external_ip = OmicronZoneExternalIp {
-                    id: ExternalIpUuid::new_v4(),
-                    kind: OmicronZoneExternalIpKind::Snat(*snat_cfg),
-                };
+                let external_ip =
+                    OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                        id: ExternalIpUuid::new_v4(),
+                        snat_cfg: *snat_cfg,
+                    });
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),

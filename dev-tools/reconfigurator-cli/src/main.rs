@@ -21,8 +21,8 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -153,16 +153,18 @@ impl ReconfiguratorSim {
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
             if let Some(ip) = zone.zone_type.external_ip() {
-                let external_ip = OmicronZoneExternalIp {
-                    id: *self
-                        .external_ips
-                        .borrow_mut()
-                        .entry(ip)
-                        .or_insert_with(ExternalIpUuid::new_v4),
-                    // TODO-cleanup This is potentially wrong;
-                    // zone_type should tell us the IP kind.
-                    kind: OmicronZoneExternalIpKind::Floating(ip),
-                };
+                // TODO-cleanup This is potentially wrong; zone_type should tell
+                // us the IP kind and ID.
+                let external_ip = OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: *self
+                            .external_ips
+                            .borrow_mut()
+                            .entry(ip)
+                            .or_insert_with(ExternalIpUuid::new_v4),
+                        ip,
+                    },
+                );
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;

@@ -10,8 +10,6 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use ipnetwork::IpNetwork;
-use ipnetwork::NetworkSize;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -153,31 +151,49 @@ impl SledResources {
 
 /// External IP variants possible for Omicron-managed zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OmicronZoneExternalIpKind {
-    Floating(IpAddr),
-    Snat(SourceNatConfig),
-    // We should probably have `Ephemeral(IpAddr)` too (for Nexus), but
-    // currently we record Nexus as Floating.
+pub enum OmicronZoneExternalIp {
+    Floating(OmicronZoneExternalFloatingIp),
+    Snat(OmicronZoneExternalSnatIp),
+    // We may eventually want `Ephemeral(_)` too (arguably Nexus could be
+    // ephemeral?), but for now we only have Floating and Snat uses.
 }
 
-impl OmicronZoneExternalIpKind {
+impl OmicronZoneExternalIp {
+    pub fn id(&self) -> ExternalIpUuid {
+        match self {
+            OmicronZoneExternalIp::Floating(ext) => ext.id,
+            OmicronZoneExternalIp::Snat(ext) => ext.id,
+        }
+    }
+
     pub fn ip(&self) -> IpAddr {
         match self {
-            OmicronZoneExternalIpKind::Floating(ip) => *ip,
-            OmicronZoneExternalIpKind::Snat(snat) => snat.ip,
+            OmicronZoneExternalIp::Floating(ext) => ext.ip,
+            OmicronZoneExternalIp::Snat(ext) => ext.snat_cfg.ip,
         }
     }
 }
 
-/// External IP allocated to an Omicron-managed zone.
+/// Floating external IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OmicronZoneExternalIp {
+pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
-    pub kind: OmicronZoneExternalIpKind,
+    pub ip: IpAddr,
+}
+
+/// SNAT (outbound) external IP allocated to an Omicron-managed zone.
+///
+/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
+/// necessary for blueprint planning, and requires that the zone have a single
+/// IP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OmicronZoneExternalSnatIp {
+    pub id: ExternalIpUuid,
+    pub snat_cfg: SourceNatConfig,
 }
 
 /// Network interface allocated to an Omicron-managed zone.
@@ -476,8 +492,6 @@ impl PlanningInput {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
-    #[error("Omicron zone {zone_id} has a range of IPs ({ip}); only a single IP is supported")]
-    NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
     DuplicateOmicronZoneExternalIp {
         zone_id: OmicronZoneUuid,
@@ -550,36 +564,6 @@ impl PlanningInputBuilder {
                 Err(PlanningInputBuildError::DuplicateSledId(sled_id))
             }
         }
-    }
-
-    /// Like `add_omicron_zone_external_ip`, but can accept an [`IpNetwork`],
-    /// validating that the IP is a single address.
-    pub fn add_omicron_zone_external_ip_network<F>(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        ip_id: ExternalIpUuid,
-        ip: IpNetwork,
-        to_kind: F,
-    ) -> Result<(), PlanningInputBuildError>
-    where
-        F: FnOnce(
-            IpAddr,
-        )
-            -> Result<OmicronZoneExternalIpKind, PlanningInputBuildError>,
-    {
-        let size = match ip.size() {
-            NetworkSize::V4(n) => u128::from(n),
-            NetworkSize::V6(n) => n,
-        };
-        if size != 1 {
-            return Err(PlanningInputBuildError::NotSingleIp { zone_id, ip });
-        }
-        let kind = to_kind(ip.ip())?;
-
-        self.add_omicron_zone_external_ip(
-            zone_id,
-            OmicronZoneExternalIp { id: ip_id, kind },
-        )
     }
 
     pub fn add_omicron_zone_external_ip(

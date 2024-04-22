@@ -16,8 +16,9 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
+use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -88,6 +89,22 @@ pub(crate) async fn ensure_zone_resources_allocated(
     Ok(())
 }
 
+// This will go away shortly! Placeholder for blueprints not storing IP IDs.
+#[derive(Debug, Clone, Copy)]
+enum OmicronIpKind {
+    Floating(IpAddr),
+    Snat(SourceNatConfig),
+}
+
+impl OmicronIpKind {
+    fn ip(&self) -> IpAddr {
+        match self {
+            OmicronIpKind::Floating(ip) => *ip,
+            OmicronIpKind::Snat(snat) => snat.ip,
+        }
+    }
+}
+
 struct ResourceAllocator<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
@@ -100,7 +117,7 @@ impl<'a> ResourceAllocator<'a> {
         &self,
         zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        ip_kind: OmicronZoneExternalIpKind,
+        ip_kind: OmicronIpKind,
     ) -> anyhow::Result<bool> {
         // localhost is used by many components in the test suite.  We can't use
         // the normal path because normally a given external IP must only be
@@ -168,8 +185,22 @@ impl<'a> ResourceAllocator<'a> {
         };
 
         // TODO-cleanup The blueprint should store the IP ID, at which point we
-        // could check full equality here instead of only checking the kind.
-        if existing_ip.kind == ip_kind {
+        // could check full equality here instead of this match that only checks
+        // the non-ID portions.
+        let ip_matches = match (existing_ip, ip_kind) {
+            (
+                OmicronZoneExternalIp::Floating(ext),
+                OmicronIpKind::Floating(ip),
+            ) => ext.ip == ip,
+            (OmicronZoneExternalIp::Snat(ext), OmicronIpKind::Snat(snat)) => {
+                ext.snat_cfg == snat
+            }
+            (OmicronZoneExternalIp::Floating(_), OmicronIpKind::Snat(_))
+            | (OmicronZoneExternalIp::Snat(_), OmicronIpKind::Floating(_)) => {
+                false
+            }
+        };
+        if ip_matches {
             info!(
                 self.opctx.log, "found already-allocated external IP";
                 "zone_kind" => %zone_kind,
@@ -265,7 +296,7 @@ impl<'a> ResourceAllocator<'a> {
         &self,
         zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        ip_kind: OmicronZoneExternalIpKind,
+        ip_kind: OmicronIpKind,
     ) -> anyhow::Result<()> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
@@ -285,19 +316,33 @@ impl<'a> ResourceAllocator<'a> {
         {
             return Ok(());
         }
-        let ip_id = ExternalIpUuid::new_v4();
+        // TODO blueprint should store the ID; we shouldn't make it up here!
+        let external_ip = match ip_kind {
+            OmicronIpKind::Floating(ip) => {
+                OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip,
+                })
+            }
+            OmicronIpKind::Snat(snat_cfg) => {
+                OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                    id: ExternalIpUuid::new_v4(),
+                    snat_cfg,
+                })
+            }
+        };
         self.datastore
             .external_ip_allocate_omicron_zone(
                 self.opctx,
                 zone_id,
                 zone_kind,
-                OmicronZoneExternalIp { id: ip_id, kind: ip_kind },
+                external_ip,
             )
             .await
             .with_context(|| {
                 format!(
                     "failed to allocate IP to {zone_kind} {zone_id}: \
-                     {ip_kind:?}"
+                     {external_ip:?}"
                 )
             })?;
 
@@ -305,8 +350,7 @@ impl<'a> ResourceAllocator<'a> {
             self.opctx.log, "successfully allocated external IP";
             "zone_kind" => %zone_kind,
             "zone_id" => %zone_id,
-            "ip" => ?ip_kind,
-            "ip_id" => %ip_id,
+            "ip" => ?external_ip,
         );
 
         Ok(())
@@ -422,7 +466,7 @@ impl<'a> ResourceAllocator<'a> {
         self.ensure_external_service_ip(
             ZoneKind::Nexus,
             zone_id,
-            OmicronZoneExternalIpKind::Floating(external_ip),
+            OmicronIpKind::Floating(external_ip),
         )
         .await?;
         self.ensure_service_nic("nexus", zone_id, nic, &NEXUS_VPC_SUBNET)
@@ -439,7 +483,7 @@ impl<'a> ResourceAllocator<'a> {
         self.ensure_external_service_ip(
             ZoneKind::ExternalDns,
             zone_id,
-            OmicronZoneExternalIpKind::Floating(dns_address.ip()),
+            OmicronIpKind::Floating(dns_address.ip()),
         )
         .await?;
         self.ensure_service_nic("external_dns", zone_id, nic, &DNS_VPC_SUBNET)
@@ -456,7 +500,7 @@ impl<'a> ResourceAllocator<'a> {
         self.ensure_external_service_ip(
             ZoneKind::BoundaryNtp,
             zone_id,
-            OmicronZoneExternalIpKind::Snat(snat),
+            OmicronIpKind::Snat(snat),
         )
         .await?;
         self.ensure_service_nic("ntp", zone_id, nic, &NTP_VPC_SUBNET).await?;

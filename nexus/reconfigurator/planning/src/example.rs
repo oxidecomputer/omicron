@@ -9,8 +9,8 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -106,12 +106,14 @@ impl ExampleSystem {
                     input_builder
                         .add_omicron_zone_external_ip(
                             service_id,
-                            OmicronZoneExternalIp {
-                                id: ExternalIpUuid::new_v4(),
-                                // TODO-cleanup This is potentially wrong;
-                                // zone_type should tell us the IP kind.
-                                kind: OmicronZoneExternalIpKind::Floating(ip),
-                            },
+                            // TODO-cleanup This is potentially wrong;
+                            // zone_type should tell us the IP kind.
+                            OmicronZoneExternalIp::Floating(
+                                OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip,
+                                },
+                            ),
                         )
                         .expect("failed to add Omicron zone external IP");
                 }
