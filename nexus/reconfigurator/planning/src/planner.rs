@@ -85,18 +85,39 @@ impl<'a> Planner<'a> {
 
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
         // Remove services from sleds marked expunged. We use `SledFilter::All`
-        // and have a custom `needs_zone_expungement` function that allows us
+        // and have a custom `needs_all_zones_expungement` function that allows us
         // to produce better errors.
         for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
             // Does this sled need zone expungement based on the details?
-            let Some(reason) =
-                needs_zone_expungement(sled_details.state, sled_details.policy)
-            else {
-                continue;
-            };
+            if let Some(reason) = needs_all_zones_expungement(
+                sled_details.state,
+                sled_details.policy,
+            ) {
+                // Perform the expungement.
+                self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
 
-            // Perform the expungement.
-            self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+                // In this case, all zones have been expunged. We can jump to
+                // the next sled.
+                continue;
+            }
+
+            // The sled isn't being decommissioned, but there still might be
+            // some zones that need expungement.
+            //
+            // Remove any zones which rely on expunged disks.
+            self.blueprint.expunge_all_zones_for_sled_where(
+                sled_id,
+                ZoneExpungeReason::DiskExpunged,
+                |zone_config| {
+                    let durable_storage_zpool =
+                        match zone_config.zone_type.zpool() {
+                            Some(pool) => pool,
+                            None => return false,
+                        };
+                    let zpool_id = durable_storage_zpool.id();
+                    !sled_details.resources.zpool_is_provisionable(&zpool_id)
+                },
+            )?;
         }
 
         Ok(())
@@ -360,7 +381,7 @@ impl<'a> Planner<'a> {
 
 /// Returns `Some(reason)` if the sled needs its zones to be expunged,
 /// based on the policy and state.
-fn needs_zone_expungement(
+fn needs_all_zones_expungement(
     state: SledState,
     policy: SledPolicy,
 ) -> Option<ZoneExpungeReason> {
@@ -387,6 +408,7 @@ fn needs_zone_expungement(
 /// logical flow.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ZoneExpungeReason {
+    DiskExpunged,
     SledDecommissioned { policy: SledPolicy },
     SledExpunged,
 }

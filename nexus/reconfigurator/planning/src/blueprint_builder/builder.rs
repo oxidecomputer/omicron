@@ -405,6 +405,19 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         reason: ZoneExpungeReason,
     ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
+        self.expunge_all_zones_for_sled_where(sled_id, reason, |_| true)
+    }
+
+    /// Expunges all zones from a sled where `filter_fn` returns `true`.
+    ///
+    /// Returns a list of zone IDs expunged (excluding zones that were already
+    /// expunged). If the list is empty, then the operation was a no-op.
+    pub(crate) fn expunge_all_zones_for_sled_where(
+        &mut self,
+        sled_id: SledUuid,
+        reason: ZoneExpungeReason,
+        filter_fn: impl Fn(&BlueprintZoneConfig) -> bool,
+    ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
         let log = self.log.new(o!(
             "sled_id" => sled_id.to_string(),
         ));
@@ -414,6 +427,11 @@ impl<'a> BlueprintBuilder<'a> {
 
         let sled_zones = self.zones.current_sled_zones(sled_id);
         for (z, state) in sled_zones {
+            // Only consider zones for which the filter returns true.
+            if !filter_fn(z) {
+                continue;
+            }
+
             let is_expunged =
                 is_already_expunged(z, state).map_err(|error| {
                     Error::Planner(anyhow!(error).context(format!(
@@ -435,6 +453,12 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         match reason {
+            ZoneExpungeReason::DiskExpunged => {
+                info!(
+                    &log,
+                    "expunged disk with non-expunged zone(s) was found"
+                );
+            }
             ZoneExpungeReason::SledDecommissioned { policy } => {
                 // A sled marked as decommissioned should have no resources
                 // allocated to it. If it does, it's an illegal state, possibly
@@ -468,6 +492,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Finally, add a comment describing what happened.
         let reason = match reason {
+            ZoneExpungeReason::DiskExpunged => "zone was using expunged disk",
             ZoneExpungeReason::SledDecommissioned { .. } => {
                 "sled state is decommissioned"
             }
