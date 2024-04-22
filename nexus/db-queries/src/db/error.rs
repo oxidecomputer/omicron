@@ -76,9 +76,9 @@ impl<T: std::fmt::Debug> TransactionError<T> {
     ///
     /// The following pattern is used frequently in retryable transactions:
     ///
-    /// - Create an OptionalError
+    /// - Create an `OptionalError<TransactionError<T>>`
     /// - Execute a series of database operations, which return the
-    /// TransactionError<T> type
+    /// `TransactionError<T>` type
     /// - If the underlying operations return a retryable error from diesel,
     /// propagate that out.
     /// - Otherwise, set the OptionalError to a value of T, and rollback the transaction.
