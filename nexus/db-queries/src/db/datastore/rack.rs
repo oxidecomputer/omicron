@@ -28,6 +28,7 @@ use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
+use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -771,9 +772,9 @@ impl DataStore {
                         info!(log, "physical disk upsert in handoff: {physical_disk:#?}");
                         if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
                             .await {
-                            if !matches!(e, Error::ObjectAlreadyExists { .. }) {
+                            if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
-                                err.set(RackInitError::PhysicalDiskInsert(e))
+                                err.set(RackInitError::PhysicalDiskInsert(e.into()))
                                     .unwrap();
                                 return Err(DieselError::RollbackTransaction);
                             }
@@ -784,9 +785,9 @@ impl DataStore {
 
                     for zpool in zpools {
                         if let Err(e) = Self::zpool_insert_on_connection(&conn, &opctx, zpool).await {
-                            if !matches!(e, Error::ObjectAlreadyExists { .. }) {
+                            if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
-                                err.set(RackInitError::ZpoolInsert(e)).unwrap();
+                                err.set(RackInitError::ZpoolInsert(e.into())).unwrap();
                                 return Err(DieselError::RollbackTransaction);
                             }
                         }

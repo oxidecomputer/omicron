@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for autmatically adopting physical disks.
+//! Background task for automatically adopting physical disks.
 //!
 //! Removable disks may be arbitrarily attached and detached from
 //! Oxide racks. When this happens, if they had not previously

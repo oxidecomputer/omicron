@@ -4,6 +4,7 @@
 
 //! Error handling and conversions.
 
+use crate::transaction_retry::OptionalError;
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -66,6 +67,30 @@ impl<T> TransactionError<T> {
                 Retryable(err)
             }
             _ => NotRetryable(self),
+        }
+    }
+}
+
+impl<T: std::fmt::Debug> TransactionError<T> {
+    /// Converts a TransactionError into a diesel error.
+    ///
+    /// The following pattern is used frequently in retryable transactions:
+    ///
+    /// - Create an `OptionalError<TransactionError<T>>`
+    /// - Execute a series of database operations, which return the
+    /// `TransactionError<T>` type
+    /// - If the underlying operations return a retryable error from diesel,
+    /// propagate that out.
+    /// - Otherwise, set the OptionalError to a value of T, and rollback the transaction.
+    ///
+    /// This function assists with that conversion.
+    pub fn into_diesel(
+        self,
+        err: &OptionalError<TransactionError<T>>,
+    ) -> DieselError {
+        match self.retryable() {
+            MaybeRetryable::NotRetryable(txn_error) => err.bail(txn_error),
+            MaybeRetryable::Retryable(diesel_error) => diesel_error,
         }
     }
 }
