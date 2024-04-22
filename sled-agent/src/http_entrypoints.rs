@@ -51,6 +51,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
@@ -483,14 +484,7 @@ async fn instance_get_state(
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
-    Ok(HttpResponseOk(
-        sa.instance_get_state(instance_id).await?.ok_or_else(|| {
-            HttpError::for_not_found(
-                None,
-                format!("instance {} not found", instance_id),
-            )
-        })?
-    ))
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
 }
 
 #[endpoint {
@@ -1023,17 +1017,4 @@ async fn bootstore_status(
         })?
         .into();
     Ok(HttpResponseOk(status))
-}
-
-/// Get the status of a VMM
-#[endpoint {
-    method = GET,
-    path = "/vmm/{id}/sled-instance-state"
-}]
-async fn vmm_get_sled_instance_state(
-    request_context: RequestContext<SledAgent>,
-) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-    let sa = request_context.context();
-    let id = reques
-    todo!("eliza")
 }

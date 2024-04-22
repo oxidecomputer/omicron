@@ -1312,28 +1312,33 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Option<Collection>, Error> {
+        let Some(id) = self.inventory_get_latest_collection_id(opctx).await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(self.inventory_collection_read(opctx, id).await?))
+    }
+
+    /// Returns the ID of the latest collection, if any collections exist.
+    ///
+    /// If there aren't any collections, returns `Ok(None)`.
+    pub async fn inventory_get_latest_collection_id(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<CollectionUuid>, Error> {
+        use db::schema::inv_collection::dsl;
+
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use db::schema::inv_collection::dsl;
-        let collection_id = dsl::inv_collection
+        let id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
             .first_async::<Uuid>(&*conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        let Some(collection_id) = collection_id else {
-            return Ok(None);
-        };
-
-        Ok(Some(
-            self.inventory_collection_read(
-                opctx,
-                CollectionUuid::from_untyped_uuid(collection_id),
-            )
-            .await?,
-        ))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .map(CollectionUuid::from_untyped_uuid);
+        Ok(id)
     }
 
     /// Attempt to read the current collection

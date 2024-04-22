@@ -9,7 +9,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::InvSledAgent;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
 use crate::db::schema::vmm::dsl;
@@ -165,46 +164,5 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(vmm)
-    }
-
-    pub async fn vmm_list_by_sled_agent(
-        &self,
-        opctx: &OpContext,
-    ) -> ListResultVec<(InvSledAgent, Vmm)> {
-        // TODO(eliza): should probably paginate this?
-        use crate::db::schema::inv_sled_agent;
-        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // Get the latest inventory collection ID.
-        let collection_id = {
-            use crate::db::schema::inv_collection::dsl;
-            dsl::inv_collection
-                .select(dsl::id)
-                .order_by(dsl::time_started.desc())
-                .first_async::<Uuid>(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
-        };
-        let Some(collection_id) = collection_id else {
-            return Ok(Vec::new());
-        };
-
-        let result = inv_sled_agent::dsl::inv_sled_agent
-            // Only list sled agents from the latest collection.
-            .filter(inv_sled_agent::dsl::inv_collection_id.eq(collection_id))
-            .inner_join(
-                dsl::vmm.on(dsl::sled_id.eq(inv_sled_agent::dsl::sled_id)),
-            )
-            .filter(dsl::time_deleted.is_null())
-            .select((InvSledAgent::as_select(), Vmm::as_select()))
-            .load_async::<(InvSledAgent, Vmm)>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(result)
     }
 }

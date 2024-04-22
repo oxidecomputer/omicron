@@ -405,7 +405,7 @@ impl InstanceRunner {
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(CurrentState{ tx }) => {
-                            tx.send(self.current_state().await)
+                            tx.send(self.current_state())
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(PutState{ state, tx }) => {
@@ -1176,7 +1176,7 @@ impl InstanceRunner {
         }
     }
 
-    async fn current_state(&self) -> SledInstanceState {
+    fn current_state(&self) -> SledInstanceState {
         self.state.sled_instance_state()
     }
 

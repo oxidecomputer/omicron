@@ -19,18 +19,13 @@ use uuid::Uuid;
 /// Returns the corresponding `DbTypedUuid` for this `TypedUuid`.
 ///
 /// Code external to the `db-model` crate sometimes needs a way to convert a
-/// `TypedUuid` to a `DbTypedUuid`. We don't want `DbTypedUuid` to be used
-/// anywhere, so we don't make it public. Instead, we expose this function.
+/// `TypedUuid` to a `DbTypedUuid`.
 #[inline]
 pub fn to_db_typed_uuid<T: TypedUuidKind>(id: TypedUuid<T>) -> DbTypedUuid<T> {
     DbTypedUuid(id)
 }
 
 /// A UUID with information about the kind of type it is.
-///
-/// Despite the fact that this is marked `pub`, this is *private* to the
-/// `db-model` crate (this type is not exported at the top level). External
-/// users must use omicron-common's `TypedUuid`.
 #[derive_where(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
 #[derive(AsExpression, FromSqlRow, Serialize, Deserialize, JsonSchema)]
 #[diesel(sql_type = sql_types::Uuid)]
