@@ -2291,7 +2291,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
             ZoneArgs::Switch(SwitchZoneConfigLocal {
-                zone: SwitchZoneConfig { id, services, addresses, .. },
+                zone: SwitchZoneConfig { id, services, addresses},
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -2315,6 +2315,7 @@ impl ServiceManager {
 
                 // Define all services in the switch zone
                 let mut mgs_service = ServiceBuilder::new("oxide/mgs");
+                let mut wicketd_service = ServiceBuilder::new("oxide/wicketd");
 
                 // Set properties for each service
                 for service in services {
@@ -2356,8 +2357,92 @@ impl ServiceManager {
                                     .add_property_group(mgs_config),
                             );
                         }
-                        SwitchService::SpSim => {}
-                        SwitchService::Wicketd { baseboard } => {}
+                        SwitchService::SpSim => {
+                            info!(
+                                self.inner.log,
+                                "Setting up Simulated SP service"
+                            );
+                        }
+                        SwitchService::Wicketd { baseboard } => {
+                            // If we're launching the switch zone, we'll have a
+                            // bootstrap_address based on our call to
+                            // `self.bootstrap_address_needed` (which always
+                            // gives us an address for the switch zone. If we
+                            // _don't_ have a bootstrap address, someone has
+                            // requested wicketd in a non-switch zone; return an
+                            // error.
+                            let Some((_, bootstrap_address)) =
+                                bootstrap_name_and_address
+                            else {
+                                return Err(Error::BadServiceRequest {
+                                    service: "wicketd".to_string(),
+                                    message: concat!(
+                                        "missing bootstrap address: ",
+                                        "wicketd can only be started in the ",
+                                        "switch zone",
+                                    )
+                                    .to_string(),
+                                });
+                            };
+
+                            let rack_subnet = Ipv6Subnet::<AZ_PREFIX>::new(
+                                info.underlay_address,
+                            );
+
+                            let baseboard_info = serde_json::to_string_pretty(&baseboard)?;
+
+                            let wicketd_config =
+                                PropertyGroupBuilder::new("config")
+                                    .add_property(
+                                        "address",
+                                        "astring",
+                                        &format!("[::1]:{WICKETD_PORT}"),
+                                    )
+                                    .add_property(
+                                        "artifact-address",
+                                        "astring",
+                                        &format!("[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"),
+                                    )
+                                    .add_property(
+                                        "mgs-address",
+                                        "astring",
+                                        &format!("[::1]:{MGS_PORT}"),
+                                    )
+                                    // We intentionally bind `nexus-proxy-address` to
+                                    // `::` so wicketd will serve this on all
+                                    // interfaces, particularly the tech port
+                                    // interfaces, allowing external clients to connect
+                                    // to this Nexus proxy.
+                                    .add_property(
+                                        "nexus-proxy-address",
+                                        "astring",
+                                        &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
+                                    )
+                                    .add_property(
+                                        "rack-subnet",
+                                        "astring",
+                                        &rack_subnet.net().ip().to_string(),
+                                    )
+                                    .add_property(
+                                        "config/baseboard-file",
+                                        "astring",
+                                        // TODO: Used to be "/opt/oxide/baseboard.json", make sure
+                                        // it's OK to change
+                                        "/var/svc/manifest/site/wicketd/baseboard.json",
+                                    )
+                                    // TODO: Remove this baseboard info and send it to
+                                    // switch_zone_setup service instead?
+                                    .add_property(
+                                        "config/baseboard-info",
+                                        "astring",
+                                        &baseboard_info,
+                                    );
+
+                            wicketd_service = wicketd_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(wicketd_config),
+                            );
+                        }
                         SwitchService::Dendrite { asic } => match asic {
                             DendriteAsic::TofinoAsic => {}
                             DendriteAsic::TofinoStub => {}

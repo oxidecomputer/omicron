@@ -46,4 +46,7 @@ for i in "${!USERS[@]}"; do
     fi
 done
 
+# TODO: Call /opt/oxide/zone-setup-cli/bin/zone-setup wicket-setup -b BASEBOARD_INFO here
+# Eventually we'll want all of the above code to be part of the zone-setup CLI as well
+
 exit $SMF_EXIT_OK

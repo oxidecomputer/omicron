@@ -11,6 +11,11 @@
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
   <!--
     Most omicron services run their binary under `ctrun` because they spawn
     child processes that should be killed if the service is killed. However,
