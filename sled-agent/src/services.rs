@@ -1421,7 +1421,7 @@ impl ServiceManager {
     fn zone_network_setup_install(
         gw_addr: &Ipv6Addr,
         zone: &InstalledZone,
-        static_addr: &String,
+        static_addrs: &Vec<Ipv6Addr>,
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
         let gateway = &gw_addr.to_string();
@@ -1429,8 +1429,15 @@ impl ServiceManager {
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
             .add_property("datalink", "astring", datalink)
-            .add_property("gateway", "astring", gateway)
-            .add_property("static_addr", "astring", static_addr);
+            .add_property("gateway", "astring", gateway);
+
+        for s in static_addrs {
+            config_builder = config_builder.add_property(
+                "static_addr",
+                "astring",
+                &s.to_string(),
+            );
+        }
 
         Ok(ServiceBuilder::new("oxide/zone-network-setup")
             .add_property_group(config_builder)
@@ -1597,7 +1604,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &vec![*underlay_address],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1646,7 +1653,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &vec![*underlay_address],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1702,7 +1709,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &vec![*underlay_address],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1751,7 +1758,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &vec![*underlay_address],
                 )?;
 
                 let dataset_name = DatasetName::new(
@@ -1806,7 +1813,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &vec![*underlay_address],
                 )?;
 
                 let config = PropertyGroupBuilder::new("config")
@@ -1851,12 +1858,10 @@ impl ServiceManager {
                     OXIMETER_PORT,
                 );
 
-                let listen_addr = &address.ip().to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &vec![*underlay_address],
                 )?;
 
                 let oximeter_config = PropertyGroupBuilder::new("config")
@@ -1899,7 +1904,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &static_addr.clone(),
+                    &vec![*underlay_address],
                 )?;
 
                 // Like Nexus, we need to be reachable externally via
@@ -1983,12 +1988,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let static_addr = underlay_address.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &static_addr.clone(),
+                    &vec![*underlay_address],
                 )?;
 
                 let is_boundary = matches!(
@@ -2081,7 +2084,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     gz_address,
                     &installed_zone,
-                    &underlay_address.to_string(),
+                    &vec![*underlay_address],
                 )?;
 
                 // Internal DNS zones require a special route through
@@ -2161,12 +2164,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let static_addr = underlay_address.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &static_addr.clone(),
+                    &vec![*underlay_address],
                 )?;
 
                 // While Nexus will be reachable via `external_ip`, it
@@ -2289,7 +2290,49 @@ impl ServiceManager {
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
-            _ => {}
+            _ => {} //            ZoneArgs::Switch(SwitchZoneConfigLocal {
+                    //                zone:
+                    //                    SwitchZoneConfig {
+                    //                        id,
+                    //                        services,
+                    //                        addresses,
+                    //                        ..
+                    //                    },
+                    //                ..
+                    //            }) => {
+                    //                let Some(info) = self.inner.sled_info.get() else {
+                    //                    return Err(Error::SledAgentNotReady);
+                    //                };
+                    //
+                    //              //  let static_addr = addresses;
+                    //
+                    //                let nw_setup_service = Self::zone_network_setup_install(
+                    //                    &info.underlay_address,
+                    //                    &installed_zone,
+                    //                    addresses,
+                    //                )?;
+                    //
+                    //                let oximeter_config = PropertyGroupBuilder::new("config")
+                    //                    .add_property("id", "astring", &id.to_string());
+                    //                let oximeter_service = ServiceBuilder::new("oxide/oximeter")
+                    //                    .add_instance(
+                    //                        ServiceInstanceBuilder::new("default")
+                    //                            .add_property_group(oximeter_config),
+                    //                    );
+                    //
+                    //                let profile = ProfileBuilder::new("omicron")
+                    //                    .add_service(nw_setup_service)
+                    //                    .add_service(disabled_ssh_service)
+                    //                    .add_service(oximeter_service)
+                    //                    .add_service(disabled_dns_client_service);
+                    //                profile
+                    //                    .add_to_zone(&self.inner.log, &installed_zone)
+                    //                    .await
+                    //                    .map_err(|err| {
+                    //                        Error::io("Failed to setup Oximeter profile", err)
+                    //                    })?;
+                    //                return Ok(RunningZone::boot(installed_zone).await?);
+                    //            }
         }
 
         let running_zone = RunningZone::boot(installed_zone).await?;

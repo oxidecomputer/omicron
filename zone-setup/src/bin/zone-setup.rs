@@ -113,11 +113,14 @@ async fn do_run() -> Result<(), CmdError> {
                     .value_parser(parse_ipv6),
                 )
                 .arg(
-                    arg!(
-                        -s --static_addr <Ipv6Addr> "static_addr"
-                    )
+                    Arg::new("static_addrs")
+                    .short('s')
+                    .long("static_addrs")
+                    .num_args(1..)
+                    .value_delimiter(' ')
+                    .value_parser(parse_ipv6)
+                    .help("List of static addresses separated by a space")
                     .required(true)
-                    .value_parser(parse_ipv6),
                 ),
         )
         .subcommand(
@@ -417,7 +420,10 @@ async fn common_nw_set_up(
     log: Logger,
 ) -> Result<(), CmdError> {
     let datalink: &String = matches.get_one("datalink").unwrap();
-    let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
+    let static_addrs = matches
+        .get_many::<Ipv6Addr>("static_addrs")
+        .unwrap()
+        .collect::<Vec<_>>();
     let gateway: Ipv6Addr = *matches.get_one("gateway").unwrap();
     let zonename = zone::current().await.map_err(|err| {
         CmdError::Failure(anyhow!(
@@ -436,26 +442,34 @@ async fn common_nw_set_up(
     Ipadm::set_interface_mtu(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?static_addr);
-    Ipadm::create_static_and_autoconfigured_addrs(&datalink, static_addr)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    for addr in &static_addrs {
+        info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
+        Ipadm::create_static_and_autoconfigured_addrs(&datalink, addr)
+            .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    }
 
     info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
     Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
-    write(
-        HOSTS_FILE,
-        format!(
-            r#"
+    let mut hosts_contents = String::from(
+        r#"
 ::1 localhost loghost
 127.0.0.1 localhost loghost
-{static_addr} {zonename}.local {zonename}
+"#,
+    );
+
+    for addr in static_addrs.clone() {
+        let s = format!(
+            r#"{addr} {zonename}.local {zonename}
 "#
-        ),
-    )
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        );
+        hosts_contents.push_str(s.as_str())
+    }
+
+    write(HOSTS_FILE, hosts_contents)
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
