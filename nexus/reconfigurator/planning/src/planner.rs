@@ -196,9 +196,9 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
-            for zpool_id in sled_resources.zpools.keys() {
+            for zpool_id in sled_resources.provisionable_zpools() {
                 if self
                     .blueprint
                     .sled_ensure_zone_crucible(sled_id, *zpool_id)?

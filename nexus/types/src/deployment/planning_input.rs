@@ -42,6 +42,15 @@ pub struct SledDisk {
     pub state: PhysicalDiskState,
 }
 
+impl SledDisk {
+    fn provisionable(&self) -> bool {
+        match (self.policy, self.state) {
+            (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Filters that apply to disks.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DiskFilter {
@@ -87,6 +96,25 @@ pub struct SledResources {
 }
 
 impl SledResources {
+    /// Returns if the zpool is provisionable (known, in-service, and active).
+    pub fn zpool_is_provisionable(&self, zpool: &ZpoolUuid) -> bool {
+        let Some(disk) = self.zpools.get(zpool) else { return false };
+        disk.provisionable()
+    }
+
+    /// Returns all in-service, active zpools
+    pub fn provisionable_zpools(
+        &self,
+    ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
+        self.zpools.iter().filter_map(|(zpool, disk)| {
+            if disk.provisionable() {
+                Some(zpool)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn all_disks(
         &self,
         filter: DiskFilter,
