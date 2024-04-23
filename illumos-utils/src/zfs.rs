@@ -622,7 +622,8 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
-        let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
+        let internal =
+            pool.kind() == omicron_common::zpool_name::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
             // Avoid erasing crashdump, backing data and swap datasets on

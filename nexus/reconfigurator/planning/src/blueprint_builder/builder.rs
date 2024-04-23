@@ -65,7 +65,6 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
@@ -110,15 +109,6 @@ pub enum EnsureMultiple {
     Added(usize),
     /// no action was necessary
     NotNeeded,
-}
-
-fn zpool_id_to_external_name(zpool_id: ZpoolUuid) -> anyhow::Result<ZpoolName> {
-    let pool_name_generated =
-        illumos_utils::zpool::ZpoolName::new_external(zpool_id).to_string();
-    let pool_name = ZpoolName::from_str(&pool_name_generated).map_err(|e| {
-        anyhow!("Failed to create zpool name from {zpool_id}: {e}")
-    })?;
-    Ok(pool_name)
 }
 
 /// Helper for assembling a blueprint
@@ -632,7 +622,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         zpool_id: ZpoolUuid,
     ) -> Result<Ensure, Error> {
-        let pool_name = zpool_id_to_external_name(zpool_id)?;
+        let pool_name = ZpoolName::new_external(zpool_id);
 
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
@@ -1354,7 +1344,7 @@ pub mod test {
             new_sled_resources
                 .zpools
                 .keys()
-                .map(|id| { zpool_id_to_external_name(*id).unwrap() })
+                .map(|id| { ZpoolName::new_external(*id) })
                 .collect()
         );
 
