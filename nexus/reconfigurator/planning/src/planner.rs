@@ -878,8 +878,10 @@ mod test {
         builder.policy_mut().target_nexus_zone_count = 1;
 
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, disk) = sled_details.resources.zpools.iter_mut().next().unwrap();
-        disk.policy = nexus_types::external_api::views::PhysicalDiskPolicy::Expunged;
+        let (_, disk) =
+            sled_details.resources.zpools.iter_mut().next().unwrap();
+        disk.policy =
+            nexus_types::external_api::views::PhysicalDiskPolicy::Expunged;
 
         let input = builder.build();
 
@@ -906,7 +908,11 @@ mod test {
         assert_eq!(diff_modified.zones_added().len(), 0);
         assert_eq!(diff_modified.zones_removed().len(), 0);
         assert_eq!(diff_modified.zones_modified().count(), 1);
-        assert!(diff_modified.zones_modified().next().unwrap().disposition_changed());
+        assert!(diff_modified
+            .zones_modified()
+            .next()
+            .unwrap()
+            .disposition_changed());
 
         logctx.cleanup_successful();
     }
