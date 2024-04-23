@@ -42,6 +42,75 @@ struct SwitchZoneUser {
     profiles: Option<Vec<String>>,
 }
 
+impl SwitchZoneUser {
+    fn new(
+        user: String,
+        group: String,
+        gecos: String,
+        nopasswd: bool,
+        homedir: Option<String>,
+        shell: String,
+        profiles: Option<Vec<String>>,
+    ) -> SwitchZoneUser {
+        SwitchZoneUser {
+            user,
+            group,
+            gecos,
+            nopasswd,
+            homedir,
+            shell,
+            profiles,
+        }
+    }
+
+    fn setup_switch_zone_user(self, log: &Logger) -> Result<(), CmdError> {
+       // TODO: create command abstractions instead of just printing them
+        info!(&log, "Add a new group for the user"; "group" => self.group.clone(), "user" => self.user.clone());
+        println!(
+            "getent group {} >/dev/null 2>&1 || groupadd {}",
+            self.group, self.group
+        );
+
+        info!(&log, "Add the user"; "user" => self.user.clone());
+        println!(
+            "getent passwd {} >/dev/null 2>&1 || useradd -m -s {} -g {} -c {} {}",
+            self.user, self.shell, self.group, self.gecos, self.user
+        );
+
+        // Either enable passwordless login (wicket) or disable password-based logins
+        // completely (support, which logs in via ssh key).
+        if self.nopasswd {
+            info!(&log, "Enable passwordless login for user"; "user" => self.user.clone());
+            println!("passwd -d {}", self.user);
+        } else {
+            info!(&log, "Disable password-based logins"; "user" => self.user.clone());
+            println!("passwd -N {}", self.user);
+        };
+
+        if let Some(profiles) = self.profiles {
+            for profile in profiles {
+                info!(&log, "Assign user profiles"; "user" => self.user.clone(), "profile" => profile.clone());
+                println!(
+                    "usermod -P\"$(printf '%s,' \"{}\")\" {}",
+                    profile, self.user
+                );
+            }
+        } else {
+            info!(&log, "Remove user profiles"; "user" => self.user.clone());
+            println!("usermod -P '' {}", self.user)
+        };
+
+        if let Some(homedir) = self.homedir {
+            info!(&log, "Set up home directory and startup files"; "user" => self.user.clone(), "home directory" => homedir.clone());
+            println!("mkdir -p {}", homedir);
+            println!("cp /root/.bashrc {}/.bashrc", homedir);
+            println!("cp /root/.profile {}/.profile", homedir);
+            println!("chown -R {} {}", self.user, homedir);
+        }
+        Ok(())
+    }
+}
+
 fn parse_ip(s: &str) -> anyhow::Result<IpAddr> {
     if s == "unknown" {
         return Err(anyhow!("ERROR: Missing input value"));
@@ -245,6 +314,32 @@ async fn switch_zone_setup(
 
     info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
     generate_switch_zone_baseboard_file(file, info)?;
+
+    info!(&log, "Setting up the users required for wicket and support");
+    let wicket_user = SwitchZoneUser::new(
+        String::from("wicket"),
+        String::from("wicket"),
+        String::from("Wicket User"),
+        true,
+        None,
+        String::from("/bin/sh"),
+        None,
+    );
+
+    let support_user = SwitchZoneUser::new(
+        String::from("support"),
+        String::from("support"),
+        String::from("Oxide Support"),
+        false,
+        Some(String::from("/home/support")),
+        String::from("/bin/bash"),
+        Some(vec![String::from("Primary Administrator")]),
+    );
+
+    let users = vec![wicket_user, support_user];
+    for u in users {
+        u.setup_switch_zone_user(&log)?;
+    }
 
     Ok(())
 }
