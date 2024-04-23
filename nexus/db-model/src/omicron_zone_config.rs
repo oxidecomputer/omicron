@@ -51,6 +51,8 @@ pub(crate) struct OmicronZone {
     pub(crate) snat_ip: Option<IpNetwork>,
     pub(crate) snat_first_port: Option<SqlU16>,
     pub(crate) snat_last_port: Option<SqlU16>,
+    // Only present for BlueprintZoneConfig; always `None` for OmicronZoneConfig
+    pub(crate) external_ip_id: Option<ExternalIpUuid>,
 }
 
 impl OmicronZone {
@@ -59,6 +61,7 @@ impl OmicronZone {
         zone_id: Uuid,
         zone_underlay_address: Ipv6Addr,
         zone_type: &nexus_types::inventory::OmicronZoneType,
+        external_ip_id: Option<ExternalIpUuid>,
     ) -> anyhow::Result<Self> {
         let id = zone_id;
         let underlay_address = ipv6::Ipv6Addr::from(zone_underlay_address);
@@ -217,13 +220,13 @@ impl OmicronZone {
             snat_ip,
             snat_first_port,
             snat_last_port,
+            external_ip_id,
         })
     }
 
     pub(crate) fn into_blueprint_zone_config(
         self,
         disposition: BlueprintZoneDisposition,
-        external_ip_id: Option<ExternalIpUuid>,
         nic_row: Option<OmicronZoneNic>,
     ) -> anyhow::Result<nexus_types::deployment::BlueprintZoneConfig> {
         let common = self.into_zone_config_common(nic_row)?;
@@ -256,8 +259,7 @@ impl OmicronZone {
                         nic: common.nic?,
                         ntp_servers: common.ntp_ntp_servers?,
                         external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip_id
-                                .context("expected non-NULL external IP ID")?,
+                            id: common.external_ip_id?,
                             snat_cfg,
                         },
                     },
@@ -294,8 +296,7 @@ impl OmicronZone {
                 blueprint_zone_type::ExternalDns {
                     dataset: common.dataset?,
                     dns_address: OmicronZoneExternalFloatingAddr {
-                        id: external_ip_id
-                            .context("expected non-NULL external IP ID")?,
+                        id: common.external_ip_id?,
                         addr: common.dns_address?,
                     },
                     http_address: address,
@@ -336,8 +337,7 @@ impl OmicronZone {
                         .nexus_external_tls
                         .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
                     external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip_id
-                            .context("expected non-NULL external IP ID")?,
+                        id: common.external_ip_id?,
                         ip: common
                             .second_service_ip
                             .ok_or_else(|| {
@@ -551,6 +551,10 @@ impl OmicronZone {
         let ntp_ntp_servers =
             self.ntp_ntp_servers.ok_or_else(|| anyhow!("expected ntp_servers"));
 
+        // Do the same for the external IP ID.
+        let external_ip_id =
+            self.external_ip_id.context("expected an external IP ID");
+
         Ok(ZoneConfigCommon {
             id: self.id,
             underlay_address: self.underlay_address,
@@ -570,6 +574,7 @@ impl OmicronZone {
             dns_address,
             ntp_dns_servers,
             ntp_ntp_servers,
+            external_ip_id,
         })
     }
 }
@@ -595,6 +600,7 @@ struct ZoneConfigCommon {
     dns_address: anyhow::Result<SocketAddr>,
     ntp_dns_servers: anyhow::Result<Vec<IpAddr>>,
     ntp_ntp_servers: anyhow::Result<Vec<String>>,
+    external_ip_id: anyhow::Result<ExternalIpUuid>,
 }
 
 #[derive(Debug)]

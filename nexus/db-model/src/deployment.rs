@@ -26,9 +26,9 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{ExternalIpKind, SledKind};
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -222,6 +222,8 @@ pub struct BpOmicronZone {
     pub snat_last_port: Option<SqlU16>,
 
     disposition: DbBpZoneDisposition,
+
+    pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
 }
 
 impl BpOmicronZone {
@@ -230,11 +232,14 @@ impl BpOmicronZone {
         sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
+        let external_ip_id =
+            blueprint_zone.zone_type.external_ip().map(|ip| ip.id().into());
         let zone = OmicronZone::new(
             sled_id,
             blueprint_zone.id.into_untyped_uuid(),
             blueprint_zone.underlay_address,
             &blueprint_zone.zone_type.clone().into(),
+            external_ip_id,
         )?;
         Ok(Self {
             blueprint_id,
@@ -259,6 +264,7 @@ impl BpOmicronZone {
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
             disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
+            external_ip_id: zone.external_ip_id.map(From::from),
         })
     }
 
@@ -287,10 +293,10 @@ impl BpOmicronZone {
             snat_ip: self.snat_ip,
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
+            external_ip_id: self.external_ip_id.map(From::from),
         };
         zone.into_blueprint_zone_config(
             self.disposition.into(),
-            None, // TODO FIXME db migration - add external IP ID
             nic_row.map(OmicronZoneNic::from),
         )
     }

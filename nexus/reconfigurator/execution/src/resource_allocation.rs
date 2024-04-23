@@ -668,7 +668,10 @@ mod tests {
             db_nexus_ips[0].parent_id,
             Some(nexus_id.into_untyped_uuid())
         );
-        // TODO-john add assertion on IP ID
+        assert_eq!(
+            db_nexus_ips[0].id,
+            nexus_external_ip.id.into_untyped_uuid()
+        );
         assert_eq!(db_nexus_ips[0].ip, nexus_external_ip.ip.into());
         assert_eq!(db_nexus_ips[0].first_port, SqlU16(0));
         assert_eq!(db_nexus_ips[0].last_port, SqlU16(65535));
@@ -680,7 +683,7 @@ mod tests {
         assert_eq!(db_dns_ips.len(), 1);
         assert!(db_dns_ips[0].is_service);
         assert_eq!(db_dns_ips[0].parent_id, Some(dns_id.into_untyped_uuid()));
-        // TODO-john add assertion on IP ID
+        assert_eq!(db_dns_ips[0].id, dns_external_addr.id.into_untyped_uuid());
         assert_eq!(db_dns_ips[0].ip, dns_external_addr.addr.ip().into());
         assert_eq!(db_dns_ips[0].first_port, SqlU16(0));
         assert_eq!(db_dns_ips[0].last_port, SqlU16(65535));
@@ -692,7 +695,7 @@ mod tests {
         assert_eq!(db_ntp_ips.len(), 1);
         assert!(db_ntp_ips[0].is_service);
         assert_eq!(db_ntp_ips[0].parent_id, Some(ntp_id.into_untyped_uuid()));
-        // TODO-john add assertion on IP ID
+        assert_eq!(db_ntp_ips[0].id, ntp_external_ip.id.into_untyped_uuid());
         assert_eq!(db_ntp_ips[0].ip, ntp_external_ip.snat_cfg.ip.into());
         assert_eq!(
             db_ntp_ips[0].first_port.0..=db_ntp_ips[0].last_port.0,
