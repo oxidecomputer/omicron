@@ -1398,6 +1398,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // generation of 1. Nexus will bump this up when it updates external DNS
         // (including creating the recovery silo).
         external_dns_version: Generation::new(),
+        cockroachdb_preserve_downgrade: Some("22.1".to_owned()), // FIXME YYY
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

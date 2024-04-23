@@ -33,6 +33,28 @@ use std::net::IpAddr;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
+/// Describes the current CockroachDB cluster settings we care about.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CockroachdbSettings {
+    /// `version`
+    ///
+    /// WARNING: This value should _not_ be used to set the
+    /// `cluster.preserve_downgrade_option` setting. It can potentially reflect
+    /// an internal, intermediate upgrade version (e.g. "22.1-12").
+    pub version: String,
+    /// `cluster.preserve_downgrade_option`
+    pub preserve_downgrade_option: Option<String>,
+}
+
+impl CockroachdbSettings {
+    pub const fn empty() -> CockroachdbSettings {
+        CockroachdbSettings {
+            version: String::new(),
+            preserve_downgrade_option: None,
+        }
+    }
+}
+
 /// Describes a single disk already managed by the sled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledDisk {
@@ -310,6 +332,9 @@ pub struct Policy {
 
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
+
+    /// desired CockroachDB `cluster.preserve_downgrade_option` setting
+    pub target_cockroachdb_cluster_version: String,
 }
 
 /// Policy and database inputs to the Reconfigurator planner
@@ -332,6 +357,9 @@ pub struct PlanningInput {
 
     /// current external DNS version
     external_dns_version: Generation,
+
+    /// current CockroachDB cluster settings
+    cockroachdb_settings: CockroachdbSettings,
 
     /// per-sled policy and resources
     sleds: BTreeMap<SledUuid, SledDetails>,
@@ -362,8 +390,16 @@ impl PlanningInput {
         self.external_dns_version
     }
 
+    pub fn cockroachdb_settings(&self) -> &CockroachdbSettings {
+        &self.cockroachdb_settings
+    }
+
     pub fn target_nexus_zone_count(&self) -> usize {
         self.policy.target_nexus_zone_count
+    }
+
+    pub fn target_cockroachdb_cluster_version(&self) -> &str {
+        &self.policy.target_cockroachdb_cluster_version
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -413,6 +449,7 @@ impl PlanningInput {
             policy: self.policy,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             omicron_zone_external_ips: self.omicron_zone_external_ips,
             omicron_zone_nics: self.omicron_zone_nics,
@@ -449,6 +486,7 @@ pub struct PlanningInputBuilder {
     policy: Policy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    cockroachdb_settings: CockroachdbSettings,
     sleds: BTreeMap<SledUuid, SledDetails>,
     omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
     omicron_zone_nics: BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
@@ -460,9 +498,11 @@ impl PlanningInputBuilder {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
                 target_nexus_zone_count: 0,
+                target_cockroachdb_cluster_version: String::new(),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            cockroachdb_settings: CockroachdbSettings::empty(),
             sleds: BTreeMap::new(),
             omicron_zone_external_ips: BTreeMap::new(),
             omicron_zone_nics: BTreeMap::new(),
@@ -473,11 +513,13 @@ impl PlanningInputBuilder {
         policy: Policy,
         internal_dns_version: Generation,
         external_dns_version: Generation,
+        cockroachdb_settings: CockroachdbSettings,
     ) -> Self {
         Self {
             policy,
             internal_dns_version,
             external_dns_version,
+            cockroachdb_settings,
             sleds: BTreeMap::new(),
             omicron_zone_external_ips: BTreeMap::new(),
             omicron_zone_nics: BTreeMap::new(),
@@ -593,6 +635,7 @@ impl PlanningInputBuilder {
             policy: self.policy,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             omicron_zone_external_ips: self.omicron_zone_external_ips,
             omicron_zone_nics: self.omicron_zone_nics,

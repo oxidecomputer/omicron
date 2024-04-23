@@ -774,6 +774,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .try_into()
                     .expect("bad internal DNS generation"),
                 external_dns_version: Generation::new(),
+                cockroachdb_preserve_downgrade: Some("22.1".to_owned()), // YYY FIXME
                 time_created: Utc::now(),
                 creator: "nexus-test-utils".to_string(),
                 comment: "initial test blueprint".to_string(),

@@ -52,6 +52,7 @@ mod bfd;
 mod bgp;
 mod bootstore;
 mod certificate;
+mod cluster_settings;
 mod console_session;
 mod dataset;
 mod db_metadata;

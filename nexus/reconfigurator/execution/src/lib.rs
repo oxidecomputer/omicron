@@ -22,6 +22,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 
+mod cockroachdb;
 mod datasets;
 mod dns;
 mod omicron_physical_disks;
@@ -108,6 +109,10 @@ where
         "attempting to realize blueprint";
         "blueprint_id" => %blueprint.id
     );
+
+    cockroachdb::ensure_cluster_settings(&opctx, datastore, blueprint)
+        .await
+        .map_err(|err| vec![err])?;
 
     resource_allocation::ensure_zone_resources_allocated(
         &opctx,

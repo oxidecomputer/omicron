@@ -10,6 +10,7 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::CockroachdbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -74,9 +75,11 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
+    target_cockroachdb_cluster_version: String,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    cockroachdb_settings: CockroachdbSettings,
 }
 
 impl SystemDescription {
@@ -121,6 +124,8 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        // YYY FIXME
+        let target_cockroachdb_cluster_version = "22.1".to_owned();
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -135,9 +140,11 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_nexus_zone_count,
+            target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            cockroachdb_settings: CockroachdbSettings::empty(),
         }
     }
 
@@ -301,11 +308,15 @@ impl SystemDescription {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_cluster_version: self
+                .target_cockroachdb_cluster_version
+                .clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version,
             self.external_dns_version,
+            self.cockroachdb_settings.clone(),
         );
 
         for sled in self.sleds.values() {

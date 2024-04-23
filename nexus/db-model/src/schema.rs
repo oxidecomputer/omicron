@@ -1445,6 +1445,8 @@ table! {
 
         internal_dns_version -> Int8,
         external_dns_version -> Int8,
+
+        cockroachdb_preserve_downgrade -> Nullable<Text>,
     }
 }
 

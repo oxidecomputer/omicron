@@ -125,6 +125,7 @@ mod test {
                     .map(|(typed_id, z)| (typed_id.into_untyped_uuid(), z))
                     .collect(),
                 blueprint_disks: BTreeMap::new(),
+                cockroachdb_preserve_downgrade: None,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),

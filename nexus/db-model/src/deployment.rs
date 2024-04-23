@@ -40,6 +40,7 @@ pub struct Blueprint {
     pub parent_blueprint_id: Option<Uuid>,
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
+    pub cockroachdb_preserve_downgrade: Option<String>,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -52,6 +53,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             parent_blueprint_id: bp.parent_blueprint_id,
             internal_dns_version: Generation(bp.internal_dns_version),
             external_dns_version: Generation(bp.external_dns_version),
+            cockroachdb_preserve_downgrade: bp
+                .cockroachdb_preserve_downgrade
+                .clone(),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),

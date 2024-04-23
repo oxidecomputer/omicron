@@ -211,6 +211,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks: BTreeMap::new(),
+                cockroachdb_preserve_downgrade: None,
                 parent_blueprint_id: Some(parent_blueprint_id),
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),

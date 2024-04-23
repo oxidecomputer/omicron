@@ -3191,7 +3191,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- identifies the latest internal DNS version when blueprint planning began
     internal_dns_version INT8 NOT NULL,
     -- identifies the latest external DNS version when blueprint planning began
-    external_dns_version INT8 NOT NULL
+    external_dns_version INT8 NOT NULL,
+
+    -- CockroachDB cluster settings managed by blueprints:
+    -- `cluster.preserve_downgrade_option`
+    cockroachdb_preserve_downgrade TEXT
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3756,7 +3760,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '53.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '54.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

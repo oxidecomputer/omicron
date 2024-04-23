@@ -159,6 +159,10 @@ impl super::Nexus {
                 "fetching external DNS version for blueprint planning",
             )?
             .version;
+        let cockroachdb_settings =
+            datastore.cluster_settings(opctx).await.internal_context(
+                "fetching cluster settings for blueprint planning",
+            )?;
 
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
@@ -167,9 +171,11 @@ impl super::Nexus {
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_cockroachdb_cluster_version: "22.1", // YYY FIXME
             log: &opctx.log,
             internal_dns_version,
             external_dns_version,
+            cockroachdb_settings: &cockroachdb_settings,
         }
         .build()?;
 

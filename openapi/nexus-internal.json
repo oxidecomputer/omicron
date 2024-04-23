@@ -2550,6 +2550,11 @@
               "$ref": "#/components/schemas/BlueprintZonesConfig"
             }
           },
+          "cockroachdb_preserve_downgrade": {
+            "nullable": true,
+            "description": "the value the CockroachDB `cluster.preserve_downgrade_option` cluster setting should be set to",
+            "type": "string"
+          },
           "comment": {
             "description": "human-readable string describing why this blueprint was created (for debugging)",
             "type": "string"

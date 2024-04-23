@@ -160,6 +160,7 @@ mod test {
                 id,
                 blueprint_zones,
                 blueprint_disks,
+                cockroachdb_preserve_downgrade: None,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_version,
                 external_dns_version: dns_version,

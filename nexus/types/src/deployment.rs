@@ -43,6 +43,7 @@ use uuid::Uuid;
 mod planning_input;
 mod zone_type;
 
+pub use planning_input::CockroachdbSettings;
 pub use planning_input::DiskFilter;
 pub use planning_input::OmicronZoneExternalIp;
 pub use planning_input::OmicronZoneExternalIpKind;
@@ -121,6 +122,10 @@ pub struct Blueprint {
     /// external DNS version when thi blueprint was created
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
+
+    /// the value the CockroachDB `cluster.preserve_downgrade_option` cluster
+    /// setting should be set to
+    pub cockroachdb_preserve_downgrade: Option<String>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,

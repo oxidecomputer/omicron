@@ -17,6 +17,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::CockroachdbSettings;
 use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -60,8 +61,10 @@ pub struct PlanningInputFromDb<'a> {
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_nexus_zone_count: usize,
+    pub target_cockroachdb_cluster_version: &'a str,
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
+    pub cockroachdb_settings: &'a CockroachdbSettings,
     pub log: &'a Logger,
 }
 
@@ -72,11 +75,15 @@ impl PlanningInputFromDb<'_> {
         let policy = Policy {
             service_ip_pool_ranges,
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_cluster_version: self
+                .target_cockroachdb_cluster_version
+                .to_owned(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
+            self.cockroachdb_settings.clone(),
         );
 
         let mut zpools_by_sled_id = {
@@ -234,17 +241,23 @@ pub async fn reconfigurator_state_load(
         .await
         .context("fetching external DNS version")?
         .version;
+    let cockroachdb_settings = datastore
+        .cluster_settings(opctx)
+        .await
+        .context("fetching cluster settings")?;
 
     let planning_input = PlanningInputFromDb {
         sled_rows: &sled_rows,
         zpool_rows: &zpool_rows,
         ip_pool_range_rows: &ip_pool_range_rows,
         target_nexus_zone_count: NEXUS_REDUNDANCY,
+        target_cockroachdb_cluster_version: "22.1", // YYY FIXME
         external_ip_rows: &external_ip_rows,
         service_nic_rows: &service_nic_rows,
         log: &opctx.log,
         internal_dns_version,
         external_dns_version,
+        cockroachdb_settings: &cockroachdb_settings,
     }
     .build()
     .context("assembling planning_input")?;

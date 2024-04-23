@@ -11,6 +11,7 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::CockroachdbSettings;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -79,6 +80,7 @@ impl<'a> Planner<'a> {
 
         self.do_plan_expunge()?;
         self.do_plan_add()?;
+        self.do_plan_cockroachdb_cluster_settings();
 
         Ok(())
     }
@@ -355,6 +357,70 @@ impl<'a> Planner<'a> {
         );
 
         Ok(())
+    }
+
+    fn do_plan_cockroachdb_cluster_settings(&mut self) {
+        // Figure out what we should set the CockroachDB "preserve downgrade
+        // option" setting to based on the planning input.
+        //
+        // A given major version of CockroachDB (such as '22.2') is backward
+        // compatible with the storage format of the previous version of
+        // CockroachDB. This is shown by the `version` cluster setting, which
+        // displays the current storage format version. When `version` is
+        // '22.2', versions v22.2.x or v23.1.x can be used to run a node. This
+        // allows for rolling upgrades of nodes within the cluster.
+        //
+        // By default, when all nodes of a cluster are upgraded to a new major
+        // version, the upgrade is "auto-finalized"; `version` is changed to the
+        // new major version, and rolling back to a previous major version of
+        // CockroachDB is no longer possible.
+        //
+        // The `cluster.preserve_downgrade_option` cluster setting can be used
+        // to control this. This setting can only be set to the current value of
+        // the `version` cluster setting, and when it is set, CockroachDB will
+        // not perform auto-finalization. To perform finalization and finish
+        // the upgrade, a client must reset the preserve downgrade option.
+        // Finalization occurs in the background, and the preserve downgrade
+        // option cannot be set again until finalization completes.
+        //
+        // This table describes the logic we take here:
+        //
+        //            the `version` cluster setting
+        //            | | |    the `cluster.preserve_downgrade_option` setting
+        //            v v v    v v v
+        // +--------+--------+--------+--------------------------------------+
+        // | policy |  vers. | p.d.o. | Action                               |
+        // +--------+--------+--------+--------------------------------------+
+        // |  22.1  =  22.1  |  NULL  | Set p.d.o. to 22.1                   |
+        // |  22.1  =  22.1  |  22.1  | Do nothing (ideal state)             |
+        // +--------+--------+--------+--------------------------------------+
+        // |  22.2  ≠  22.1  |  22.1  | Reset p.d.o.                         |
+        // |  22.2  ≠ 22.1-9 |  NULL  | Finalizing -- do not change settings |
+        // +--------+--------+--------+--------------------------------------+
+
+        let policy = self.input.target_cockroachdb_cluster_version();
+        let CockroachdbSettings { version, preserve_downgrade_option } =
+            self.input.cockroachdb_settings();
+
+        if policy == version {
+            if preserve_downgrade_option.is_none() {
+                // Set `cluster.preserve_downgrade_option`
+                self.blueprint
+                    .cockroachdb_preserve_downgrade(Some(policy.to_owned()));
+            }
+        } else {
+            if preserve_downgrade_option.is_some() {
+                // Reset `cluster.preserve_downgrade_option`
+                self.blueprint.cockroachdb_preserve_downgrade(None);
+            } else {
+                // CockroachDB may be finalizing. Per documentation, do not
+                // change any cluster settings while upgrading.
+                return;
+            }
+        }
+
+        // (If we need to manage further CockroachDB cluster settings, they
+        // should be planned here.)
     }
 }
 
