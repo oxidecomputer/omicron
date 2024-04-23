@@ -765,6 +765,10 @@ const WEB_SECURITY_HEADERS: [(HeaderName, HeaderValue); 3] = [
     (http::header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
 ];
 
+/// Serve a static asset from `static_dir`. 404 on virtually all errors.
+/// No auth. NO SENSITIVE FILES. Will serve a gzipped version if the `.gz`
+/// file is present in the directory and `gzip` is listed in the request's
+/// `Accept-Encoding` header.
 async fn serve_static(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: &Utf8Path,
@@ -824,11 +828,12 @@ async fn serve_static(
     Ok(resp.body(body)?)
 }
 
-/// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
-/// errors. No auth. NO SENSITIVE FILES. Will serve a gzipped version if the
-/// `.gz` file is present in the directory and `Accept-Encoding: gzip` is
-/// present on the request. Cache in browser for a year because assets have
-/// content hash in filename.
+/// Serve a static asset from `<static_dir>/assets` via [`serve_static`]. Cache
+/// in browser for a year because assets have content hash in filename.
+///
+/// Note that Dropshot protects us from directory traversal attacks (e.g.
+/// `/assets/../../../etc/passwd`). This is tested in the `console_api`
+/// integration tests.
 #[endpoint {
    method = GET,
    path = "/assets/{path:.*}",
@@ -847,6 +852,7 @@ pub(crate) async fn asset(
     serve_static(rqctx, &path, CACHE_CONTROL).await
 }
 
+/// Serve `<static_dir>/index.html` via [`serve_static`]. Disallow caching.
 pub(crate) async fn serve_console_index(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
@@ -862,6 +868,9 @@ fn not_found(internal_msg: &str) -> HttpError {
 
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.
+///
+/// WARNING: This function assumes that `..` path segments have already been
+/// found and rejected.
 fn find_file(
     path: &Utf8Path,
     root_dir: &Utf8Path,

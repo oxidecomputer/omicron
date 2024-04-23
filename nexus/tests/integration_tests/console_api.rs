@@ -358,6 +358,18 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(resp.body, "not gzipped but I know a guy".as_bytes());
     // make sure we're not including the gzip header on non-gzipped files
     assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
+    // test that `..` is not allowed in paths. (Dropshot handles this, so we
+    // test to ensure this hasn't gone away.)
+    let _ = RequestBuilder::new(
+        &testctx,
+        Method::GET,
+        "/assets/../assets/hello.txt",
+    )
+    .expect_status(Some(StatusCode::BAD_REQUEST))
+    .execute()
+    .await
+    .expect("failed to 400 on `..` traversal");
 }
 
 #[tokio::test]
