@@ -8,7 +8,6 @@ anyhow.workspace = true
 chrono.workspace = true
 debug-ignore.workspace = true
 gateway-client.workspace = true
-illumos-utils.workspace = true
 indexmap.workspace = true
 internal-dns.workspace = true
 ipnet.workspace = true

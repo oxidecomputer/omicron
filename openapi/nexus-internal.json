@@ -7267,8 +7267,10 @@
         "minimum": 0
       },
       "ZpoolName": {
-        "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"The name of a Zpool\", \"description\": \"Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique\", \"type\": \"string\", \"pattern\": \"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\" } ``` </details>",
-        "type": "string"
+        "title": "The name of a Zpool",
+        "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
+        "type": "string",
+        "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
       "ZpoolPutRequest": {
         "description": "Identifies information about a Zpool that should be part of the control plane.",

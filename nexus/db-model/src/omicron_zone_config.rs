@@ -175,8 +175,7 @@ impl OmicronZone {
             }
         };
 
-        let dataset_zpool_name =
-            dataset.map(|d| d.pool_name.as_str().to_string());
+        let dataset_zpool_name = dataset.map(|d| d.pool_name.to_string());
         let primary_service_sockaddr = primary_service_sockaddr_str
             .parse::<std::net::SocketAddrV6>()
             .with_context(|| {
