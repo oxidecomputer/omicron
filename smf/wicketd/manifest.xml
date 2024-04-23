@@ -55,12 +55,6 @@
     <propval name='mgs-address' type='astring' value='unknown' />
     <propval name='nexus-proxy-address' type='astring' value='unknown' />
     <propval name='baseboard-file' type='astring' value='unknown' />
-    <!-- 
-      TODO: Remove this baseboard info and send it to
-      switch_zone_setup service instead?
-    -->
-    <propval name='baseboard-info' type='astring' value='unknown' />
-
     <!--
       In a standard deployment, this will remain `unknown` until rack setup
       is complete, at which point it will be populated. Prior to this being

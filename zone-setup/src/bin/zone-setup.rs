@@ -22,14 +22,25 @@ use uzers::{get_group_by_name, get_user_by_name};
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
 pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
-pub const WICKET_BASEBOARD_FILE: &str = "/var/svc/manifest/site/wicketd/baseboard.json";
+pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 pub const ROOT: &str = "root";
 pub const SYS: &str = "sys";
 
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
 pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
-pub const WICKET_SETUP_CMD: &str = "wicket-setup";
+pub const SWITCH_ZONE_SETUP_CMD: &str = "switch-zone";
+
+// User information for the switch zone
+struct SwitchZoneUser {
+    user: String,
+    group: String,
+    gecos: String,
+    nopasswd: bool,
+    homedir: Option<String>,
+    shell: String,
+    profiles: Option<Vec<String>>,
+}
 
 fn parse_ip(s: &str) -> anyhow::Result<IpAddr> {
     if s == "unknown" {
@@ -79,7 +90,8 @@ fn parse_wicket_conf(s: &str) -> anyhow::Result<String> {
         return Err(anyhow!("ERROR: Missing baseboard configuration file"));
     };
 
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid baseboard configuration file"))
+    s.parse()
+        .map_err(|_| anyhow!("ERROR: Invalid baseboard configuration file"))
 }
 
 fn parse_boundary(s: &str) -> anyhow::Result<bool> {
@@ -159,13 +171,13 @@ async fn do_run() -> Result<(), CmdError> {
                 ),
         )
         .subcommand(
-            Command::new(WICKET_SETUP_CMD)
-                .about("Sets up Wicket configuration")
+            Command::new(SWITCH_ZONE_SETUP_CMD)
+                .about("Sets up switch zone configuration")
                 .arg(
                     arg!(
                         -b --baseboard_file <STRING> "baseboard_file"
                     )
-                    .default_value(WICKET_BASEBOARD_FILE)
+                    .default_value(SWITCH_ZONE_BASEBOARD_FILE)
                     .value_parser(parse_wicket_conf),
                 )
                 .arg(
@@ -217,42 +229,49 @@ async fn do_run() -> Result<(), CmdError> {
         chrony_setup(matches, log.clone()).await?;
     }
 
-    if let Some(matches) = matches.subcommand_matches(WICKET_SETUP_CMD) {
-        wicket_setup(matches, log.clone()).await?;
+    if let Some(matches) = matches.subcommand_matches(SWITCH_ZONE_SETUP_CMD) {
+        switch_zone_setup(matches, log.clone()).await?;
     }
 
     Ok(())
 }
 
-async fn wicket_setup(
+async fn switch_zone_setup(
     matches: &ArgMatches,
     log: Logger,
 ) -> Result<(), CmdError> {
     let file: &String = matches.get_one("baseboard_file").unwrap();
     let info: &String = matches.get_one("baseboard_info").unwrap();
 
-    info!(&log, "Generating baseboard.json file"; "baseboard file" => ?WICKET_BASEBOARD_FILE);
+    info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
+    generate_switch_zone_baseboard_file(file, info)?;
 
+    Ok(())
+}
+
+fn generate_switch_zone_baseboard_file(
+    file: &String,
+    info: &String,
+) -> Result<(), CmdError> {
     let mut config_file = OpenOptions::new()
-    .write(true)
-    .create(true)
-    .truncate(true)
-    .open(file)
-    .map_err(|err| {
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(file)
+        .map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not create baseboard configuration file {}: {}",
+                file,
+                err
+            ))
+        })?;
+    config_file.write(info.as_bytes()).map_err(|err| {
         CmdError::Failure(anyhow!(
-            "Could not create baseboard configuration file {}: {}",
+            "Could not write to baseboard configuration file {}: {}",
             file,
             err
         ))
     })?;
-config_file.write(info.as_bytes()).map_err(|err| {
-    CmdError::Failure(anyhow!(
-        "Could not write to baseboard configuration file {}: {}",
-        file,
-        err
-    ))
-})?;
-
     Ok(())
 }
 

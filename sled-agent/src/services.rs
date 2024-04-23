@@ -2293,7 +2293,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
             ZoneArgs::Switch(SwitchZoneConfigLocal {
-                zone: SwitchZoneConfig { id, services, addresses},
+                zone: SwitchZoneConfig { id, services, addresses },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -2318,6 +2318,8 @@ impl ServiceManager {
                 // Define all services in the switch zone
                 let mut mgs_service = ServiceBuilder::new("oxide/mgs");
                 let mut wicketd_service = ServiceBuilder::new("oxide/wicketd");
+                let mut switch_zone_setup_service =
+                    ServiceBuilder::new("oxide/switch_zone_setup");
 
                 // Set properties for each service
                 for service in services {
@@ -2391,7 +2393,8 @@ impl ServiceManager {
                                 info.underlay_address,
                             );
 
-                            let baseboard_info = serde_json::to_string_pretty(&baseboard)?;
+                            let baseboard_info =
+                                serde_json::to_string_pretty(&baseboard)?;
 
                             let wicketd_config =
                                 PropertyGroupBuilder::new("config")
@@ -2428,9 +2431,7 @@ impl ServiceManager {
                                     .add_property(
                                         "config/baseboard-file",
                                         "astring",
-                                        // TODO: Used to be "/opt/oxide/baseboard.json", make sure
-                                        // it's OK to change
-                                        "/var/svc/manifest/site/wicketd/baseboard.json",
+                                        "/opt/oxide/baseboard.json",
                                     )
                                     // TODO: Remove this baseboard info and send it to
                                     // switch_zone_setup service instead?
@@ -2444,6 +2445,22 @@ impl ServiceManager {
                                 ServiceInstanceBuilder::new("default")
                                     .add_property_group(wicketd_config),
                             );
+
+                            let switch_zone_setup_config =
+                                PropertyGroupBuilder::new("config")
+                                    .add_property(
+                                        "config/baseboard-info",
+                                        "astring",
+                                        &baseboard_info,
+                                    );
+
+                            switch_zone_setup_service =
+                                switch_zone_setup_service.add_instance(
+                                    ServiceInstanceBuilder::new("default")
+                                        .add_property_group(
+                                            switch_zone_setup_config,
+                                        ),
+                                );
                         }
                         SwitchService::Dendrite { asic } => match asic {
                             DendriteAsic::TofinoAsic => {}
@@ -2460,14 +2477,16 @@ impl ServiceManager {
                         }
                         SwitchService::Mgd => {}
                         SwitchService::MgDdm { mode } => {}
+                        SwitchService::Pumpkind { asic } => {}
                     }
                 }
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
-                    .add_service(disabled_ssh_service)
+                    .add_service(disabled_dns_client_service)
                     .add_service(mgs_service)
-                    .add_service(disabled_dns_client_service);
+                    .add_service(wicketd_service)
+                    .add_service(switch_zone_setup_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await

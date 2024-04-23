@@ -4,6 +4,8 @@ set -ex -o pipefail
 
 . /lib/svc/share/smf_include.sh
 
+BASEBOARD_INFO="$(svcprop -c -p config/baseboard-info "${SMF_FMRI}")"
+
 # set up the users required for wicket and support.
 USERS=(
     (user=wicket group=wicket gecos='Wicket User' nopasswd=1 shell='/bin/sh')
@@ -46,7 +48,7 @@ for i in "${!USERS[@]}"; do
     fi
 done
 
-# TODO: Call /opt/oxide/zone-setup-cli/bin/zone-setup wicket-setup -b BASEBOARD_INFO here
-# Eventually we'll want all of the above code to be part of the zone-setup CLI as well
+# TODO: Eventually we'll want all of the above code to be part of the zone-setup CLI as well
+exec /opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i "$BASEBOARD_INFO"
 
 exit $SMF_EXIT_OK

@@ -20,7 +20,7 @@
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
 
   <property_group name='startd' type='framework'>
-    <!-- TODO: Add propval for baseboard information -->
+    <propval name='baseboard-info' type='astring' value='unknown' />
     <propval name='duration' type='astring' value='transient' />
   </property_group>
 
