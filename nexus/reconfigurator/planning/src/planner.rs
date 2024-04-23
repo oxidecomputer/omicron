@@ -436,8 +436,11 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -778,6 +781,83 @@ mod test {
             }
         }
         assert_eq!(total_new_nexus_zones, 11);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_crucible_allocation_skips_nonprovisionable_disks() {
+        static TEST_NAME: &str =
+            "planner_crucible_allocation_skips_nonprovisionable_disks";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Avoid churning on the quantity of Nexus zones - we're okay staying at
+        // one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        let new_sled_disk = |policy| nexus_types::deployment::SledDisk {
+            disk_identity: DiskIdentity {
+                vendor: "test-vendor".to_string(),
+                serial: "test-serial".to_string(),
+                model: "test-model".to_string(),
+            },
+            disk_id: PhysicalDiskUuid::new_v4(),
+            policy,
+            state: nexus_types::external_api::views::PhysicalDiskState::Active,
+        };
+
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+
+        // Inject some new disks into the input.
+        //
+        // These counts are arbitrary, as long as they're non-zero
+        // for the sake of the test.
+
+        const NEW_IN_SERVICE_DISKS: usize = 2;
+        const NEW_EXPUNGED_DISKS: usize = 1;
+
+        for _ in 0..NEW_IN_SERVICE_DISKS {
+            sled_details.resources.zpools.insert(
+                ZpoolUuid::new_v4(),
+                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::InService),
+            );
+        }
+        for _ in 0..NEW_EXPUNGED_DISKS {
+            sled_details.resources.zpools.insert(
+                ZpoolUuid::new_v4(),
+                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::Expunged),
+            );
+        }
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: some new disks",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        println!("1 -> 2 (some new disks, one expunged):\n{}", diff.display());
+        let mut modified_sleds = diff.sleds_modified();
+        assert_eq!(modified_sleds.len(), 1);
+        let (_, diff_modified) = modified_sleds.next().unwrap();
+
+        // We should be adding a Crucible zone for each new in-service disk.
+        assert_eq!(diff_modified.zones_added().count(), NEW_IN_SERVICE_DISKS);
+        assert_eq!(diff_modified.zones_removed().len(), 0);
 
         logctx.cleanup_successful();
     }
