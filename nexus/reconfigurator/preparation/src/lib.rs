@@ -17,7 +17,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
-use nexus_types::deployment::CockroachdbSettings;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -64,7 +64,7 @@ pub struct PlanningInputFromDb<'a> {
     pub target_cockroachdb_cluster_version: &'a str,
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
-    pub cockroachdb_settings: &'a CockroachdbSettings,
+    pub cockroachdb_settings: &'a CockroachDbSettings,
     pub log: &'a Logger,
 }
 

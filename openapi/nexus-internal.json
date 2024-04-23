@@ -2552,7 +2552,7 @@
           },
           "cockroachdb_preserve_downgrade": {
             "nullable": true,
-            "description": "the value the CockroachDB `cluster.preserve_downgrade_option` cluster setting should be set to",
+            "description": "the value the CockroachDB `cluster.preserve_downgrade_option` cluster setting should be set to\n\nNote that this value is always used. `None` does _not_ mean \"don't change the value\". `None` means \"set it to the default value\".",
             "type": "string"
           },
           "comment": {

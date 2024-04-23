@@ -33,9 +33,10 @@ use std::net::IpAddr;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
-/// Describes the current CockroachDB cluster settings we care about.
+/// Describes the current values for any CockroachDB cluster settings that we
+/// care about.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CockroachdbSettings {
+pub struct CockroachDbSettings {
     /// `version`
     ///
     /// WARNING: This value should _not_ be used to set the
@@ -46,9 +47,9 @@ pub struct CockroachdbSettings {
     pub preserve_downgrade_option: Option<String>,
 }
 
-impl CockroachdbSettings {
-    pub const fn empty() -> CockroachdbSettings {
-        CockroachdbSettings {
+impl CockroachDbSettings {
+    pub const fn empty() -> CockroachDbSettings {
+        CockroachDbSettings {
             version: String::new(),
             preserve_downgrade_option: None,
         }
@@ -333,7 +334,9 @@ pub struct Policy {
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
-    /// desired CockroachDB `cluster.preserve_downgrade_option` setting
+    /// desired CockroachDB `cluster.preserve_downgrade_option` setting.
+    /// at present this is hardcoded based on the version of CockroachDB we
+    /// presently ship and the tick-tock pattern described in RFD 469.
     pub target_cockroachdb_cluster_version: String,
 }
 
@@ -359,7 +362,7 @@ pub struct PlanningInput {
     external_dns_version: Generation,
 
     /// current CockroachDB cluster settings
-    cockroachdb_settings: CockroachdbSettings,
+    cockroachdb_settings: CockroachDbSettings,
 
     /// per-sled policy and resources
     sleds: BTreeMap<SledUuid, SledDetails>,
@@ -382,15 +385,18 @@ pub struct SledDetails {
 }
 
 impl PlanningInput {
+    /// current internal DNS version
     pub fn internal_dns_version(&self) -> Generation {
         self.internal_dns_version
     }
 
+    /// current external DNS version
     pub fn external_dns_version(&self) -> Generation {
         self.external_dns_version
     }
 
-    pub fn cockroachdb_settings(&self) -> &CockroachdbSettings {
+    /// current CockroachDB cluster settings
+    pub fn cockroachdb_settings(&self) -> &CockroachDbSettings {
         &self.cockroachdb_settings
     }
 
@@ -486,7 +492,7 @@ pub struct PlanningInputBuilder {
     policy: Policy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
-    cockroachdb_settings: CockroachdbSettings,
+    cockroachdb_settings: CockroachDbSettings,
     sleds: BTreeMap<SledUuid, SledDetails>,
     omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
     omicron_zone_nics: BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
@@ -502,7 +508,7 @@ impl PlanningInputBuilder {
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            cockroachdb_settings: CockroachdbSettings::empty(),
+            cockroachdb_settings: CockroachDbSettings::empty(),
             sleds: BTreeMap::new(),
             omicron_zone_external_ips: BTreeMap::new(),
             omicron_zone_nics: BTreeMap::new(),
@@ -513,7 +519,7 @@ impl PlanningInputBuilder {
         policy: Policy,
         internal_dns_version: Generation,
         external_dns_version: Generation,
-        cockroachdb_settings: CockroachdbSettings,
+        cockroachdb_settings: CockroachDbSettings,
     ) -> Self {
         Self {
             policy,

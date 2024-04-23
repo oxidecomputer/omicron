@@ -477,7 +477,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
-    use nexus_types::deployment::CockroachdbSettings;
+    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::identity::Resource;
@@ -1210,7 +1210,7 @@ mod test {
                 .into(),
                 // These are not used because we're not actually going through
                 // the planner.
-                cockroachdb_settings: &CockroachdbSettings::empty(),
+                cockroachdb_settings: &CockroachDbSettings::empty(),
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,

@@ -10,7 +10,7 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
-use nexus_types::deployment::CockroachdbSettings;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -79,7 +79,6 @@ pub struct SystemDescription {
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
-    cockroachdb_settings: CockroachdbSettings,
 }
 
 impl SystemDescription {
@@ -144,7 +143,6 @@ impl SystemDescription {
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            cockroachdb_settings: CockroachdbSettings::empty(),
         }
     }
 
@@ -316,7 +314,7 @@ impl SystemDescription {
             policy,
             self.internal_dns_version,
             self.external_dns_version,
-            self.cockroachdb_settings.clone(),
+            CockroachDbSettings::empty(),
         );
 
         for sled in self.sleds.values() {

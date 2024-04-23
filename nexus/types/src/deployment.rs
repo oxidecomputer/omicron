@@ -43,7 +43,7 @@ use uuid::Uuid;
 mod planning_input;
 mod zone_type;
 
-pub use planning_input::CockroachdbSettings;
+pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
 pub use planning_input::OmicronZoneExternalIp;
 pub use planning_input::OmicronZoneExternalIpKind;
@@ -125,6 +125,9 @@ pub struct Blueprint {
 
     /// the value the CockroachDB `cluster.preserve_downgrade_option` cluster
     /// setting should be set to
+    ///
+    /// Note that this value is always used. `None` does _not_ mean "don't
+    /// change the value". `None` means "set it to the default value".
     pub cockroachdb_preserve_downgrade: Option<String>,
 
     /// when this blueprint was generated (for debugging)

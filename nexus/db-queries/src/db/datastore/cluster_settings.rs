@@ -6,11 +6,13 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::error::public_error_from_diesel;
+use crate::db::error::ErrorHandler;
 use crate::db::raw_query_builder::QueryBuilder;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::deserialize::Queryable;
 use diesel::sql_types;
-use nexus_types::deployment::CockroachdbSettings;
+use nexus_types::deployment::CockroachDbSettings;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 
@@ -19,7 +21,7 @@ impl DataStore {
     pub async fn cluster_settings(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<CockroachdbSettings> {
+    ) -> LookupResult<CockroachDbSettings> {
         #[derive(Debug, Queryable)]
         struct QueryOutput {
             version: String,
@@ -40,9 +42,9 @@ impl DataStore {
             .get_result_async(&*conn)
             .await
             .map_err(|err| {
-                Error::internal_error(&format!("cluster_version: {:?}", err))
+                public_error_from_diesel(err, ErrorHandler::Server)
             })?;
-        Ok(CockroachdbSettings {
+        Ok(CockroachDbSettings {
             version: output.version,
             preserve_downgrade_option: Some(output.preserve_downgrade_option)
                 .filter(|x| !x.is_empty()),
@@ -85,10 +87,7 @@ impl DataStore {
             None => query.sql("DEFAULT"),
         };
         query.query::<()>().execute_async(&*conn).await.map_err(|err| {
-            Error::internal_error(&format!(
-                "cluster_setting_preserve_downgrade_option: {:?}",
-                err
-            ))
+            public_error_from_diesel(err, ErrorHandler::Server)
         })?;
         Ok(())
     }
@@ -96,7 +95,7 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
-    use super::{CockroachdbSettings, OpContext};
+    use super::{CockroachDbSettings, OpContext};
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use std::sync::Arc;
@@ -123,7 +122,7 @@ mod test {
         // With a fresh cluster, this is the expected state
         assert_eq!(
             datastore.cluster_settings(&opctx).await.unwrap(),
-            CockroachdbSettings {
+            CockroachDbSettings {
                 version: version.to_string(),
                 preserve_downgrade_option: None,
             }
@@ -141,7 +140,7 @@ mod test {
                 .unwrap();
             assert_eq!(
                 datastore.cluster_settings(&opctx).await.unwrap(),
-                CockroachdbSettings {
+                CockroachDbSettings {
                     version: version.to_string(),
                     preserve_downgrade_option: Some(version.to_string()),
                 }
@@ -156,7 +155,7 @@ mod test {
                 .unwrap();
             assert_eq!(
                 datastore.cluster_settings(&opctx).await.unwrap(),
-                CockroachdbSettings {
+                CockroachDbSettings {
                     version: version.to_string(),
                     preserve_downgrade_option: None,
                 }

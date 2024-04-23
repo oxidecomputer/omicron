@@ -11,7 +11,7 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::CockroachdbSettings;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -363,12 +363,18 @@ impl<'a> Planner<'a> {
         // Figure out what we should set the CockroachDB "preserve downgrade
         // option" setting to based on the planning input.
         //
-        // A given major version of CockroachDB (such as '22.2') is backward
-        // compatible with the storage format of the previous version of
-        // CockroachDB. This is shown by the `version` cluster setting, which
-        // displays the current storage format version. When `version` is
-        // '22.2', versions v22.2.x or v23.1.x can be used to run a node. This
-        // allows for rolling upgrades of nodes within the cluster.
+        // CockroachDB version numbers look like SemVer but are not. Major
+        // version numbers consist of the first *two* components, which
+        // represent the year and the Nth release that year. So the major
+        // version in "22.2.7" is "22.2".
+        //
+        // A given major version of CockroachDB is backward compatible with
+        // the storage format of the previous major version of CockroachDB.
+        // This is shown by the `version` cluster setting, which displays the
+        // current storage format version. When `version` is '22.2', versions
+        // v22.2.x or v23.1.x can be used to run a node. This allows for rolling
+        // upgrades of nodes within the cluster and also preserves the ability
+        // to rollback until the new software version can be validated.
         //
         // By default, when all nodes of a cluster are upgraded to a new major
         // version, the upgrade is "auto-finalized"; `version` is changed to the
@@ -378,36 +384,44 @@ impl<'a> Planner<'a> {
         // The `cluster.preserve_downgrade_option` cluster setting can be used
         // to control this. This setting can only be set to the current value of
         // the `version` cluster setting, and when it is set, CockroachDB will
-        // not perform auto-finalization. To perform finalization and finish
-        // the upgrade, a client must reset the preserve downgrade option.
-        // Finalization occurs in the background, and the preserve downgrade
-        // option cannot be set again until finalization completes.
+        // not perform auto-finalization. To perform finalization and finish the
+        // upgrade, a client must reset the "preserve downgrade option" setting.
+        // Finalization occurs in the background, and the "preserve downgrade
+        // option" setting should not be changed again until finalization
+        // completes.
         //
-        // This table describes the logic we take here:
+        // We determine the appropriate value for `preserve_downgrade_option`
+        // based on:
         //
-        //            the `version` cluster setting
-        //            | | |    the `cluster.preserve_downgrade_option` setting
-        //            v v v    v v v
-        // +--------+--------+--------+--------------------------------------+
-        // | policy |  vers. | p.d.o. | Action                               |
-        // +--------+--------+--------+--------------------------------------+
-        // |  22.1  =  22.1  |  NULL  | Set p.d.o. to 22.1                   |
-        // |  22.1  =  22.1  |  22.1  | Do nothing (ideal state)             |
-        // +--------+--------+--------+--------------------------------------+
-        // |  22.2  ≠  22.1  |  22.1  | Reset p.d.o.                         |
-        // |  22.2  ≠ 22.1-9 |  NULL  | Finalizing -- do not change settings |
-        // +--------+--------+--------+--------------------------------------+
+        // 1. the _target_ cluster version from the `Policy` (what we want to
+        //    be running)
+        // 2. the `version` setting reported by CockroachDB (what we're
+        //    currently running)
+        //
+        // by saying:
+        //
+        // - If our target version matches what CockroachDB reports, we will
+        //   ensure `preserve_downgrade_option` is set to the same value. This
+        //   prevents auto-finalization when we deploy the next major version of
+        //   CockroachDB as part of an update.
+        // - If our target version does not match what CockroachDB reports,
+        //   we will ensure `preserve_downgrade_option` is set to the default
+        //   value. This will trigger finalization.
+        //
+        // As a safety precaution, if we are ensuring
+        // `preserve_downgrade_option` is set to the default value, we return
+        // early to avoid setting any further CockroachDB settings. The
+        // CockroachDB documentation says "Do not change cluster settings while
+        // upgrading to a new version of CockroachDB.".
 
         let policy = self.input.target_cockroachdb_cluster_version();
-        let CockroachdbSettings { version, preserve_downgrade_option } =
+        let CockroachDbSettings { version, preserve_downgrade_option } =
             self.input.cockroachdb_settings();
 
         if policy == version {
-            if preserve_downgrade_option.is_none() {
-                // Set `cluster.preserve_downgrade_option`
-                self.blueprint
-                    .cockroachdb_preserve_downgrade(Some(policy.to_owned()));
-            }
+            // Ensure `cluster.preserve_downgrade_option` is set
+            self.blueprint
+                .cockroachdb_preserve_downgrade(Some(policy.to_owned()));
         } else {
             if preserve_downgrade_option.is_some() {
                 // Reset `cluster.preserve_downgrade_option`
