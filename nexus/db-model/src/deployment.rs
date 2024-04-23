@@ -233,7 +233,7 @@ impl BpOmicronZone {
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
         let external_ip_id =
-            blueprint_zone.zone_type.external_ip().map(|ip| ip.id().into());
+            blueprint_zone.zone_type.external_ip().map(|ip| ip.id());
         let zone = OmicronZone::new(
             sled_id,
             blueprint_zone.id.into_untyped_uuid(),
