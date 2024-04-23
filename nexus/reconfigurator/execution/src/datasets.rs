@@ -67,8 +67,6 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
             continue;
         }
 
-        // Map progenitor client strings into the types we need. We never
-        // expect these to fail.
         let pool_id = dataset.pool_name.id();
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
