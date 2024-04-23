@@ -499,7 +499,7 @@ impl<'a> BlueprintBuilder<'a> {
         for (count, reason) in count_and_reason {
             if count > 0 {
                 self.comment(format!(
-                    "sled {sled_id} expunging {count} zones: {reason}",
+                    "sled {sled_id} ({reason}): {count} zones expunged",
                 ));
             }
         }
