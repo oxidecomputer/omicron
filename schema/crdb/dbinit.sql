@@ -163,6 +163,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
     id
 ) WHERE time_deleted IS NULL;
 
+/* Add an index which lets us look up sleds based on policy and state */
+CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sled (
+    sled_policy,
+    sled_state
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
     -- omicron.public.instance
     'instance'
@@ -3756,7 +3762,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '53.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '54.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

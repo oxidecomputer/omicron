@@ -1455,6 +1455,7 @@ mod test {
             .sled_list_all_batched(&opctx, SledFilter::All)
             .await
             .expect("failed to list all sleds");
+
         // We don't need to sort these ids because the sleds are enumerated in
         // id order.
         let found_ids: Vec<_> = sleds.into_iter().map(|s| s.id()).collect();
