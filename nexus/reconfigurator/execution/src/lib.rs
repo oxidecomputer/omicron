@@ -24,10 +24,10 @@ use std::net::SocketAddrV6;
 
 mod datasets;
 mod dns;
+mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
-mod resource_allocation;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
@@ -109,7 +109,7 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    resource_allocation::ensure_zone_resources_allocated(
+    external_networking::ensure_zone_external_networking_allocated(
         &opctx,
         datastore,
         blueprint

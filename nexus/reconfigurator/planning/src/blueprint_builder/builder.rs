@@ -291,7 +291,7 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
 
-            if let Some(external_ip) = zone_type.external_ip() {
+            if let Some((external_ip, nic)) = zone_type.external_networking() {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
@@ -300,9 +300,7 @@ impl<'a> BlueprintBuilder<'a> {
                 {
                     bail!("duplicate external IP: {external_ip:?}");
                 }
-            }
 
-            if let Some(nic) = zone_type.opte_vnic() {
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
