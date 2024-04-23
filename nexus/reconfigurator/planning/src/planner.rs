@@ -862,6 +862,55 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn test_disk_expungement_removes_zones() {
+        static TEST_NAME: &str = "planner_disk_expungement_removes_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Avoid churning on the quantity of Nexus zones - we're okay staying at
+        // one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+        let (_, disk) = sled_details.resources.zpools.iter_mut().next().unwrap();
+        disk.policy = nexus_types::external_api::views::PhysicalDiskPolicy::Expunged;
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: expunge a disk",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
+        let mut modified_sleds = diff.sleds_modified();
+        assert_eq!(modified_sleds.len(), 1);
+        let (_, diff_modified) = modified_sleds.next().unwrap();
+
+        // We should be removing a single zone, associated with the Crucible
+        // using that device.
+        assert_eq!(diff_modified.zones_added().len(), 0);
+        assert_eq!(diff_modified.zones_removed().len(), 0);
+        assert_eq!(diff_modified.zones_modified().count(), 1);
+        assert!(diff_modified.zones_modified().next().unwrap().disposition_changed());
+
+        logctx.cleanup_successful();
+    }
+
     /// Check that the planner will skip non-provisionable sleds when allocating
     /// extra Nexus zones
     #[test]
