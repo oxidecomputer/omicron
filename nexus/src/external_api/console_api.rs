@@ -757,7 +757,8 @@ const WEB_SECURITY_HEADERS: [(HeaderName, HeaderValue); 3] = [
     (
         http::header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
-            "default-src 'self'; frame-src 'none'; object-src 'none'; \
+            "default-src 'self'; style-src 'unsafe-inline' 'self'; \
+            frame-src 'none'; object-src 'none'; \
             form-action 'none'; frame-ancestors 'none'",
         ),
     ),
