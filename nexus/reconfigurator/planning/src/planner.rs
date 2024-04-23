@@ -432,6 +432,9 @@ mod test {
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::DiffSledModified;
+    use nexus_types::deployment::SledDisk;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -802,7 +805,7 @@ mod test {
         // one.
         builder.policy_mut().target_nexus_zone_count = 1;
 
-        let new_sled_disk = |policy| nexus_types::deployment::SledDisk {
+        let new_sled_disk = |policy| SledDisk {
             disk_identity: DiskIdentity {
                 vendor: "test-vendor".to_string(),
                 serial: "test-serial".to_string(),
@@ -810,7 +813,7 @@ mod test {
             },
             disk_id: PhysicalDiskUuid::new_v4(),
             policy,
-            state: nexus_types::external_api::views::PhysicalDiskState::Active,
+            state: PhysicalDiskState::Active,
         };
 
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
@@ -826,13 +829,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::new_v4(),
-                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::InService),
+                new_sled_disk(PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::new_v4(),
-                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::Expunged),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
             );
         }
 
@@ -881,8 +884,7 @@ mod test {
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
         let (_, disk) =
             sled_details.resources.zpools.iter_mut().next().unwrap();
-        disk.policy =
-            nexus_types::external_api::views::PhysicalDiskPolicy::Expunged;
+        disk.policy = PhysicalDiskPolicy::Expunged;
 
         let input = builder.build();
 
