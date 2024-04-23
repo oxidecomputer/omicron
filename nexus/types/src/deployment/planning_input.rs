@@ -23,11 +23,13 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
+use std::net::SocketAddr;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
@@ -179,10 +181,27 @@ impl OmicronZoneExternalIp {
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
 pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
     pub ip: IpAddr,
+}
+
+/// Floating external address with port allocated to an Omicron-managed zone.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalFloatingAddr {
+    pub id: ExternalIpUuid,
+    pub addr: SocketAddr,
+}
+
+impl OmicronZoneExternalFloatingAddr {
+    pub fn into_ip(self) -> OmicronZoneExternalFloatingIp {
+        OmicronZoneExternalFloatingIp { id: self.id, ip: self.addr.ip() }
+    }
 }
 
 /// SNAT (outbound) external IP allocated to an Omicron-managed zone.
@@ -190,7 +209,9 @@ pub struct OmicronZoneExternalFloatingIp {
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,
     pub snat_cfg: SourceNatConfig,

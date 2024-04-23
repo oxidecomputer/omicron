@@ -23,6 +23,7 @@ pub use crate::inventory::ZpoolName;
 use newtype_uuid::GenericUuid;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -44,6 +45,7 @@ mod planning_input;
 mod zone_type;
 
 pub use planning_input::DiskFilter;
+pub use planning_input::OmicronZoneExternalFloatingAddr;
 pub use planning_input::OmicronZoneExternalFloatingIp;
 pub use planning_input::OmicronZoneExternalIp;
 pub use planning_input::OmicronZoneExternalSnatIp;
@@ -388,13 +390,15 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
 // https://github.com/oxidecomputer/omicron/issues/4988.
 #[derive(Debug, Clone, Error, SlogInlineError)]
 pub enum InvalidOmicronZoneType {
-    #[error("invalid socket address for {kind} ({addr})")]
+    #[error("invalid socket address for Omicron zone {kind} ({addr})")]
     ParseSocketAddr {
         kind: ZoneKind,
         addr: String,
         #[source]
         err: AddrParseError,
     },
+    #[error("Omicron zone {kind} requires an external IP ID")]
+    ExternalIpIdRequired { kind: ZoneKind },
 }
 
 /// Describes one Omicron-managed zone in a blueprint.
@@ -411,10 +415,23 @@ pub struct BlueprintZoneConfig {
 }
 
 impl BlueprintZoneConfig {
+    /// Convert from an [`OmicronZoneConfig`].
+    ///
+    /// This method is annoying to call correctly and will become more so over
+    /// time. Ideally we'd remove all callers and then remove this method, but
+    /// for now we keep it.
+    ///
+    /// # Errors
+    ///
+    /// If `config.zone_type` is a zone that has an external IP address (Nexus,
+    /// boundary NTP, external DNS), `external_ip_id` must be `Some(_)` or this
+    /// method will return an error.
     pub fn from_omicron_zone_config(
         config: OmicronZoneConfig,
         disposition: BlueprintZoneDisposition,
+        external_ip_id: Option<ExternalIpUuid>,
     ) -> Result<Self, InvalidOmicronZoneType> {
+        let kind = config.zone_type.kind();
         let zone_type = match config.zone_type {
             OmicronZoneType::BoundaryNtp {
                 address,
@@ -424,9 +441,12 @@ impl BlueprintZoneConfig {
                 ntp_servers,
                 snat_cfg,
             } => {
+                let external_ip_id = external_ip_id.ok_or(
+                    InvalidOmicronZoneType::ExternalIpIdRequired { kind },
+                )?;
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::BoundaryNtp,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -438,14 +458,17 @@ impl BlueprintZoneConfig {
                         dns_servers,
                         domain,
                         nic,
-                        snat_cfg,
+                        external_ip: OmicronZoneExternalSnatIp {
+                            id: external_ip_id,
+                            snat_cfg,
+                        },
                     },
                 )
             }
             OmicronZoneType::Clickhouse { address, dataset } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::Clickhouse,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -458,7 +481,7 @@ impl BlueprintZoneConfig {
             OmicronZoneType::ClickhouseKeeper { address, dataset } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::ClickhouseKeeper,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -470,7 +493,7 @@ impl BlueprintZoneConfig {
             OmicronZoneType::CockroachDb { address, dataset } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::CockroachDb,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -482,7 +505,7 @@ impl BlueprintZoneConfig {
             OmicronZoneType::Crucible { address, dataset } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::Crucible,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -495,7 +518,7 @@ impl BlueprintZoneConfig {
             OmicronZoneType::CruciblePantry { address } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::CruciblePantry,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -510,16 +533,19 @@ impl BlueprintZoneConfig {
                 http_address,
                 nic,
             } => {
+                let external_ip_id = external_ip_id.ok_or(
+                    InvalidOmicronZoneType::ExternalIpIdRequired { kind },
+                )?;
                 let dns_address = dns_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::ExternalDns,
+                        kind,
                         addr: dns_address.clone(),
                         err,
                     }
                 })?;
                 let http_address = http_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::ExternalDns,
+                        kind,
                         addr: http_address.clone(),
                         err,
                     }
@@ -528,7 +554,10 @@ impl BlueprintZoneConfig {
                     blueprint_zone_type::ExternalDns {
                         dataset,
                         http_address,
-                        dns_address,
+                        dns_address: OmicronZoneExternalFloatingAddr {
+                            id: external_ip_id,
+                            addr: dns_address,
+                        },
                         nic,
                     },
                 )
@@ -542,14 +571,14 @@ impl BlueprintZoneConfig {
             } => {
                 let dns_address = dns_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::InternalDns,
+                        kind,
                         addr: dns_address.clone(),
                         err,
                     }
                 })?;
                 let http_address = http_address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::InternalDns,
+                        kind,
                         addr: http_address.clone(),
                         err,
                     }
@@ -572,7 +601,7 @@ impl BlueprintZoneConfig {
             } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::InternalNtp,
+                        kind,
                         addr: address.clone(),
                         err,
                     }
@@ -593,17 +622,23 @@ impl BlueprintZoneConfig {
                 internal_address,
                 nic,
             } => {
+                let external_ip_id = external_ip_id.ok_or(
+                    InvalidOmicronZoneType::ExternalIpIdRequired { kind },
+                )?;
                 let internal_address =
                     internal_address.parse().map_err(|err| {
                         InvalidOmicronZoneType::ParseSocketAddr {
-                            kind: ZoneKind::Nexus,
+                            kind,
                             addr: internal_address.clone(),
                             err,
                         }
                     })?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
-                    external_ip,
+                    external_ip: OmicronZoneExternalFloatingIp {
+                        id: external_ip_id,
+                        ip: external_ip,
+                    },
                     nic,
                     external_tls,
                     external_dns_servers,
@@ -612,7 +647,7 @@ impl BlueprintZoneConfig {
             OmicronZoneType::Oximeter { address } => {
                 let address = address.parse().map_err(|err| {
                     InvalidOmicronZoneType::ParseSocketAddr {
-                        kind: ZoneKind::Oximeter,
+                        kind,
                         addr: address.clone(),
                         err,
                     }

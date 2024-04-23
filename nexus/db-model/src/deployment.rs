@@ -15,7 +15,6 @@ use crate::typed_uuid::DbTypedUuid;
 use crate::{
     impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
 };
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -289,13 +288,11 @@ impl BpOmicronZone {
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
         };
-        let config =
-            zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
-        BlueprintZoneConfig::from_omicron_zone_config(
-            config,
+        zone.into_blueprint_zone_config(
             self.disposition.into(),
+            None, // TODO FIXME db migration - add external IP ID
+            nic_row.map(OmicronZoneNic::from),
         )
-        .context("failed to convert OmicronZoneConfig")
     }
 }
 

@@ -275,11 +275,11 @@ impl nexus_test_interface::NexusServer for Server {
             .filter_map(|(_, zc)| match &zc.zone_type {
                 BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns { dns_address, .. },
-                ) => Some(IpRange::from(dns_address.ip())),
+                ) => Some(IpRange::from(dns_address.addr.ip())),
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     external_ip,
                     ..
-                }) => Some(IpRange::from(*external_ip)),
+                }) => Some(IpRange::from(external_ip.ip)),
                 _ => None,
             })
             .collect();
