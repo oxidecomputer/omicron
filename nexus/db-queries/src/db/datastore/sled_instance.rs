@@ -51,7 +51,7 @@ impl DataStore {
         let result = paginated(
             inv_sled_agent::dsl::inv_sled_agent,
             inv_sled_agent::dsl::sled_id,
-            &pagparams,
+            pagparams,
         )
         // Only list sled agents from the latest collection.
         .filter(

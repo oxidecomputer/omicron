@@ -6,11 +6,13 @@
 
 use super::common::BackgroundTask;
 use futures::{future::BoxFuture, FutureExt};
+use nexus_db_model::{InvSledAgent, SledInstance};
 use nexus_db_queries::{
     context::OpContext, db::pagination::Paginator, db::DataStore,
 };
 use serde::Serialize;
 use serde_json::json;
+use sled_agent_client::{types::SledInstanceState, Client as SledAgentClient};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -63,14 +65,79 @@ impl BackgroundTask for InstanceWatcher {
                         break;
                     }
                 };
-                paginator = p.found_batch(&batch, &|(sled_agent, _)| *sled_agent.sled_id);
-                for (sled_agent, sled_instance) in batch {
-                    todo!()
+                paginator = p.found_batch(&batch, &|(sled_agent, _)| sled_agent.sled_id);
+                let mut batch = batch.into_iter();
+
+                if let Some((mut curr_sled_agent, sled_instance)) = batch.next() {
+                    let mut client = mk_sled_agent_client(&opctx.log, &curr_sled_agent);
+
+                    for (sled_agent, sled_instance) in batch {
+                        // We're now talking to a new sled agent; update the client.
+                        if sled_agent.sled_id != curr_sled_agent.sled_id {
+                            client = mk_sled_agent_client(&opctx.log, &sled_agent);
+                            curr_sled_agent = sled_agent;
+                        }
+                        spawn_get_state(&client, &mut requests, sled_instance);
+                    }
                 }
+            }
+
+            // All requests fired off, let's wait for them to come back.
+            while let Some(result) = requests.join_next().await {
+                let (instance, state) = match result {
+                    Err(_) => unreachable!(
+                        "a `JoinError` is returned if a spawned task \
+                        panics, or if the task is aborted. we never abort \
+                        tasks on this `JoinSet`, and nexus is compiled with \
+                        `panic=\"abort\"`, so neither of these cases should \
+                        ever occur."
+                    ),
+                    Ok(Ok(rsp)) => rsp,
+                    Ok(Err(e)) => {
+                        // Here is where it gets interesting. This is where we
+                        // might learn that the sled-agent we were trying to
+                        // talk to is dead.
+                        todo!("eliza: implement the interesting parts!");
+                    }
+                };
             }
 
             todo!()
         }
         .boxed()
     }
+}
+
+type ClientError = sled_agent_client::Error<sled_agent_client::types::Error>;
+
+fn spawn_get_state(
+    client: &SledAgentClient,
+    tasks: &mut tokio::task::JoinSet<
+        Result<(SledInstance, SledInstanceState), ClientError>,
+    >,
+    instance: SledInstance,
+) {
+    let client = client.clone();
+    tasks.spawn(async move {
+        let state = client
+            .instance_get_state(&instance.instance_id())
+            .await?
+            .into_inner();
+        Ok((instance, state))
+    });
+}
+
+fn mk_sled_agent_client(
+    log: &slog::Logger,
+    InvSledAgent {
+        ref sled_id, ref sled_agent_ip, ref sled_agent_port, ..
+    }: &InvSledAgent,
+) -> SledAgentClient {
+    // Ipv6Addr's `fmt::Debug` impl is the same as its Display impl, so we
+    // should get the RFC 5952 textual representation here even though the DB
+    // `Ipv6Addr` type doesn't expose `Display`.
+    let url = format!("http://{sled_agent_ip:?}:{sled_agent_port}");
+    let log =
+        log.new(o!("sled_id" => sled_id.to_string(), "url" => url.clone()));
+    SledAgentClient::new(&url, log)
 }
