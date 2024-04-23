@@ -44,10 +44,7 @@ pub struct SledDisk {
 
 impl SledDisk {
     fn provisionable(&self) -> bool {
-        match (self.policy, self.state) {
-            (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => true,
-            _ => false,
-        }
+        DiskFilter::InService.matches_policy_and_state(self.policy, self.state)
     }
 }
 
@@ -70,6 +67,34 @@ impl DiskFilter {
         match self {
             DiskFilter::All => true,
             DiskFilter::InService => match (policy, state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+}
+
+/// Filters that apply to zpools.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ZpoolFilter {
+    /// All zpools
+    All,
+
+    /// All zpools which are in-service.
+    InService,
+}
+
+impl ZpoolFilter {
+    fn matches_policy_and_state(
+        self,
+        policy: PhysicalDiskPolicy,
+        state: PhysicalDiskState,
+    ) -> bool {
+        match self {
+            ZpoolFilter::All => true,
+            ZpoolFilter::InService => match (policy, state) {
                 (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
                     true
                 }
@@ -102,16 +127,15 @@ impl SledResources {
         disk.provisionable()
     }
 
-    /// Returns all in-service, active zpools
-    pub fn provisionable_zpools(
+    /// Returns all zpools matching the given filter.
+    pub fn all_zpools(
         &self,
+        filter: ZpoolFilter,
     ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
-        self.zpools.iter().filter_map(|(zpool, disk)| {
-            if disk.provisionable() {
-                Some(zpool)
-            } else {
-                None
-            }
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some(zpool)
         })
     }
 

@@ -13,6 +13,7 @@ use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
@@ -219,7 +220,7 @@ impl<'a> Planner<'a> {
 
             // Every provisionable zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
-            for zpool_id in sled_resources.provisionable_zpools() {
+            for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
                 if self
                     .blueprint
                     .sled_ensure_zone_crucible(sled_id, *zpool_id)?

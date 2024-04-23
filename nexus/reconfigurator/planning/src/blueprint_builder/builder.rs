@@ -111,10 +111,6 @@ pub enum EnsureMultiple {
     NotNeeded,
 }
 
-fn zpool_id_to_external_name(zpool_id: ZpoolUuid) -> ZpoolName {
-    ZpoolName::new_external(zpool_id)
-}
-
 /// Helper for assembling a blueprint
 ///
 /// There are two basic ways to assemble a new blueprint:
@@ -651,7 +647,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         zpool_id: ZpoolUuid,
     ) -> Result<Ensure, Error> {
-        let pool_name = zpool_id_to_external_name(zpool_id);
+        let pool_name = ZpoolName::new_external(zpool_id);
 
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
@@ -1373,7 +1369,7 @@ pub mod test {
             new_sled_resources
                 .zpools
                 .keys()
-                .map(|id| { zpool_id_to_external_name(*id) })
+                .map(|id| { ZpoolName::new_external(*id) })
                 .collect()
         );
 
