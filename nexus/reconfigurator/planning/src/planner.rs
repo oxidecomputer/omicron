@@ -11,7 +11,9 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -86,39 +88,10 @@ impl<'a> Planner<'a> {
 
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
         // Remove services from sleds marked expunged. We use `SledFilter::All`
-        // and have a custom `needs_all_zones_expungement` function that allows us
+        // and have a custom `expunge_zones_for_sled` function that allows us
         // to produce better errors.
         for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
-            // Does this sled need zone expungement based on the details?
-            if let Some(reason) = needs_all_zones_expungement(
-                sled_details.state,
-                sled_details.policy,
-            ) {
-                // Perform the expungement.
-                self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
-
-                // In this case, all zones have been expunged. We can jump to
-                // the next sled.
-                continue;
-            }
-
-            // The sled isn't being decommissioned, but there still might be
-            // some zones that need expungement.
-            //
-            // Remove any zones which rely on expunged disks.
-            self.blueprint.expunge_all_zones_for_sled_where(
-                sled_id,
-                ZoneExpungeReason::DiskExpunged,
-                |zone_config| {
-                    let durable_storage_zpool =
-                        match zone_config.zone_type.zpool() {
-                            Some(pool) => pool,
-                            None => return false,
-                        };
-                    let zpool_id = durable_storage_zpool.id();
-                    !sled_details.resources.zpool_is_provisionable(&zpool_id)
-                },
-            )?;
+            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
         }
 
         Ok(())
@@ -382,7 +355,7 @@ impl<'a> Planner<'a> {
 
 /// Returns `Some(reason)` if the sled needs its zones to be expunged,
 /// based on the policy and state.
-fn needs_all_zones_expungement(
+fn sled_needs_all_zones_expunged(
     state: SledState,
     policy: SledPolicy,
 ) -> Option<ZoneExpungeReason> {
@@ -393,7 +366,7 @@ fn needs_all_zones_expungement(
             // an illegal state, but representable. If we see a sled in this
             // state, we should still expunge all zones in it, but parent code
             // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned { policy });
+            return Some(ZoneExpungeReason::SledDecommissioned);
         }
     }
 
@@ -403,14 +376,36 @@ fn needs_all_zones_expungement(
     }
 }
 
+pub(crate) fn zone_needs_expungement(
+    sled_details: &SledDetails,
+    zone_config: &BlueprintZoneConfig,
+) -> Option<ZoneExpungeReason> {
+    // Should we expunge the zone because the sled is gone?
+    if let Some(reason) =
+        sled_needs_all_zones_expunged(sled_details.state, sled_details.policy)
+    {
+        return Some(reason);
+    }
+
+    // Should we expunge the zone because durable storage is gone?
+    if let Some(durable_storage_zpool) = zone_config.zone_type.zpool() {
+        let zpool_id = durable_storage_zpool.id();
+        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
+            return Some(ZoneExpungeReason::DiskExpunged);
+        }
+    };
+
+    None
+}
+
 /// The reason a sled's zones need to be expunged.
 ///
 /// This is used only for introspection and logging -- it's not part of the
 /// logical flow.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum ZoneExpungeReason {
     DiskExpunged,
-    SledDecommissioned { policy: SledPolicy },
+    SledDecommissioned,
     SledExpunged,
 }
 
