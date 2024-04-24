@@ -28,6 +28,7 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
@@ -242,7 +243,7 @@ pub async fn reconfigurator_state_load(
         .context("fetching external DNS version")?
         .version;
     let cockroachdb_settings = datastore
-        .cluster_settings(opctx)
+        .cockroachdb_settings(opctx)
         .await
         .context("fetching cluster settings")?;
 
@@ -251,7 +252,7 @@ pub async fn reconfigurator_state_load(
         zpool_rows: &zpool_rows,
         ip_pool_range_rows: &ip_pool_range_rows,
         target_nexus_zone_count: NEXUS_REDUNDANCY,
-        target_cockroachdb_cluster_version: "22.1", // YYY FIXME
+        target_cockroachdb_cluster_version: COCKROACHDB_CLUSTER_VERSION,
         external_ip_rows: &external_ip_rows,
         service_nic_rows: &service_nic_rows,
         log: &opctx.log,

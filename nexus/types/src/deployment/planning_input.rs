@@ -33,10 +33,44 @@ use std::net::IpAddr;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
+/// The hardcoded CockroachDB cluster version we want to have, used in
+/// [`Policy`].
+///
+/// CockroachDB can be upgraded from one major version to the next, e.g. v22.1
+/// -> v22.2. Each major version introduces changes in how it stores data on
+/// disk to support new features, and each major version has support for reading
+/// the previous version's data so that it can perform an upgrade. The version
+/// of the data format is called the "cluster version", which is distinct from
+/// but related to the software version that's being run.
+///
+/// While software version v22.2 is using cluster version v22.1, it's possible
+/// to downgrade back to v22.1. Once the cluster version is upgraded, there's no
+/// going back.
+///
+/// To give us some time to evaluate new versions of the software while
+/// retaining a downgrade path, we currently deploy new versions of CockroachDB
+/// across two releases of the Oxide software, in a "tick-tock" model:
+///
+/// - In "tick" releases, we upgrade the version of the CockroachDB software to
+///   a new major version. The new version is running with the previous cluster
+///   version.
+/// - In "tock" releases, we change this `const` to the major version we
+///   upgraded to in the last "tick" release. This results in a new blueprint
+///   that upgrades the cluster version, destroying the downgrade path but
+///   allowing us to eventually upgrade to the next release.
+///
+/// /!\ WARNING: If you change this, there is no going back. /!\
+pub const COCKROACHDB_CLUSTER_VERSION: &str = "22.1";
+
 /// Describes the current values for any CockroachDB cluster settings that we
 /// care about.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CockroachDbSettings {
+    /// A fingerprint representing the current state of the cluster. This must
+    /// be recorded in a blueprint and passed to the `DataStore` function when
+    /// changing settings.
+    pub state_fingerprint: String,
+
     /// `version`
     ///
     /// WARNING: This value should _not_ be used to set the
@@ -44,14 +78,15 @@ pub struct CockroachDbSettings {
     /// an internal, intermediate upgrade version (e.g. "22.1-12").
     pub version: String,
     /// `cluster.preserve_downgrade_option`
-    pub preserve_downgrade_option: Option<String>,
+    pub preserve_downgrade: String,
 }
 
 impl CockroachDbSettings {
     pub const fn empty() -> CockroachDbSettings {
         CockroachDbSettings {
+            state_fingerprint: String::new(),
             version: String::new(),
-            preserve_downgrade_option: None,
+            preserve_downgrade: String::new(),
         }
     }
 }

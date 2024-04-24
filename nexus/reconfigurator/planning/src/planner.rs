@@ -406,35 +406,19 @@ impl<'a> Planner<'a> {
         //   CockroachDB as part of an update.
         // - If our target version does not match what CockroachDB reports,
         //   we will ensure `preserve_downgrade_option` is set to the default
-        //   value. This will trigger finalization.
-        //
-        // As a safety precaution, if we are ensuring
-        // `preserve_downgrade_option` is set to the default value, we return
-        // early to avoid setting any further CockroachDB settings. The
-        // CockroachDB documentation says "Do not change cluster settings while
-        // upgrading to a new version of CockroachDB.".
+        //   value (the empty string). This will trigger finalization.
 
         let policy = self.input.target_cockroachdb_cluster_version();
-        let CockroachDbSettings { version, preserve_downgrade_option } =
+        let CockroachDbSettings { version, preserve_downgrade, .. } =
             self.input.cockroachdb_settings();
 
         if policy == version {
             // Ensure `cluster.preserve_downgrade_option` is set
-            self.blueprint
-                .cockroachdb_preserve_downgrade(Some(policy.to_owned()));
+            self.blueprint.cockroachdb_preserve_downgrade(policy.to_owned());
         } else {
-            if preserve_downgrade_option.is_some() {
-                // Reset `cluster.preserve_downgrade_option`
-                self.blueprint.cockroachdb_preserve_downgrade(None);
-            } else {
-                // CockroachDB may be finalizing. Per documentation, do not
-                // change any cluster settings while upgrading.
-                return;
-            }
+            // Ensure `cluster.preserve_downgrade_option` is reset
+            self.blueprint.cockroachdb_preserve_downgrade(String::new());
         }
-
-        // (If we need to manage further CockroachDB cluster settings, they
-        // should be planned here.)
     }
 }
 

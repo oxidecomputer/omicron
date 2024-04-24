@@ -110,7 +110,7 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    cockroachdb::ensure_cluster_settings(&opctx, datastore, blueprint)
+    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
         .await
         .map_err(|err| vec![err])?;
 

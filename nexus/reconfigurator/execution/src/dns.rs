@@ -478,6 +478,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::identity::Resource;
@@ -585,10 +586,11 @@ mod test {
             id: Uuid::new_v4(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
-            cockroachdb_preserve_downgrade: None,
+            cockroachdb_setting_preserve_downgrade: None,
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1214,7 +1216,7 @@ mod test {
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
-                target_cockroachdb_cluster_version: "22.1", // YYY FIXME
+                target_cockroachdb_cluster_version: COCKROACHDB_CLUSTER_VERSION,
                 log,
             }
             .build()

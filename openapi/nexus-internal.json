@@ -2550,9 +2550,13 @@
               "$ref": "#/components/schemas/BlueprintZonesConfig"
             }
           },
-          "cockroachdb_preserve_downgrade": {
+          "cockroachdb_fingerprint": {
+            "description": "CockroachDB state fingerprint when this blueprint was created",
+            "type": "string"
+          },
+          "cockroachdb_setting_preserve_downgrade": {
             "nullable": true,
-            "description": "the value the CockroachDB `cluster.preserve_downgrade_option` cluster setting should be set to\n\nNote that this value is always used. `None` does _not_ mean \"don't change the value\". `None` means \"set it to the default value\".",
+            "description": "if Some, the value to ensure the CockroachDB setting `cluster.preserve_downgrade_option` is set to",
             "type": "string"
           },
           "comment": {
@@ -2599,6 +2603,7 @@
         "required": [
           "blueprint_disks",
           "blueprint_zones",
+          "cockroachdb_fingerprint",
           "comment",
           "creator",
           "external_dns_version",
@@ -2611,6 +2616,10 @@
         "description": "Describe high-level metadata about a blueprint",
         "type": "object",
         "properties": {
+          "cockroachdb_fingerprint": {
+            "description": "CockroachDB state fingerprint when this blueprint was created",
+            "type": "string"
+          },
           "comment": {
             "description": "human-readable string describing why this blueprint was created (for debugging)",
             "type": "string"
@@ -2653,6 +2662,7 @@
           }
         },
         "required": [
+          "cockroachdb_fingerprint",
           "comment",
           "creator",
           "external_dns_version",

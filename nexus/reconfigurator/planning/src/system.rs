@@ -16,6 +16,7 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
@@ -123,8 +124,8 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
-        // YYY FIXME
-        let target_cockroachdb_cluster_version = "22.1".to_owned();
+        let target_cockroachdb_cluster_version =
+            COCKROACHDB_CLUSTER_VERSION.to_owned();
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),

@@ -56,6 +56,7 @@ pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
+pub use planning_input::COCKROACHDB_CLUSTER_VERSION;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 
@@ -123,12 +124,14 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
-    /// the value the CockroachDB `cluster.preserve_downgrade_option` cluster
-    /// setting should be set to
-    ///
-    /// Note that this value is always used. `None` does _not_ mean "don't
-    /// change the value". `None` means "set it to the default value".
-    pub cockroachdb_preserve_downgrade: Option<String>,
+    /// CockroachDB state fingerprint when this blueprint was created
+    // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
+    // on this.
+    pub cockroachdb_fingerprint: String,
+
+    /// if Some, the value to ensure the CockroachDB setting
+    /// `cluster.preserve_downgrade_option` is set to
+    pub cockroachdb_setting_preserve_downgrade: Option<String>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -148,6 +151,7 @@ impl Blueprint {
             parent_blueprint_id: self.parent_blueprint_id,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             time_created: self.time_created,
             creator: self.creator.clone(),
             comment: self.comment.clone(),
@@ -794,6 +798,8 @@ pub struct BlueprintMetadata {
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
     pub external_dns_version: Generation,
+    /// CockroachDB state fingerprint when this blueprint was created
+    pub cockroachdb_fingerprint: String,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,

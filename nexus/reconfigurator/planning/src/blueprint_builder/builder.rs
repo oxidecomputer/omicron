@@ -151,7 +151,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
-    cockroachdb_preserve_downgrade: Option<String>,
+    cockroachdb_setting_preserve_downgrade: Option<String>,
 
     creator: String,
     comments: Vec<String>,
@@ -218,7 +218,8 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            cockroachdb_preserve_downgrade: None,
+            cockroachdb_fingerprint: String::new(),
+            cockroachdb_setting_preserve_downgrade: None,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -353,8 +354,8 @@ impl<'a> BlueprintBuilder<'a> {
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
-            cockroachdb_preserve_downgrade: parent_blueprint
-                .cockroachdb_preserve_downgrade
+            cockroachdb_setting_preserve_downgrade: parent_blueprint
+                .cockroachdb_setting_preserve_downgrade
                 .clone(),
             creator: creator.to_owned(),
             comments: Vec::new(),
@@ -381,7 +382,13 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
-            cockroachdb_preserve_downgrade: self.cockroachdb_preserve_downgrade,
+            cockroachdb_fingerprint: self
+                .input
+                .cockroachdb_settings()
+                .version
+                .clone(),
+            cockroachdb_setting_preserve_downgrade: self
+                .cockroachdb_setting_preserve_downgrade,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
@@ -820,8 +827,8 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Added(num_nexus_to_add))
     }
 
-    pub fn cockroachdb_preserve_downgrade(&mut self, version: Option<String>) {
-        self.cockroachdb_preserve_downgrade = version;
+    pub fn cockroachdb_preserve_downgrade(&mut self, version: String) {
+        self.cockroachdb_setting_preserve_downgrade = Some(version);
     }
 
     fn sled_add_zone(

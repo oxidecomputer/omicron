@@ -14,6 +14,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
 use nexus_types::inventory::Collection;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::CreateResult;
@@ -160,7 +161,7 @@ impl super::Nexus {
             )?
             .version;
         let cockroachdb_settings =
-            datastore.cluster_settings(opctx).await.internal_context(
+            datastore.cockroachdb_settings(opctx).await.internal_context(
                 "fetching cluster settings for blueprint planning",
             )?;
 
@@ -171,7 +172,7 @@ impl super::Nexus {
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
-            target_cockroachdb_cluster_version: "22.1", // YYY FIXME
+            target_cockroachdb_cluster_version: COCKROACHDB_CLUSTER_VERSION,
             log: &opctx.log,
             internal_dns_version,
             external_dns_version,
