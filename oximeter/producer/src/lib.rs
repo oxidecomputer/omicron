@@ -517,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn test_producer_registration_task() {
         let log = test_logger();
-        let mut fake_nexus = TestServer::run();
+        let fake_nexus = TestServer::run();
         slog::info!(
             log,
             "fake nexus test server listening";
@@ -565,6 +565,12 @@ mod tests {
             tokio::time::advance(Duration::from_millis(10)).await;
         }
         tokio::time::resume();
-        fake_nexus.verify_and_clear();
+
+        // Drop the server to check its requests, rather than calling
+        // `verify_and_clear()`. It's possible for requests to be in-flight
+        // between when we called `verify_and_clear()` and when we exit this
+        // test, at which point the drop impl of the `TestServer` checks the
+        // expectations _again_. Let's just do the check by dropping here.
+        drop(fake_nexus);
     }
 }
