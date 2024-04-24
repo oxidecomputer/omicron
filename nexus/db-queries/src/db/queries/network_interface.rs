@@ -2126,7 +2126,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_service_is_idempotent() {
         let context =
-            TestContext::new("test_insert_running_instance_fails", 2).await;
+            TestContext::new("test_delete_service_is_idempotent", 2).await;
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
@@ -2193,6 +2193,7 @@ mod tests {
             err.contains("Record not found"),
             "expected `Record not found`; got {err:?}"
         );
+        context.success().await;
     }
 
     #[tokio::test]
