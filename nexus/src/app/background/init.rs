@@ -12,6 +12,7 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::instance_state;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
@@ -90,6 +91,9 @@ pub struct BackgroundTasks {
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
+
+    /// task handle for the task that polls sled agents for instance states.
+    pub task_instance_watcher: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -341,6 +345,22 @@ impl BackgroundTasks {
             task
         };
 
+        let task_instance_watcher = {
+            let watcher = instance_state::InstanceWatcher::new(
+                datastore.clone(),
+                resolver.clone(),
+                opctx.child(BTreeMap::new()),
+            );
+            driver.register(
+                "instance_watcher".to_string(),
+                "periodically checks instance states".to_string(),
+                config.instance_watcher.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -360,6 +380,7 @@ impl BackgroundTasks {
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_region_replacement,
+            task_instance_watcher,
         }
     }
 

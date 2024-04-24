@@ -10,7 +10,6 @@ use nexus_db_model::{InvSledAgent, SledInstance};
 use nexus_db_queries::{
     context::OpContext, db::pagination::Paginator, db::DataStore,
 };
-use serde::Serialize;
 use serde_json::json;
 use sled_agent_client::{types::SledInstanceState, Client as SledAgentClient};
 use std::num::NonZeroU32;
@@ -19,6 +18,8 @@ use std::sync::Arc;
 /// Background task that periodically checks instance states.
 pub struct InstanceWatcher {
     datastore: Arc<DataStore>,
+    resolver: internal_dns::resolver::Resolver,
+    opctx_alloc: OpContext,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -70,6 +71,7 @@ impl BackgroundTask for InstanceWatcher {
 
                 if let Some((mut curr_sled_agent, sled_instance)) = batch.next() {
                     let mut client = mk_sled_agent_client(&opctx.log, &curr_sled_agent);
+                    spawn_get_state(&client, &mut requests, sled_instance);
 
                     for (sled_agent, sled_instance) in batch {
                         // We're now talking to a new sled agent; update the client.
@@ -84,7 +86,7 @@ impl BackgroundTask for InstanceWatcher {
 
             // All requests fired off, let's wait for them to come back.
             while let Some(result) = requests.join_next().await {
-                match result {
+                let (instance, state) = match result {
                     Err(_) => unreachable!(
                         "a `JoinError` is returned if a spawned task \
                         panics, or if the task is aborted. we never abort \
@@ -92,19 +94,27 @@ impl BackgroundTask for InstanceWatcher {
                         `panic=\"abort\"`, so neither of these cases should \
                         ever occur."
                     ),
-                    Ok(Ok(rsp)) => {
-                        todo!("eliza");
+                    Ok((instance, Ok(state))) => {
+                        (instance, state)
                     }
-                    Ok(Err(e)) => {
+                    Ok((instance, Err(client_error))) => {
                         // Here is where it gets interesting. This is where we
                         // might learn that the sled-agent we were trying to
                         // talk to is dead.
                         todo!("eliza: implement the interesting parts!");
                     }
                 };
+                let log = opctx.log.new(slog::o!("instance_id" => instance.instance_id().to_string(), "state" => format!("{state:?}")));
+                // TODO(eliza): it would be nice to do this in parallel as part
+                // of the task we spawn for each instance, but apparently we
+                // can't clone the `OpCtx`...so, do it here for now.
+                let result = crate::app::instance::notify_instance_updated(&self.datastore, &self.resolver, &self.opctx_alloc, opctx, &log, &instance.instance_id(), &state.into()).await;
+                match result {
+                    Ok(_) => slog::debug!(log, "instance state updated"),
+                    Err(e) =>  slog::error!(log, "failed to update instance state: {e}"),
+                }
             }
-
-            todo!()
+            serde_json::json!({})
         }
         .boxed()
     }
@@ -114,18 +124,19 @@ type ClientError = sled_agent_client::Error<sled_agent_client::types::Error>;
 
 fn spawn_get_state(
     client: &SledAgentClient,
-    tasks: &mut tokio::task::JoinSet<
-        Result<(SledInstance, SledInstanceState), ClientError>,
-    >,
+    tasks: &mut tokio::task::JoinSet<(
+        SledInstance,
+        Result<SledInstanceState, ClientError>,
+    )>,
     instance: SledInstance,
 ) {
     let client = client.clone();
     tasks.spawn(async move {
         let state = client
             .instance_get_state(&instance.instance_id())
-            .await?
-            .into_inner();
-        Ok((instance, state))
+            .await
+            .map(|rsp| rsp.into_inner());
+        (instance, state)
     });
 }
 
