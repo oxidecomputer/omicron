@@ -740,7 +740,7 @@ impl super::Nexus {
         debug!(self.log, "Listing sleds");
         let sleds = self
             .db_datastore
-            .sled_list(opctx, &pagparams, SledFilter::All)
+            .sled_list(opctx, &pagparams, SledFilter::InService)
             .await?;
 
         let mut uninitialized_sleds: Vec<UninitializedSled> = collection

@@ -34,9 +34,7 @@ pub(crate) async fn deploy_zones(
             {
                 Some(sled) => sled,
                 None => {
-                    if config.zones.iter().all(|c| {
-                        c.disposition == BlueprintZoneDisposition::Expunged
-                    }) {
+                    if config.are_all_zones_expunged() {
                         info!(
                             opctx.log,
                             "Skipping zone deployment to expunged sled";

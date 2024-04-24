@@ -116,7 +116,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore.sled_list(&opctx, pagparams, SledFilter::All).await
+        self.db_datastore
+            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .await
     }
 
     pub async fn sled_client(
