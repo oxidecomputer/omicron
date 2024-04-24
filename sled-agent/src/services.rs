@@ -2432,13 +2432,6 @@ impl ServiceManager {
                                         "config/baseboard-file",
                                         "astring",
                                         "/opt/oxide/baseboard.json",
-                                    )
-                                    // TODO: Remove this baseboard info and send it to
-                                    // switch_zone_setup service instead?
-                                    .add_property(
-                                        "config/baseboard-info",
-                                        "astring",
-                                        &baseboard_info,
                                     );
 
                             wicketd_service = wicketd_service.add_instance(

@@ -12,7 +12,10 @@ use illumos_utils::svcadm::Svcadm;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
-use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
+use std::fs::{
+    copy, create_dir_all, metadata, read_to_string, set_permissions, write,
+    OpenOptions,
+};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
@@ -29,6 +32,9 @@ pub const SYS: &str = "sys";
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
 pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
+// TODO: Decide if we want to do the whole switch zone set up via the
+// CLI, or just the baseboard generation. If it's just the latter,
+// this command should change to something else.
 pub const SWITCH_ZONE_SETUP_CMD: &str = "switch-zone";
 
 // User information for the switch zone
@@ -64,48 +70,230 @@ impl SwitchZoneUser {
     }
 
     fn setup_switch_zone_user(self, log: &Logger) -> Result<(), CmdError> {
-       // TODO: create command abstractions instead of just printing them
-        info!(&log, "Add a new group for the user"; "group" => self.group.clone(), "user" => self.user.clone());
-        println!(
-            "getent group {} >/dev/null 2>&1 || groupadd {}",
-            self.group, self.group
-        );
+        // TODO: Remove non-destructive comments I'm using for testing on my machine
+        info!(&log, "Add a new group for the user"; "group" => &self.group, "user" => &self.user);
+        match get_group_by_name(&self.group) {
+            Some(_) => {}
+            None => {
+                let cmd = std::process::Command::new("groupadd")
+                    .arg(&self.group)
+                    .output()
+                    .map_err(|err| {
+                        CmdError::Failure(anyhow!(
+                            "Could not execute `groupadd {}`: {}",
+                            self.group,
+                            err
+                        ))
+                    })?;
 
-        info!(&log, "Add the user"; "user" => self.user.clone());
-        println!(
-            "getent passwd {} >/dev/null 2>&1 || useradd -m -s {} -g {} -c {} {}",
-            self.user, self.shell, self.group, self.gecos, self.user
-        );
+                if !cmd.status.success() {
+                    return Err(CmdError::Failure(anyhow!(
+                        "Could not add group: {} status: {}",
+                        self.group,
+                        cmd.status
+                    )));
+                }
+            }
+        };
+        // println!(
+        //     "getent group {} >/dev/null 2>&1 || groupadd {}",
+        //     self.group, self.group
+        // );
 
-        // Either enable passwordless login (wicket) or disable password-based logins
+        info!(&log, "Add the user"; "user" => &self.user, "shell" => &self.shell,
+        "group" => &self.group, "gecos" => &self.gecos);
+        match get_user_by_name(&self.user) {
+            Some(_) => {}
+            None => {
+                let cmd = std::process::Command::new("useradd")
+                    .args([
+                        "-m",
+                        "-s",
+                        &self.shell,
+                        "-g",
+                        &self.group,
+                        "-c",
+                        &self.gecos,
+                        &self.user,
+                    ])
+                    .output()
+                    .map_err(|err| {
+                        CmdError::Failure(anyhow!(
+                            "Could not execute `useradd -m -s {} -g {} -c {} {}`: {}",
+                            self.shell, self.group, self.gecos, self.user, err
+                        ))
+                    })?;
+
+                if !cmd.status.success() {
+                    return Err(CmdError::Failure(anyhow!(
+                        "Could not add user: {} status: {}",
+                        self.user,
+                        cmd.status
+                    )));
+                }
+            }
+        };
+        // println!(
+        //     "getent passwd {} >/dev/null 2>&1 || useradd -m -s {} -g {} -c {} {}",
+        //     self.user, self.shell, self.group, self.gecos, self.user
+        // );
+
+        // Either enable password-less login (wicket) or disable password-based logins
         // completely (support, which logs in via ssh key).
         if self.nopasswd {
-            info!(&log, "Enable passwordless login for user"; "user" => self.user.clone());
-            println!("passwd -d {}", self.user);
+            info!(&log, "Enable password-less login for user"; "user" => self.user.clone());
+            let cmd = std::process::Command::new("passwd")
+                .args(["-d", &self.user])
+                .output()
+                .map_err(|err| {
+                    CmdError::Failure(anyhow!(
+                        "Could not execute `passwd -d {}`: {}",
+                        self.user,
+                        err
+                    ))
+                })?;
+
+            if !cmd.status.success() {
+                return Err(CmdError::Failure(anyhow!(
+                    "Could not enable password-less login: {} status: {}",
+                    self.user,
+                    cmd.status
+                )));
+            }
+            // println!("passwd -d {}", self.user);
         } else {
             info!(&log, "Disable password-based logins"; "user" => self.user.clone());
-            println!("passwd -N {}", self.user);
+            let cmd = std::process::Command::new("passwd")
+                .args(["-N", &self.user])
+                .output()
+                .map_err(|err| {
+                    CmdError::Failure(anyhow!(
+                        "Could not execute `passwd -N {}`: {}",
+                        self.user,
+                        err
+                    ))
+                })?;
+
+            if !cmd.status.success() {
+                return Err(CmdError::Failure(anyhow!(
+                    "Could not disable password-based logins: {} status: {}",
+                    self.user,
+                    cmd.status
+                )));
+            }
+            // println!("passwd -N {}", self.user);
         };
 
         if let Some(profiles) = self.profiles {
+            let mut profile_list: String = Default::default();
             for profile in profiles {
-                info!(&log, "Assign user profiles"; "user" => self.user.clone(), "profile" => profile.clone());
-                println!(
-                    "usermod -P\"$(printf '%s,' \"{}\")\" {}",
-                    profile, self.user
-                );
+                info!(&log, "Assign user profiles"; "user" => &self.user, "profile" => &profile);
+                profile_list.push_str(&profile)
             }
+
+            let cmd = std::process::Command::new("usermod")
+                .args(["-P", &profile_list, &self.user])
+                .output()
+                .map_err(|err| {
+                    CmdError::Failure(anyhow!(
+                        "Could not execute `usermod -P {} {}`: {}",
+                        profile_list,
+                        self.user,
+                        err
+                    ))
+                })?;
+
+            if !cmd.status.success() {
+                return Err(CmdError::Failure(anyhow!(
+                    "Could not assign user profiles: {} status: {}",
+                    self.user,
+                    cmd.status
+                )));
+            }
+
+            // println!(
+            //     "usermod -P\"$(printf '%s,' \"{}\")\" {}",
+            //     profile_list, self.user
+            // );
         } else {
             info!(&log, "Remove user profiles"; "user" => self.user.clone());
-            println!("usermod -P '' {}", self.user)
+            let cmd = std::process::Command::new("usermod")
+                .args(["-P", "''", &self.user])
+                .output()
+                .map_err(|err| {
+                    CmdError::Failure(anyhow!(
+                        "Could not execute `usermod -P '' {}`: {}",
+                        self.user,
+                        err
+                    ))
+                })?;
+
+            if !cmd.status.success() {
+                return Err(CmdError::Failure(anyhow!(
+                    "Could not remove user profiles: {} status: {}",
+                    self.user,
+                    cmd.status
+                )));
+            }
+            // println!("usermod -P '' {}", self.user)
         };
 
         if let Some(homedir) = self.homedir {
             info!(&log, "Set up home directory and startup files"; "user" => self.user.clone(), "home directory" => homedir.clone());
-            println!("mkdir -p {}", homedir);
-            println!("cp /root/.bashrc {}/.bashrc", homedir);
-            println!("cp /root/.profile {}/.profile", homedir);
-            println!("chown -R {} {}", self.user, homedir);
+            create_dir_all(&homedir).map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "Could not execute create directory {} and its parents: {}",
+                    &homedir,
+                    err
+                ))
+            })?;
+
+            let mut home_bashrc = homedir.clone();
+            home_bashrc.push_str("/.bashrc");
+            copy("/root/.bashrc", &home_bashrc).map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "Could not copy file from /root/.bashrc to {}: {}",
+                    &homedir,
+                    err
+                ))
+            })?;
+
+            let mut home_profile = homedir.clone();
+            home_profile.push_str("/.profile");
+            copy("/root/.profile", &home_profile).map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "Could not copy file from /root/.profile to {}: {}",
+                    &homedir,
+                    err
+                ))
+            })?;
+
+            // Not using std::os::unix::fs::chown here because it doesn't support
+            // recursive option.
+            let cmd = std::process::Command::new("chown")
+                .args(["-R", &self.user, &homedir])
+                .output()
+                .map_err(|err| {
+                    CmdError::Failure(anyhow!(
+                        "Could not execute `chown -R {} {}`: {}",
+                        self.user,
+                        homedir,
+                        err
+                    ))
+                })?;
+
+            if !cmd.status.success() {
+                return Err(CmdError::Failure(anyhow!(
+                    "Could not change ownership: {} status: {}",
+                    homedir,
+                    cmd.status
+                )));
+            }
+
+            // println!("mkdir -p {}", homedir);
+            // println!("cp /root/.bashrc {}/.bashrc", homedir);
+            // println!("cp /root/.profile {}/.profile", homedir);
+            // println!("chown -R {} {}", self.user, homedir);
         }
         Ok(())
     }
@@ -315,6 +503,7 @@ async fn switch_zone_setup(
     info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
     generate_switch_zone_baseboard_file(file, info)?;
 
+    // TODO: Decide if we actually want to set the users via rust code or the bash script
     info!(&log, "Setting up the users required for wicket and support");
     let wicket_user = SwitchZoneUser::new(
         String::from("wicket"),
