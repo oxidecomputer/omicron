@@ -329,7 +329,7 @@ impl BackgroundTasks {
         // process
         let task_region_replacement = {
             let detector = region_replacement::RegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
                 saga_request.clone(),
             );
 
@@ -347,9 +347,8 @@ impl BackgroundTasks {
 
         let task_instance_watcher = {
             let watcher = instance_state::InstanceWatcher::new(
-                datastore.clone(),
+                datastore,
                 resolver.clone(),
-                opctx.child(BTreeMap::new()),
             );
             driver.register(
                 "instance_watcher".to_string(),
