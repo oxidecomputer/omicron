@@ -245,7 +245,7 @@ table! {
         nic_id -> Uuid,
         sled_id -> Uuid,
         sled_ip -> Inet,
-        vni -> Int8,
+        vni -> Int4,
         mac -> Int8,
         ip -> Inet,
     }

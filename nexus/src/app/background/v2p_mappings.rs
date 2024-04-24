@@ -88,19 +88,7 @@ impl BackgroundTask for V2PManager {
                         std::net::IpAddr::V6(v) => v,
                     };
 
-                    let vni = match mapping.vni.0.try_into() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // if we're here, that means a VNI stored in the DB as SqlU32 is
-                            // an invalid VNI
-                            error!(
-                                &log,
-                                "unable to parse Vni from SqlU32";
-                                "error" => ?e
-                            );
-                            return None;
-                        }
-                    };
+                    let vni = mapping.vni.0;
 
                     // TODO: after looking at the sled-agent side of things, we may not need nic_id?
                     // the nic_id path parameter is not used in sled_agent
