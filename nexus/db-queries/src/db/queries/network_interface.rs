@@ -1692,7 +1692,7 @@ impl Query for DeleteQuery {
 impl RunQueryDsl<DbConnection> for DeleteQuery {}
 
 /// Errors related to deleting a network interface
-#[derive(Debug, thiserror::Error, SlogInlineError)]
+#[derive(Debug, thiserror::Error, SlogInlineError, PartialEq)]
 pub enum DeleteError {
     /// Attempting to delete the primary interface, while there still exist
     /// secondary interfaces.
@@ -1728,6 +1728,24 @@ impl DeleteError {
                     e,
                     query.parent_id,
                 )
+            }
+            // Faithfully plumb through `NotFound`
+            DieselError::NotFound => {
+                let type_name = match query.kind {
+                    NetworkInterfaceKind::Instance => {
+                        external::ResourceType::InstanceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Service => {
+                        external::ResourceType::ServiceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
+                    }
+                };
+                DeleteError::External(external::Error::ObjectNotFound {
+                    type_name,
+                    lookup_type: external::LookupType::ById(query.interface_id),
+                })
             }
             // Any other error at all is a bug
             _ => DeleteError::External(error::public_error_from_diesel(
@@ -1823,6 +1841,7 @@ fn decode_delete_network_interface_database_error(
 mod tests {
     use super::first_available_address;
     use super::last_address_offset;
+    use super::DeleteError;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -1857,7 +1876,6 @@ mod tests {
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
-    use slog_error_chain::InlineErrorChain;
     use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
@@ -2177,22 +2195,24 @@ mod tests {
         assert!(!second_deleted, "second delete did nothing");
 
         // Attempting to delete a nonexistent interface should fail.
+        let bogus_id = Uuid::new_v4();
         let err = context
             .db_datastore
             .service_delete_network_interface(
                 &context.opctx,
                 service_id,
-                Uuid::new_v4(),
+                bogus_id,
             )
             .await
             .expect_err(
                 "unexpectedly succeeded deleting nonexistent interface",
             );
-        let err = InlineErrorChain::new(&err).to_string();
-        assert!(
-            err.contains("Record not found"),
-            "expected `Record not found`; got {err:?}"
-        );
+        let expected_err =
+            DeleteError::External(external::Error::ObjectNotFound {
+                type_name: external::ResourceType::ServiceNetworkInterface,
+                lookup_type: external::LookupType::ById(bogus_id),
+            });
+        assert_eq!(err, expected_err);
         context.success().await;
     }
 
