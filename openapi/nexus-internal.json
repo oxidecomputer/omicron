@@ -2794,6 +2794,9 @@
                 "nullable": true,
                 "type": "string"
               },
+              "external_ip": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIp"
+              },
               "nic": {
                 "description": "The service vNIC providing outbound connectivity using OPTE.",
                 "allOf": [
@@ -2808,14 +2811,6 @@
                   "type": "string"
                 }
               },
-              "snat_cfg": {
-                "description": "The SNAT configuration for outbound connections.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/SourceNatConfig"
-                  }
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2826,9 +2821,9 @@
             "required": [
               "address",
               "dns_servers",
+              "external_ip",
               "nic",
               "ntp_servers",
-              "snat_cfg",
               "type"
             ]
           },
@@ -2946,7 +2941,11 @@
               },
               "dns_address": {
                 "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+                  }
+                ]
               },
               "http_address": {
                 "description": "The address at which the external DNS server API is reachable.",
@@ -3064,8 +3063,11 @@
               },
               "external_ip": {
                 "description": "The address at which the external nexus server is reachable.",
-                "type": "string",
-                "format": "ip"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+                  }
+                ]
               },
               "external_tls": {
                 "description": "Whether Nexus's external endpoint should use TLS",
@@ -5891,6 +5893,55 @@
           "pool_name"
         ]
       },
+      "OmicronZoneExternalFloatingAddr": {
+        "description": "Floating external address with port allocated to an Omicron-managed zone.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+          }
+        },
+        "required": [
+          "addr",
+          "id"
+        ]
+      },
+      "OmicronZoneExternalFloatingIp": {
+        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "id",
+          "ip"
+        ]
+      },
+      "OmicronZoneExternalSnatIp": {
+        "description": "SNAT (outbound) external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+          },
+          "snat_cfg": {
+            "$ref": "#/components/schemas/SourceNatConfig"
+          }
+        },
+        "required": [
+          "id",
+          "snat_cfg"
+        ]
+      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -7134,6 +7185,10 @@
         "type": "object"
       },
       "TypedUuidForDownstairsRegionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForExternalIpKind": {
         "type": "string",
         "format": "uuid"
       },

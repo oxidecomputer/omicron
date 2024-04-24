@@ -4796,6 +4796,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "slog",
+ "slog-error-chain",
 ]
 
 [[package]]

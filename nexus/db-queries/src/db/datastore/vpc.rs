@@ -1243,6 +1243,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -1254,6 +1255,7 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1490,9 +1492,10 @@ mod tests {
     struct HarnessNexus {
         sled_id: SledUuid,
         id: OmicronZoneUuid,
-        ip: IpAddr,
+        external_ip: OmicronZoneExternalFloatingIp,
         mac: MacAddr,
         nic_id: Uuid,
+        nic_ip: IpAddr,
     }
 
     impl Harness {
@@ -1501,7 +1504,10 @@ mod tests {
                 (0..num_sleds).map(|_| SledUuid::new_v4()).collect::<Vec<_>>();
             sled_ids.sort();
 
-            let mut nexus_ips = NEXUS_OPTE_IPV4_SUBNET
+            // RFC 5737 TEST-NET-1
+            let mut nexus_external_ips =
+                "192.0.2.0/24".parse::<ipnetwork::IpNetwork>().unwrap().iter();
+            let mut nexus_nic_ips = NEXUS_OPTE_IPV4_SUBNET
                 .iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                 .map(IpAddr::from);
@@ -1512,9 +1518,13 @@ mod tests {
                 .map(|sled_id| HarnessNexus {
                     sled_id,
                     id: OmicronZoneUuid::new_v4(),
-                    ip: nexus_ips.next().unwrap(),
+                    external_ip: OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: nexus_external_ips.next().unwrap(),
+                    },
                     mac: nexus_macs.next().unwrap(),
                     nic_id: Uuid::new_v4(),
+                    nic_ip: nexus_nic_ips.next().unwrap(),
                 })
                 .collect::<Vec<_>>();
             Self { rack_id: Uuid::new_v4(), sled_ids, nexuses }
@@ -1547,7 +1557,7 @@ mod tests {
                         name: name.parse().unwrap(),
                         description: name,
                     },
-                    nexus.ip,
+                    nexus.nic_ip,
                     nexus.mac,
                     0,
                 )
@@ -1566,7 +1576,7 @@ mod tests {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:0".parse().unwrap(),
-                            external_ip: "::1".parse().unwrap(),
+                            external_ip: nexus.external_ip,
                             nic: NetworkInterface {
                                 id: nic.identity.id,
                                 kind: NetworkInterfaceKind::Service {

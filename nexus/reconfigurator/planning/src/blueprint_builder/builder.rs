@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneDataset;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -43,6 +44,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -293,10 +295,10 @@ impl<'a> BlueprintBuilder<'a> {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
-                if !external_ip.is_loopback()
-                    && !used_external_ips.insert(external_ip)
+                if !external_ip.ip().is_loopback()
+                    && !used_external_ips.insert(external_ip.ip())
                 {
-                    bail!("duplicate external IP: {external_ip}");
+                    bail!("duplicate external IP: {external_ip:?}");
                 }
             }
 
@@ -741,13 +743,16 @@ impl<'a> BlueprintBuilder<'a> {
 
         for _ in 0..num_nexus_to_add {
             let nexus_id = self.rng.zone_rng.next();
-            let external_ip = self
-                .available_external_ips
-                .next()
-                .ok_or(Error::NoExternalServiceIpAvailable)?;
+            let external_ip = OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: self
+                    .available_external_ips
+                    .next()
+                    .ok_or(Error::NoExternalServiceIpAvailable)?,
+            };
 
             let nic = {
-                let (ip, subnet) = match external_ip {
+                let (ip, subnet) = match external_ip.ip {
                     IpAddr::V4(_) => (
                         self.nexus_v4_ips
                             .next()
@@ -1513,8 +1518,8 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(ip) = z.zone_type.external_ip() {
-                    used_ip_ranges.push(IpRange::from(ip));
+                if let Some(external_ip) = z.zone_type.external_ip() {
+                    used_ip_ranges.push(IpRange::from(external_ip.ip()));
                 }
             }
             assert!(!used_ip_ranges.is_empty());
