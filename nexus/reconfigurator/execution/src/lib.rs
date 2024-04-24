@@ -184,5 +184,17 @@ where
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
 
+    external_networking::ensure_zone_external_networking_deallocated(
+        &opctx,
+        datastore,
+        blueprint
+            .all_omicron_zones_not_in(
+                BlueprintZoneFilter::ShouldBeExternallyReachable,
+            )
+            .map(|(_sled_id, zone)| zone),
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
     Ok(())
 }
