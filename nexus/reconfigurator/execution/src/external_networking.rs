@@ -25,21 +25,38 @@ use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
+use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 
 pub(crate) async fn ensure_zone_external_networking_allocated(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
+    zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
 ) -> anyhow::Result<()> {
-    for z in all_omicron_zones {
+    for z in zones_to_allocate {
         let Some((external_ip, nic)) = z.zone_type.external_networking() else {
             continue;
         };
 
+        let log = opctx.log.new(slog::o!(
+            "action" => "allocate-external-networking",
+            "zone_kind" => z.zone_type.kind().to_string(),
+            "zone_id" => z.id.to_string(),
+            "ip" => format!("{external_ip:?}"),
+            "nic" => format!("{nic:?}"),
+        ));
+
         let kind = z.zone_type.kind();
-        ensure_external_service_ip(opctx, datastore, kind, z.id, external_ip)
-            .await?;
-        ensure_service_nic(opctx, datastore, kind, z.id, nic).await?;
+        ensure_external_service_ip(
+            opctx,
+            datastore,
+            kind,
+            z.id,
+            external_ip,
+            &log,
+        )
+        .await?;
+        ensure_service_nic(opctx, datastore, kind, z.id, nic, &log).await?;
     }
 
     Ok(())
@@ -48,14 +65,22 @@ pub(crate) async fn ensure_zone_external_networking_allocated(
 pub(crate) async fn ensure_zone_external_networking_deallocated(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
+    zones_to_deallocate: impl Iterator<Item = &BlueprintZoneConfig>,
 ) -> anyhow::Result<()> {
-    for z in all_omicron_zones {
+    for z in zones_to_deallocate {
         let Some((external_ip, nic)) = z.zone_type.external_networking() else {
             continue;
         };
 
         let kind = z.zone_type.kind();
+        let log = opctx.log.new(slog::o!(
+            "action" => "deallocate-external-networking",
+            "zone_kind" => z.zone_type.kind().to_string(),
+            "zone_id" => z.id.to_string(),
+            "ip" => format!("{external_ip:?}"),
+            "nic" => format!("{nic:?}"),
+        ));
+
         let deleted_ip = datastore
             .deallocate_external_ip(opctx, external_ip.id().into_untyped_uuid())
             .await
@@ -67,19 +92,9 @@ pub(crate) async fn ensure_zone_external_networking_deallocated(
                 )
             })?;
         if deleted_ip {
-            info!(
-                opctx.log, "successfully deleted Omicron zone external IP";
-                "zone_kind" => %kind,
-                "zone_id" => %z.id,
-                "ip" => ?external_ip,
-            );
+            info!(log, "successfully deleted Omicron zone external IP");
         } else {
-            debug!(
-                opctx.log, "Omicron zone external IP already deleted";
-                "zone_kind" => %kind,
-                "zone_id" => %z.id,
-                "ip" => ?external_ip,
-            );
+            debug!(log, "Omicron zone external IP already deleted");
         }
 
         let deleted_nic = datastore
@@ -96,19 +111,9 @@ pub(crate) async fn ensure_zone_external_networking_deallocated(
                 )
             })?;
         if deleted_nic {
-            info!(
-                opctx.log, "successfully deleted Omicron zone vNIC";
-                "zone_kind" => %kind,
-                "zone_id" => %z.id,
-                "nic" => ?nic,
-            );
+            info!(log, "successfully deleted Omicron zone vNIC");
         } else {
-            debug!(
-                opctx.log, "Omicron zone vNIC already deleted";
-                "zone_kind" => %kind,
-                "zone_id" => %z.id,
-                "nic" => ?nic,
-            );
+            debug!(log, "Omicron zone vNIC already deleted");
         }
     }
 
@@ -123,6 +128,7 @@ async fn is_external_ip_already_allocated(
     zone_kind: ZoneKind,
     zone_id: OmicronZoneUuid,
     external_ip: OmicronZoneExternalIp,
+    log: &Logger,
 ) -> anyhow::Result<bool> {
     // localhost is used by many components in the test suite.  We can't use
     // the normal path because normally a given external IP must only be
@@ -144,22 +150,14 @@ async fn is_external_ip_already_allocated(
     // below.
     let existing_ip = match allocated_ips.as_slice() {
         [] => {
-            info!(
-                opctx.log, "external IP allocation required for zone";
-                "zone_kind" => %zone_kind,
-                "zone_id" => %zone_id,
-                "ip" => ?external_ip,
-            );
+            info!(log, "external IP allocation required for zone");
 
             return Ok(false);
         }
         [ip] => ip,
         _ => {
             warn!(
-                opctx.log, "zone has multiple IPs allocated";
-                "zone_kind" => %zone_kind,
-                "zone_id" => %zone_id,
-                "want_ip" => ?external_ip,
+                log, "zone has multiple IPs allocated";
                 "allocated_ips" => ?allocated_ips,
             );
             bail!(
@@ -175,31 +173,20 @@ async fn is_external_ip_already_allocated(
     let existing_ip = match OmicronZoneExternalIp::try_from(existing_ip) {
         Ok(existing_ip) => existing_ip,
         Err(err) => {
-            error!(
-                opctx.log, "invalid IP in database for zone";
-                "zone_kind" => %zone_kind,
-                "zone_id" => %zone_id,
-                "ip" => ?existing_ip,
-                &err,
+            error!(log, "invalid IP in database for zone"; &err);
+            bail!(
+                "zone {zone_id} has invalid IP database record: {}",
+                InlineErrorChain::new(&err)
             );
-            bail!("zone {zone_id} has invalid IP database record: {err}");
         }
     };
 
     if existing_ip == external_ip {
-        info!(
-            opctx.log, "found already-allocated external IP";
-            "zone_kind" => %zone_kind,
-            "zone_id" => %zone_id,
-            "ip" => ?external_ip,
-        );
+        info!(log, "found already-allocated external IP");
         Ok(true)
     } else {
         warn!(
-            opctx.log, "zone has unexpected IP allocated";
-            "zone_kind" => %zone_kind,
-            "zone_id" => %zone_id,
-            "want_ip" => ?external_ip,
+            log, "zone has unexpected IP allocated";
             "allocated_ip" => ?existing_ip,
         );
         bail!("zone {zone_id} has a different IP allocated ({existing_ip:?})",);
@@ -214,6 +201,7 @@ async fn is_nic_already_allocated(
     zone_kind: ZoneKind,
     zone_id: OmicronZoneUuid,
     nic: &NetworkInterface,
+    log: &Logger,
 ) -> anyhow::Result<bool> {
     // See the comment in is_external_ip_already_allocated().
     if cfg!(test) && nic.ip.is_loopback() {
@@ -241,21 +229,13 @@ async fn is_nic_already_allocated(
                 && *allocated_nic.slot == nic.slot
                 && allocated_nic.primary == nic.primary
             {
-                info!(
-                    opctx.log, "found already-allocated NIC";
-                    "zone_kind" => %zone_kind,
-                    "zone_id" => %zone_id,
-                    "nic" => ?allocated_nic,
-                );
+                info!(log, "found already-allocated NIC");
                 return Ok(true);
             }
         }
 
         warn!(
-            opctx.log, "zone has unexpected NICs allocated";
-            "zone_kind" => %zone_kind,
-            "zone_id" => %zone_id,
-            "want_nic" => ?nic,
+            log, "zone has unexpected NICs allocated";
             "allocated_nics" => ?allocated_nics,
         );
 
@@ -265,12 +245,7 @@ async fn is_nic_already_allocated(
         );
     }
 
-    info!(
-        opctx.log, "NIC allocation required for zone";
-        "zone_kind" => %zone_kind,
-        "zone_id" => %zone_id,
-        "nid" => ?nic,
-    );
+    info!(log, "NIC allocation required for zone");
 
     Ok(false)
 }
@@ -281,6 +256,7 @@ async fn ensure_external_service_ip(
     zone_kind: ZoneKind,
     zone_id: OmicronZoneUuid,
     external_ip: OmicronZoneExternalIp,
+    log: &Logger,
 ) -> anyhow::Result<()> {
     // Only attempt to allocate `external_ip` if it isn't already assigned
     // to this zone.
@@ -300,6 +276,7 @@ async fn ensure_external_service_ip(
         zone_kind,
         zone_id,
         external_ip,
+        log,
     )
     .await?
     {
@@ -320,12 +297,7 @@ async fn ensure_external_service_ip(
             )
         })?;
 
-    info!(
-        opctx.log, "successfully allocated external IP";
-        "zone_kind" => %zone_kind,
-        "zone_id" => %zone_id,
-        "ip" => ?external_ip,
-    );
+    info!(log, "successfully allocated external IP");
 
     Ok(())
 }
@@ -337,6 +309,7 @@ async fn ensure_service_nic(
     zone_kind: ZoneKind,
     service_id: OmicronZoneUuid,
     nic: &NetworkInterface,
+    log: &Logger,
 ) -> anyhow::Result<()> {
     // We don't pass `nic.kind` into the database below, but instead
     // explicitly call `service_create_network_interface`. Ensure this is
@@ -373,8 +346,10 @@ async fn ensure_service_nic(
     // This is subject to the same kind of TOCTOU race as described for IP
     // allocation in `ensure_external_service_ip`, and we believe it's okay
     // for the same reasons as described there.
-    if is_nic_already_allocated(opctx, datastore, zone_kind, service_id, nic)
-        .await?
+    if is_nic_already_allocated(
+        opctx, datastore, zone_kind, service_id, nic, log,
+    )
+    .await?
     {
         return Ok(());
     }
@@ -415,11 +390,9 @@ async fn ensure_service_nic(
     // `Vni::SERVICES_VNI`.)
     if created_nic.primary != nic.primary || *created_nic.slot != nic.slot {
         warn!(
-            opctx.log, "unexpected property on allocated NIC";
-            "db_primary" => created_nic.primary,
-            "expected_primary" => nic.primary,
-            "db_slot" => *created_nic.slot,
-            "expected_slot" => nic.slot,
+            log, "unexpected property on allocated NIC";
+            "allocated_primary" => created_nic.primary,
+            "allocated_slot" => *created_nic.slot,
         );
 
         // Now what? We've allocated a NIC in the database but it's
@@ -434,18 +407,12 @@ async fn ensure_service_nic(
         // impossible with the way we generate blueprints, so we'll just
         // return a scary error here and expect to never see it.
         bail!(
-            "database cleanup required: \
-                 unexpected NIC ({created_nic:?}) \
-                 allocated for {zone_kind} {service_id}"
+            "database cleanup required: unexpected NIC ({created_nic:?}) \
+             allocated for {zone_kind} {service_id}"
         );
     }
 
-    info!(
-        opctx.log, "successfully allocated service vNIC";
-        "zone_kind" => %zone_kind,
-        "zone_id" => %service_id,
-        "nic" => ?nic,
-    );
+    info!(log, "successfully allocated service vNIC");
 
     Ok(())
 }
