@@ -10,6 +10,7 @@ use nexus_db_model::{InvSledAgent, SledInstance};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use omicron_common::backoff::{self, BackoffError};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use sled_agent_client::Client as SledAgentClient;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
+    max_retries: NonZeroU32,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -33,8 +35,9 @@ impl InstanceWatcher {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
+        max_retries: NonZeroU32,
     ) -> Self {
-        Self { datastore, resolver }
+        Self { datastore, resolver, max_retries }
     }
 
     fn check_instance(
@@ -55,22 +58,61 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            let InstanceWatcher { datastore, resolver } = watcher;
+            let InstanceWatcher { datastore, resolver, max_retries } = watcher;
             slog::trace!(opctx.log, "checking on instance...");
-            let rsp = client.instance_get_state(&instance.instance_id()).await;
-            let state = match rsp {
-                Ok(rsp) => rsp.into_inner(),
-                Err(error) => {
-                    // Here is where it gets interesting. This is where we
-                    // might learn that the sled-agent we were trying to
-                    // talk to is dead.
+            let backoff = backoff::retry_policy_internal_service();
+            let mut retries = 0;
+            let rsp = backoff::retry_notify(
+                backoff,
+                || async {
+                    let rsp = client
+                        .instance_get_state(&instance.instance_id())
+                        .await;
+                    match rsp {
+                        Ok(rsp) => Ok(rsp.into_inner()),
+                        Err(e) if retries == max_retries.get() => {
+                            Err(BackoffError::Permanent(e))
+                        }
+                        Err(
+                            e @ ClientError::InvalidRequest(_)
+                            | e @ ClientError::InvalidUpgrade(_)
+                            | e @ ClientError::UnexpectedResponse(_)
+                            | e @ ClientError::PreHookError(_),
+                        ) => Err(BackoffError::Permanent(e)),
+                        Err(e) => Err(BackoffError::transient(e)),
+                    }
+                },
+                |err, duration| {
                     slog::info!(
                         opctx.log,
-                        "client error checking on instance: {error:?}"
+                        "instance check failed; retrying: {err}";
+                        "duration" => ?duration,
+                        "retries_remaining" => max_retries.get() - retries,
                     );
-                    todo!("eliza: implement the interesting parts!");
+                },
+            )
+            .await;
+            let state = match rsp {
+                Ok(state) => state,
+                Err(error) => {
+                    // TODO(eliza): here is where it gets interesting --- if the
+                    // sled-agent is in a bad state, we need to:
+                    // 1. figure out whether the instance's VMM is reachable directly
+                    // 2. figure out whether we can recover the sled agent?
+                    // 3. if the instances' VMMs are also gone, mark them as
+                    //    "failed"
+                    // 4. this might mean that the whole sled is super gone,
+                    //    figure that out too.
+                    //
+                    // for now though, we'll just log a really big error.
+                    slog::error!(
+                        opctx.log,
+                        "instance seems to be in a bad state: {error}"
+                    );
+                    return;
                 }
             };
+
             slog::debug!(opctx.log, "updating instance state: {state:?}");
             let result = crate::app::instance::notify_instance_updated(
                 &datastore,

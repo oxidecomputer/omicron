@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -527,6 +528,10 @@ pub struct InstanceWatcherConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// maximum number of retries to attempt before considering a sled-agent
+    /// dead.
+    pub max_retries: NonZeroU32,
 }
 
 /// Configuration for a nexus server
@@ -895,6 +900,7 @@ mod test {
                         },
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
+                            max_retries: NonZeroU32::new(5).unwrap(),
                         }
                     },
                     default_region_allocation_strategy:
@@ -963,6 +969,7 @@ mod test {
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             instance_watcher.period_secs = 30
+            instance_watcher.max_retries = 10
             [default_region_allocation_strategy]
             type = "random"
             "##,
