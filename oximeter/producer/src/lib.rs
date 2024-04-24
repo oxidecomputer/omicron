@@ -136,8 +136,9 @@ impl Server {
 
     /// Serve requests for metrics.
     pub async fn serve_forever(self) -> Result<(), Error> {
+        let res = self.server.await.map_err(Error::Server);
         self.registration_task.abort();
-        self.server.await.map_err(Error::Server)
+        res
     }
 
     /// Close the server
@@ -211,14 +212,6 @@ impl Server {
         if registry.producer_id() != server_info.id {
             return Err(Error::UuidMismatch);
         }
-        // Ensure that, if we need to use internal DNS to look up Nexus, we are
-        // listening on an IPv6 address. That's required so we can find the DNS
-        // server in our /48.
-        if registration_address.is_none() {
-            if !server_info.address.ip().is_ipv6() {
-                return Err(Error::Ipv6AddressRequiredForResolution);
-            }
-        }
 
         // Overwrite any provided base_route.
         //
@@ -259,13 +252,16 @@ impl Server {
                 FindNexus::ByAddr(*addr)
             }
             None => {
+                // Ensure that we've been provided with an IPv6 address if we're
+                // using DNS to resolve Nexus. That's required because we need
+                // to use the /48 to find our DNS server itself.
+                let IpAddr::V6(our_addr) = server_info.address.ip() else {
+                    return Err(Error::Ipv6AddressRequiredForResolution);
+                };
                 debug!(
                     log,
                     "Nexus IP not provided, will use DNS to resolve it"
                 );
-                let IpAddr::V6(our_addr) = server_info.address.ip() else {
-                    unreachable!();
-                };
                 Resolver::new_from_ip(
                     log.new(o!("component" => "internal-dns-resolver")),
                     our_addr,
@@ -535,7 +531,7 @@ mod tests {
                 "POST",
                 "/metrics/producers",
             ))
-            .times(1..)
+            .times(2..)
             .respond_with(
                 status_code(201).body(serde_json::to_string(&body).unwrap()),
             ),
