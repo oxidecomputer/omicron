@@ -1,3 +1,5 @@
+set local disallow_full_table_scans = off;
+
 -- Fill in the external IP IDs for all past blueprints.
 --
 -- This query makes some assumptions that are true at the time of its writing
