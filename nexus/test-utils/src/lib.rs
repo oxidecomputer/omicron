@@ -31,6 +31,8 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
@@ -52,6 +54,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -657,7 +660,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .deployment
                     .external_dns_servers
                     .clone(),
-                external_ip: external_address,
+                external_ip: OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip: external_address,
+                },
                 external_tls: self.config.deployment.dropshot_external.tls,
                 internal_address: address,
                 nic: NetworkInterface {
@@ -976,7 +982,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
                     dataset: OmicronZoneDataset { pool_name },
-                    dns_address: dns_address.into(),
+                    dns_address: OmicronZoneExternalFloatingAddr {
+                        id: ExternalIpUuid::new_v4(),
+                        addr: dns_address.into(),
+                    },
                     http_address: dropshot_address,
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),

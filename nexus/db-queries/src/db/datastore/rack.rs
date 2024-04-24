@@ -49,7 +49,6 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -64,7 +63,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
@@ -479,10 +477,8 @@ impl DataStore {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
-                let external_ip = OmicronZoneExternalIp {
-                    id: ExternalIpUuid::new_v4(),
-                    kind: OmicronZoneExternalIpKind::Floating(dns_address.ip()),
-                };
+                let external_ip =
+                    OmicronZoneExternalIp::Floating(dns_address.into_ip());
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -506,10 +502,7 @@ impl DataStore {
                 external_ip,
                 ..
             }) => {
-                let external_ip = OmicronZoneExternalIp {
-                    id: ExternalIpUuid::new_v4(),
-                    kind: OmicronZoneExternalIpKind::Floating(*external_ip),
-                };
+                let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -529,12 +522,9 @@ impl DataStore {
                 Some((external_ip, db_nic))
             }
             BlueprintZoneType::BoundaryNtp(
-                blueprint_zone_type::BoundaryNtp { snat_cfg, nic, .. },
+                blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
-                let external_ip = OmicronZoneExternalIp {
-                    id: ExternalIpUuid::new_v4(),
-                    kind: OmicronZoneExternalIpKind::Snat(*snat_cfg),
-                };
+                let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -965,9 +955,14 @@ mod test {
         SledBuilder, SystemDescription,
     };
     use nexus_test_utils::db::test_setup_database;
-    use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::{
+        BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
+        OmicronZoneExternalFloatingIp,
+    };
+    use nexus_types::deployment::{
+        BlueprintZoneDisposition, OmicronZoneExternalSnatIp,
+    };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
@@ -982,8 +977,8 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
@@ -1309,10 +1304,10 @@ mod test {
                             blueprint_zone_type::ExternalDns {
                                 dataset: random_dataset(),
                                 http_address: "[::1]:80".parse().unwrap(),
-                                dns_address: SocketAddr::new(
-                                    external_dns_ip,
-                                    53,
-                                ),
+                                dns_address: OmicronZoneExternalFloatingAddr {
+                                    id: ExternalIpUuid::new_v4(),
+                                    addr: SocketAddr::new(external_dns_ip, 53),
+                                },
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
@@ -1358,10 +1353,13 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig::new(
-                                    ntp1_ip, 16384, 32767,
-                                )
-                                .unwrap(),
+                                external_ip: OmicronZoneExternalSnatIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    snat_cfg: SourceNatConfig::new(
+                                        ntp1_ip, 16384, 32767,
+                                    )
+                                    .unwrap(),
+                                },
                             },
                         ),
                     },
@@ -1380,7 +1378,10 @@ mod test {
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: nexus_ip,
+                                external_ip: OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip: nexus_ip,
+                                },
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
@@ -1428,10 +1429,13 @@ mod test {
                                     primary: true,
                                     slot: 0,
                                 },
-                                snat_cfg: SourceNatConfig::new(
-                                    ntp2_ip, 0, 16383,
-                                )
-                                .unwrap(),
+                                external_ip: OmicronZoneExternalSnatIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    snat_cfg: SourceNatConfig::new(
+                                        ntp2_ip, 0, 16383,
+                                    )
+                                    .unwrap(),
+                                },
                             },
                         ),
                     },
@@ -1627,7 +1631,10 @@ mod test {
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: nexus_ip_start.into(),
+                                external_ip: OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip: nexus_ip_start.into(),
+                                },
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
@@ -1656,7 +1663,10 @@ mod test {
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: nexus_ip_end.into(),
+                                external_ip: OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip: nexus_ip_end.into(),
+                                },
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
@@ -1782,7 +1792,7 @@ mod test {
                 .1
                 .zone_type
             {
-                *external_ip
+                external_ip.ip
             } else {
                 panic!("Unexpected zone type")
             }
@@ -1801,7 +1811,7 @@ mod test {
                 .1
                 .zone_type
             {
-                *external_ip
+                external_ip.ip
             } else {
                 panic!("Unexpected service kind")
             }
@@ -1890,7 +1900,10 @@ mod test {
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
-                            external_ip: nexus_ip,
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: nexus_ip,
+                            },
                             external_tls: false,
                             external_dns_servers: vec![],
                             nic: NetworkInterface {
@@ -1993,7 +2006,10 @@ mod test {
                             blueprint_zone_type::ExternalDns {
                                 dataset: random_dataset(),
                                 http_address: "[::1]:80".parse().unwrap(),
-                                dns_address: SocketAddr::new(ip, 53),
+                                dns_address: OmicronZoneExternalFloatingAddr {
+                                    id: ExternalIpUuid::new_v4(),
+                                    addr: SocketAddr::new(ip, 53),
+                                },
                                 nic: NetworkInterface {
                                     id: Uuid::new_v4(),
                                     kind: NetworkInterfaceKind::Service {
@@ -2020,7 +2036,10 @@ mod test {
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: ip,
+                                external_ip: OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip,
+                                },
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {

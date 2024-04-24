@@ -200,7 +200,7 @@ impl super::Nexus {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     external_ip,
                     ..
-                }) => Some(match external_ip {
+                }) => Some(match external_ip.ip {
                     IpAddr::V4(addr) => DnsRecord::A(addr),
                     IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
                 }),

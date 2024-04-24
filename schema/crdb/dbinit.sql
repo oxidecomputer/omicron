@@ -3332,6 +3332,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Zone disposition
     disposition omicron.public.bp_zone_disposition NOT NULL,
 
+    -- For some zones, either primary_service_ip or second_service_ip (but not
+    -- both!) is an external IP address. For such zones, this is the ID of that
+    -- external IP. In general this is a foreign key into
+    -- omicron.public.external_ip, though the row many not exist: if this
+    -- blueprint is old, it's possible the IP has been deleted, and if this
+    -- blueprint has not yet been realized, it's possible the IP hasn't been
+    -- created yet.
+    external_ip_id UUID,
+
     PRIMARY KEY (blueprint_id, id)
 );
 
@@ -3756,7 +3765,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '53.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '54.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
