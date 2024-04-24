@@ -19,7 +19,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
