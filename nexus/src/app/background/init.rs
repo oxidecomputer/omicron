@@ -12,7 +12,7 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
-use super::instance_state;
+use super::instance_watcher;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
@@ -346,7 +346,7 @@ impl BackgroundTasks {
         };
 
         let task_instance_watcher = {
-            let watcher = instance_state::InstanceWatcher::new(
+            let watcher = instance_watcher::InstanceWatcher::new(
                 datastore,
                 resolver.clone(),
             );
