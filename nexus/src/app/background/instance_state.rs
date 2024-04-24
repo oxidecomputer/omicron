@@ -84,7 +84,7 @@ impl BackgroundTask for InstanceWatcher {
 
             // All requests fired off, let's wait for them to come back.
             while let Some(result) = requests.join_next().await {
-                let (instance, state) = match result {
+                match result {
                     Err(_) => unreachable!(
                         "a `JoinError` is returned if a spawned task \
                         panics, or if the task is aborted. we never abort \
@@ -92,7 +92,9 @@ impl BackgroundTask for InstanceWatcher {
                         `panic=\"abort\"`, so neither of these cases should \
                         ever occur."
                     ),
-                    Ok(Ok(rsp)) => rsp,
+                    Ok(Ok(rsp)) => {
+                        todo!("eliza");
+                    }
                     Ok(Err(e)) => {
                         // Here is where it gets interesting. This is where we
                         // might learn that the sled-agent we were trying to

@@ -1314,3 +1314,122 @@ async fn ensure_nat_entry(
         }
     }
 }
+
+/// Ensure that the necessary v2p mappings for an instance are deleted
+pub(crate) async fn delete_instance_v2p_mappings(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    opctx: &OpContext,
+    opctx_alloc: &OpContext,
+    instance_id: Uuid,
+) -> Result<(), Error> {
+    // For every sled that isn't the sled this instance was allocated to, delete
+    // the virtual to physical mapping for each of this instance's NICs. If
+    // there isn't a V2P mapping, del_v2p should be a no-op.
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Read)
+        .await?;
+
+    let instance_nics = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await?;
+
+    let mut last_sled_id: Option<Uuid> = None;
+
+    loop {
+        let pagparams = DataPageParams {
+            marker: last_sled_id.as_ref(),
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(10).unwrap(),
+        };
+
+        let sleds_page = datastore.sled_list(&opctx_alloc, &pagparams).await?;
+        let mut join_handles =
+            Vec::with_capacity(sleds_page.len() * instance_nics.len());
+
+        for sled in &sleds_page {
+            for nic in &instance_nics {
+                let client = nexus_networking::sled_client(
+                    &datastore,
+                    &opctx_alloc,
+                    sled.id(),
+                    &log,
+                )
+                .await?;
+                let nic_id = nic.id;
+                let mapping = DeleteVirtualNetworkInterfaceHost {
+                    virtual_ip: nic.ip,
+                    vni: nic.vni,
+                };
+
+                let log = log.clone();
+
+                // This function is idempotent: calling the set_v2p ioctl with
+                // the same information is a no-op.
+                join_handles.push(tokio::spawn(futures::future::lazy(
+                    move |_ctx| async move {
+                        retry_until_known_result(&log, || async {
+                            client.del_v2p(&nic_id, &mapping).await
+                        })
+                        .await
+                    },
+                )));
+            }
+        }
+
+        // Concurrently run each future to completion, but return the last
+        // error seen.
+        let mut error = None;
+        for join_handle in join_handles {
+            let result = join_handle
+                .await
+                .map_err(|e| Error::internal_error(&e.to_string()))?
+                .await;
+
+            if result.is_err() {
+                error!(log, "{:?}", result);
+                error = Some(result);
+            }
+        }
+        if let Some(e) = error {
+            return e.map(|_| ()).map_err(|e| e.into());
+        }
+
+        if sleds_page.len() < 10 {
+            break;
+        }
+
+        if let Some(last) = sleds_page.last() {
+            last_sled_id = Some(last.id());
+        }
+    }
+
+    Ok(())
+}
+
+/// Soft-delete an individual external IP from the NAT RPW, without
+/// triggering a Dendrite notification.
+async fn external_ip_delete_dpd_config_inner(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    opctx: &OpContext,
+    external_ip: &ExternalIp,
+) -> Result<(), Error> {
+    // Soft delete the NAT entry
+    match datastore.ipv4_nat_delete_by_external_ip(&opctx, external_ip).await {
+        Ok(_) => Ok(()),
+        Err(err) => match err {
+            Error::ObjectNotFound { .. } => {
+                warn!(log, "no matching nat entries to soft delete");
+                Ok(())
+            }
+            _ => {
+                let message =
+                    format!("failed to delete nat entry due to error: {err:?}");
+                error!(log, "{}", message);
+                Err(Error::internal_error(&message))
+            }
+        },
+    }
+}
