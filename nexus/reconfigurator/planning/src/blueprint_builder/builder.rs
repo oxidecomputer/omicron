@@ -412,6 +412,10 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_zones = self.zones.current_sled_zones(sled_id);
         for (zone_config, state) in sled_zones {
             let zone_id = zone_config.id;
+            let log = log.new(o!(
+                "zone_id" => zone_id.to_string()
+            ));
+
             let Some(reason) =
                 zone_needs_expungement(sled_details, zone_config)
             else {
@@ -430,7 +434,7 @@ impl<'a> BlueprintBuilder<'a> {
                     ZoneExpungeReason::DiskExpunged => {
                         info!(
                             &log,
-                            "expunged disk with non-expunged zone(s) was found"
+                            "expunged disk with non-expunged zone was found"
                         );
                     }
                     ZoneExpungeReason::SledDecommissioned => {
@@ -441,7 +445,7 @@ impl<'a> BlueprintBuilder<'a> {
                         // this, while still removing the zones.
                         error!(
                             &log,
-                            "sled has state Decommissioned, yet has zone {zone_id} \
+                            "sled has state Decommissioned, yet has zone \
                              allocated to it; will expunge it"
                         );
                     }
@@ -449,7 +453,7 @@ impl<'a> BlueprintBuilder<'a> {
                         // This is the expected situation.
                         info!(
                             &log,
-                            "expunged sled with non-expunged zone {zone_id} found"
+                            "expunged sled with non-expunged zone found"
                         );
                     }
                 }

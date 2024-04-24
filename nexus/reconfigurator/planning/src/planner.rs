@@ -906,11 +906,19 @@ mod test {
         assert_eq!(diff_modified.zones_added().len(), 0);
         assert_eq!(diff_modified.zones_removed().len(), 0);
         assert_eq!(diff_modified.zones_modified().count(), 1);
-        assert!(diff_modified
-            .zones_modified()
-            .next()
-            .unwrap()
-            .disposition_changed());
+
+        let modified_zone =
+            &diff_modified.zones_modified().next().unwrap().zone_after;
+        assert!(
+            modified_zone.zone_type.is_crucible(),
+            "Expected the modified zone to be a Crucible zone, but it was: {:?}",
+            modified_zone.zone_type
+        );
+        assert_eq!(
+            modified_zone.disposition,
+            BlueprintZoneDisposition::Expunged,
+            "Should have expunged this zone"
+        );
 
         logctx.cleanup_successful();
     }
