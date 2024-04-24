@@ -1515,7 +1515,9 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(external_ip) = z.zone_type.external_ip() {
+                if let Some((external_ip, _)) =
+                    z.zone_type.external_networking()
+                {
                     used_ip_ranges.push(IpRange::from(external_ip.ip()));
                 }
             }
