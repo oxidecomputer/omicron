@@ -170,7 +170,10 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
         async {
             Ok(self
                 .datastore
-                .sled_list_all_batched(&self.opctx, SledFilter::InInventory)
+                .sled_list_all_batched(
+                    &self.opctx,
+                    SledFilter::QueryDuringInventory,
+                )
                 .await
                 .context("listing sleds")?
                 .into_iter()

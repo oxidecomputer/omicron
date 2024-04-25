@@ -250,7 +250,7 @@ pub enum SledFilter {
     EligibleForDiscretionaryServices,
 
     /// Sleds whose sled agents should be queried for inventory
-    InInventory,
+    QueryDuringInventory,
 
     /// Sleds that are in service (even if they might not be eligible for
     /// discretionary services).
@@ -309,7 +309,7 @@ impl SledPolicy {
             } => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => true,
-                SledFilter::InInventory => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
@@ -319,7 +319,7 @@ impl SledPolicy {
             } => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
-                SledFilter::InInventory => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => true,
@@ -327,7 +327,7 @@ impl SledPolicy {
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
-                SledFilter::InInventory => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
@@ -357,7 +357,7 @@ impl SledState {
             SledState::Active => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => true,
-                SledFilter::InInventory => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
@@ -365,7 +365,7 @@ impl SledState {
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
-                SledFilter::InInventory => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
