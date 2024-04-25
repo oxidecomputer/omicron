@@ -359,8 +359,9 @@ impl<'a> BlueprintBuilder<'a> {
         // are no longer in service and need expungement work.
         let blueprint_zones =
             self.zones.into_zones_map(self.input.all_sled_ids(SledFilter::All));
-        let blueprint_disks =
-            self.disks.into_disks_map(self.input.all_sled_ids(SledFilter::All));
+        let blueprint_disks = self
+            .disks
+            .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,

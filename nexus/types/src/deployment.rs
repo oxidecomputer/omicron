@@ -341,6 +341,14 @@ impl BlueprintZonesConfig {
                 .collect(),
         }
     }
+
+    /// Returns true if all zones in the blueprint have a disposition of
+    // `Expunged`, false otherwise.
+    pub fn are_all_zones_expunged(&self) -> bool {
+        self.zones
+            .iter()
+            .all(|c| c.disposition == BlueprintZoneDisposition::Expunged)
+    }
 }
 
 trait ZoneSortKey {

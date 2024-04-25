@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
@@ -115,7 +116,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore.sled_list(&opctx, pagparams).await
+        self.db_datastore
+            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .await
     }
 
     pub async fn sled_client(
