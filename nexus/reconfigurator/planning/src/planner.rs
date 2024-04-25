@@ -409,7 +409,7 @@ impl<'a> Planner<'a> {
         //   value (the empty string). This will trigger finalization.
 
         let policy = self.input.target_cockroachdb_cluster_version();
-        let CockroachDbSettings { version, preserve_downgrade, .. } =
+        let CockroachDbSettings { version, .. } =
             self.input.cockroachdb_settings();
 
         if policy == version {
