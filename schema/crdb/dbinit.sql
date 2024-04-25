@@ -3195,7 +3195,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- identifies the CockroachDB state fingerprint when blueprint planning began
     cockroachdb_fingerprint TEXT NOT NULL,
 
-    -- CockroachDB cluster settings managed by blueprints.
+    -- CockroachDB settings managed by blueprints.
     --
     -- Settings are typed and not null; we use NULL in these columns to reflect
     -- that blueprint execution should not modify these options. There is no

@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Datastore methods involving CockroachDB cluster settings, which are managed
-//! by the Reconfigurator.
+//! Datastore methods involving CockroachDB settings, which are managed by the
+//! Reconfigurator.
 
 use super::DataStore;
 use crate::context::OpContext;
@@ -85,7 +85,7 @@ impl DataStore {
         })
     }
 
-    /// Set a CockroachDB cluster setting with a `String` value.
+    /// Set a CockroachDB setting with a `String` value.
     ///
     /// This cannot be run in a multi-statement transaction.
     pub async fn cockroachdb_setting_set_string(

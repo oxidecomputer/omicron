@@ -162,7 +162,7 @@ impl super::Nexus {
             .version;
         let cockroachdb_settings =
             datastore.cockroachdb_settings(opctx).await.internal_context(
-                "fetching cluster settings for blueprint planning",
+                "fetching cockroachdb settings for blueprint planning",
             )?;
 
         let planning_input = PlanningInputFromDb {

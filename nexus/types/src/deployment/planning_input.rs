@@ -62,8 +62,8 @@ use uuid::Uuid;
 /// /!\ WARNING: If you change this, there is no going back. /!\
 pub const COCKROACHDB_CLUSTER_VERSION: &str = "22.1";
 
-/// Describes the current values for any CockroachDB cluster settings that we
-/// care about.
+/// Describes the current values for any CockroachDB settings that we care
+/// about.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CockroachDbSettings {
     /// A fingerprint representing the current state of the cluster. This must
@@ -485,7 +485,7 @@ pub struct PlanningInput {
     /// current external DNS version
     external_dns_version: Generation,
 
-    /// current CockroachDB cluster settings
+    /// current CockroachDB settings
     cockroachdb_settings: CockroachDbSettings,
 
     /// per-sled policy and resources
@@ -519,7 +519,7 @@ impl PlanningInput {
         self.external_dns_version
     }
 
-    /// current CockroachDB cluster settings
+    /// current CockroachDB settings
     pub fn cockroachdb_settings(&self) -> &CockroachDbSettings {
         &self.cockroachdb_settings
     }

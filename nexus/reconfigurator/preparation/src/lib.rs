@@ -227,7 +227,7 @@ pub async fn reconfigurator_state_load(
     let cockroachdb_settings = datastore
         .cockroachdb_settings(opctx)
         .await
-        .context("fetching cluster settings")?;
+        .context("fetching cockroachdb settings")?;
 
     let planning_input = PlanningInputFromDb {
         sled_rows: &sled_rows,

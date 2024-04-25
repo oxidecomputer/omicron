@@ -81,7 +81,7 @@ impl<'a> Planner<'a> {
 
         self.do_plan_expunge()?;
         self.do_plan_add()?;
-        self.do_plan_cockroachdb_cluster_settings();
+        self.do_plan_cockroachdb_settings();
 
         Ok(())
     }
@@ -360,7 +360,7 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_cockroachdb_cluster_settings(&mut self) {
+    fn do_plan_cockroachdb_settings(&mut self) {
         // Figure out what we should set the CockroachDB "preserve downgrade
         // option" setting to based on the planning input.
         //
@@ -369,23 +369,23 @@ impl<'a> Planner<'a> {
         // represent the year and the Nth release that year. So the major
         // version in "22.2.7" is "22.2".
         //
-        // A given major version of CockroachDB is backward compatible with
-        // the storage format of the previous major version of CockroachDB.
-        // This is shown by the `version` cluster setting, which displays the
-        // current storage format version. When `version` is '22.2', versions
-        // v22.2.x or v23.1.x can be used to run a node. This allows for rolling
-        // upgrades of nodes within the cluster and also preserves the ability
-        // to rollback until the new software version can be validated.
+        // A given major version of CockroachDB is backward compatible with the
+        // storage format of the previous major version of CockroachDB. This is
+        // shown by the `version` setting, which displays the current storage
+        // format version. When `version` is '22.2', versions v22.2.x or v23.1.x
+        // can be used to run a node. This allows for rolling upgrades of nodes
+        // within the cluster and also preserves the ability to rollback until
+        // the new software version can be validated.
         //
         // By default, when all nodes of a cluster are upgraded to a new major
         // version, the upgrade is "auto-finalized"; `version` is changed to the
         // new major version, and rolling back to a previous major version of
         // CockroachDB is no longer possible.
         //
-        // The `cluster.preserve_downgrade_option` cluster setting can be used
-        // to control this. This setting can only be set to the current value of
-        // the `version` cluster setting, and when it is set, CockroachDB will
-        // not perform auto-finalization. To perform finalization and finish the
+        // The `cluster.preserve_downgrade_option` setting can be used to
+        // control this. This setting can only be set to the current value
+        // of the `version` setting, and when it is set, CockroachDB will not
+        // perform auto-finalization. To perform finalization and finish the
         // upgrade, a client must reset the "preserve downgrade option" setting.
         // Finalization occurs in the background, and the "preserve downgrade
         // option" setting should not be changed again until finalization

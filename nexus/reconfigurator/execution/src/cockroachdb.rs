@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Ensures CockroachDB cluster settings are set
+//! Ensures CockroachDB settings are set
 
 use anyhow::Context;
 use nexus_db_queries::context::OpContext;
@@ -27,7 +27,7 @@ pub(crate) async fn ensure_settings(
             .context("failed to set cluster.preserve_downgrade_option")?;
         info!(
             opctx.log,
-            "set cluster setting";
+            "set cockroachdb setting";
             "setting" => "cluster.preserve_downgrade_option",
             "value" => &value,
         );
