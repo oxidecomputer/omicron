@@ -103,8 +103,8 @@ use omicron_common::backoff::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -1341,6 +1341,16 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         BlueprintZoneConfig::from_omicron_zone_config(
             z.clone().into(),
             disposition,
+            // This is pretty weird: IP IDs don't exist yet, so it's fine for us
+            // to make them up (Nexus will record them as a part of the
+            // handoff). We could pass `None` here for some zone types, but it's
+            // a little simpler to just always pass a new ID, which will only be
+            // used if the zone type has an external IP.
+            //
+            // This should all go away once RSS starts using blueprints more
+            // directly (instead of this conversion after the fact):
+            // https://github.com/oxidecomputer/omicron/issues/5272
+            Some(ExternalIpUuid::new_v4()),
         )
     };
 

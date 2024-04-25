@@ -17,20 +17,15 @@ use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
-use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::info;
 use slog::warn;
-use std::net::IpAddr;
-use std::net::SocketAddr;
 
 pub(crate) async fn ensure_zone_resources_allocated(
     opctx: &OpContext,
@@ -49,7 +44,7 @@ pub(crate) async fn ensure_zone_resources_allocated(
                 allocator
                     .ensure_nexus_external_networking_allocated(
                         z.id,
-                        *external_ip,
+                        OmicronZoneExternalIp::Floating(*external_ip),
                         nic,
                     )
                     .await?;
@@ -60,17 +55,19 @@ pub(crate) async fn ensure_zone_resources_allocated(
                 allocator
                     .ensure_external_dns_external_networking_allocated(
                         z.id,
-                        *dns_address,
+                        OmicronZoneExternalIp::Floating(dns_address.into_ip()),
                         nic,
                     )
                     .await?;
             }
             BlueprintZoneType::BoundaryNtp(
-                blueprint_zone_type::BoundaryNtp { snat_cfg, nic, .. },
+                blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 allocator
                     .ensure_boundary_ntp_external_networking_allocated(
-                        z.id, *snat_cfg, nic,
+                        z.id,
+                        OmicronZoneExternalIp::Snat(*external_ip),
+                        nic,
                     )
                     .await?;
             }
@@ -100,13 +97,13 @@ impl<'a> ResourceAllocator<'a> {
         &self,
         zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        ip_kind: OmicronZoneExternalIpKind,
+        external_ip: OmicronZoneExternalIp,
     ) -> anyhow::Result<bool> {
         // localhost is used by many components in the test suite.  We can't use
         // the normal path because normally a given external IP must only be
         // used once.  Just treat localhost in the test suite as though it's
         // already allocated.  We do the same in is_nic_already_allocated().
-        if cfg!(test) && ip_kind.ip().is_loopback() {
+        if cfg!(test) && external_ip.ip().is_loopback() {
             return Ok(true);
         }
 
@@ -129,7 +126,7 @@ impl<'a> ResourceAllocator<'a> {
                     self.opctx.log, "external IP allocation required for zone";
                     "zone_kind" => %zone_kind,
                     "zone_id" => %zone_id,
-                    "ip" => ?ip_kind,
+                    "ip" => ?external_ip,
                 );
 
                 return Ok(false);
@@ -140,7 +137,7 @@ impl<'a> ResourceAllocator<'a> {
                     self.opctx.log, "zone has multiple IPs allocated";
                     "zone_kind" => %zone_kind,
                     "zone_id" => %zone_id,
-                    "want_ip" => ?ip_kind,
+                    "want_ip" => ?external_ip,
                     "allocated_ips" => ?allocated_ips,
                 );
                 bail!(
@@ -167,26 +164,26 @@ impl<'a> ResourceAllocator<'a> {
             }
         };
 
-        // TODO-cleanup The blueprint should store the IP ID, at which point we
-        // could check full equality here instead of only checking the kind.
-        if existing_ip.kind == ip_kind {
+        if existing_ip == external_ip {
             info!(
                 self.opctx.log, "found already-allocated external IP";
                 "zone_kind" => %zone_kind,
                 "zone_id" => %zone_id,
-                "ip" => ?ip_kind,
+                "ip" => ?external_ip,
             );
-            return Ok(true);
+            Ok(true)
+        } else {
+            warn!(
+                self.opctx.log, "zone has unexpected IP allocated";
+                "zone_kind" => %zone_kind,
+                "zone_id" => %zone_id,
+                "want_ip" => ?external_ip,
+                "allocated_ip" => ?existing_ip,
+            );
+            bail!(
+                "zone {zone_id} has a different IP allocated ({existing_ip:?})",
+            );
         }
-
-        warn!(
-            self.opctx.log, "zone has unexpected IP allocated";
-            "zone_kind" => %zone_kind,
-            "zone_id" => %zone_id,
-            "want_ip" => ?ip_kind,
-            "allocated_ip" => ?existing_ip,
-        );
-        bail!("zone {zone_id} has a different IP allocated ({existing_ip:?})",);
     }
 
     // Helper function to determine whether a given NIC is already allocated to
@@ -265,7 +262,7 @@ impl<'a> ResourceAllocator<'a> {
         &self,
         zone_kind: ZoneKind,
         zone_id: OmicronZoneUuid,
-        ip_kind: OmicronZoneExternalIpKind,
+        external_ip: OmicronZoneExternalIp,
     ) -> anyhow::Result<()> {
         // Only attempt to allocate `external_ip` if it isn't already assigned
         // to this zone.
@@ -280,24 +277,23 @@ impl<'a> ResourceAllocator<'a> {
         // exactly what we want if two Nexuses try to realize the same
         // blueprint at the same time.
         if self
-            .is_external_ip_already_allocated(zone_kind, zone_id, ip_kind)
+            .is_external_ip_already_allocated(zone_kind, zone_id, external_ip)
             .await?
         {
             return Ok(());
         }
-        let ip_id = ExternalIpUuid::new_v4();
         self.datastore
             .external_ip_allocate_omicron_zone(
                 self.opctx,
                 zone_id,
                 zone_kind,
-                OmicronZoneExternalIp { id: ip_id, kind: ip_kind },
+                external_ip,
             )
             .await
             .with_context(|| {
                 format!(
                     "failed to allocate IP to {zone_kind} {zone_id}: \
-                     {ip_kind:?}"
+                     {external_ip:?}"
                 )
             })?;
 
@@ -305,8 +301,7 @@ impl<'a> ResourceAllocator<'a> {
             self.opctx.log, "successfully allocated external IP";
             "zone_kind" => %zone_kind,
             "zone_id" => %zone_id,
-            "ip" => ?ip_kind,
-            "ip_id" => %ip_id,
+            "ip" => ?external_ip,
         );
 
         Ok(())
@@ -416,15 +411,11 @@ impl<'a> ResourceAllocator<'a> {
     async fn ensure_nexus_external_networking_allocated(
         &self,
         zone_id: OmicronZoneUuid,
-        external_ip: IpAddr,
+        external_ip: OmicronZoneExternalIp,
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
-        self.ensure_external_service_ip(
-            ZoneKind::Nexus,
-            zone_id,
-            OmicronZoneExternalIpKind::Floating(external_ip),
-        )
-        .await?;
+        self.ensure_external_service_ip(ZoneKind::Nexus, zone_id, external_ip)
+            .await?;
         self.ensure_service_nic("nexus", zone_id, nic, &NEXUS_VPC_SUBNET)
             .await?;
         Ok(())
@@ -433,13 +424,13 @@ impl<'a> ResourceAllocator<'a> {
     async fn ensure_external_dns_external_networking_allocated(
         &self,
         zone_id: OmicronZoneUuid,
-        dns_address: SocketAddr,
+        external_ip: OmicronZoneExternalIp,
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
         self.ensure_external_service_ip(
             ZoneKind::ExternalDns,
             zone_id,
-            OmicronZoneExternalIpKind::Floating(dns_address.ip()),
+            external_ip,
         )
         .await?;
         self.ensure_service_nic("external_dns", zone_id, nic, &DNS_VPC_SUBNET)
@@ -450,13 +441,13 @@ impl<'a> ResourceAllocator<'a> {
     async fn ensure_boundary_ntp_external_networking_allocated(
         &self,
         zone_id: OmicronZoneUuid,
-        snat: SourceNatConfig,
+        external_ip: OmicronZoneExternalIp,
         nic: &NetworkInterface,
     ) -> anyhow::Result<()> {
         self.ensure_external_service_ip(
             ZoneKind::BoundaryNtp,
             zone_id,
-            OmicronZoneExternalIpKind::Snat(snat),
+            external_ip,
         )
         .await?;
         self.ensure_service_nic("ntp", zone_id, nic, &NTP_VPC_SUBNET).await?;
@@ -473,7 +464,11 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneDataset;
+    use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::identity::Resource;
+    use nexus_types::inventory::SourceNatConfig;
     use omicron_common::address::IpRange;
     use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -482,8 +477,10 @@ mod tests {
     use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddr;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -524,8 +521,10 @@ mod tests {
 
         // Nexus:
         let nexus_id = OmicronZoneUuid::new_v4();
-        let nexus_external_ip =
-            external_ips.next().expect("exhausted external_ips");
+        let nexus_external_ip = OmicronZoneExternalFloatingIp {
+            id: ExternalIpUuid::new_v4(),
+            ip: external_ips.next().expect("exhausted external_ips"),
+        };
         let nexus_nic = NetworkInterface {
             id: Uuid::new_v4(),
             kind: NetworkInterfaceKind::Service {
@@ -546,8 +545,13 @@ mod tests {
 
         // External DNS:
         let dns_id = OmicronZoneUuid::new_v4();
-        let dns_external_ip =
-            external_ips.next().expect("exhausted external_ips");
+        let dns_external_addr = OmicronZoneExternalFloatingAddr {
+            id: ExternalIpUuid::new_v4(),
+            addr: SocketAddr::new(
+                external_ips.next().expect("exhausted external_ips"),
+                0,
+            ),
+        };
         let dns_nic = NetworkInterface {
             id: Uuid::new_v4(),
             kind: NetworkInterfaceKind::Service {
@@ -568,12 +572,15 @@ mod tests {
 
         // Boundary NTP:
         let ntp_id = OmicronZoneUuid::new_v4();
-        let ntp_snat = SourceNatConfig::new(
-            external_ips.next().expect("exhausted external_ips"),
-            NUM_SOURCE_NAT_PORTS,
-            2 * NUM_SOURCE_NAT_PORTS - 1,
-        )
-        .unwrap();
+        let ntp_external_ip = OmicronZoneExternalSnatIp {
+            id: ExternalIpUuid::new_v4(),
+            snat_cfg: SourceNatConfig::new(
+                external_ips.next().expect("exhausted external_ips"),
+                NUM_SOURCE_NAT_PORTS,
+                2 * NUM_SOURCE_NAT_PORTS - 1,
+            )
+            .unwrap(),
+        };
         let ntp_nic = NetworkInterface {
             id: Uuid::new_v4(),
             kind: NetworkInterfaceKind::Service {
@@ -621,7 +628,7 @@ mod tests {
                                 .expect("bad name"),
                         },
                         http_address: "[::1]:0".parse().unwrap(),
-                        dns_address: SocketAddr::new(dns_external_ip, 0),
+                        dns_address: dns_external_addr,
                         nic: dns_nic.clone(),
                     },
                 ),
@@ -637,7 +644,7 @@ mod tests {
                         dns_servers: Vec::new(),
                         domain: None,
                         nic: ntp_nic.clone(),
-                        snat_cfg: ntp_snat,
+                        external_ip: ntp_external_ip,
                     },
                 ),
             },
@@ -661,7 +668,11 @@ mod tests {
             db_nexus_ips[0].parent_id,
             Some(nexus_id.into_untyped_uuid())
         );
-        assert_eq!(db_nexus_ips[0].ip, nexus_external_ip.into());
+        assert_eq!(
+            db_nexus_ips[0].id,
+            nexus_external_ip.id.into_untyped_uuid()
+        );
+        assert_eq!(db_nexus_ips[0].ip, nexus_external_ip.ip.into());
         assert_eq!(db_nexus_ips[0].first_port, SqlU16(0));
         assert_eq!(db_nexus_ips[0].last_port, SqlU16(65535));
 
@@ -672,7 +683,8 @@ mod tests {
         assert_eq!(db_dns_ips.len(), 1);
         assert!(db_dns_ips[0].is_service);
         assert_eq!(db_dns_ips[0].parent_id, Some(dns_id.into_untyped_uuid()));
-        assert_eq!(db_dns_ips[0].ip, dns_external_ip.into());
+        assert_eq!(db_dns_ips[0].id, dns_external_addr.id.into_untyped_uuid());
+        assert_eq!(db_dns_ips[0].ip, dns_external_addr.addr.ip().into());
         assert_eq!(db_dns_ips[0].first_port, SqlU16(0));
         assert_eq!(db_dns_ips[0].last_port, SqlU16(65535));
 
@@ -683,10 +695,11 @@ mod tests {
         assert_eq!(db_ntp_ips.len(), 1);
         assert!(db_ntp_ips[0].is_service);
         assert_eq!(db_ntp_ips[0].parent_id, Some(ntp_id.into_untyped_uuid()));
-        assert_eq!(db_ntp_ips[0].ip, ntp_snat.ip.into());
+        assert_eq!(db_ntp_ips[0].id, ntp_external_ip.id.into_untyped_uuid());
+        assert_eq!(db_ntp_ips[0].ip, ntp_external_ip.snat_cfg.ip.into());
         assert_eq!(
             db_ntp_ips[0].first_port.0..=db_ntp_ips[0].last_port.0,
-            ntp_snat.port_range()
+            ntp_external_ip.snat_cfg.port_range()
         );
 
         // Check that the NIC records were created.
@@ -807,7 +820,7 @@ mod tests {
                         },
                     ) = &mut zone.zone_type
                     {
-                        *external_ip = bogus_ip;
+                        external_ip.ip = bogus_ip;
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id
@@ -827,7 +840,7 @@ mod tests {
                         },
                     ) = &mut zone.zone_type
                     {
-                        *dns_address = SocketAddr::new(bogus_ip, 0);
+                        dns_address.addr.set_ip(bogus_ip);
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id
@@ -841,17 +854,21 @@ mod tests {
                 for zone in zones {
                     if let BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
-                            ref mut snat_cfg,
+                            ref mut external_ip,
                             ..
                         },
                     ) = &mut zone.zone_type
                     {
-                        let (mut first, mut last) = snat_cfg.port_range_raw();
+                        let (mut first, mut last) =
+                            external_ip.snat_cfg.port_range_raw();
                         first += NUM_SOURCE_NAT_PORTS;
                         last += NUM_SOURCE_NAT_PORTS;
-                        *snat_cfg =
-                            SourceNatConfig::new(snat_cfg.ip, first, last)
-                                .unwrap();
+                        external_ip.snat_cfg = SourceNatConfig::new(
+                            external_ip.snat_cfg.ip,
+                            first,
+                            last,
+                        )
+                        .unwrap();
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id

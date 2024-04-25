@@ -48,6 +48,8 @@ progenitor::generate_api!(
         Vni = omicron_common::api::external::Vni,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
+        ZpoolKind = omicron_common::zpool_name::ZpoolKind,
+        ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
 );
 

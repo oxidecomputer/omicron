@@ -4725,7 +4725,6 @@ dependencies = [
  "dns-service-client",
  "futures",
  "httptest",
- "illumos-utils",
  "internal-dns",
  "ipnet",
  "nexus-config",
@@ -4762,7 +4761,6 @@ dependencies = [
  "debug-ignore",
  "expectorate",
  "gateway-client",
- "illumos-utils",
  "indexmap 2.2.6",
  "internal-dns",
  "ipnet",
@@ -4791,7 +4789,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
- "illumos-utils",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-types",
@@ -4799,6 +4796,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "slog",
+ "slog-error-chain",
 ]
 
 [[package]]
@@ -5228,6 +5226,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
+ "toml 0.8.12",
  "uuid 1.8.0",
 ]
 

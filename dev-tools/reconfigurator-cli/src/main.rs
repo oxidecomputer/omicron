@@ -21,8 +21,6 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -34,13 +32,10 @@ use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::SledUuid;
 use reedline::{Reedline, Signal};
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::BufRead;
-use std::net::IpAddr;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -60,14 +55,6 @@ struct ReconfiguratorSim {
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
-
-    /// external IPs allocated to services
-    ///
-    /// In the real system, external IPs have IDs, but those IDs only live in
-    /// CRDB - they're not part of the zone config sent from Reconfigurator to
-    /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
-    /// we need.
-    external_ips: RefCell<IndexMap<IpAddr, ExternalIpUuid>>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -152,17 +139,7 @@ impl ReconfiguratorSim {
         for (_, zone) in
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
-            if let Some(ip) = zone.zone_type.external_ip() {
-                let external_ip = OmicronZoneExternalIp {
-                    id: *self
-                        .external_ips
-                        .borrow_mut()
-                        .entry(ip)
-                        .or_insert_with(ExternalIpUuid::new_v4),
-                    // TODO-cleanup This is potentially wrong;
-                    // zone_type should tell us the IP kind.
-                    kind: OmicronZoneExternalIpKind::Floating(ip),
-                };
+            if let Some(external_ip) = zone.zone_type.external_ip() {
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
@@ -205,7 +182,6 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
-        external_ips: RefCell::new(IndexMap::new()),
         internal_dns: BTreeMap::new(),
         external_dns: BTreeMap::new(),
         log,

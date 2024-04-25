@@ -389,7 +389,7 @@ pub struct OmicronZoneDataset {
 impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
     fn from(local: OmicronZoneDataset) -> Self {
         Self {
-            pool_name: sled_agent_client::types::ZpoolName::from_str(
+            pool_name: omicron_common::zpool_name::ZpoolName::from_str(
                 &local.pool_name.to_string(),
             )
             .unwrap(),

@@ -9,13 +9,10 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use typed_rng::TypedUuidRng;
@@ -102,17 +99,9 @@ impl ExampleSystem {
             };
             for zone in zones.zones.iter() {
                 let service_id = zone.id;
-                if let Some(ip) = zone.zone_type.external_ip() {
+                if let Some(external_ip) = zone.zone_type.external_ip() {
                     input_builder
-                        .add_omicron_zone_external_ip(
-                            service_id,
-                            OmicronZoneExternalIp {
-                                id: ExternalIpUuid::new_v4(),
-                                // TODO-cleanup This is potentially wrong;
-                                // zone_type should tell us the IP kind.
-                                kind: OmicronZoneExternalIpKind::Floating(ip),
-                            },
-                        )
+                        .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
                 }
                 if let Some(nic) = zone.zone_type.opte_vnic() {

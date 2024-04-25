@@ -1150,7 +1150,8 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
-    use nexus_types::deployment::OmicronZoneExternalIpKind;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfig;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -1205,23 +1206,28 @@ mod tests {
         let mut external_ips = Vec::new();
         let mut allocate_snat = false; // flip-flop between regular and snat
         for ip in ip_range.iter() {
-            let external_ip_kind = if allocate_snat {
-                OmicronZoneExternalIpKind::Snat(
-                    SourceNatConfig::new(ip, 0, NUM_SOURCE_NAT_PORTS - 1)
-                        .unwrap(),
-                )
+            let external_ip = if allocate_snat {
+                OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                    id: ExternalIpUuid::new_v4(),
+                    snat_cfg: SourceNatConfig::new(
+                        ip,
+                        0,
+                        NUM_SOURCE_NAT_PORTS - 1,
+                    )
+                    .unwrap(),
+                })
             } else {
-                OmicronZoneExternalIpKind::Floating(ip)
+                OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip,
+                })
             };
             let external_ip = datastore
                 .external_ip_allocate_omicron_zone(
                     &opctx,
                     OmicronZoneUuid::new_v4(),
                     ZoneKind::Nexus,
-                    OmicronZoneExternalIp {
-                        id: ExternalIpUuid::new_v4(),
-                        kind: external_ip_kind,
-                    },
+                    external_ip,
                 )
                 .await
                 .expect("failed to allocate service IP");

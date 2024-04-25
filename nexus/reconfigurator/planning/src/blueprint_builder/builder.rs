@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneDataset;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -43,6 +44,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -65,7 +67,6 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
@@ -110,15 +111,6 @@ pub enum EnsureMultiple {
     Added(usize),
     /// no action was necessary
     NotNeeded,
-}
-
-fn zpool_id_to_external_name(zpool_id: ZpoolUuid) -> anyhow::Result<ZpoolName> {
-    let pool_name_generated =
-        illumos_utils::zpool::ZpoolName::new_external(zpool_id).to_string();
-    let pool_name = ZpoolName::from_str(&pool_name_generated).map_err(|e| {
-        anyhow!("Failed to create zpool name from {zpool_id}: {e}")
-    })?;
-    Ok(pool_name)
 }
 
 /// Helper for assembling a blueprint
@@ -306,10 +298,10 @@ impl<'a> BlueprintBuilder<'a> {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
-                if !external_ip.is_loopback()
-                    && !used_external_ips.insert(external_ip)
+                if !external_ip.ip().is_loopback()
+                    && !used_external_ips.insert(external_ip.ip())
                 {
-                    bail!("duplicate external IP: {external_ip}");
+                    bail!("duplicate external IP: {external_ip:?}");
                 }
             }
 
@@ -645,7 +637,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         zpool_id: ZpoolUuid,
     ) -> Result<Ensure, Error> {
-        let pool_name = zpool_id_to_external_name(zpool_id)?;
+        let pool_name = ZpoolName::new_external(zpool_id);
 
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
@@ -763,13 +755,16 @@ impl<'a> BlueprintBuilder<'a> {
 
         for _ in 0..num_nexus_to_add {
             let nexus_id = self.rng.zone_rng.next();
-            let external_ip = self
-                .available_external_ips
-                .next()
-                .ok_or(Error::NoExternalServiceIpAvailable)?;
+            let external_ip = OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: self
+                    .available_external_ips
+                    .next()
+                    .ok_or(Error::NoExternalServiceIpAvailable)?,
+            };
 
             let nic = {
-                let (ip, subnet) = match external_ip {
+                let (ip, subnet) = match external_ip.ip {
                     IpAddr::V4(_) => (
                         self.nexus_v4_ips
                             .next()
@@ -1371,7 +1366,7 @@ pub mod test {
             new_sled_resources
                 .zpools
                 .keys()
-                .map(|id| { zpool_id_to_external_name(*id).unwrap() })
+                .map(|id| { ZpoolName::new_external(*id) })
                 .collect()
         );
 
@@ -1539,8 +1534,8 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(ip) = z.zone_type.external_ip() {
-                    used_ip_ranges.push(IpRange::from(ip));
+                if let Some(external_ip) = z.zone_type.external_ip() {
+                    used_ip_ranges.push(IpRange::from(external_ip.ip()));
                 }
             }
             assert!(!used_ip_ranges.is_empty());

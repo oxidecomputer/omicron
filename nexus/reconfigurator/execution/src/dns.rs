@@ -445,7 +445,7 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) => Some(external_ip),
+            }) => Some(external_ip.ip),
             _ => None,
         })
         .collect()
@@ -496,6 +496,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
@@ -567,10 +568,14 @@ mod test {
                         .zones
                         .zones
                         .into_iter()
-                        .map(|config| {
+                        .map(|config| -> BlueprintZoneConfig {
                             BlueprintZoneConfig::from_omicron_zone_config(
                                 config,
                                 BlueprintZoneDisposition::InService,
+                                // We don't get external IP IDs in inventory
+                                // collections. We'll just make one up for every
+                                // zone that needs one here. This is gross.
+                                Some(ExternalIpUuid::new_v4()),
                             )
                             .expect("failed to convert zone config")
                         })
