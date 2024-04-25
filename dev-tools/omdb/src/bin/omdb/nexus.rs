@@ -483,9 +483,8 @@ async fn cmd_nexus_background_tasks_activate(
     client: &nexus_client::Client,
     args: &BackgroundTasksActivateArgs,
 ) -> Result<(), anyhow::Error> {
-    let body = BackgroundTasksActivateRequest {
-        bgtask_names: args.tasks.iter().cloned().collect(),
-    };
+    let body =
+        BackgroundTasksActivateRequest { bgtask_names: args.tasks.clone() };
     client
         .bgtask_activate(&body)
         .await
