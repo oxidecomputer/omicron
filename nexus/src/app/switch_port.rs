@@ -169,13 +169,6 @@ impl super::Nexus {
         self.db_datastore.switch_port_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn list_switch_ports_with_uplinks(
-        &self,
-        opctx: &OpContext,
-    ) -> ListResultVec<SwitchPort> {
-        list_switch_ports_with_uplinks(&self.db_datastore, opctx).await
-    }
-
     pub(crate) async fn set_switch_port_settings_id(
         &self,
         opctx: &OpContext,

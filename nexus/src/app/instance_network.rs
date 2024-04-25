@@ -211,35 +211,13 @@ impl super::Nexus {
         opctx: &OpContext,
         nat_entry: &Ipv4NatEntry,
     ) -> Result<(), Error> {
-        let log = &self.log;
-
-        info!(log, "deleting individual NAT entry from dpd configuration";
-              "id" => ?nat_entry.id,
-              "version_added" => %nat_entry.external_address.0);
-
-        match self.db_datastore.ipv4_nat_delete(&opctx, nat_entry).await {
-            Ok(_) => {}
-            Err(err) => match err {
-                Error::ObjectNotFound { .. } => {
-                    warn!(log, "no matching nat entries to soft delete");
-                }
-                _ => {
-                    let message = format!(
-                        "failed to delete nat entry due to error: {err:?}"
-                    );
-                    error!(log, "{}", message);
-                    return Err(Error::internal_error(&message));
-                }
-            },
-        }
-
-        notify_dendrite_nat_state(
+        delete_dpd_config_by_entry(
             &self.db_datastore,
-            log,
             &self.resolver().await,
+            &self.log,
+            opctx,
             &self.opctx_alloc,
-            None,
-            false,
+            nat_entry,
         )
         .await
     }
@@ -260,45 +238,6 @@ impl super::Nexus {
             opctx,
             &self.opctx_alloc,
             probe_id,
-        )
-        .await
-    }
-
-    /// Given old and new instance runtime states, determines the desired
-    /// networking configuration for a given instance and ensures it has been
-    /// propagated to all relevant sleds.
-    ///
-    /// # Arguments
-    ///
-    /// - opctx: An operation context for this operation.
-    /// - authz_instance: A resolved authorization context for the instance of
-    ///   interest.
-    /// - prev_instance_state: The most-recently-recorded instance runtime
-    ///   state for this instance.
-    /// - new_instance_state: The instance state that the caller of this routine
-    ///   has observed and that should be used to set up this instance's
-    ///   networking state.
-    ///
-    /// # Return value
-    ///
-    /// `Ok(())` if this routine completed all the operations it wanted to
-    /// complete, or an appropriate `Err` otherwise.
-    pub(crate) async fn ensure_updated_instance_network_config(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        prev_instance_state: &db::model::InstanceRuntimeState,
-        new_instance_state: &nexus::InstanceRuntimeState,
-    ) -> Result<(), Error> {
-        ensure_updated_instance_network_config(
-            &self.db_datastore,
-            &self.log,
-            &self.resolver().await,
-            opctx,
-            &self.opctx_alloc,
-            authz_instance,
-            prev_instance_state,
-            new_instance_state,
         )
         .await
     }
@@ -353,6 +292,7 @@ pub(crate) async fn boundary_switches(
 ///
 /// `Ok(())` if this routine completed all the operations it wanted to
 /// complete, or an appropriate `Err` otherwise.
+#[allow(clippy::too_many_arguments)] // Yeah, I know, I know, Clippy...
 pub(crate) async fn ensure_updated_instance_network_config(
     datastore: &DataStore,
     log: &slog::Logger,
@@ -529,6 +469,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
 ///   - If this is `None`, this routine configures DPD for all external
 ///     IPs and *will back out* if any IPs are not yet fully attached to
 ///     the instance.
+#[allow(clippy::too_many_arguments)] // I don't like it either, clippy...
 pub(crate) async fn instance_ensure_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,
