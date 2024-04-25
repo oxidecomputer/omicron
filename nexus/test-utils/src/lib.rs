@@ -11,7 +11,6 @@ use chrono::Utc;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
@@ -1433,10 +1432,7 @@ pub fn start_producer_server(
     let config = oximeter_producer::Config {
         server_info,
         registration_address: Some(nexus_address),
-        dropshot: ConfigDropshot {
-            bind_address: producer_address,
-            ..Default::default()
-        },
+        request_body_max_bytes: 1024,
         log: LogConfig::Config(ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Error,
         }),

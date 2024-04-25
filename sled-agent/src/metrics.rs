@@ -4,8 +4,6 @@
 
 //! Metrics produced by the sled-agent for collection by oximeter.
 
-use dropshot::ConfigDropshot;
-use dropshot::HandlerTaskMode;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::MetricsError;
@@ -175,11 +173,7 @@ fn start_producer_server(
             interval: METRIC_COLLECTION_INTERVAL,
         },
         registration_address,
-        dropshot: ConfigDropshot {
-            bind_address: address,
-            request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
-            default_handler_task_mode: HandlerTaskMode::Detached,
-        },
+        request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
         log: LogConfig::Logger(log),
     };
     ProducerServer::start(&config).map(Arc::new).map_err(Error::ProducerServer)

@@ -10,10 +10,8 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::Parser;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use dropshot::HandlerTaskMode;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::Cumulative;
@@ -112,11 +110,6 @@ impl Producer for CpuBusyProducer {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let dropshot = ConfigDropshot {
-        bind_address: args.address,
-        request_body_max_bytes: 2048,
-        default_handler_task_mode: HandlerTaskMode::Detached,
-    };
     let log = LogConfig::Config(ConfigLogging::StderrTerminal {
         level: ConfigLoggingLevel::Debug,
     });
@@ -133,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config {
         server_info,
         registration_address: Some(args.nexus),
-        dropshot,
+        request_body_max_bytes: 2048,
         log,
     };
     let server = Server::with_registry(registry, &config)

@@ -90,8 +90,8 @@ pub struct Config {
     /// using internal DNS, based on the local address of the server being
     /// configured.
     pub registration_address: Option<SocketAddr>,
-    /// Configuration for starting the Dropshot server used to produce metrics.
-    pub dropshot: ConfigDropshot,
+    /// The maximum size of Dropshot requests.
+    pub request_body_max_bytes: usize,
     /// The logging configuration or actual logger used to emit logs.
     pub log: LogConfig,
 }
@@ -129,7 +129,7 @@ impl Server {
             registry,
             config.server_info.clone(),
             config.registration_address.as_ref(),
-            &config.dropshot,
+            config.request_body_max_bytes,
             &config.log,
         )
     }
@@ -206,7 +206,7 @@ impl Server {
         registry: ProducerRegistry,
         mut server_info: ProducerEndpoint,
         registration_address: Option<&SocketAddr>,
-        dropshot: &ConfigDropshot,
+        request_body_max_bytes: usize,
         log: &LogConfig,
     ) -> Result<Self, Error> {
         if registry.producer_id() != server_info.id {
@@ -223,7 +223,12 @@ impl Server {
 
         // Build the logger / server.
         let log = Self::build_logger(log)?;
-        let server = Self::build_dropshot_server(&log, &registry, dropshot)?;
+        let dropshot = ConfigDropshot {
+            bind_address: server_info.address,
+            request_body_max_bytes,
+            default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
+        };
+        let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 
         // Update the producer endpoint address with the actual server's
         // address, to handle cases where client listens on any available
@@ -492,7 +497,6 @@ mod tests {
     use super::LogConfig;
     use super::ProducerEndpoint;
     use super::Server;
-    use dropshot::ConfigDropshot;
     use httptest::matchers::request;
     use httptest::responders::status_code;
     use httptest::Expectation;
@@ -546,10 +550,7 @@ mod tests {
                 interval: Duration::from_secs(10),
             },
             registration_address: Some(fake_nexus.addr()),
-            dropshot: ConfigDropshot {
-                bind_address: address,
-                ..Default::default()
-            },
+            request_body_max_bytes: 1024,
             log: LogConfig::Logger(log),
         };
 

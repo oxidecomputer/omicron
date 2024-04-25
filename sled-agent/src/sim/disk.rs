@@ -8,7 +8,6 @@ use crate::nexus::NexusClient;
 use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::DiskState;
@@ -177,10 +176,7 @@ impl SimDisk {
         let config = oximeter_producer::Config {
             server_info,
             registration_address: Some(nexus_address),
-            dropshot: ConfigDropshot {
-                bind_address: producer_address,
-                ..Default::default()
-            },
+            request_body_max_bytes: 2048,
             log: LogConfig::Config(ConfigLogging::StderrTerminal {
                 level: ConfigLoggingLevel::Error,
             }),
