@@ -5,14 +5,13 @@
 //! Background task for pulling instance state from sled-agents.
 
 use super::common::BackgroundTask;
+use crate::Error;
 use futures::{future::BoxFuture, FutureExt};
 use nexus_db_model::{Sled, SledInstance};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
-use omicron_common::backoff::{self, BackoffError};
-use serde_json::json;
 use sled_agent_client::Client as SledAgentClient;
 use std::future::Future;
 use std::num::NonZeroU32;
@@ -23,7 +22,6 @@ use std::sync::Arc;
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
-    max_retries: NonZeroU32,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -37,7 +35,7 @@ impl InstanceWatcher {
         resolver: internal_dns::resolver::Resolver,
         max_retries: NonZeroU32,
     ) -> Self {
-        Self { datastore, resolver, max_retries }
+        Self { datastore, resolver }
     }
 
     fn check_instance(
@@ -45,7 +43,7 @@ impl InstanceWatcher {
         opctx: &OpContext,
         client: &SledAgentClient,
         instance: SledInstance,
-    ) -> impl Future<Output = ()> + Send + 'static {
+    ) -> impl Future<Output = Result<(), Error>> + Send + 'static {
         let instance_id = instance.instance_id();
         let watcher = self.clone();
         let opctx = opctx.child(
@@ -58,63 +56,30 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            let InstanceWatcher { datastore, resolver, max_retries } = watcher;
+            let InstanceWatcher { datastore, resolver } = watcher;
             slog::trace!(opctx.log, "checking on instance...");
-            let backoff = backoff::retry_policy_internal_service();
-            let mut retries = 0;
-            let rsp = backoff::retry_notify(
-                backoff,
-                || async {
-                    let rsp = client
-                        .instance_get_state(&instance.instance_id())
-                        .await;
-                    match rsp {
-                        Ok(rsp) => Ok(rsp.into_inner()),
-                        Err(e) if retries == max_retries.get() => {
-                            Err(BackoffError::Permanent(e))
-                        }
-                        Err(
-                            e @ ClientError::InvalidRequest(_)
-                            | e @ ClientError::InvalidUpgrade(_)
-                            | e @ ClientError::UnexpectedResponse(_)
-                            | e @ ClientError::PreHookError(_),
-                        ) => Err(BackoffError::Permanent(e)),
-                        Err(e) => Err(BackoffError::transient(e)),
-                    }
-                },
-                |err, duration| {
-                    slog::info!(
-                        opctx.log,
-                        "instance check failed; retrying: {err}";
-                        "duration" => ?duration,
-                        "retries_remaining" => max_retries.get() - retries,
-                    );
-                },
-            )
-            .await;
+            let rsp = client.instance_get_state(&instance_id).await;
             let state = match rsp {
-                Ok(state) => state,
-                Err(error) => {
-                    // TODO(eliza): here is where it gets interesting --- if the
-                    // sled-agent is in a bad state, we need to:
-                    // 1. figure out whether the instance's VMM is reachable directly
-                    // 2. figure out whether we can recover the sled agent?
-                    // 3. if the instances' VMMs are also gone, mark them as
-                    //    "failed"
-                    // 4. this might mean that the whole sled is super gone,
-                    //    figure that out too.
-                    //
-                    // for now though, we'll just log a really big error.
-                    slog::error!(
+                Ok(rsp) => rsp.into_inner(),
+                Err(ClientError::ErrorResponse(rsp))
+                    if rsp.status() == http::StatusCode::NOT_FOUND
+                        && rsp.as_ref().error_code.as_deref()
+                            == Some("NO_SUCH_INSTANCE") =>
+                {
+                    slog::info!(opctx.log, "instance is wayyyyy gone");
+                    todo!();
+                }
+                Err(e) => {
+                    slog::warn!(
                         opctx.log,
-                        "instance seems to be in a bad state: {error}"
+                        "error checking up on instance: {e}"
                     );
-                    return;
+                    return Err(e.into());
                 }
             };
 
             slog::debug!(opctx.log, "updating instance state: {state:?}");
-            let result = crate::app::instance::notify_instance_updated(
+            crate::app::instance::notify_instance_updated(
                 &datastore,
                 &resolver,
                 &opctx,
@@ -123,17 +88,12 @@ impl InstanceWatcher {
                 &instance_id,
                 &state.into(),
             )
-            .await;
-            match result {
-                Ok(_) => slog::debug!(opctx.log, "instance state updated"),
-                Err(e) => slog::error!(
-                    opctx.log,
-                    "failed to update instance state: {e}"
-                ),
-            }
+            .await
         }
     }
 }
+
+struct CheckResult {}
 
 type ClientError = sled_agent_client::Error<sled_agent_client::types::Error>;
 
@@ -198,20 +158,27 @@ impl BackgroundTask for InstanceWatcher {
             }
 
             // All requests fired off, let's wait for them to come back.
+            let mut ok = 0;
             while let Some(result) = tasks.join_next().await {
-                if let Err(e) = result {
-                    unreachable!(
+                match result {
+                    Ok(Ok(())) => {
+                        ok += 1;
+                    }
+                    Err(e) => unreachable!(
                         "a `JoinError` is returned if a spawned task \
                         panics, or if the task is aborted. we never abort \
                         tasks on this `JoinSet`, and nexus is compiled with \
                         `panic=\"abort\"`, so neither of these cases should \
                         ever occur: {e}",
-                    );
+                    ),
+                    Ok(Err(e)) => {}
                 }
             }
 
             slog::trace!(opctx.log, "all instance checks complete");
-            serde_json::json!({})
+            serde_json::json!({
+                "num_ok": ok,
+            })
         }
         .boxed()
     }
