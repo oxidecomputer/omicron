@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
