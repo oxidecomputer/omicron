@@ -98,14 +98,24 @@ async fn test_oximeter_reregistration() {
         result
             .into_iter()
             .find(|row| row.get::<&str, Uuid>("id") == producer_id)
-            .expect("Integration test producer is not in the database")
+            .ok_or_else(|| CondCheckError::<()>::NotYet)
     };
 
     // Get the original time modified, for comparison later.
-    let original_time_modified = {
-        let row = get_record().await;
-        row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified")
-    };
+    //
+    // Note that the record may not show up right away, so we'll wait for it
+    // here.
+    const PRODUCER_POLL_INTERVAL: Duration = Duration::from_secs(1);
+    const PRODUCER_POLL_DURATION: Duration = Duration::from_secs(60);
+    let row = wait_for_condition(
+        get_record,
+        &PRODUCER_POLL_INTERVAL,
+        &PRODUCER_POLL_DURATION,
+    )
+    .await
+    .expect("Integration test producer is not in the database");
+    let original_time_modified =
+        row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified");
 
     // ClickHouse client for verifying collection.
     let ch_address = net::SocketAddrV6::new(
@@ -266,7 +276,8 @@ async fn test_oximeter_reregistration() {
     // Note that it's _probably_ not the case that the port is the same as the original, but it is
     // possible. We can verify that the modification time has been changed.
     let (new_port, new_time_modified) = {
-        let row = get_record().await;
+        let row =
+            get_record().await.expect("Expected the producer record to exist");
         (
             row.get::<&str, i32>("port") as u16,
             row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified"),
