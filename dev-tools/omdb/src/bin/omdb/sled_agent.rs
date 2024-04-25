@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Sleds
 
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
@@ -14,7 +15,12 @@ use clap::Subcommand;
 #[derive(Debug, Args)]
 pub struct SledAgentArgs {
     /// URL of the Sled internal API
-    #[clap(long, env("OMDB_SLED_AGENT_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_SLED_AGENT_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     sled_agent_url: Option<String>,
 
     #[command(subcommand)]

@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
@@ -20,6 +21,7 @@ use futures::future::try_join;
 use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
+use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::SledSelector;
@@ -44,7 +46,12 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct NexusArgs {
     /// URL of the Nexus internal API
-    #[clap(long, env("OMDB_NEXUS_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_NEXUS_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     nexus_internal_url: Option<String>,
 
     #[command(subcommand)]
@@ -77,6 +84,15 @@ enum BackgroundTasksCommands {
     List,
     /// Print human-readable summary of the status of each background task
     Show,
+    /// Activate one or more background tasks
+    Activate(BackgroundTasksActivateArgs),
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksActivateArgs {
+    /// Name of the background tasks to activate
+    #[clap(value_name = "TASK_NAME", required = true)]
+    tasks: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -298,6 +314,12 @@ impl NexusArgs {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show,
             }) => cmd_nexus_background_tasks_show(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::Activate(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_background_tasks_activate(&client, args, token).await
+            }
 
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::List,
@@ -462,6 +484,26 @@ async fn cmd_nexus_background_tasks_show(
         print_task(bgtask);
     }
 
+    Ok(())
+}
+
+/// Runs `omdb nexus background-tasks activate`
+async fn cmd_nexus_background_tasks_activate(
+    client: &nexus_client::Client,
+    args: &BackgroundTasksActivateArgs,
+    // This isn't quite "destructive" in the sense that of it being potentially
+    // dangerous, but it does modify the system rather than being a read-only
+    // view on it.
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let body =
+        BackgroundTasksActivateRequest { bgtask_names: args.tasks.clone() };
+    client
+        .bgtask_activate(&body)
+        .await
+        .context("error activating background tasks")?;
+
+    eprintln!("activated background tasks: {}", args.tasks.join(", "));
     Ok(())
 }
 

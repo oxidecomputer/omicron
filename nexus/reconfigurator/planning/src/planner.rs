@@ -271,7 +271,7 @@ impl<'a> Planner<'a> {
             BTreeMap::new();
         for sled_id in self
             .input
-            .all_sled_ids(SledFilter::EligibleForDiscretionaryServices)
+            .all_sled_ids(SledFilter::Discretionary)
             .filter(|sled_id| !sleds_waiting_for_ntp_zone.contains(sled_id))
         {
             let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);

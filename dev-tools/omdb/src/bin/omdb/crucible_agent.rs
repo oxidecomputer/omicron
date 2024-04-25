@@ -12,13 +12,19 @@ use crucible_agent_client::types::RegionId;
 use crucible_agent_client::Client;
 use tabled::Tabled;
 
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 
 /// Arguments to the "omdb crucible-agent" subcommand
 #[derive(Debug, Args)]
 pub struct CrucibleAgentArgs {
     /// URL of the crucible agent internal API
-    #[clap(long, env("OMDB_CRUCIBLE_AGENT_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_CRUCIBLE_AGENT_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     crucible_agent_url: Option<String>,
 
     #[command(subcommand)]
