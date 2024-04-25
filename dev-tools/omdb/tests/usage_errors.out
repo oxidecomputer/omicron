@@ -302,13 +302,26 @@ print information about background tasks
 Usage: omdb nexus background-tasks <COMMAND>
 
 Commands:
-  doc   Show documentation about background tasks
-  list  Print a summary of the status of all background tasks
-  show  Print human-readable summary of the status of each background task
-  help  Print this message or the help of the given subcommand(s)
+  doc       Show documentation about background tasks
+  list      Print a summary of the status of all background tasks
+  show      Print human-readable summary of the status of each background task
+  activate  Activate one or more background tasks
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "collections"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: unrecognized subcommand 'collections'
+
+Usage: omdb nexus [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent"]
 termination: Exited(2)

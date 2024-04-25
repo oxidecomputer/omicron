@@ -125,6 +125,34 @@
         }
       }
     },
+    "/bgtasks-activate": {
+      "post": {
+        "summary": "Activates one or more background tasks, causing them to be run immediately",
+        "description": "if idle, or scheduled to run again as soon as possible if already running.",
+        "operationId": "bgtask_activate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackgroundTasksActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
       "post": {
         "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
@@ -1426,6 +1454,22 @@
           "last",
           "name",
           "period"
+        ]
+      },
+      "BackgroundTasksActivateRequest": {
+        "description": "Query parameters for multiple background task requests.",
+        "type": "object",
+        "properties": {
+          "bgtask_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "bgtask_names"
         ]
       },
       "Baseboard": {
