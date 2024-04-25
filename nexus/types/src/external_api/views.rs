@@ -632,7 +632,7 @@ impl fmt::Display for SledPolicy {
             } => write!(f, "in service"),
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
-            } => write!(f, "in service (not provisionable)"),
+            } => write!(f, "not provisionable"),
             SledPolicy::Expunged => write!(f, "expunged"),
         }
     }
