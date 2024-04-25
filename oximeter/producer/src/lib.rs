@@ -47,9 +47,6 @@ pub enum Error {
     #[error("Error running producer HTTP server: {0}")]
     Server(String),
 
-    #[error("Error registering as metric producer: {msg}")]
-    RegistrationError { retryable: bool, msg: String },
-
     #[error("Producer registry and config UUIDs do not match")]
     UuidMismatch,
 
@@ -306,9 +303,6 @@ enum FindNexus {
     WithResolver(Resolver),
 }
 
-/// The default period within which we renew our lease from Nexus.
-const DEFAULT_LEASE_DURATION: Duration = Duration::from_secs(60 * 2);
-
 /// The rate at which we renew, as a fraction of the renewal interval.
 //
 // E.g., a value of 4 means wait no more than 1/4 the period before renewing the
@@ -390,40 +384,6 @@ async fn collect(
     }
 }
 
-/// Register a metric server to be polled for metric data.
-///
-/// Nexus should respond with the interval within which the client should renew
-/// its producer's lease.
-async fn register_once(
-    address: SocketAddr,
-    log: &slog::Logger,
-    server_info: &ApiProducerEndpoint,
-) -> Result<Duration, Error> {
-    let client =
-        nexus_client::Client::new(&format!("http://{}", address), log.clone());
-    match client.cpapi_producers_post(&server_info.into()).await {
-        Ok(response) => Ok(response.into_inner().lease_duration.into()),
-        // Convert any unexpected-but-successful response to an Ok.
-        // See https://github.com/oxidecomputer/omicron/issues/5284 for details.
-        Err(nexus_client::Error::UnexpectedResponse(resp))
-            if resp.status().is_success() =>
-        {
-            Ok(DEFAULT_LEASE_DURATION)
-        }
-        Err(err) => {
-            let retryable = match &err {
-                nexus_client::Error::CommunicationError(..) => true,
-                nexus_client::Error::ErrorResponse(resp) => {
-                    resp.status().is_server_error()
-                }
-                _ => false,
-            };
-            let msg = err.to_string();
-            Err(Error::RegistrationError { retryable, msg })
-        }
-    }
-}
-
 /// Resolve Nexus's address using the provided resolver.
 async fn resolve_nexus_with_backoff(
     log: &Logger,
@@ -470,17 +430,20 @@ async fn register_with_backoff(
             "error" => ?error,
         );
     };
+    // For the purposes of oximeter registration, all errors are retryable. The
+    // main reason for this is that there's just not much better we can do.
+    // Panicking seems bad, but stopping the retry loop is also not great
+    // without a way to kick it to start trying again. We may want to add
+    // better reporting, such as a counter or way to fetch the last registration
+    // result.
     let do_register = || async {
-        register_once(addr, log, endpoint).await.map_err(|e| match e {
-            Error::RegistrationError { retryable, msg } => {
-                if retryable {
-                    BackoffError::transient(msg)
-                } else {
-                    BackoffError::permanent(msg)
-                }
-            }
-            _ => BackoffError::permanent(e.to_string()),
-        })
+        let client =
+            nexus_client::Client::new(&format!("http://{}", addr), log.clone());
+        client
+            .cpapi_producers_post(&endpoint.into())
+            .await
+            .map(|response| response.into_inner().lease_duration.into())
+            .map_err(|e| BackoffError::transient(e.to_string()))
     };
     backoff::retry_notify(
         backoff::retry_policy_internal_service(),
