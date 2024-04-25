@@ -378,7 +378,7 @@ mod test {
 
         // Now mark one expunged.  We should not find that sled any more.
         let expunged_sled = &sleds[0];
-        let expunged_sled_id = sleds[sleds.len() - 1].id();
+        let expunged_sled_id = expunged_sled.id();
         let authz_sled = authz::Sled::new(
             authz::FLEET,
             expunged_sled_id,
