@@ -131,87 +131,16 @@ impl super::Nexus {
         ip_index_filter: Option<usize>,
         dpd_client: &dpd_client::Client,
     ) -> Result<(), Error> {
-        let log = &self.log;
-
-        // All external IPs map to the primary network interface, so find that
-        // interface. If there is no such interface, there's no way to route
-        // traffic destined to those IPs, so there's nothing to configure and
-        // it's safe to return early.
-        let network_interface = match self
-            .db_datastore
-            .derive_probe_network_interface_info(&opctx, probe_id)
-            .await?
-            .into_iter()
-            .find(|interface| interface.primary)
-        {
-            Some(interface) => interface,
-            None => {
-                info!(log, "probe has no primary network interface";
-                      "probe_id" => %probe_id);
-                return Ok(());
-            }
-        };
-
-        let mac_address =
-            macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to convert mac address: {e}"
-                    ))
-                })?;
-
-        info!(log, "looking up probe's external IPs";
-              "probe_id" => %probe_id);
-
-        let ips = self
-            .db_datastore
-            .probe_lookup_external_ips(&opctx, probe_id)
-            .await?;
-
-        if let Some(wanted_index) = ip_index_filter {
-            if let None = ips.get(wanted_index) {
-                return Err(Error::internal_error(&format!(
-                    "failed to find external ip address at index: {}",
-                    wanted_index
-                )));
-            }
-        }
-
-        let sled_address =
-            Ipv6Net(Ipv6Network::new(sled_ip_address, 128).unwrap());
-
-        for target_ip in ips
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                if let Some(wanted_index) = ip_index_filter {
-                    *index == wanted_index
-                } else {
-                    true
-                }
-            })
-            .map(|(_, ip)| ip)
-        {
-            // For each external ip, add a nat entry to the database
-            ensure_nat_entry(
-                &self.db_datastore,
-                target_ip,
-                sled_address,
-                &network_interface,
-                mac_address,
-                opctx,
-            )
-            .await?;
-        }
-
-        // Notify dendrite that there are changes for it to reconcile.
-        // In the event of a failure to notify dendrite, we'll log an error
-        // and rely on dendrite's RPW timer to catch it up.
-        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
-            error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
-        };
-
-        Ok(())
+        probe_ensure_dpd_config(
+            &self.db_datastore,
+            &self.log,
+            opctx,
+            probe_id,
+            sled_ip_address,
+            ip_index_filter,
+            dpd_client,
+        )
+        .await
     }
 
     /// Attempts to delete all of the Dendrite NAT configuration for the
@@ -324,82 +253,15 @@ impl super::Nexus {
         opctx: &OpContext,
         probe_id: Uuid,
     ) -> Result<(), Error> {
-        let log = &self.log;
-
-        info!(log, "deleting probe dpd configuration";
-              "probe_id" => %probe_id);
-
-        let external_ips = self
-            .db_datastore
-            .probe_lookup_external_ips(opctx, probe_id)
-            .await?;
-
-        let mut errors = vec![];
-        for entry in external_ips {
-            // Soft delete the NAT entry
-            match self
-                .db_datastore
-                .ipv4_nat_delete_by_external_ip(&opctx, &entry)
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(err) => match err {
-                    Error::ObjectNotFound { .. } => {
-                        warn!(log, "no matching nat entries to soft delete");
-                        Ok(())
-                    }
-                    _ => {
-                        let message = format!(
-                            "failed to delete nat entry due to error: {err:?}"
-                        );
-                        error!(log, "{}", message);
-                        Err(Error::internal_error(&message))
-                    }
-                },
-            }?;
-        }
-
-        let boundary_switches =
-            self.boundary_switches(&self.opctx_alloc).await?;
-
-        for switch in &boundary_switches {
-            debug!(&self.log, "notifying dendrite of updates";
-                       "probe_id" => %probe_id,
-                       "switch" => switch.to_string());
-
-            let dpd_clients = self.dpd_clients().await.map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to get dpd_clients: {e}"
-                ))
-            })?;
-
-            let client_result = dpd_clients.get(switch).ok_or_else(|| {
-                Error::internal_error(&format!(
-                    "unable to find dendrite client for {switch}"
-                ))
-            });
-
-            let dpd_client = match client_result {
-                Ok(client) => client,
-                Err(new_error) => {
-                    errors.push(new_error);
-                    continue;
-                }
-            };
-
-            // Notify dendrite that there are changes for it to reconcile.
-            // In the event of a failure to notify dendrite, we'll log an error
-            // and rely on dendrite's RPW timer to catch it up.
-            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
-                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
-            };
-        }
-
-        if let Some(e) = errors.into_iter().nth(0) {
-            return Err(e);
-        }
-
-        Ok(())
+        probe_delete_dpd_config(
+            &self.db_datastore,
+            &self.log,
+            &self.resolver().await,
+            opctx,
+            &self.opctx_alloc,
+            probe_id,
+        )
+        .await
     }
 
     /// Given old and new instance runtime states, determines the desired
@@ -470,12 +332,20 @@ pub(crate) async fn boundary_switches(
 ///
 /// # Arguments
 ///
-/// - opctx: An operation context for this operation.
-/// - authz_instance: A resolved authorization context for the instance of
+/// - `datastore`: the datastore to use for lookups and updates.
+/// - `log`: the [`slog::Logger`] to log to.
+/// - `resolver`: an internal DNS resolver to look up DPD service addresses.
+/// - `opctx`: An operation context for this operation.
+/// - `opctx_alloc`: An operational context list permissions for all sleds. When
+///   called by methods on the [`Nexus`] type, this is the `OpContext` used for
+///   instance allocation. In a background task, this may be the background
+///   task's operational context; nothing stops you from passing the same
+///   `OpContext` as both `opctx` and `opctx_alloc`.
+/// - `authz_instance``: A resolved authorization context for the instance of
 ///   interest.
-/// - prev_instance_state: The most-recently-recorded instance runtime
+/// - `prev_instance_state``: The most-recently-recorded instance runtime
 ///   state for this instance.
-/// - new_instance_state: The instance state that the caller of this routine
+/// - `new_instance_state`: The instance state that the caller of this routine
 ///   has observed and that should be used to set up this instance's
 ///   networking state.
 ///
@@ -638,9 +508,16 @@ pub(crate) async fn ensure_updated_instance_network_config(
 ///
 /// # Parameters
 ///
-/// - `datastore`: The datastore to use for lookups and updates.
+/// - `datastore`: the datastore to use for lookups and updates.
+/// - `log`: the [`slog::Logger`] to log to.
+/// - `resolver`: an internal DNS resolver to look up DPD service addresses.
 /// - `opctx`: An operation context that grants read and list-children
 ///   permissions on the identified instance.
+/// - `opctx_alloc`: An operational context list permissions for all sleds. When
+///   called by methods on the [`Nexus`] type, this is the `OpContext` used for
+///   instance allocation. In a background task, this may be the background
+///   task's operational context; nothing stops you from passing the same
+///   `OpContext` as both `opctx` and `opctx_alloc`.
 /// - `instance_id`: The ID of the instance to act on.
 /// - `sled_ip_address`: The internal IP address assigned to the sled's
 ///   sled agent.
@@ -817,6 +694,95 @@ pub(crate) async fn instance_ensure_dpd_config(
     .await?;
 
     Ok(nat_entries)
+}
+
+// The logic of this function should follow very closely what
+// `instance_ensure_dpd_config` does. However, there are enough differences
+// in the mechanics of how the logic is being carried out to justify having
+// this separate function, it seems.
+pub(crate) async fn probe_ensure_dpd_config(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    opctx: &OpContext,
+    probe_id: Uuid,
+    sled_ip_address: std::net::Ipv6Addr,
+    ip_index_filter: Option<usize>,
+    dpd_client: &dpd_client::Client,
+) -> Result<(), Error> {
+    // All external IPs map to the primary network interface, so find that
+    // interface. If there is no such interface, there's no way to route
+    // traffic destined to those IPs, so there's nothing to configure and
+    // it's safe to return early.
+    let network_interface = match datastore
+        .derive_probe_network_interface_info(&opctx, probe_id)
+        .await?
+        .into_iter()
+        .find(|interface| interface.primary)
+    {
+        Some(interface) => interface,
+        None => {
+            info!(log, "probe has no primary network interface";
+                    "probe_id" => %probe_id);
+            return Ok(());
+        }
+    };
+
+    let mac_address =
+        macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to convert mac address: {e}"
+                ))
+            })?;
+
+    info!(log, "looking up probe's external IPs";
+            "probe_id" => %probe_id);
+
+    let ips = datastore.probe_lookup_external_ips(&opctx, probe_id).await?;
+
+    if let Some(wanted_index) = ip_index_filter {
+        if let None = ips.get(wanted_index) {
+            return Err(Error::internal_error(&format!(
+                "failed to find external ip address at index: {}",
+                wanted_index
+            )));
+        }
+    }
+
+    let sled_address = Ipv6Net(Ipv6Network::new(sled_ip_address, 128).unwrap());
+
+    for target_ip in ips
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            if let Some(wanted_index) = ip_index_filter {
+                *index == wanted_index
+            } else {
+                true
+            }
+        })
+        .map(|(_, ip)| ip)
+    {
+        // For each external ip, add a nat entry to the database
+        ensure_nat_entry(
+            datastore,
+            target_ip,
+            sled_address,
+            &network_interface,
+            mac_address,
+            opctx,
+        )
+        .await?;
+    }
+
+    // Notify dendrite that there are changes for it to reconcile.
+    // In the event of a failure to notify dendrite, we'll log an error
+    // and rely on dendrite's RPW timer to catch it up.
+    if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+        error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
+    };
+
+    Ok(())
 }
 
 /// Deletes an instance's OPTE V2P mappings and the boundary switch NAT
@@ -1153,6 +1119,132 @@ pub(crate) async fn instance_delete_dpd_config(
         resolver,
         opctx_alloc,
         Some(instance_id),
+        false,
+    )
+    .await
+}
+
+// The logic of this function should follow very closely what
+// `instance_delete_dpd_config` does. However, there are enough differences
+// in the mechanics of how the logic is being carried out to justify having
+// this separate function, it seems.
+pub(crate) async fn probe_delete_dpd_config(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    resolver: &internal_dns::resolver::Resolver,
+    opctx: &OpContext,
+    opctx_alloc: &OpContext,
+    probe_id: Uuid,
+) -> Result<(), Error> {
+    info!(log, "deleting probe dpd configuration";
+            "probe_id" => %probe_id);
+
+    let external_ips =
+        datastore.probe_lookup_external_ips(opctx, probe_id).await?;
+
+    let mut errors = vec![];
+    for entry in external_ips {
+        // Soft delete the NAT entry
+        match datastore.ipv4_nat_delete_by_external_ip(&opctx, &entry).await {
+            Ok(_) => Ok(()),
+            Err(err) => match err {
+                Error::ObjectNotFound { .. } => {
+                    warn!(log, "no matching nat entries to soft delete");
+                    Ok(())
+                }
+                _ => {
+                    let message = format!(
+                        "failed to delete nat entry due to error: {err:?}"
+                    );
+                    error!(log, "{}", message);
+                    Err(Error::internal_error(&message))
+                }
+            },
+        }?;
+    }
+
+    let boundary_switches = boundary_switches(datastore, opctx_alloc).await?;
+
+    for switch in &boundary_switches {
+        debug!(log, "notifying dendrite of updates";
+                "probe_id" => %probe_id,
+                "switch" => switch.to_string());
+
+        let dpd_clients =
+            super::dpd_clients(resolver, log).await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "unable to get dpd_clients: {e}"
+                ))
+            })?;
+
+        let client_result = dpd_clients.get(switch).ok_or_else(|| {
+            Error::internal_error(&format!(
+                "unable to find dendrite client for {switch}"
+            ))
+        });
+
+        let dpd_client = match client_result {
+            Ok(client) => client,
+            Err(new_error) => {
+                errors.push(new_error);
+                continue;
+            }
+        };
+
+        // Notify dendrite that there are changes for it to reconcile.
+        // In the event of a failure to notify dendrite, we'll log an error
+        // and rely on dendrite's RPW timer to catch it up.
+        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+            error!(log, "failed to notify dendrite of nat updates"; "error" => ?e);
+        };
+    }
+
+    if let Some(e) = errors.into_iter().nth(0) {
+        return Err(e);
+    }
+
+    Ok(())
+}
+
+/// Attempts to soft-delete Dendrite NAT configuration for a specific entry
+/// via ID.
+///
+/// This function is needed to safely cleanup in at least one unwind scenario
+/// where a potential second user could need to use the same (IP, portset) pair,
+/// e.g. a rapid reattach or a reallocated ephemeral IP.
+pub(crate) async fn delete_dpd_config_by_entry(
+    datastore: &DataStore,
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+    opctx: &OpContext,
+    opctx_alloc: &OpContext,
+    nat_entry: &Ipv4NatEntry,
+) -> Result<(), Error> {
+    info!(log, "deleting individual NAT entry from dpd configuration";
+            "id" => ?nat_entry.id,
+            "version_added" => %nat_entry.external_address.0);
+
+    match datastore.ipv4_nat_delete(&opctx, nat_entry).await {
+        Ok(_) => {}
+        Err(err) => match err {
+            Error::ObjectNotFound { .. } => {
+                warn!(log, "no matching nat entries to soft delete");
+            }
+            _ => {
+                let message =
+                    format!("failed to delete nat entry due to error: {err:?}");
+                error!(log, "{}", message);
+                return Err(Error::internal_error(&message));
+            }
+        },
+    }
+
+    notify_dendrite_nat_state(
+        datastore,
+        log,
+        resolver,
+        opctx_alloc,
+        None,
         false,
     )
     .await
