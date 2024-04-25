@@ -311,17 +311,47 @@ Commands:
 Options:
   -h, --help  Print help
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "collections"]
+EXECUTING COMMAND: omdb ["nexus", "blueprints"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
 ---------------------------------------------
 stderr:
-error: unrecognized subcommand 'collections'
+interact with blueprints
 
-Usage: omdb nexus [OPTIONS] <COMMAND>
+Usage: omdb nexus blueprints <COMMAND>
 
-For more information, try '--help'.
+Commands:
+  list        List all blueprints
+  show        Show a blueprint
+  diff        Diff two blueprints
+  delete      Delete a blueprint
+  target      Interact with the current target blueprint
+  regenerate  Generate a new blueprint
+  import      Import a blueprint
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sleds"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+interact with sleds
+
+Usage: omdb nexus sleds <COMMAND>
+
+Commands:
+  list-uninitialized  List all uninitialized sleds
+  add                 Add an uninitialized sled
+  expunge             Expunge a sled (DANGEROUS)
+  help                Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent"]
 termination: Exited(2)
