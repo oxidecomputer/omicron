@@ -110,10 +110,6 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-        .await
-        .map_err(|err| vec![err])?;
-
     resource_allocation::ensure_zone_resources_allocated(
         &opctx,
         datastore,
@@ -188,6 +184,13 @@ where
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
+
+    // This is likely to error if any cluster upgrades are in progress (which
+    // can take some time), so it should remain at the end so that other parts
+    // of the blueprint can progress normally.
+    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
+        .await
+        .map_err(|err| vec![err])?;
 
     Ok(())
 }
