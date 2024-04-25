@@ -14,6 +14,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
+use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::CollectionUuid;
@@ -180,7 +181,11 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
             while let Some(p) = paginator.next() {
                 let records_batch = self
                     .datastore
-                    .sled_list(&self.opctx, &p.current_pagparams())
+                    .sled_list(
+                        &self.opctx,
+                        &p.current_pagparams(),
+                        SledFilter::All,
+                    )
                     .await
                     .context("listing sleds")?;
                 paginator = p.found_batch(

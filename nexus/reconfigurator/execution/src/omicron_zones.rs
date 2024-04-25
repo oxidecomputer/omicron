@@ -33,6 +33,14 @@ pub(crate) async fn deploy_zones(
             {
                 Some(sled) => sled,
                 None => {
+                    if config.are_all_zones_expunged() {
+                        info!(
+                            opctx.log,
+                            "Skipping zone deployment to expunged sled";
+                            "sled_id" => %sled_id
+                        );
+                        return None;
+                    }
                     let err = anyhow!("sled not found in db list: {}", sled_id);
                     warn!(opctx.log, "{err:#}");
                     return Some(err);
