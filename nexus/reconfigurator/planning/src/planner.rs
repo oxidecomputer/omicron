@@ -413,13 +413,20 @@ impl<'a> Planner<'a> {
         let CockroachDbSettings { version, .. } =
             self.input.cockroachdb_settings();
 
-        if policy == version {
+        let value = if policy == version {
             // Ensure `cluster.preserve_downgrade_option` is set
-            self.blueprint.cockroachdb_preserve_downgrade(policy.to_owned());
+            policy
         } else {
             // Ensure `cluster.preserve_downgrade_option` is reset
-            self.blueprint.cockroachdb_preserve_downgrade(String::new());
-        }
+            ""
+        };
+        self.blueprint.cockroachdb_preserve_downgrade(value.to_owned());
+        info!(
+            &self.log,
+            "will ensure cockroachdb setting";
+            "setting" => "cluster.preserve_downgrade_option",
+            "value" => &value,
+        )
     }
 }
 
