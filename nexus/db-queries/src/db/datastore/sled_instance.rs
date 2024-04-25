@@ -10,13 +10,10 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_model::ApplySledFilterExt;
-use nexus_db_model::DbTypedUuid;
 use nexus_db_model::SledInstance;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
-use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::SledKind;
 use uuid::Uuid;
 
 impl DataStore {
@@ -41,7 +38,7 @@ impl DataStore {
     pub async fn sled_instance_list_by_sled_agent(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, DbTypedUuid<SledKind>>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<(Sled, SledInstance)> {
         // TODO(eliza): should probably paginate this?
         use crate::db::schema::{sled::dsl as sled_dsl, sled_instance::dsl};

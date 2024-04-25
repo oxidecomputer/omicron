@@ -6,7 +6,7 @@
 
 use super::common::BackgroundTask;
 use futures::{future::BoxFuture, FutureExt};
-use nexus_db_model::SledInstance;
+use nexus_db_model::{Sled, SledInstance};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -166,9 +166,8 @@ impl BackgroundTask for InstanceWatcher {
                 paginator = p.found_batch(&batch, &|(sled, _)| sled.id());
                 let mut batch = batch.into_iter();
 
-                if let Some((mut curr_sled_agent, sled_instance)) = batch.next()
-                {
-                    let mk_client = |sled| {
+                if let Some((mut curr_sled, sled_instance)) = batch.next() {
+                    let mk_client = |sled: &Sled| {
                         nexus_networking::sled_client_from_address(
                             sled.id(),
                             sled.address(),
@@ -176,18 +175,18 @@ impl BackgroundTask for InstanceWatcher {
                         )
                     };
 
-                    let mut client = mk_client(&curr_sled_agent);
+                    let mut client = mk_client(&curr_sled);
                     tasks.spawn(self.check_instance(
                         opctx,
                         &client,
                         sled_instance,
                     ));
 
-                    for (sled_agent, sled_instance) in batch {
+                    for (sled, sled_instance) in batch {
                         // We're now talking to a new sled agent; update the client.
-                        if sled_agent.sled_id != curr_sled_agent.sled_id {
-                            client = mk_client(&sled_agent);
-                            curr_sled_agent = sled_agent;
+                        if sled.id() != curr_sled.id() {
+                            client = mk_client(&sled);
+                            curr_sled = sled;
                         }
                         tasks.spawn(self.check_instance(
                             opctx,
