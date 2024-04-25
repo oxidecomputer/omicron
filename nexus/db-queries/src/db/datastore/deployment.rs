@@ -137,11 +137,7 @@ impl DataStore {
             .blueprint_zones
             .iter()
             .map(|(sled_id, zones_config)| {
-                BpSledOmicronZones::new(
-                    blueprint_id,
-                    SledUuid::from_untyped_uuid(*sled_id),
-                    zones_config,
-                )
+                BpSledOmicronZones::new(blueprint_id, *sled_id, zones_config)
             })
             .collect::<Vec<_>>();
         let omicron_zones = blueprint
@@ -149,12 +145,8 @@ impl DataStore {
             .iter()
             .flat_map(|(sled_id, zones_config)| {
                 zones_config.zones.iter().map(move |zone| {
-                    BpOmicronZone::new(
-                        blueprint_id,
-                        SledUuid::from_untyped_uuid(*sled_id),
-                        zone,
-                    )
-                    .map_err(|e| Error::internal_error(&format!("{:#}", e)))
+                    BpOmicronZone::new(blueprint_id, *sled_id, zone)
+                        .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -302,7 +294,7 @@ impl DataStore {
         // the `OmicronZonesConfig` generation number for each sled that is a
         // part of this blueprint. Construct the BTreeMap we ultimately need,
         // but all the `zones` vecs will be empty until our next query below.
-        let mut blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig> = {
+        let mut blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig> = {
             use db::schema::bp_sled_omicron_zones::dsl;
 
             let mut blueprint_zones = BTreeMap::new();
@@ -325,7 +317,7 @@ impl DataStore {
 
                 for s in batch {
                     let old = blueprint_zones.insert(
-                        s.sled_id.into_untyped_uuid(),
+                        s.sled_id.into(),
                         BlueprintZonesConfig {
                             generation: *s.generation,
                             zones: Vec::new(),
@@ -467,24 +459,23 @@ impl DataStore {
                             })
                         })
                         .transpose()?;
-                    let sled_zones = blueprint_zones
-                        .get_mut(z.sled_id.as_untyped_uuid())
-                        .ok_or_else(|| {
+                    let sled_id = SledUuid::from(z.sled_id);
+                    let zone_id = z.id;
+                    let sled_zones =
+                        blueprint_zones.get_mut(&sled_id).ok_or_else(|| {
                             // This error means that we found a row in
                             // bp_omicron_zone with no associated record in
                             // bp_sled_omicron_zones.  This should be
                             // impossible and reflects either a bug or database
                             // corruption.
                             Error::internal_error(&format!(
-                                "zone {}: unknown sled: {}",
-                                z.id, z.sled_id
+                                "zone {zone_id}: unknown sled: {sled_id}",
                             ))
                         })?;
-                    let zone_id = z.id;
                     let zone = z
                         .into_blueprint_zone_config(nic_row)
                         .with_context(|| {
-                            format!("zone {:?}: parse from database", zone_id)
+                            format!("zone {zone_id}: parse from database")
                         })
                         .map_err(|e| {
                             Error::internal_error(&format!(

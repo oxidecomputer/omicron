@@ -110,7 +110,7 @@ pub struct Blueprint {
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
-    pub blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+    pub blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
 
     /// A map of sled id -> disks in use on each sled.
     pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
@@ -155,11 +155,12 @@ impl Blueprint {
     pub fn all_omicron_zones(
         &self,
         filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
-            z.zones.iter().filter_map(move |z| {
-                z.disposition.matches(filter).then_some((*sled_id, z))
-            })
+            z.zones
+                .iter()
+                .filter(move |z| z.disposition.matches(filter))
+                .map(|z| (*sled_id, z))
         })
     }
 
@@ -174,26 +175,13 @@ impl Blueprint {
             z.zones
                 .iter()
                 .filter(move |z| !z.disposition.matches(filter))
-                .map(|z| (SledUuid::from_untyped_uuid(*sled_id), z))
+                .map(|z| (*sled_id, z))
         })
-    }
-
-    // Temporary method that provides the list of Omicron zones using
-    // `TypedUuid`.
-    //
-    // In the future, `all_omicron_zones` will return `SledUuid`,
-    // and this method will go away.
-    pub fn all_omicron_zones_typed(
-        &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        self.all_omicron_zones(filter)
-            .map(|(sled_id, z)| (SledUuid::from_untyped_uuid(sled_id), z))
     }
 
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
-        self.blueprint_zones.keys().copied().map(SledUuid::from_untyped_uuid)
+        self.blueprint_zones.keys().copied()
     }
 
     /// Summarize the difference between sleds and zones between two
@@ -209,12 +197,12 @@ impl Blueprint {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
             before
-                .typed_blueprint_zones()
-                .into_iter()
-                .map(|(sled_id, zones)| (sled_id, zones.into()))
+                .blueprint_zones
+                .iter()
+                .map(|(sled_id, zones)| (*sled_id, zones.clone().into()))
                 .collect(),
             self.metadata(),
-            self.typed_blueprint_zones(),
+            self.blueprint_zones.clone(),
         )
     }
 
@@ -243,7 +231,7 @@ impl Blueprint {
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.metadata(),
-            self.typed_blueprint_zones(),
+            self.blueprint_zones.clone(),
         )
     }
 
@@ -251,21 +239,6 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
-    }
-
-    /// Temporary method that returns `self.blueprint_zones`, except the keys
-    /// are `SledUuid`.
-    ///
-    /// TODO-cleanup use `TypedUuid` everywhere
-    pub fn typed_blueprint_zones(
-        &self,
-    ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
-        self.blueprint_zones
-            .iter()
-            .map(|(sled_id, zones)| {
-                (SledUuid::from_untyped_uuid(*sled_id), zones.clone())
-            })
-            .collect()
     }
 }
 

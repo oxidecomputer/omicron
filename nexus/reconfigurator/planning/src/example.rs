@@ -13,7 +13,6 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use typed_rng::TypedUuidRng;
 
@@ -91,10 +90,7 @@ impl ExampleSystem {
         builder.set_rng_seed((test_name, "ExampleSystem collection"));
 
         for sled_id in blueprint.sleds() {
-            // TODO-cleanup use `TypedUuid` everywhere
-            let Some(zones) =
-                blueprint.blueprint_zones.get(sled_id.as_untyped_uuid())
-            else {
+            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
             for zone in zones.zones.iter() {
