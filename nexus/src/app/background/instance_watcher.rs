@@ -5,6 +5,7 @@
 //! Background task for pulling instance state from sled-agents.
 
 use super::common::BackgroundTask;
+use crate::app::instance::InstanceUpdated;
 use crate::Error;
 use futures::{future::BoxFuture, FutureExt};
 use nexus_db_model::{Sled, SledInstance};
@@ -33,7 +34,6 @@ impl InstanceWatcher {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
-        max_retries: NonZeroU32,
     ) -> Self {
         Self { datastore, resolver }
     }
@@ -43,7 +43,10 @@ impl InstanceWatcher {
         opctx: &OpContext,
         client: &SledAgentClient,
         instance: SledInstance,
-    ) -> impl Future<Output = Result<(), Error>> + Send + 'static {
+    ) -> impl Future<
+        Output = Result<crate::app::instance::InstanceUpdated, CheckError>,
+    > + Send
+           + 'static {
         let instance_id = instance.instance_id();
         let watcher = self.clone();
         let opctx = opctx.child(
@@ -66,7 +69,7 @@ impl InstanceWatcher {
                         && rsp.as_ref().error_code.as_deref()
                             == Some("NO_SUCH_INSTANCE") =>
                 {
-                    slog::info!(opctx.log, "instance is wayyyyy gone");
+                    slog::debug!(opctx.log, "instance is wayyyyy gone");
                     todo!();
                 }
                 Err(e) => {
@@ -74,7 +77,7 @@ impl InstanceWatcher {
                         opctx.log,
                         "error checking up on instance: {e}"
                     );
-                    return Err(e.into());
+                    return Err(CheckError::SledAgent);
                 }
             };
 
@@ -89,11 +92,17 @@ impl InstanceWatcher {
                 &state.into(),
             )
             .await
+            .map_err(|_| CheckError::Update)?
+            .ok_or(CheckError::NotFound)
         }
     }
 }
 
-struct CheckResult {}
+enum CheckError {
+    SledAgent,
+    Update,
+    NotFound,
+}
 
 type ClientError = sled_agent_client::Error<sled_agent_client::types::Error>;
 
@@ -158,12 +167,35 @@ impl BackgroundTask for InstanceWatcher {
             }
 
             // All requests fired off, let's wait for them to come back.
-            let mut ok = 0;
+            let mut total = 0;
+            let mut instances_updated = 0;
+            let mut vmms_updated = 0;
+            let mut no_change = 0;
+            let mut not_found = 0;
+            let mut sled_agent_errors = 0;
+            let mut update_errors = 0;
             while let Some(result) = tasks.join_next().await {
+                total += 1;
                 match result {
-                    Ok(Ok(())) => {
-                        ok += 1;
+                    Ok(Ok(InstanceUpdated {
+                        vmm_updated,
+                        instance_updated,
+                    })) => {
+                        if instance_updated {
+                            instances_updated += 1;
+                        }
+
+                        if vmm_updated {
+                            vmms_updated += 1;
+                        }
+
+                        if !(vmm_updated || instance_updated) {
+                            no_change += 1;
+                        }
                     }
+                    Ok(Err(CheckError::NotFound)) => not_found += 1,
+                    Ok(Err(CheckError::SledAgent)) => sled_agent_errors += 1,
+                    Ok(Err(CheckError::Update)) => update_errors += 1,
                     Err(e) => unreachable!(
                         "a `JoinError` is returned if a spawned task \
                         panics, or if the task is aborted. we never abort \
@@ -171,13 +203,26 @@ impl BackgroundTask for InstanceWatcher {
                         `panic=\"abort\"`, so neither of these cases should \
                         ever occur: {e}",
                     ),
-                    Ok(Err(e)) => {}
                 }
             }
 
-            slog::trace!(opctx.log, "all instance checks complete");
+            slog::info!(opctx.log, "all instance checks complete";
+                "total_instances" => ?total,
+                "instances_updated" => ?instances_updated,
+                "vmms_updated" => ?vmms_updated,
+                "no_change" => ?no_change,
+                "not_found" => ?not_found,
+                "sled_agent_errors" => ?sled_agent_errors,
+                "update_errors" => ?update_errors,
+            );
             serde_json::json!({
-                "num_ok": ok,
+                "total_instances": total,
+                "instances_updated": instances_updated,
+                "vmms_updated": vmms_updated,
+                "no_change": no_change,
+                "not_found": not_found,
+                "sled_agent_errors": sled_agent_errors,
+                "update_errors": update_errors,
             })
         }
         .boxed()

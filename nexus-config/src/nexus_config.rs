@@ -528,10 +528,6 @@ pub struct InstanceWatcherConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
-
-    /// maximum number of retries to attempt before considering a sled-agent
-    /// dead.
-    pub max_retries: NonZeroU32,
 }
 
 /// Configuration for a nexus server
