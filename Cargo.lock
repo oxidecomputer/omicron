@@ -5818,7 +5818,7 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
- "toml_edit 0.22.9",
+ "toml_edit 0.22.12",
  "tracing",
  "trust-dns-proto",
  "unicode-bidi",
@@ -9823,7 +9823,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.9",
+ "toml_edit 0.22.12",
 ]
 
 [[package]]
@@ -9850,9 +9850,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.9"
+version = "0.22.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
+checksum = "d3328d4f68a705b2a4498da1d580585d39a6510f98318a2cec3018a7ec61ddef"
 dependencies = [
  "indexmap 2.2.6",
  "serde",
@@ -10875,7 +10875,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.8.12",
- "toml_edit 0.22.9",
+ "toml_edit 0.22.12",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
