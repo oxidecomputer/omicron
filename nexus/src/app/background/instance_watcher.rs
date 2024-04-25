@@ -6,12 +6,12 @@
 
 use super::common::BackgroundTask;
 use futures::{future::BoxFuture, FutureExt};
-use nexus_db_model::{InvSledAgent, SledInstance};
+use nexus_db_model::SledInstance;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_types::identity::Asset;
 use omicron_common::backoff::{self, BackoffError};
-use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use sled_agent_client::Client as SledAgentClient;
 use std::future::Future;
@@ -143,52 +143,45 @@ impl BackgroundTask for InstanceWatcher {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let latest_collection = {
-                let maybe_id = self
-                    .datastore
-                    .inventory_get_latest_collection_id(opctx)
-                    .await;
-                match maybe_id {
-                    Ok(Some(collection)) => collection,
-                    Ok(None) => {
-                        slog::debug!(opctx.log, "no inventory collection exists, not querying sled agents.");
-                        return json!({});
-                        }
-                    Err(e) => {
-                        slog::warn!(opctx.log, "failed to get latest collection ID: {e}");
-                        return json!({});
-                    }
-                }
-            };
-
             let mut tasks = tokio::task::JoinSet::new();
             let mut paginator = Paginator::new(MAX_SLED_AGENTS);
             while let Some(p) = paginator.next() {
-                let maybe_batch = self.datastore.sled_instance_list_by_sled_agent(
-                    opctx,
-                    latest_collection,
-                    &p.current_pagparams(),
-                ).await;
+                let maybe_batch = self
+                    .datastore
+                    .sled_instance_list_by_sled_agent(
+                        opctx,
+                        &p.current_pagparams(),
+                    )
+                    .await;
                 let batch = match maybe_batch {
                     Ok(batch) => batch,
                     Err(e) => {
-                        slog::warn!(opctx.log, "sled instances by sled agent query failed: {e}");
+                        slog::warn!(
+                            opctx.log,
+                            "sled instances by sled agent query failed: {e}"
+                        );
                         break;
                     }
                 };
-                paginator = p.found_batch(&batch, &|(sled_agent, _)| sled_agent.sled_id);
+                paginator = p.found_batch(&batch, &|(sled, _)| sled.id());
                 let mut batch = batch.into_iter();
 
-                if let Some((mut curr_sled_agent, sled_instance)) = batch.next() {
-                    let mk_client = |&InvSledAgent {
-                        ref sled_id, sled_agent_ip, sled_agent_port, ..
-                    }: &InvSledAgent| {
-                        let address = std::net::SocketAddrV6::new(sled_agent_ip.into(), sled_agent_port.into(), 0, 0);
-                        nexus_networking::sled_client_from_address(sled_id.into_untyped_uuid(), address, &opctx.log)
+                if let Some((mut curr_sled_agent, sled_instance)) = batch.next()
+                {
+                    let mk_client = |sled| {
+                        nexus_networking::sled_client_from_address(
+                            sled.id(),
+                            sled.address(),
+                            &opctx.log,
+                        )
                     };
 
                     let mut client = mk_client(&curr_sled_agent);
-                    tasks.spawn(self.check_instance(opctx, &client, sled_instance));
+                    tasks.spawn(self.check_instance(
+                        opctx,
+                        &client,
+                        sled_instance,
+                    ));
 
                     for (sled_agent, sled_instance) in batch {
                         // We're now talking to a new sled agent; update the client.
@@ -196,7 +189,11 @@ impl BackgroundTask for InstanceWatcher {
                             client = mk_client(&sled_agent);
                             curr_sled_agent = sled_agent;
                         }
-                        tasks.spawn(self.check_instance(opctx, &client, sled_instance));
+                        tasks.spawn(self.check_instance(
+                            opctx,
+                            &client,
+                            sled_instance,
+                        ));
                     }
                 }
             }
