@@ -751,7 +751,7 @@ struct BackgroundTaskPathParam {
     bgtask_name: String,
 }
 
-/// Query parameters for multiple background task requests.
+/// Query parameters for Background Task activation requests.
 #[derive(Deserialize, JsonSchema)]
 struct BackgroundTasksActivateRequest {
     bgtask_names: BTreeSet<String>,
@@ -762,7 +762,7 @@ struct BackgroundTasksActivateRequest {
 /// This is exposed for support and debugging.
 #[endpoint {
     method = GET,
-    path = "/bgtasks/{bgtask_name}",
+    path = "/bgtasks/view/{bgtask_name}",
 }]
 async fn bgtask_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -783,9 +783,7 @@ async fn bgtask_view(
 /// if idle, or scheduled to run again as soon as possible if already running.
 #[endpoint {
     method = POST,
-    // Can't be "bgtasks/activate" because it conflicts with the GET endpoint
-    // for bgtask_view.
-    path = "/bgtasks-activate",
+    path = "/bgtasks/activate",
 }]
 async fn bgtask_activate(
     rqctx: RequestContext<Arc<ServerContext>>,

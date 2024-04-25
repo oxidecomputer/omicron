@@ -310,7 +310,10 @@ impl NexusArgs {
             }) => cmd_nexus_background_tasks_show(&client).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
-            }) => cmd_nexus_background_tasks_activate(&client, args).await,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_background_tasks_activate(&client, args, token).await
+            }
 
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::List,
@@ -482,6 +485,10 @@ async fn cmd_nexus_background_tasks_show(
 async fn cmd_nexus_background_tasks_activate(
     client: &nexus_client::Client,
     args: &BackgroundTasksActivateArgs,
+    // This isn't quite "destructive" in the sense that of it being potentially
+    // dangerous, but it does modify the system rather than being a read-only
+    // view on it.
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let body =
         BackgroundTasksActivateRequest { bgtask_names: args.tasks.clone() };

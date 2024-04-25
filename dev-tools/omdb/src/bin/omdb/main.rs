@@ -86,8 +86,8 @@ struct Omdb {
     #[arg(env = "OMDB_DNS_SERVER", long)]
     dns_server: Option<SocketAddr>,
 
-    /// allow potentially-destructive subcommands
-    #[arg(short = 'w', long = "destructive")]
+    /// Allow potentially-destructive subcommands.
+    #[arg(short = 'w', long = "destructive", global = true)]
     allow_destructive: bool,
 
     #[command(subcommand)]

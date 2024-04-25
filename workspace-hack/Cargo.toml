@@ -85,7 +85,7 @@ proc-macro2 = { version = "1.0.81" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.4" }
-regex-automata = { version = "0.4.5", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
+regex-automata = { version = "0.4.5", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
@@ -100,14 +100,14 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.59", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.60", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.34", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.37.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.10", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.9", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.12", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
@@ -192,7 +192,7 @@ proc-macro2 = { version = "1.0.81" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.4" }
-regex-automata = { version = "0.4.5", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
+regex-automata = { version = "0.4.5", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
@@ -207,7 +207,7 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.59", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.60", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.34", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.17", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.37.0", features = ["full", "test-util"] }
@@ -215,7 +215,7 @@ tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serd
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.10", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.9", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.12", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }

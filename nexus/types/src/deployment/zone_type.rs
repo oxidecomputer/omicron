@@ -33,33 +33,21 @@ pub enum BlueprintZoneType {
 }
 
 impl BlueprintZoneType {
-    pub fn external_ip(&self) -> Option<OmicronZoneExternalIp> {
+    pub fn external_networking(
+        &self,
+    ) -> Option<(OmicronZoneExternalIp, &NetworkInterface)> {
         match self {
-            BlueprintZoneType::Nexus(nexus) => {
-                Some(OmicronZoneExternalIp::Floating(nexus.external_ip))
-            }
-            BlueprintZoneType::ExternalDns(dns) => {
-                Some(OmicronZoneExternalIp::Floating(dns.dns_address.into_ip()))
-            }
+            BlueprintZoneType::Nexus(nexus) => Some((
+                OmicronZoneExternalIp::Floating(nexus.external_ip),
+                &nexus.nic,
+            )),
+            BlueprintZoneType::ExternalDns(dns) => Some((
+                OmicronZoneExternalIp::Floating(dns.dns_address.into_ip()),
+                &dns.nic,
+            )),
             BlueprintZoneType::BoundaryNtp(ntp) => {
-                Some(OmicronZoneExternalIp::Snat(ntp.external_ip))
+                Some((OmicronZoneExternalIp::Snat(ntp.external_ip), &ntp.nic))
             }
-            BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::CockroachDb(_)
-            | BlueprintZoneType::Crucible(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::InternalDns(_)
-            | BlueprintZoneType::InternalNtp(_)
-            | BlueprintZoneType::Oximeter(_) => None,
-        }
-    }
-
-    pub fn opte_vnic(&self) -> Option<&NetworkInterface> {
-        match self {
-            BlueprintZoneType::Nexus(nexus) => Some(&nexus.nic),
-            BlueprintZoneType::ExternalDns(dns) => Some(&dns.nic),
-            BlueprintZoneType::BoundaryNtp(ntp) => Some(&ntp.nic),
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
             | BlueprintZoneType::CockroachDb(_)

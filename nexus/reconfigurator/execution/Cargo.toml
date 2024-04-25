@@ -33,6 +33,8 @@ pq-sys = "*"
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+async-bb8-diesel.workspace = true
+diesel.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
 nexus-reconfigurator-planning.workspace = true
