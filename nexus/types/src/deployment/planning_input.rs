@@ -249,6 +249,9 @@ pub enum SledFilter {
     /// Sleds that are eligible for discretionary services.
     EligibleForDiscretionaryServices,
 
+    /// Sleds whose sled agents should be queried for inventory
+    InInventory,
+
     /// Sleds that are in service (even if they might not be eligible for
     /// discretionary services).
     InService,
@@ -306,6 +309,7 @@ impl SledPolicy {
             } => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::InInventory => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
@@ -315,6 +319,7 @@ impl SledPolicy {
             } => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::InInventory => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => true,
@@ -322,6 +327,7 @@ impl SledPolicy {
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::InInventory => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
@@ -351,6 +357,7 @@ impl SledState {
             SledState::Active => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::InInventory => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
@@ -358,6 +365,7 @@ impl SledState {
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
                 SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::InInventory => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
