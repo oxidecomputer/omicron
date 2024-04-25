@@ -378,6 +378,7 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
+            rack_id,
             config.deployment.id,
             resolver.clone(),
             saga_request,
