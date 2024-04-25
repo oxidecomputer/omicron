@@ -291,7 +291,7 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
 
-            if let Some(external_ip) = zone_type.external_ip() {
+            if let Some((external_ip, nic)) = zone_type.external_networking() {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
@@ -300,9 +300,7 @@ impl<'a> BlueprintBuilder<'a> {
                 {
                     bail!("duplicate external IP: {external_ip:?}");
                 }
-            }
 
-            if let Some(nic) = zone_type.opte_vnic() {
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
@@ -1518,7 +1516,9 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(external_ip) = z.zone_type.external_ip() {
+                if let Some((external_ip, _)) =
+                    z.zone_type.external_networking()
+                {
                     used_ip_ranges.push(IpRange::from(external_ip.ip()));
                 }
             }

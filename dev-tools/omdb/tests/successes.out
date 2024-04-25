@@ -436,15 +436,6 @@ warning: unknown background task: "switch_port_config_manager" (don't know how t
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "background-tasks", "activate", "inventory_collection"]
-termination: Exited(0)
----------------------------------------------
-stdout:
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-activated background tasks: inventory_collection
-=============================================
 EXECUTING COMMAND: omdb ["nexus", "blueprints", "list"]
 termination: Exited(0)
 ---------------------------------------------

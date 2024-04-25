@@ -163,6 +163,21 @@ impl Blueprint {
         })
     }
 
+    /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
+    /// that do not match the provided filter, along with the associated sled
+    /// id.
+    pub fn all_omicron_zones_not_in(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+            z.zones
+                .iter()
+                .filter(move |z| !z.disposition.matches(filter))
+                .map(|z| (SledUuid::from_untyped_uuid(*sled_id), z))
+        })
+    }
+
     // Temporary method that provides the list of Omicron zones using
     // `TypedUuid`.
     //

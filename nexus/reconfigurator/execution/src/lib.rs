@@ -25,10 +25,10 @@ use std::net::SocketAddrV6;
 
 mod datasets;
 mod dns;
+mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
-mod resource_allocation;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
@@ -110,7 +110,23 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    resource_allocation::ensure_zone_resources_allocated(
+    // Deallocate external networking resources for non-externally-reachable
+    // zones first. This will allow external networking resource allocation to
+    // succeed if we are swapping an external IP between two zones (e.g., moving
+    // a specific external IP from an old external DNS zone to a new one).
+    external_networking::ensure_zone_external_networking_deallocated(
+        &opctx,
+        datastore,
+        blueprint
+            .all_omicron_zones_not_in(
+                BlueprintZoneFilter::ShouldBeExternallyReachable,
+            )
+            .map(|(_sled_id, zone)| zone),
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
+    external_networking::ensure_zone_external_networking_allocated(
         &opctx,
         datastore,
         blueprint
