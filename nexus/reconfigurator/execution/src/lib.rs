@@ -110,6 +110,22 @@ where
         "blueprint_id" => %blueprint.id
     );
 
+    // Deallocate external networking resources for non-externally-reachable
+    // zones first. This will allow external networking resource allocation to
+    // succeed if we are swapping an external IP between two zones (e.g., moving
+    // a specific external IP from an old external DNS zone to a new one).
+    external_networking::ensure_zone_external_networking_deallocated(
+        &opctx,
+        datastore,
+        blueprint
+            .all_omicron_zones_not_in(
+                BlueprintZoneFilter::ShouldBeExternallyReachable,
+            )
+            .map(|(_sled_id, zone)| zone),
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
     external_networking::ensure_zone_external_networking_allocated(
         &opctx,
         datastore,
@@ -184,18 +200,6 @@ where
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
-
-    external_networking::ensure_zone_external_networking_deallocated(
-        &opctx,
-        datastore,
-        blueprint
-            .all_omicron_zones_not_in(
-                BlueprintZoneFilter::ShouldBeExternallyReachable,
-            )
-            .map(|(_sled_id, zone)| zone),
-    )
-    .await
-    .map_err(|err| vec![err])?;
 
     Ok(())
 }
