@@ -445,7 +445,8 @@ fn start_producer_server(
             id: registry.producer_id(),
             kind: ProducerKind::Service,
             address,
-            base_route: String::from("/metrics/collect"),
+            // NOTE: This is now unused, and will be removed in the future.
+            base_route: String::new(),
             interval: std::time::Duration::from_secs(10),
         },
         // Some(_) here prevents DNS resolution, using our own address to
