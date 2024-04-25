@@ -40,7 +40,6 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
 use omicron_common::address::Ipv6Subnet;
-use slog::warn;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
@@ -142,7 +141,7 @@ impl Omdb {
         log: slog::Logger,
         service_name: internal_dns::ServiceName,
     ) -> Result<SocketAddrV6, anyhow::Error> {
-        let addrs = self.dns_lookup_all(log.clone(), service_name).await?;
+        let addrs = self.dns_lookup_all(log, service_name).await?;
         ensure!(
             !addrs.is_empty(),
             "expected at least one address from successful DNS lookup for {:?}",
@@ -183,10 +182,9 @@ impl Omdb {
             match connect_result {
                 Ok(()) => return Ok(sockaddr),
                 Err(error) => {
-                    warn!(log, "failed to connect";
-                        "service_name" => ?service_name,
-                        "sockaddr" => %sockaddr,
-                        "error" => format!("{:#}", error),
+                    eprintln!(
+                        "warning: failed to connect to {:?} at {}: {:#}",
+                        service_name, sockaddr, error
                     );
                 }
             }
