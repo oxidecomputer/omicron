@@ -496,7 +496,6 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -560,7 +559,7 @@ mod test {
         let mut blueprint_zones = BTreeMap::new();
         for (sled_id, zones_config) in collection.omicron_zones {
             blueprint_zones.insert(
-                sled_id.into_untyped_uuid(),
+                sled_id,
                 BlueprintZonesConfig {
                     generation: zones_config.zones.generation,
                     zones: zones_config
@@ -628,9 +627,8 @@ mod test {
             .zip(possible_sled_subnets)
             .enumerate()
             .map(|(i, (sled_id, subnet))| {
-                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 let sled_info = Sled {
-                    id: sled_id,
+                    id: *sled_id,
                     sled_agent_address: get_sled_address(Ipv6Subnet::new(
                         subnet.network(),
                     )),
@@ -638,7 +636,7 @@ mod test {
                     // Scrimlets.
                     is_scrimlet: i < 2,
                 };
-                (sled_id, sled_info)
+                (*sled_id, sled_info)
             })
             .collect();
 

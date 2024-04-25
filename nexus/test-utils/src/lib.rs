@@ -57,6 +57,7 @@ use omicron_test_utils::dev;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
@@ -758,7 +759,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             ] {
                 if let Some(sa) = maybe_sled_agent {
                     blueprint_zones.insert(
-                        sa.sled_agent.id,
+                        SledUuid::from_untyped_uuid(sa.sled_agent.id),
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
                             zones: zones.clone(),
