@@ -11,6 +11,7 @@ use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::DataStore;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{DataPageParams, ListResultVec};
@@ -181,7 +182,7 @@ impl super::Nexus {
                 self.db_datastore.oximeter_lookup(opctx, &collector_id).await?;
             let address =
                 SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
-            let client = self.build_oximeter_client(&id, address);
+            let client = build_oximeter_client(&self.log, &id, address);
             if let Err(e) = client.producer_delete(&id).await {
                 error!(
                     self.log,
@@ -324,25 +325,6 @@ impl super::Nexus {
         .unwrap())
     }
 
-    // Internal helper to build an Oximeter client from its ID and address (common data between
-    // model type and the API type).
-    fn build_oximeter_client(
-        &self,
-        id: &Uuid,
-        address: SocketAddr,
-    ) -> OximeterClient {
-        let client_log =
-            self.log.new(o!("oximeter-collector" => id.to_string()));
-        let client =
-            OximeterClient::new(&format!("http://{}", address), client_log);
-        info!(
-            self.log,
-            "registered oximeter collector client";
-            "id" => id.to_string(),
-        );
-        client
-    }
-
     // Return an oximeter collector to assign a newly-registered producer
     async fn next_collector(
         &self,
@@ -361,7 +343,61 @@ impl super::Nexus {
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         let id = info.id;
-        Ok((self.build_oximeter_client(&id, address), id))
+        Ok((build_oximeter_client(&self.log, &id, address), id))
+    }
+}
+
+/// Idempotently un-assign a producer from an oximeter collector.
+pub(crate) async fn unassign_producer(
+    datastore: &DataStore,
+    log: &slog::Logger,
+    opctx: &OpContext,
+    id: &Uuid,
+) -> Result<(), Error> {
+    if let Some(collector_id) =
+        datastore.producer_endpoint_delete(opctx, id).await?
+    {
+        debug!(
+            log,
+            "deleted metric producer assignment";
+            "producer_id" => %id,
+            "collector_id" => %collector_id,
+        );
+        let oximeter_info =
+            datastore.oximeter_lookup(opctx, &collector_id).await?;
+        let address =
+            SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
+        let client = build_oximeter_client(&log, &id, address);
+        if let Err(e) = client.producer_delete(&id).await {
+            error!(
+                log,
+                "failed to delete producer from collector";
+                "producer_id" => %id,
+                "collector_id" => %collector_id,
+                "address" => %address,
+                "error" => ?e,
+            );
+            return Err(Error::internal_error(
+                format!("failed to delete producer from collector: {e:?}")
+                    .as_str(),
+            ));
+        } else {
+            debug!(
+                log,
+                "successfully deleted producer from collector";
+                "producer_id" => %id,
+                "collector_id" => %collector_id,
+                "address" => %address,
+            );
+            Ok(())
+        }
+    } else {
+        trace!(
+            log,
+            "un-assigned non-existent metric producer";
+            "producer_id" => %id,
+        );
+        Ok(())
     }
 }
 
@@ -372,4 +408,22 @@ fn map_oximeter_err(error: oximeter_db::Error) -> Error {
         }
         _ => Error::InternalError { internal_message: error.to_string() },
     }
+}
+
+// Internal helper to build an Oximeter client from its ID and address (common data between
+// model type and the API type).
+fn build_oximeter_client(
+    log: &slog::Logger,
+    id: &Uuid,
+    address: SocketAddr,
+) -> OximeterClient {
+    let client_log = log.new(o!("oximeter-collector" => id.to_string()));
+    let client =
+        OximeterClient::new(&format!("http://{}", address), client_log);
+    info!(
+        log,
+        "registered oximeter collector client";
+        "id" => id.to_string(),
+    );
+    client
 }

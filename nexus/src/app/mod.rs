@@ -378,7 +378,6 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
-            rack_id,
             config.deployment.id,
             resolver.clone(),
             saga_request,
@@ -882,33 +881,16 @@ impl Nexus {
     pub(crate) async fn dpd_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-        let mappings = self.switch_zone_address_mappings().await?;
-        let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
-            .iter()
-            .map(|(location, addr)| {
-                let port = DENDRITE_PORT;
-
-                let client_state = dpd_client::ClientState {
-                    tag: String::from("nexus"),
-                    log: self.log.new(o!(
-                        "component" => "DpdClient"
-                    )),
-                };
-
-                let dpd_client = dpd_client::Client::new(
-                    &format!("http://[{addr}]:{port}"),
-                    client_state,
-                );
-                (*location, dpd_client)
-            })
-            .collect();
-        Ok(clients)
+        let resolver = self.resolver().await;
+        dpd_clients(&resolver, &self.log).await
     }
 
     pub(crate) async fn mg_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
-        let mappings = self.switch_zone_address_mappings().await?;
+        let resolver = self.resolver().await;
+        let mappings =
+            switch_zone_address_mappings(&resolver, &self.log).await?;
         let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
             vec![];
         for (location, addr) in &mappings {
@@ -922,24 +904,6 @@ impl Nexus {
             clients.push((*location, client));
         }
         Ok(clients.into_iter().collect::<HashMap<_, _>>())
-    }
-
-    async fn switch_zone_address_mappings(
-        &self,
-    ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-        let switch_zone_addresses = match self
-            .resolver()
-            .await
-            .lookup_all_ipv6(ServiceName::Dendrite)
-            .await
-        {
-            Ok(addrs) => addrs,
-            Err(e) => {
-                error!(self.log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                return Err(e.to_string());
-            }
-        };
-        Ok(map_switch_zone_addrs(&self.log, switch_zone_addresses).await)
     }
 }
 
@@ -957,6 +921,50 @@ pub enum Unimpl {
     #[allow(unused)]
     Public,
     ProtectedLookup(Error),
+}
+
+pub(crate) async fn dpd_clients(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+    let mappings = switch_zone_address_mappings(resolver, log).await?;
+    let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
+        .iter()
+        .map(|(location, addr)| {
+            let port = DENDRITE_PORT;
+
+            let client_state = dpd_client::ClientState {
+                tag: String::from("nexus"),
+                log: log.new(o!(
+                    "component" => "DpdClient"
+                )),
+            };
+
+            let dpd_client = dpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                client_state,
+            );
+            (*location, dpd_client)
+        })
+        .collect();
+    Ok(clients)
+}
+
+async fn switch_zone_address_mappings(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+    let switch_zone_addresses = match resolver
+        .lookup_all_ipv6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
