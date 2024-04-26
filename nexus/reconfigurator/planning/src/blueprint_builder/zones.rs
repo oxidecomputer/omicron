@@ -408,7 +408,7 @@ mod tests {
                 assert_eq!(sled_modified.zones_modified().count(), 1);
                 let modified_zone =
                     sled_modified.zones_modified().next().unwrap();
-                assert_eq!(modified_zone.zone_before.id, existing_zone_id);
+                assert_eq!(modified_zone.zone_before.id(), existing_zone_id);
             } else {
                 assert_eq!(sled_id, control_sled_id);
 

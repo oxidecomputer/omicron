@@ -428,12 +428,15 @@ async fn sic_create_network_interface_undo(
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
-    match LookupPath::new(&opctx, &datastore)
+
+    let interface_deleted = match LookupPath::new(&opctx, &datastore)
         .instance_network_interface_id(interface_id)
         .lookup_for(authz::Action::Delete)
         .await
     {
         Ok((.., authz_interface)) => {
+            // The lookup succeeded, but we could still fail to delete the
+            // interface if we're racing another deleter.
             datastore
                 .instance_delete_network_interface(
                     &opctx,
@@ -441,25 +444,26 @@ async fn sic_create_network_interface_undo(
                     &authz_interface,
                 )
                 .await
-                .map_err(|e| e.into_external())?;
-            Ok(())
+                .map_err(|e| e.into_external())?
         }
-        Err(Error::ObjectNotFound { .. }) => {
-            // The saga is attempting to delete the NIC by the ID cached
-            // in the saga log. If we're running this, the NIC already
-            // appears to be gone, which is odd, but not exactly an
-            // error. Swallowing the error allows the saga to continue,
-            // but this is another place we might want to consider
-            // bumping a counter or otherwise tracking things.
-            warn!(
-                osagactx.log(),
-                "During saga unwind, NIC already appears deleted";
-                "interface_id" => %interface_id,
-            );
-            Ok(())
-        }
-        Err(e) => Err(e.into()),
+        Err(Error::ObjectNotFound { .. }) => false,
+        Err(e) => return Err(e.into()),
+    };
+
+    if !interface_deleted {
+        // The saga is attempting to delete the NIC by the ID cached
+        // in the saga log. If we're running this, the NIC already
+        // appears to be gone, which is odd, but not exactly an
+        // error. Swallowing the error allows the saga to continue,
+        // but this is another place we might want to consider
+        // bumping a counter or otherwise tracking things.
+        warn!(
+            osagactx.log(),
+            "During saga unwind, NIC already appears deleted";
+            "interface_id" => %interface_id,
+        );
     }
+    Ok(())
 }
 
 /// Create one custom (non-default) network interface for the provided instance.

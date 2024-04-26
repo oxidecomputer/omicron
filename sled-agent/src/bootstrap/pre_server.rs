@@ -11,6 +11,7 @@
 #![allow(clippy::result_large_err)]
 
 use super::maghemite;
+use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
 use crate::config::SidecarRevision;
@@ -75,6 +76,7 @@ impl BootstrapAgentStartup {
         let (config, log, ddm_admin_localhost_client, startup_networking) =
             tokio::task::spawn_blocking(move || {
                 enable_mg_ddm(&config, &log)?;
+                pumpkind::enable_pumpkind_service(&log)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
                 let startup_networking = BootstrapNetworking::setup(&config)?;

@@ -127,9 +127,9 @@ mod test {
     };
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use omicron_uuid_kinds::SledKind;
-    use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::SledUuid;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -142,11 +142,8 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     fn create_blueprint(
-        blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
-        blueprint_disks: BTreeMap<
-            TypedUuid<SledKind>,
-            BlueprintPhysicalDisksConfig,
-        >,
+        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
@@ -186,8 +183,8 @@ mod test {
         // sleds to CRDB.
         let mut s1 = httptest::Server::run();
         let mut s2 = httptest::Server::run();
-        let sled_id1 = Uuid::new_v4();
-        let sled_id2 = Uuid::new_v4();
+        let sled_id1 = SledUuid::new_v4();
+        let sled_id2 = SledUuid::new_v4();
         let rack_id = Uuid::new_v4();
         for (i, (sled_id, server)) in
             [(sled_id1, &s1), (sled_id2, &s2)].iter().enumerate()
@@ -196,7 +193,7 @@ mod test {
                 panic!("Expected Ipv6 address. Got {}", server.addr());
             };
             let update = SledUpdate::new(
-                *sled_id,
+                sled_id.into_untyped_uuid(),
                 addr,
                 SledBaseboard {
                     serial_number: i.to_string(),

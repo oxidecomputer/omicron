@@ -19,6 +19,7 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::TransactionError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -39,7 +40,9 @@ impl DataStore {
         zpool: Zpool,
     ) -> CreateResult<Zpool> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        Self::zpool_insert_on_connection(&conn, opctx, zpool).await
+        let zpool =
+            Self::zpool_insert_on_connection(&conn, opctx, zpool).await?;
+        Ok(zpool)
     }
 
     /// Stores a new zpool in the database.
@@ -47,13 +50,13 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         zpool: Zpool,
-    ) -> CreateResult<Zpool> {
+    ) -> Result<Zpool, TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         use db::schema::zpool::dsl;
 
         let sled_id = zpool.sled_id;
-        Sled::insert_resource(
+        let pool = Sled::insert_resource(
             sled_id,
             diesel::insert_into(dsl::zpool)
                 .values(zpool.clone())
@@ -78,7 +81,9 @@ impl DataStore {
                     &zpool.id().to_string(),
                 ),
             ),
-        })
+        })?;
+
+        Ok(pool)
     }
 
     /// Fetches a page of the list of all zpools on U.2 disks in all sleds

@@ -17,6 +17,7 @@ use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
+use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::bootstrap::sprockets_server::SprocketsServer;
@@ -73,6 +74,9 @@ pub enum StartError {
 
     #[error("Failed to enable mg-ddm")]
     EnableMgDdm(#[from] maghemite::Error),
+
+    #[error("Failed to enable pumpkind")]
+    EnablePumpkind(#[from] pumpkind::Error),
 
     #[error("Failed to create zfs key directory {dir:?}")]
     CreateZfsKeyDirectory {

@@ -24,6 +24,7 @@ pub mod route;
 pub mod running_zone;
 pub mod scf;
 pub mod svc;
+pub mod svcadm;
 pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;

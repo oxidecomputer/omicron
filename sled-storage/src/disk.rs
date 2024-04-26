@@ -7,11 +7,11 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
-use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::ledger::Ledgerable;
+use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

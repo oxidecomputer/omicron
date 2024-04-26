@@ -19,7 +19,9 @@ use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pool::DbConnection;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
+use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -33,8 +35,10 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::bail_unless;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -95,15 +99,43 @@ impl DataStore {
         Ok((sled, was_modified))
     }
 
+    /// Confirms that a sled exists and is in-service.
+    ///
+    /// This function may be called from a transaction context.
+    pub async fn check_sled_in_service_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: Uuid,
+    ) -> Result<(), TransactionError<Error>> {
+        use db::schema::sled::dsl;
+        let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
+            dsl::sled
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(sled_id))
+                .sled_filter(SledFilter::InService),
+        ))
+        .get_result_async::<bool>(conn)
+        .await?;
+
+        bail_unless!(
+            sled_exists_and_in_service,
+            "Sled {} is not in service",
+            sled_id,
+        );
+
+        Ok(())
+    }
+
     pub async fn sled_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
+        sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
+            .sled_filter(sled_filter)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -117,6 +149,7 @@ impl DataStore {
     pub async fn sled_list_all_batched(
         &self,
         opctx: &OpContext,
+        sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
@@ -124,7 +157,9 @@ impl DataStore {
         let mut all_sleds = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch = self.sled_list(opctx, &p.current_pagparams()).await?;
+            let batch = self
+                .sled_list(opctx, &p.current_pagparams(), sled_filter)
+                .await?;
             paginator =
                 p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
             all_sleds.extend(batch);
@@ -1417,9 +1452,10 @@ mod test {
         assert_eq!(ninserted, size);
 
         let sleds = datastore
-            .sled_list_all_batched(&opctx)
+            .sled_list_all_batched(&opctx, SledFilter::All)
             .await
             .expect("failed to list all sleds");
+
         // We don't need to sort these ids because the sleds are enumerated in
         // id order.
         let found_ids: Vec<_> = sleds.into_iter().map(|s| s.id()).collect();

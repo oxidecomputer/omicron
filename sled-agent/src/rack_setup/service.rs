@@ -103,8 +103,8 @@ use omicron_common::backoff::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -812,7 +812,7 @@ impl ServiceInner {
                         serial: config.identity.serial.clone(),
                         model: config.identity.model.clone(),
                         variant: NexusTypes::PhysicalDiskKind::U2,
-                        sled_id: *sled_id,
+                        sled_id: sled_id.into_untyped_uuid(),
                     }
                 })
             })
@@ -825,7 +825,7 @@ impl ServiceInner {
                     NexusTypes::ZpoolPutRequest {
                         id: config.pool_id.into_untyped_uuid(),
                         physical_disk_id: config.id,
-                        sled_id: *sled_id,
+                        sled_id: sled_id.into_untyped_uuid(),
                     }
                 })
             })
@@ -1277,11 +1277,11 @@ impl DeployStepVersion {
 fn build_sled_configs_by_id(
     sled_plan: &SledPlan,
     service_plan: &ServicePlan,
-) -> anyhow::Result<BTreeMap<Uuid, SledConfig>> {
+) -> anyhow::Result<BTreeMap<SledUuid, SledConfig>> {
     let mut sled_configs = BTreeMap::new();
     for sled_request in sled_plan.sleds.values() {
         let sled_addr = get_sled_address(sled_request.body.subnet);
-        let sled_id = sled_request.body.id;
+        let sled_id = SledUuid::from_untyped_uuid(sled_request.body.id);
         let entry = match sled_configs.entry(sled_id) {
             btree_map::Entry::Vacant(entry) => entry,
             btree_map::Entry::Occupied(_) => {
@@ -1314,7 +1314,7 @@ fn build_sled_configs_by_id(
 
 // Build an initial blueprint
 fn build_initial_blueprint_from_plan(
-    sled_configs_by_id: &BTreeMap<Uuid, SledConfig>,
+    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     service_plan: &ServicePlan,
 ) -> anyhow::Result<Blueprint> {
     let internal_dns_version =
@@ -1330,7 +1330,7 @@ fn build_initial_blueprint_from_plan(
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
-    sled_configs_by_id: &BTreeMap<Uuid, SledConfig>,
+    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> Result<Blueprint, InvalidOmicronZoneType> {
     // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
@@ -1341,13 +1341,23 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         BlueprintZoneConfig::from_omicron_zone_config(
             z.clone().into(),
             disposition,
+            // This is pretty weird: IP IDs don't exist yet, so it's fine for us
+            // to make them up (Nexus will record them as a part of the
+            // handoff). We could pass `None` here for some zone types, but it's
+            // a little simpler to just always pass a new ID, which will only be
+            // used if the zone type has an external IP.
+            //
+            // This should all go away once RSS starts using blueprints more
+            // directly (instead of this conversion after the fact):
+            // https://github.com/oxidecomputer/omicron/issues/5272
+            Some(ExternalIpUuid::new_v4()),
         )
     };
 
     let mut blueprint_disks = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
         blueprint_disks.insert(
-            SledUuid::from_untyped_uuid(*sled_id),
+            *sled_id,
             BlueprintPhysicalDisksConfig {
                 generation: sled_config.disks.generation,
                 disks: sled_config

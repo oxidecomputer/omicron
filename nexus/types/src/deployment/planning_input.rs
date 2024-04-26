@@ -10,8 +10,7 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use ipnetwork::IpNetwork;
-use ipnetwork::NetworkSize;
+use clap::ValueEnum;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -25,11 +24,13 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
+use std::net::SocketAddr;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
@@ -40,6 +41,12 @@ pub struct SledDisk {
     pub disk_id: PhysicalDiskUuid,
     pub policy: PhysicalDiskPolicy,
     pub state: PhysicalDiskState,
+}
+
+impl SledDisk {
+    fn provisionable(&self) -> bool {
+        DiskFilter::InService.matches_policy_and_state(self.policy, self.state)
+    }
 }
 
 /// Filters that apply to disks.
@@ -70,6 +77,34 @@ impl DiskFilter {
     }
 }
 
+/// Filters that apply to zpools.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ZpoolFilter {
+    /// All zpools
+    All,
+
+    /// All zpools which are in-service.
+    InService,
+}
+
+impl ZpoolFilter {
+    fn matches_policy_and_state(
+        self,
+        policy: PhysicalDiskPolicy,
+        state: PhysicalDiskState,
+    ) -> bool {
+        match self {
+            ZpoolFilter::All => true,
+            ZpoolFilter::InService => match (policy, state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+}
+
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
@@ -87,6 +122,24 @@ pub struct SledResources {
 }
 
 impl SledResources {
+    /// Returns if the zpool is provisionable (known, in-service, and active).
+    pub fn zpool_is_provisionable(&self, zpool: &ZpoolUuid) -> bool {
+        let Some(disk) = self.zpools.get(zpool) else { return false };
+        disk.provisionable()
+    }
+
+    /// Returns all zpools matching the given filter.
+    pub fn all_zpools(
+        &self,
+        filter: ZpoolFilter,
+    ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some(zpool)
+        })
+    }
+
     pub fn all_disks(
         &self,
         filter: DiskFilter,
@@ -101,31 +154,68 @@ impl SledResources {
 
 /// External IP variants possible for Omicron-managed zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OmicronZoneExternalIpKind {
-    Floating(IpAddr),
-    Snat(SourceNatConfig),
-    // We should probably have `Ephemeral(IpAddr)` too (for Nexus), but
-    // currently we record Nexus as Floating.
+pub enum OmicronZoneExternalIp {
+    Floating(OmicronZoneExternalFloatingIp),
+    Snat(OmicronZoneExternalSnatIp),
+    // We may eventually want `Ephemeral(_)` too (arguably Nexus could be
+    // ephemeral?), but for now we only have Floating and Snat uses.
 }
 
-impl OmicronZoneExternalIpKind {
+impl OmicronZoneExternalIp {
+    pub fn id(&self) -> ExternalIpUuid {
+        match self {
+            OmicronZoneExternalIp::Floating(ext) => ext.id,
+            OmicronZoneExternalIp::Snat(ext) => ext.id,
+        }
+    }
+
     pub fn ip(&self) -> IpAddr {
         match self {
-            OmicronZoneExternalIpKind::Floating(ip) => *ip,
-            OmicronZoneExternalIpKind::Snat(snat) => snat.ip,
+            OmicronZoneExternalIp::Floating(ext) => ext.ip,
+            OmicronZoneExternalIp::Snat(ext) => ext.snat_cfg.ip,
         }
     }
 }
 
-/// External IP allocated to an Omicron-managed zone.
+/// Floating external IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OmicronZoneExternalIp {
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
-    pub kind: OmicronZoneExternalIpKind,
+    pub ip: IpAddr,
+}
+
+/// Floating external address with port allocated to an Omicron-managed zone.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalFloatingAddr {
+    pub id: ExternalIpUuid,
+    pub addr: SocketAddr,
+}
+
+impl OmicronZoneExternalFloatingAddr {
+    pub fn into_ip(self) -> OmicronZoneExternalFloatingIp {
+        OmicronZoneExternalFloatingIp { id: self.id, ip: self.addr.ip() }
+    }
+}
+
+/// SNAT (outbound) external IP allocated to an Omicron-managed zone.
+///
+/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
+/// necessary for blueprint planning, and requires that the zone have a single
+/// IP.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalSnatIp {
+    pub id: ExternalIpUuid,
+    pub snat_cfg: SourceNatConfig,
 }
 
 /// Network interface allocated to an Omicron-managed zone.
@@ -149,7 +239,7 @@ pub struct OmicronZoneNic {
 /// The meaning of a particular filter should not be overloaded -- each time a
 /// new use case wants to make a decision based on the zone disposition, a new
 /// variant should be added to this enum.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, ValueEnum)]
 pub enum SledFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
@@ -158,7 +248,7 @@ pub enum SledFilter {
     All,
 
     /// Sleds that are eligible for discretionary services.
-    EligibleForDiscretionaryServices,
+    Discretionary,
 
     /// Sleds that are in service (even if they might not be eligible for
     /// discretionary services).
@@ -216,7 +306,7 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::Discretionary => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
@@ -225,14 +315,14 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
@@ -261,14 +351,14 @@ impl SledState {
         match self {
             SledState::Active => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::Discretionary => true,
                 SledFilter::InService => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
@@ -424,8 +514,6 @@ impl PlanningInput {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
-    #[error("Omicron zone {zone_id} has a range of IPs ({ip}); only a single IP is supported")]
-    NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
     DuplicateOmicronZoneExternalIp {
         zone_id: OmicronZoneUuid,
@@ -498,36 +586,6 @@ impl PlanningInputBuilder {
                 Err(PlanningInputBuildError::DuplicateSledId(sled_id))
             }
         }
-    }
-
-    /// Like `add_omicron_zone_external_ip`, but can accept an [`IpNetwork`],
-    /// validating that the IP is a single address.
-    pub fn add_omicron_zone_external_ip_network<F>(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        ip_id: ExternalIpUuid,
-        ip: IpNetwork,
-        to_kind: F,
-    ) -> Result<(), PlanningInputBuildError>
-    where
-        F: FnOnce(
-            IpAddr,
-        )
-            -> Result<OmicronZoneExternalIpKind, PlanningInputBuildError>,
-    {
-        let size = match ip.size() {
-            NetworkSize::V4(n) => u128::from(n),
-            NetworkSize::V6(n) => n,
-        };
-        if size != 1 {
-            return Err(PlanningInputBuildError::NotSingleIp { zone_id, ip });
-        }
-        let kind = to_kind(ip.ip())?;
-
-        self.add_omicron_zone_external_ip(
-            zone_id,
-            OmicronZoneExternalIp { id: ip_id, kind },
-        )
     }
 
     pub fn add_omicron_zone_external_ip(

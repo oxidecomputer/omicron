@@ -25,19 +25,21 @@ use nexus_config::MgdConfig;
 use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
 use nexus_types::internal_api::params::DatasetKind;
 use nexus_types::internal_api::params::DatasetPutRequest;
 use nexus_types::internal_api::params::RecoverySiloConfig;
-use nexus_types::inventory::OmicronZoneConfig;
 use nexus_types::inventory::OmicronZoneDataset;
-use nexus_types::inventory::OmicronZoneType;
 use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -52,8 +54,10 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
@@ -198,17 +202,13 @@ impl RackInitRequestBuilder {
 
     fn add_service_to_dns(
         &mut self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
         address: SocketAddrV6,
         service_name: internal_dns::ServiceName,
     ) {
         let zone = self
             .internal_dns_config
-            .host_zone(
-                // TODO-cleanup use TypedUuid everywhere
-                OmicronZoneUuid::from_untyped_uuid(zone_id),
-                *address.ip(),
-            )
+            .host_zone(zone_id, *address.ip())
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -279,8 +279,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
     initial_blueprint_id: Option<Uuid>,
-    omicron_zones: Vec<OmicronZoneConfig>,
-    omicron_zones2: Vec<OmicronZoneConfig>,
+    blueprint_zones: Vec<BlueprintZoneConfig>,
+    blueprint_zones2: Vec<BlueprintZoneConfig>,
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
@@ -324,8 +324,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_dns: None,
             dns_config: None,
             initial_blueprint_id: None,
-            omicron_zones: Vec::new(),
-            omicron_zones2: Vec::new(),
+            blueprint_zones: Vec::new(),
+            blueprint_zones2: Vec::new(),
             silo_name: None,
             user_name: None,
         }
@@ -410,13 +410,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .to_string()
             .parse()
             .unwrap();
-        self.omicron_zones.push(OmicronZoneConfig {
-            id: dataset_id,
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
             underlay_address: *address.ip(),
-            zone_type: OmicronZoneType::CockroachDb {
-                address: address.to_string(),
-                dataset: OmicronZoneDataset { pool_name },
-            },
+            zone_type: BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb {
+                    address,
+                    dataset: OmicronZoneDataset { pool_name },
+                },
+            ),
         });
         self.database = Some(database);
     }
@@ -459,13 +462,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .to_string()
             .parse()
             .unwrap();
-        self.omicron_zones.push(OmicronZoneConfig {
-            id: dataset_id,
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
             underlay_address: *address.ip(),
-            zone_type: OmicronZoneType::Clickhouse {
-                address: address.to_string(),
-                dataset: OmicronZoneDataset { pool_name },
-            },
+            zone_type: BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse {
+                    address,
+                    dataset: OmicronZoneDataset { pool_name },
+                },
+            ),
         });
     }
 
@@ -637,32 +643,39 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .expect("ran out of MAC addresses");
         let external_address =
             self.config.deployment.dropshot_external.dropshot.bind_address.ip();
-        let nexus_id = self.config.deployment.id;
+        let nexus_id =
+            OmicronZoneUuid::from_untyped_uuid(self.config.deployment.id);
         self.rack_init_builder.add_service_to_dns(
             nexus_id,
             address,
             internal_dns::ServiceName::Nexus,
         );
 
-        self.omicron_zones.push(OmicronZoneConfig {
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
             underlay_address: *address.ip(),
-            zone_type: OmicronZoneType::Nexus {
+            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_dns_servers: self
                     .config
                     .deployment
                     .external_dns_servers
                     .clone(),
-                external_ip: external_address,
+                external_ip: OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip: external_address,
+                },
                 external_tls: self.config.deployment.dropshot_external.tls,
-                internal_address: address.to_string(),
+                internal_address: address,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    kind: NetworkInterfaceKind::Service { id: nexus_id },
+                    kind: NetworkInterfaceKind::Service {
+                        id: nexus_id.into_untyped_uuid(),
+                    },
                     mac,
                     name: format!("nexus-{}", nexus_id).parse().unwrap(),
                     primary: true,
@@ -670,7 +683,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
                 },
-            },
+            }),
         });
 
         self.nexus_internal = Some(nexus_internal);
@@ -741,24 +754,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let blueprint = {
             let mut blueprint_zones = BTreeMap::new();
             for (maybe_sled_agent, zones) in [
-                (self.sled_agent.as_ref(), &self.omicron_zones),
-                (self.sled_agent2.as_ref(), &self.omicron_zones2),
+                (self.sled_agent.as_ref(), &self.blueprint_zones),
+                (self.sled_agent2.as_ref(), &self.blueprint_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
                     blueprint_zones.insert(
-                        sa.sled_agent.id,
+                        SledUuid::from_untyped_uuid(sa.sled_agent.id),
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones
-                                .iter()
-                                .map(|z| {
-                                    // All initial zones are in-service
-                                    BlueprintZoneConfig::from_omicron_zone_config(
-                                        z.clone(),
-                                        BlueprintZoneDisposition::InService,
-                                    ).unwrap()
-                                })
-                                .collect(),
+                            zones: zones.clone(),
                         },
                     );
                 }
@@ -889,9 +893,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         switch_location: SwitchLocation,
     ) {
         let (field, zones) = if switch_location == SwitchLocation::Switch0 {
-            (&self.sled_agent, &self.omicron_zones)
+            (&self.sled_agent, &self.blueprint_zones)
         } else {
-            (&self.sled_agent2, &self.omicron_zones2)
+            (&self.sled_agent2, &self.blueprint_zones2)
         };
 
         // Tell our Sled Agent to report the zones that we configured.
@@ -904,7 +908,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
         client
             .omicron_zones_put(&OmicronZonesConfig {
-                zones: zones.clone(),
+                zones: zones.clone().into_iter().map(From::from).collect(),
                 generation: Generation::new().next(),
             })
             .await
@@ -925,18 +929,19 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Expected IPv6 Pantry Address");
         };
 
-        let zone_id = Uuid::new_v4();
+        let zone_id = OmicronZoneUuid::new_v4();
         self.rack_init_builder.add_service_to_dns(
             zone_id,
             address,
             internal_dns::ServiceName::CruciblePantry,
         );
-        self.omicron_zones.push(OmicronZoneConfig {
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             underlay_address: *address.ip(),
-            zone_type: OmicronZoneType::CruciblePantry {
-                address: address.to_string(),
-            },
+            zone_type: BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            ),
         });
     }
 
@@ -959,7 +964,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        let zone_id = Uuid::new_v4();
+        let zone_id = OmicronZoneUuid::new_v4();
         self.rack_init_builder.add_service_to_dns(
             zone_id,
             dropshot_address,
@@ -971,28 +976,38 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .to_string()
             .parse()
             .unwrap();
-        self.omicron_zones.push(OmicronZoneConfig {
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             underlay_address: *dropshot_address.ip(),
-            zone_type: OmicronZoneType::ExternalDns {
-                dataset: OmicronZoneDataset { pool_name },
-                dns_address: dns_address.to_string(),
-                http_address: dropshot_address.to_string(),
-                nic: NetworkInterface {
-                    id: Uuid::new_v4(),
-                    ip: DNS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
-                        .unwrap()
-                        .into(),
-                    kind: NetworkInterfaceKind::Service { id: zone_id },
-                    mac,
-                    name: format!("external-dns-{}", zone_id).parse().unwrap(),
-                    primary: true,
-                    slot: 0,
-                    subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
-                    vni: Vni::SERVICES_VNI,
+            zone_type: BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    dataset: OmicronZoneDataset { pool_name },
+                    dns_address: OmicronZoneExternalFloatingAddr {
+                        id: ExternalIpUuid::new_v4(),
+                        addr: dns_address.into(),
+                    },
+                    http_address: dropshot_address,
+                    nic: NetworkInterface {
+                        id: Uuid::new_v4(),
+                        ip: DNS_OPTE_IPV4_SUBNET
+                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                            .unwrap()
+                            .into(),
+                        kind: NetworkInterfaceKind::Service {
+                            id: zone_id.into_untyped_uuid(),
+                        },
+                        mac,
+                        name: format!("external-dns-{}", zone_id)
+                            .parse()
+                            .unwrap(),
+                        primary: true,
+                        slot: 0,
+                        subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
+                        vni: Vni::SERVICES_VNI,
+                    },
                 },
-            },
+            ),
         });
 
         self.external_dns = Some(dns);
@@ -1003,13 +1018,17 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
         let dns = dns_server::TransientServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
+        let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
         };
-        let zone_id = Uuid::new_v4();
+        let SocketAddr::V6(http_address) = dns.dropshot_server.local_addr()
+        else {
+            panic!("Unsupported IPv4 DNS address");
+        };
+        let zone_id = OmicronZoneUuid::new_v4();
         self.rack_init_builder.add_service_to_dns(
             zone_id,
-            address,
+            http_address,
             internal_dns::ServiceName::InternalDns,
         );
 
@@ -1018,16 +1037,19 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .to_string()
             .parse()
             .unwrap();
-        self.omicron_zones.push(OmicronZoneConfig {
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            underlay_address: *address.ip(),
-            zone_type: OmicronZoneType::InternalDns {
-                dataset: OmicronZoneDataset { pool_name },
-                dns_address: dns.dns_server.local_address().to_string(),
-                http_address: address.to_string(),
-                gz_address: Ipv6Addr::LOCALHOST,
-                gz_address_index: 0,
-            },
+            underlay_address: *http_address.ip(),
+            zone_type: BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset: OmicronZoneDataset { pool_name },
+                    dns_address,
+                    http_address,
+                    gz_address: Ipv6Addr::LOCALHOST,
+                    gz_address_index: 0,
+                },
+            ),
         });
 
         self.internal_dns = Some(dns);

@@ -13,6 +13,7 @@ use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
@@ -196,9 +197,9 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
-            for zpool_id in sled_resources.zpools.keys() {
+            for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
                 if self
                     .blueprint
                     .sled_ensure_zone_crucible(sled_id, *zpool_id)?
@@ -270,7 +271,7 @@ impl<'a> Planner<'a> {
             BTreeMap::new();
         for sled_id in self
             .input
-            .all_sled_ids(SledFilter::EligibleForDiscretionaryServices)
+            .all_sled_ids(SledFilter::Discretionary)
             .filter(|sled_id| !sleds_waiting_for_ntp_zone.contains(sled_id))
         {
             let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
@@ -414,8 +415,10 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -529,7 +532,7 @@ mod test {
                     sled_id: new_sled_id,
                     zones: blueprint4
                         .blueprint_zones
-                        .get(new_sled_id.as_untyped_uuid())
+                        .get(&new_sled_id)
                         .expect("blueprint should contain zones for new sled")
                         .to_omicron_zones_config(
                             BlueprintZoneFilter::ShouldBeRunning
@@ -624,9 +627,7 @@ mod test {
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
-            blueprint
-                .blueprint_zones
-                .retain(|k, _v| keep_sled_id.as_untyped_uuid() == k);
+            blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
 
             (keep_sled_id, blueprint, collection, builder.build())
         };
@@ -637,7 +638,7 @@ mod test {
         assert_eq!(
             blueprint1
                 .blueprint_zones
-                .get(sled_id.as_untyped_uuid())
+                .get(&sled_id)
                 .expect("missing kept sled")
                 .zones
                 .iter()
@@ -756,6 +757,83 @@ mod test {
             }
         }
         assert_eq!(total_new_nexus_zones, 11);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_crucible_allocation_skips_nonprovisionable_disks() {
+        static TEST_NAME: &str =
+            "planner_crucible_allocation_skips_nonprovisionable_disks";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Avoid churning on the quantity of Nexus zones - we're okay staying at
+        // one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        let new_sled_disk = |policy| nexus_types::deployment::SledDisk {
+            disk_identity: DiskIdentity {
+                vendor: "test-vendor".to_string(),
+                serial: "test-serial".to_string(),
+                model: "test-model".to_string(),
+            },
+            disk_id: PhysicalDiskUuid::new_v4(),
+            policy,
+            state: nexus_types::external_api::views::PhysicalDiskState::Active,
+        };
+
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+
+        // Inject some new disks into the input.
+        //
+        // These counts are arbitrary, as long as they're non-zero
+        // for the sake of the test.
+
+        const NEW_IN_SERVICE_DISKS: usize = 2;
+        const NEW_EXPUNGED_DISKS: usize = 1;
+
+        for _ in 0..NEW_IN_SERVICE_DISKS {
+            sled_details.resources.zpools.insert(
+                ZpoolUuid::new_v4(),
+                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::InService),
+            );
+        }
+        for _ in 0..NEW_EXPUNGED_DISKS {
+            sled_details.resources.zpools.insert(
+                ZpoolUuid::new_v4(),
+                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::Expunged),
+            );
+        }
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: some new disks",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        println!("1 -> 2 (some new disks, one expunged):\n{}", diff.display());
+        let mut modified_sleds = diff.sleds_modified();
+        assert_eq!(modified_sleds.len(), 1);
+        let (_, diff_modified) = modified_sleds.next().unwrap();
+
+        // We should be adding a Crucible zone for each new in-service disk.
+        assert_eq!(diff_modified.zones_added().count(), NEW_IN_SERVICE_DISKS);
+        assert_eq!(diff_modified.zones_removed().len(), 0);
 
         logctx.cleanup_successful();
     }
@@ -934,8 +1012,7 @@ mod test {
         // Leave the non-provisionable sled's generation alone.
         let zones = &mut blueprint2a
             .blueprint_zones
-            // TODO-cleanup use `TypedUuid` everywhere
-            .get_mut(nonprovisionable_sled_id.as_untyped_uuid())
+            .get_mut(&nonprovisionable_sled_id)
             .unwrap()
             .zones;
 
@@ -976,18 +1053,12 @@ mod test {
             }
         });
 
-        let expunged_zones = blueprint2a
-            .blueprint_zones
-            // TODO-cleanup use `TypedUuid` everywhere
-            .get_mut(expunged_sled_id.as_untyped_uuid())
-            .unwrap();
+        let expunged_zones =
+            blueprint2a.blueprint_zones.get_mut(&expunged_sled_id).unwrap();
         expunged_zones.zones.clear();
         expunged_zones.generation = expunged_zones.generation.next();
 
-        blueprint2a
-            .blueprint_zones
-            // TODO-cleanup use `TypedUuid` everywhere
-            .remove(decommissioned_sled_id.as_untyped_uuid());
+        blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
 
         blueprint2a.external_dns_version =
             blueprint2a.external_dns_version.next();

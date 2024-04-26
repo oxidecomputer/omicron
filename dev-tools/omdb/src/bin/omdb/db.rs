@@ -81,6 +81,9 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -252,7 +255,7 @@ enum DbCommands {
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about sleds
-    Sleds,
+    Sleds(SledsArgs),
     /// Print information about customer instances
     Instances(InstancesOptions),
     /// Print information about the network
@@ -398,6 +401,13 @@ struct ReconfiguratorSaveArgs {
 }
 
 #[derive(Debug, Args)]
+struct SledsArgs {
+    /// Show sleds that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args)]
 struct NetworkArgs {
     #[command(subcommand)]
     command: NetworkCommands,
@@ -505,8 +515,8 @@ impl DbArgs {
                 )
                 .await
             }
-            DbCommands::Sleds => {
-                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts).await
+            DbCommands::Sleds(args) => {
+                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts, args).await
             }
             DbCommands::Instances(instances_options) => {
                 cmd_db_instances(
@@ -1416,6 +1426,8 @@ struct SledRow {
     serial: String,
     ip: String,
     role: &'static str,
+    policy: SledPolicy,
+    state: SledState,
     id: Uuid,
 }
 
@@ -1426,6 +1438,8 @@ impl From<Sled> for SledRow {
             serial: s.serial_number().to_string(),
             ip: s.address().to_string(),
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
+            policy: s.policy(),
+            state: s.state().into(),
         }
     }
 }
@@ -1435,10 +1449,19 @@ async fn cmd_db_sleds(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &SledsArgs,
 ) -> Result<(), anyhow::Error> {
     let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!("note: listing all sleds (use -F to filter, e.g. -F in-service)");
+            SledFilter::All
+        }
+    };
+
     let sleds = datastore
-        .sled_list(&opctx, &first_page(limit))
+        .sled_list(&opctx, &first_page(limit), filter)
         .await
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
@@ -1446,7 +1469,7 @@ async fn cmd_db_sleds(
     let rows = sleds.into_iter().map(|s| SledRow::from(s));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
         .to_string();
 
     println!("{}", table);

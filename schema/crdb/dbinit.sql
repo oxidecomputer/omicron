@@ -163,6 +163,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
     id
 ) WHERE time_deleted IS NULL;
 
+/* Add an index which lets us look up sleds based on policy and state */
+CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sled (
+    sled_policy,
+    sled_state
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
     -- omicron.public.instance
     'instance'
@@ -3332,6 +3338,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Zone disposition
     disposition omicron.public.bp_zone_disposition NOT NULL,
 
+    -- For some zones, either primary_service_ip or second_service_ip (but not
+    -- both!) is an external IP address. For such zones, this is the ID of that
+    -- external IP. In general this is a foreign key into
+    -- omicron.public.external_ip, though the row many not exist: if this
+    -- blueprint is old, it's possible the IP has been deleted, and if this
+    -- blueprint has not yet been realized, it's possible the IP hasn't been
+    -- created yet.
+    external_ip_id UUID,
+
     PRIMARY KEY (blueprint_id, id)
 );
 
@@ -3756,7 +3771,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '53.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '55.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

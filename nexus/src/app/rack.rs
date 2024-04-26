@@ -23,6 +23,7 @@ use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -200,7 +201,7 @@ impl super::Nexus {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     external_ip,
                     ..
-                }) => Some(match external_ip {
+                }) => Some(match external_ip.ip {
                     IpAddr::V4(addr) => DnsRecord::A(addr),
                     IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
                 }),
@@ -737,7 +738,10 @@ impl super::Nexus {
         };
 
         debug!(self.log, "Listing sleds");
-        let sleds = self.db_datastore.sled_list(opctx, &pagparams).await?;
+        let sleds = self
+            .db_datastore
+            .sled_list(opctx, &pagparams, SledFilter::InService)
+            .await?;
 
         let mut uninitialized_sleds: Vec<UninitializedSled> = collection
             .sps

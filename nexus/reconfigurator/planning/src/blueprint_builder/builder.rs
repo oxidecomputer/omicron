@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneDataset;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -43,6 +44,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -56,7 +58,6 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::Logger;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -65,11 +66,9 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
-use uuid::Uuid;
 
 use super::zones::is_already_expunged;
 use super::zones::BuilderZoneState;
@@ -110,15 +109,6 @@ pub enum EnsureMultiple {
     Added(usize),
     /// no action was necessary
     NotNeeded,
-}
-
-fn zpool_id_to_external_name(zpool_id: ZpoolUuid) -> anyhow::Result<ZpoolName> {
-    let pool_name_generated =
-        illumos_utils::zpool::ZpoolName::new_external(zpool_id).to_string();
-    let pool_name = ZpoolName::from_str(&pool_name_generated).map_err(|e| {
-        anyhow!("Failed to create zpool name from {zpool_id}: {e}")
-    })?;
-    Ok(pool_name)
 }
 
 /// Helper for assembling a blueprint
@@ -206,7 +196,7 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     zones: Vec::new(),
                 };
-                (sled_id.into_untyped_uuid(), config)
+                (sled_id, config)
             })
             .collect::<BTreeMap<_, _>>();
         let num_sleds = blueprint_zones.len();
@@ -299,18 +289,16 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
 
-            if let Some(external_ip) = zone_type.external_ip() {
+            if let Some((external_ip, nic)) = zone_type.external_networking() {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
-                if !external_ip.is_loopback()
-                    && !used_external_ips.insert(external_ip)
+                if !external_ip.ip().is_loopback()
+                    && !used_external_ips.insert(external_ip.ip())
                 {
-                    bail!("duplicate external IP: {external_ip}");
+                    bail!("duplicate external IP: {external_ip:?}");
                 }
-            }
 
-            if let Some(nic) = zone_type.opte_vnic() {
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
@@ -367,8 +355,9 @@ impl<'a> BlueprintBuilder<'a> {
         // are no longer in service and need expungement work.
         let blueprint_zones =
             self.zones.into_zones_map(self.input.all_sled_ids(SledFilter::All));
-        let blueprint_disks =
-            self.disks.into_disks_map(self.input.all_sled_ids(SledFilter::All));
+        let blueprint_disks = self
+            .disks
+            .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -632,7 +621,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         zpool_id: ZpoolUuid,
     ) -> Result<Ensure, Error> {
-        let pool_name = zpool_id_to_external_name(zpool_id)?;
+        let pool_name = ZpoolName::new_external(zpool_id);
 
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
@@ -750,13 +739,16 @@ impl<'a> BlueprintBuilder<'a> {
 
         for _ in 0..num_nexus_to_add {
             let nexus_id = self.rng.zone_rng.next();
-            let external_ip = self
-                .available_external_ips
-                .next()
-                .ok_or(Error::NoExternalServiceIpAvailable)?;
+            let external_ip = OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: self
+                    .available_external_ips
+                    .next()
+                    .ok_or(Error::NoExternalServiceIpAvailable)?,
+            };
 
             let nic = {
-                let (ip, subnet) = match external_ip {
+                let (ip, subnet) = match external_ip.ip {
                     IpAddr::V4(_) => (
                         self.nexus_v4_ips
                             .next()
@@ -967,17 +959,14 @@ impl BlueprintBuilderRng {
 /// struct makes it easy for callers iterate over the right set of zones.
 pub(super) struct BlueprintZonesBuilder<'a> {
     changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
-    // Temporarily make a clone of the parent blueprint's zones so we can use
-    // typed UUIDs everywhere. Once we're done migrating, this `Cow` can be
-    // removed.
-    parent_zones: Cow<'a, BTreeMap<SledUuid, BlueprintZonesConfig>>,
+    parent_zones: &'a BTreeMap<SledUuid, BlueprintZonesConfig>,
 }
 
 impl<'a> BlueprintZonesBuilder<'a> {
     pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZonesBuilder {
         BlueprintZonesBuilder {
             changed_zones: BTreeMap::new(),
-            parent_zones: Cow::Owned(parent_blueprint.typed_blueprint_zones()),
+            parent_zones: &parent_blueprint.blueprint_zones,
         }
     }
 
@@ -1024,25 +1013,26 @@ impl<'a> BlueprintZonesBuilder<'a> {
     pub fn into_zones_map(
         mut self,
         sled_ids: impl Iterator<Item = SledUuid>,
-    ) -> BTreeMap<Uuid, BlueprintZonesConfig> {
+    ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
         sled_ids
             .map(|sled_id| {
                 // Start with self.changed_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
                 if let Some(zones) = self.changed_zones.remove(&sled_id) {
-                    (sled_id.into_untyped_uuid(), zones.build())
+                    (sled_id, zones.build())
                 }
-                // Next, check self.parent_zones, to represent an unchanged sled.
+                // Next, check self.parent_zones, to represent an unchanged
+                // sled.
                 else if let Some(parent_zones) =
                     self.parent_zones.get(&sled_id)
                 {
-                    (sled_id.into_untyped_uuid(), parent_zones.clone())
+                    (sled_id, parent_zones.clone())
                 } else {
-                    // If the sled is not in self.parent_zones, then it must be a
-                    // new sled and we haven't added any zones to it yet.  Use the
-                    // standard initial config.
+                    // If the sled is not in self.parent_zones, then it must be
+                    // a new sled and we haven't added any zones to it yet.  Use
+                    // the standard initial config.
                     (
-                        sled_id.into_untyped_uuid(),
+                        sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new(),
                             zones: vec![],
@@ -1354,7 +1344,7 @@ pub mod test {
             new_sled_resources
                 .zpools
                 .keys()
-                .map(|id| { zpool_id_to_external_name(*id).unwrap() })
+                .map(|id| { ZpoolName::new_external(*id) })
                 .collect()
         );
 
@@ -1471,7 +1461,7 @@ pub mod test {
                     // Also remove this zone from the blueprint.
                     parent
                         .blueprint_zones
-                        .get_mut(sled_id.as_untyped_uuid())
+                        .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
                         .retain(|z| !z.zone_type.is_nexus());
@@ -1522,8 +1512,10 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(ip) = z.zone_type.external_ip() {
-                    used_ip_ranges.push(IpRange::from(ip));
+                if let Some((external_ip, _)) =
+                    z.zone_type.external_networking()
+                {
+                    used_ip_ranges.push(IpRange::from(external_ip.ip()));
                 }
             }
             assert!(!used_ip_ranges.is_empty());
