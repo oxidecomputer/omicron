@@ -79,6 +79,7 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
+            let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             for pool_name in sled_resources.zpools.keys() {
                 let _ = builder
                     .sled_ensure_zone_crucible(sled_id, *pool_name)

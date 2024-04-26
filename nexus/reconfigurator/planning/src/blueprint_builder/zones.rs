@@ -346,6 +346,11 @@ mod tests {
                 .expect("new zone ID should be present");
         }
 
+        // TODO: FIXME: AJS - Delete use of the control sled? - We don't
+        // actually compute changes based on generation number anymore. Zones or
+        // physical disks must change for a sled to be modified. It's not clear
+        // to me that the way we use this in this test is actually useful.
+        //
         // Also call change_sled_zones without making any changes. This
         // currently bumps the generation number, but in the future might
         // become smarter and not do so (in which case this test will break).
@@ -376,52 +381,44 @@ mod tests {
         // above are present.
         let blueprint = builder.build();
         verify_blueprint(&blueprint);
-        let diff = blueprint.diff_since_blueprint(&blueprint_initial).unwrap();
+        let diff = blueprint.diff_since_blueprint(&blueprint_initial);
         println!("expecting new NTP and Oximeter zones:\n{}", diff.display());
 
         // No sleds were removed.
-        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
 
         // One sled was added.
-        let sleds: Vec<_> = diff.sleds_added().collect();
-        assert_eq!(sleds.len(), 1);
-        let (sled_id, new_sled_zones) = sleds[0];
-        assert_eq!(sled_id, new_sled_id);
+        assert_eq!(diff.sleds_added.len(), 1);
+        let sled_id = diff.sleds_added.first().unwrap();
+        assert_eq!(*sled_id, new_sled_id);
+        let new_sled_zones = diff.zones.added.get(sled_id).unwrap();
         // The generation number should be newer than the initial default.
-        assert_eq!(new_sled_zones.generation, Generation::new().next());
+        assert_eq!(
+            new_sled_zones.generation_after.unwrap(),
+            Generation::new().next()
+        );
         assert_eq!(new_sled_zones.zones.len(), 1);
 
-        // Two sleds were modified: existing_sled_id and control_sled_id.
-        let sleds = diff.sleds_modified();
-        assert_eq!(sleds.len(), 2, "2 sleds modified");
-        for (sled_id, sled_modified) in sleds {
-            if sled_id == existing_sled_id {
-                assert_eq!(
-                    sled_modified.generation_after,
-                    sled_modified.generation_before.next()
-                );
-                assert_eq!(sled_modified.zones_added().len(), 1);
-                let added_zone = sled_modified.zones_added().next().unwrap();
-                assert_eq!(added_zone.id, new_zone_id);
+        // TODO: AJS - See comment above - we don't actually use the control sled anymore
+        // so the comparison was changed.
+        // One sled was modified: existing_sled_id
+        assert_eq!(diff.sleds_modified.len(), 1, "1 sled modified");
+        for sled_id in &diff.sleds_modified {
+            assert_eq!(*sled_id, existing_sled_id);
+            let added = diff.zones.added.get(sled_id).unwrap();
+            assert_eq!(
+                added.generation_after.unwrap(),
+                added.generation_before.unwrap().next()
+            );
+            assert_eq!(added.zones.len(), 1);
+            let added_zone = &added.zones[0];
+            assert_eq!(added_zone.id(), new_zone_id);
 
-                assert_eq!(sled_modified.zones_removed().len(), 0);
-                assert_eq!(sled_modified.zones_modified().count(), 1);
-                let modified_zone =
-                    sled_modified.zones_modified().next().unwrap();
-                assert_eq!(modified_zone.zone_before.id(), existing_zone_id);
-            } else {
-                assert_eq!(sled_id, control_sled_id);
-
-                // The generation number is bumped, but nothing else.
-                assert_eq!(
-                    sled_modified.generation_after,
-                    sled_modified.generation_before.next(),
-                    "control sled has generation number bumped"
-                );
-                assert_eq!(sled_modified.zones_added().len(), 0);
-                assert_eq!(sled_modified.zones_removed().len(), 0);
-                assert_eq!(sled_modified.zones_modified().count(), 0);
-            }
+            assert!(!diff.zones.removed.contains_key(sled_id));
+            let modified = diff.zones.modified.get(sled_id).unwrap();
+            assert_eq!(modified.zones.len(), 1);
+            let modified_zone = &modified.zones[0];
+            assert_eq!(modified_zone.zone.id(), existing_zone_id);
         }
 
         logctx.cleanup_successful();
