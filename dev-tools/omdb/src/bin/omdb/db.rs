@@ -15,6 +15,7 @@
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
+use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -24,6 +25,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use camino::Utf8PathBuf;
 use chrono::SecondsFormat;
+use chrono::Utc;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -96,6 +98,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -264,6 +267,8 @@ enum DbCommands {
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
     Validate(ValidateArgs),
+    /// Temporary utilities for sled expunge testing
+    ExpungeTesting(ExpungeTestingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -462,6 +467,23 @@ enum ValidateCommands {
     ValidateRegionSnapshots,
 }
 
+#[derive(Debug, Args)]
+struct ExpungeTestingArgs {
+    #[command(subcommand)]
+    command: ExpungeTestingCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ExpungeTestingCommands {
+    /// Rewrite the serial number of an expunged sled and all its physical disks
+    FudgeSerial(FudgeSerialArgs),
+}
+
+#[derive(Debug, Args)]
+struct FudgeSerialArgs {
+    sled_id: SledUuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     pub(crate) async fn run_cmd(
@@ -557,6 +579,14 @@ impl DbArgs {
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
             }) => cmd_db_validate_region_snapshots(&datastore).await,
+            DbCommands::ExpungeTesting(ExpungeTestingArgs {
+                command:
+                    ExpungeTestingCommands::FudgeSerial(FudgeSerialArgs { sled_id }),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_db_expunge_testing_fudge_serial(&datastore, *sled_id, token)
+                    .await
+            }
         }
     }
 }
@@ -3194,4 +3224,114 @@ async fn cmd_db_reconfigurator_save(
         .with_context(|| format!("write {:?}", output_path))?;
     eprintln!("wrote {}", output_path);
     Ok(())
+}
+
+// Expunge testing
+
+/// Run `omdb expunge-testing fudge-serial <UUID>`.
+async fn cmd_db_expunge_testing_fudge_serial(
+    datastore: &DataStore,
+    sled_id: SledUuid,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    use diesel::IntoSql;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // Build a unique-enough prefix and suffix to attach to the serial number
+    // of this sled and all its disks.
+    let prefix = "omdb-fudged-";
+    let suffix = Utc::now().timestamp().to_string();
+
+    // Ensure the requested sled has already been expunged, and fetch the
+    // serial/part number while we're there.
+    let (sled_serial, sled_part) = {
+        use db::schema::sled::dsl;
+
+        let sled = dsl::sled
+            .filter(dsl::id.eq(sled_id.into_untyped_uuid()))
+            .limit(1)
+            .select(Sled::as_select())
+            .get_result_async(&*conn)
+            .await
+            .with_context(|| format!("loading sled {sled_id}"))?;
+
+        match sled.policy() {
+            SledPolicy::Expunged => (),
+            policy @ SledPolicy::InService { .. } => {
+                bail!(
+                    "serial number fudging only supported for expunged sleds; \
+                     sled {sled_id} has policy {policy:?}"
+                );
+            }
+        }
+
+        if sled.serial_number().starts_with(prefix) {
+            bail!(
+                "sled serial number ({}) already appears fudged",
+                sled.serial_number()
+            );
+        }
+
+        (sled.serial_number().to_string(), sled.part_number().to_string())
+    };
+
+    // Apply all transformations in one transaction, so we either fudge all or
+    // none of the relevant serials.
+    conn.transaction_async(|conn| async move {
+        {
+            use db::schema::sled::dsl;
+
+            diesel::update(dsl::sled)
+                .filter(dsl::id.eq(sled_id.into_untyped_uuid()))
+                .set(
+                    dsl::serial_number.eq(prefix
+                        .to_string()
+                        .into_sql::<diesel::sql_types::Text>()
+                        .concat(dsl::serial_number)
+                        .concat(suffix.clone())),
+                )
+                .execute_async(&conn)
+                .await
+                .context("updating serial number in sled table")?;
+        }
+
+        {
+            use db::schema::hw_baseboard_id::dsl;
+
+            diesel::update(dsl::hw_baseboard_id)
+                .filter(dsl::serial_number.eq(sled_serial.clone()))
+                .filter(dsl::part_number.eq(sled_part.clone()))
+                .set(
+                    dsl::serial_number.eq(prefix
+                        .to_string()
+                        .into_sql::<diesel::sql_types::Text>()
+                        .concat(dsl::serial_number)
+                        .concat(suffix.clone())),
+                )
+                .execute_async(&conn)
+                .await
+                .context("updating serial number in hw_baseboard_id table")?;
+        }
+
+        {
+            use db::schema::physical_disk::dsl;
+
+            diesel::update(dsl::physical_disk)
+                .filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()))
+                .set(
+                    dsl::serial.eq(prefix
+                        .to_string()
+                        .into_sql::<diesel::sql_types::Text>()
+                        .concat(dsl::serial)
+                        .concat(suffix.clone())),
+                )
+                .execute_async(&conn)
+                .await
+                .context("updating serial numbers in physical_disk table")?;
+        }
+
+        Ok(())
+    })
+    .await
 }

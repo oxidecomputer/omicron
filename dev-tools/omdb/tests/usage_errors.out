@@ -106,6 +106,7 @@ Commands:
   network              Print information about the network
   snapshots            Print information about snapshots
   validate             Validate the contents of the database
+  expunge-testing      Temporary utilities for sled expunge testing
   help                 Print this message or the help of the given subcommand(s)
 
 Options:
@@ -135,6 +136,7 @@ Commands:
   network              Print information about the network
   snapshots            Print information about snapshots
   validate             Validate the contents of the database
+  expunge-testing      Temporary utilities for sled expunge testing
   help                 Print this message or the help of the given subcommand(s)
 
 Options:
