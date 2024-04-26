@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
+use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -168,14 +169,6 @@ impl super::Nexus {
         self.db_datastore.switch_port_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn list_switch_ports_with_uplinks(
-        &self,
-        opctx: &OpContext,
-    ) -> ListResultVec<SwitchPort> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.switch_ports_with_uplinks(opctx).await
-    }
-
     pub(crate) async fn set_switch_port_settings_id(
         &self,
         opctx: &OpContext,
@@ -296,4 +289,12 @@ impl super::Nexus {
 
         Ok(())
     }
+}
+
+pub(crate) async fn list_switch_ports_with_uplinks(
+    datastore: &DataStore,
+    opctx: &OpContext,
+) -> ListResultVec<SwitchPort> {
+    opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+    datastore.switch_ports_with_uplinks(opctx).await
 }

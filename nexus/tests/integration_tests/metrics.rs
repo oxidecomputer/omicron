@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::time::Duration;
+
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
@@ -14,6 +16,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
@@ -40,7 +43,7 @@ pub async fn get_latest_system_metric(
         None => "".to_string(),
     };
     let url = format!(
-        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}", 
+        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}",
         cptestctx.start_time,
         Utc::now(),
         id_param,
@@ -70,7 +73,7 @@ pub async fn get_latest_silo_metric(
         None => "".to_string(),
     };
     let url = format!(
-        "/v1/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}", 
+        "/v1/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}",
         cptestctx.start_time,
         Utc::now(),
         id_param,
@@ -79,7 +82,7 @@ pub async fn get_latest_silo_metric(
         objects_list_page_authz::<Measurement>(client, &url).await;
 
     // prevent more confusing error on next line
-    assert!(measurements.items.len() == 1, "Expected exactly one measurement");
+    assert_eq!(measurements.items.len(), 1, "Expected exactly one measurement");
 
     let item = &measurements.items[0];
     let datum = match item.datum() {
@@ -167,10 +170,15 @@ async fn test_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     let client = &cptestctx.external_client;
-
-    cptestctx.server.register_as_producer().await; // needed for oximeter metrics to work
     create_default_ip_pool(&client).await; // needed for instance create to work
     DiskTest::new(cptestctx).await; // needed for disk create to work
+
+    // Wait until Nexus registers as a producer with Oximeter.
+    wait_for_producer(
+        &cptestctx.oximeter,
+        cptestctx.server.apictx().nexus.id(),
+    )
+    .await;
 
     // silo metrics start out zero
     assert_system_metrics(&cptestctx, None, 0, 0, 0).await;
@@ -187,14 +195,14 @@ async fn test_metrics(
     // obvious, but all the different resources are stored the same way in
     // Clickhouse, so we need to be careful.
     let bad_silo_metrics_url = format!(
-        "/v1/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&project={}", 
+        "/v1/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&project={}",
         cptestctx.start_time,
         Utc::now(),
         *DEFAULT_SILO_ID,
     );
     assert_404(&cptestctx, &bad_silo_metrics_url).await;
     let bad_system_metrics_url = format!(
-        "/v1/system/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&silo={}", 
+        "/v1/system/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&silo={}",
         cptestctx.start_time,
         Utc::now(),
         project1_id,
@@ -245,11 +253,16 @@ async fn test_metrics(
 async fn test_timeseries_schema_list(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
+    // Nexus registers itself as a metric producer on startup, with its own UUID
+    // as the producer ID. Wait for this to show up in the registered lists of
+    // producers.
+    let nexus_id = cptestctx.server.apictx().nexus.id();
+    wait_for_producer(&cptestctx.oximeter, nexus_id).await;
+
     // We should be able to fetch the list of timeseries, and it should include
     // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
     // should always exist after we've registered as a producer and start
     // producing data. Force a collection to ensure that happens.
-    cptestctx.server.register_as_producer().await;
     cptestctx.oximeter.force_collect().await;
     let client = &cptestctx.external_client;
     let url = "/v1/timeseries/schema";
@@ -262,4 +275,32 @@ async fn test_timeseries_schema_list(
             sc.timeseries_name == "http_service:request_latency_histogram"
         })
         .expect("Failed to find HTTP request latency histogram schema");
+}
+
+/// Wait until a producer is registered with Oximeter.
+///
+/// This blocks until the producer is registered, for up to 60s. It panics if
+/// the retry loop hits a permanent error.
+pub async fn wait_for_producer(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: &Uuid,
+) {
+    wait_for_condition(
+        || async {
+            if oximeter
+                .list_producers(None, usize::MAX)
+                .await
+                .iter()
+                .any(|p| &p.id == producer_id)
+            {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("Failed to find producer within time limit");
 }

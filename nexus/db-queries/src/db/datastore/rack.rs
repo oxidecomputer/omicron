@@ -977,9 +977,9 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::TypedUuid;
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
+    use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -1292,7 +1292,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled1.id(),
+            SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -1367,7 +1367,7 @@ mod test {
             },
         );
         blueprint_zones.insert(
-            sled2.id(),
+            SledUuid::from_untyped_uuid(sled2.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -1443,7 +1443,7 @@ mod test {
             },
         );
         blueprint_zones.insert(
-            sled3.id(),
+            SledUuid::from_untyped_uuid(sled3.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![BlueprintZoneConfig {
@@ -1620,7 +1620,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled.id(),
+            SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -1890,7 +1890,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled.id(),
+            SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![BlueprintZoneConfig {
@@ -1994,7 +1994,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled.id(),
+            SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![

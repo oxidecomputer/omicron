@@ -271,7 +271,7 @@ impl<'a> Planner<'a> {
             BTreeMap::new();
         for sled_id in self
             .input
-            .all_sled_ids(SledFilter::EligibleForDiscretionaryServices)
+            .all_sled_ids(SledFilter::Discretionary)
             .filter(|sled_id| !sleds_waiting_for_ntp_zone.contains(sled_id))
         {
             let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
@@ -417,7 +417,6 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
@@ -533,7 +532,7 @@ mod test {
                     sled_id: new_sled_id,
                     zones: blueprint4
                         .blueprint_zones
-                        .get(new_sled_id.as_untyped_uuid())
+                        .get(&new_sled_id)
                         .expect("blueprint should contain zones for new sled")
                         .to_omicron_zones_config(
                             BlueprintZoneFilter::ShouldBeRunning
@@ -628,9 +627,7 @@ mod test {
 
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
-            blueprint
-                .blueprint_zones
-                .retain(|k, _v| keep_sled_id.as_untyped_uuid() == k);
+            blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
 
             (keep_sled_id, blueprint, collection, builder.build())
         };
@@ -641,7 +638,7 @@ mod test {
         assert_eq!(
             blueprint1
                 .blueprint_zones
-                .get(sled_id.as_untyped_uuid())
+                .get(&sled_id)
                 .expect("missing kept sled")
                 .zones
                 .iter()
@@ -1015,8 +1012,7 @@ mod test {
         // Leave the non-provisionable sled's generation alone.
         let zones = &mut blueprint2a
             .blueprint_zones
-            // TODO-cleanup use `TypedUuid` everywhere
-            .get_mut(nonprovisionable_sled_id.as_untyped_uuid())
+            .get_mut(&nonprovisionable_sled_id)
             .unwrap()
             .zones;
 
@@ -1057,18 +1053,12 @@ mod test {
             }
         });
 
-        let expunged_zones = blueprint2a
-            .blueprint_zones
-            // TODO-cleanup use `TypedUuid` everywhere
-            .get_mut(expunged_sled_id.as_untyped_uuid())
-            .unwrap();
+        let expunged_zones =
+            blueprint2a.blueprint_zones.get_mut(&expunged_sled_id).unwrap();
         expunged_zones.zones.clear();
         expunged_zones.generation = expunged_zones.generation.next();
 
-        blueprint2a
-            .blueprint_zones
-            // TODO-cleanup use `TypedUuid` everywhere
-            .remove(decommissioned_sled_id.as_untyped_uuid());
+        blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
 
         blueprint2a.external_dns_version =
             blueprint2a.external_dns_version.next();

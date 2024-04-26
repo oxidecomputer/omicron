@@ -282,16 +282,12 @@ impl NexusArgs {
                 eprintln!(
                     "note: Nexus URL not specified.  Will pick one from DNS."
                 );
-                let addrs = omdb
-                    .dns_lookup_all(
+                let addr = omdb
+                    .dns_lookup_one(
                         log.clone(),
                         internal_dns::ServiceName::Nexus,
                     )
                     .await?;
-                let addr = addrs.into_iter().next().expect(
-                    "expected at least one Nexus address from \
-                    successful DNS lookup",
-                );
                 format!("http://{}", addr)
             }
         };
