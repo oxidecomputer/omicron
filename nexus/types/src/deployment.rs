@@ -265,6 +265,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         )?;
 
         writeln!(f, "\n{}", self.make_zone_table())?;
+        writeln!(f, "\n{}", self.make_physical_disk_table())?;
 
         writeln!(f, "\n{}", table_display::metadata_heading())?;
         writeln!(f, "{}", self.make_metadata_table())?;
@@ -1424,6 +1425,7 @@ mod table_display {
     use crate::sectioned_table::SectionSpacing;
     use crate::sectioned_table::StBuilder;
     use crate::sectioned_table::StSectionBuilder;
+    use sled_agent_client::types::OmicronPhysicalDiskConfig;
     use tabled::builder::Builder;
     use tabled::settings::object::Columns;
     use tabled::settings::Modify;
@@ -1458,6 +1460,40 @@ mod table_display {
                             section.push_nested_heading(
                                 SectionSpacing::IfNotFirst,
                                 format!("{ZONE_HEAD_INDENT}{NO_ZONES_PARENS}"),
+                            );
+                        }
+                    },
+                );
+            }
+
+            builder.build()
+        }
+
+        pub(super) fn make_physical_disk_table(&self) -> Table {
+            let blueprint_disks = &self.blueprint.blueprint_disks;
+            let mut builder = StBuilder::new();
+            builder.push_header_row(physical_disk_header_row());
+            for (sled_id, config) in blueprint_disks {
+                let heading = format!(
+                    "{SLED_INDENT}sled {sled_id}: blueprint disks at generation {}",
+                    config.generation
+                );
+                builder.make_section(
+                    SectionSpacing::Always,
+                    heading,
+                    |section| {
+                        for disk in &config.disks {
+                            add_physical_disk_record(
+                                DISK_INDENT.to_string(),
+                                &disk,
+                                section,
+                            );
+                        }
+
+                        if section.is_empty() {
+                            section.push_nested_heading(
+                                SectionSpacing::IfNotFirst,
+                                format!("{DISK_HEAD_INDENT}{NO_DISKS_PARENS}"),
                             );
                         }
                     },
@@ -1850,6 +1886,22 @@ mod table_display {
         ]);
     }
 
+    /// Add a physical disk record to this section.
+    ///
+    /// This is the meat-and-potatoes of the diff display.
+    fn add_physical_disk_record(
+        first_column: String,
+        disk: &OmicronPhysicalDiskConfig,
+        section: &mut StSectionBuilder,
+    ) {
+        section.push_record(vec![
+            first_column,
+            disk.identity.vendor.to_string(),
+            disk.identity.model.to_string(),
+            disk.identity.serial.to_string(),
+        ]);
+    }
+
     /// Add a change table for the zone to the section.
     ///
     /// For diffs, this contains a table of changes between two zone
@@ -1950,9 +2002,11 @@ mod table_display {
     const SLED_HEAD_INDENT: &str = " ";
     const SLED_INDENT: &str = "  ";
     const ZONE_HEAD_INDENT: &str = "   ";
+    const DISK_HEAD_INDENT: &str = ZONE_HEAD_INDENT;
     // Due to somewhat mysterious reasons with how padding works with tabled,
     // this needs to be 3 columns wide rather than 4.
     const ZONE_INDENT: &str = "   ";
+    const DISK_INDENT: &str = SLED_INDENT;
     const METADATA_INDENT: &str = "  ";
     const METADATA_DIFF_INDENT: &str = "   ";
 
@@ -1989,9 +2043,14 @@ mod table_display {
 
     const UNCHANGED_PARENS: &str = "(unchanged)";
     const NO_ZONES_PARENS: &str = "(no zones)";
+    const NO_DISKS_PARENS: &str = "(no disks)";
     const NONE_PARENS: &str = "(none)";
     const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
+
+    const VENDOR: &str = "vendor";
+    const MODEL: &str = "model";
+    const SERIAL: &str = "serial";
 
     fn header_row() -> Vec<String> {
         vec![
@@ -2015,6 +2074,17 @@ mod table_display {
             DISPOSITION.to_string(),
             UNDERLAY_IP.to_string(),
             STATUS.to_string(),
+        ]
+    }
+
+    fn physical_disk_header_row() -> Vec<String> {
+        vec![
+            // First column is so that the header border aligns with the ZONE
+            // TABLE section header.
+            SLED_INDENT.to_string(),
+            VENDOR.to_string(),
+            MODEL.to_string(),
+            SERIAL.to_string(),
         ]
     }
 
