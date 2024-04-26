@@ -477,7 +477,7 @@ impl OximeterAgent {
         Ok(self_)
     }
 
-    /// Ensure the backgrouund task that polls Nexus periodically for our list of
+    /// Ensure the background task that polls Nexus periodically for our list of
     /// assigned producers is running.
     pub(crate) fn ensure_producer_refresh_task(&self, resolver: Resolver) {
         let mut task = self.refresh_task.lock().unwrap();

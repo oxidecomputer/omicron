@@ -201,7 +201,7 @@
             "type": "string"
           },
           "base_route": {
-            "description": "The API base route from which `oximeter` can collect metrics.\n\nThe full route is `{base_route}/{id}`.",
+            "description": "NOTE: This field is deprecated, and will be ignored. It will be removed in future releases.",
             "type": "string"
           },
           "id": {
