@@ -18,6 +18,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Ipv4Net;
@@ -843,7 +844,10 @@ pub(crate) async fn create_instance_v2p_mappings(
             limit: std::num::NonZeroU32::new(10).unwrap(),
         };
 
-        let sleds_page = datastore.sled_list(&opctx_alloc, &pagparams).await?;
+        let sleds_page = datastore
+            // XXX: InService might not be exactly correct
+            .sled_list(&opctx_alloc, &pagparams, SledFilter::InService)
+            .await?;
         let mut join_handles =
             Vec::with_capacity(sleds_page.len() * instance_nics.len());
 
@@ -947,7 +951,10 @@ pub(crate) async fn delete_instance_v2p_mappings(
             limit: std::num::NonZeroU32::new(10).unwrap(),
         };
 
-        let sleds_page = datastore.sled_list(&opctx_alloc, &pagparams).await?;
+        let sleds_page = datastore
+            // XXX: InService might not be exactly correct
+            .sled_list(&opctx_alloc, &pagparams, SledFilter::InService)
+            .await?;
         let mut join_handles =
             Vec::with_capacity(sleds_page.len() * instance_nics.len());
 
