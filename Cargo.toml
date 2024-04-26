@@ -163,7 +163,7 @@ default-members = [
 resolver = "2"
 
 [workspace.dependencies]
-anyhow = "1.0"
+anyhow = "1.0.82"
 anstyle = "1.0.6"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
