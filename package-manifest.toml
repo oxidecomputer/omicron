@@ -533,10 +533,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7fc100bd5c61ce61c2a506dea503d51a0f6743c0"
+source.commit = "e06ba8e69638b3e53a48acb13a149490fb11029d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "a3899099d70670873460a494eb8323d042729f4648c7a48a922fd590b4f32730"
+source.sha256 = "91a752aee1bf130ac3a62096b3ae26d81988a0450452eb6d913dd25aabc56ac0"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -549,10 +549,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7fc100bd5c61ce61c2a506dea503d51a0f6743c0"
+source.commit = "e06ba8e69638b3e53a48acb13a149490fb11029d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "5ece9d2fb54a426a3e63d87415bf9f65a8c2fd0b8ec0a0ccca12c7e8a8412a87"
+source.sha256 = "b85590a7e16292272ba0132a041fb232ab6953f7bd8396868f4175dc532fb888"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -564,7 +564,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7fc100bd5c61ce61c2a506dea503d51a0f6743c0"
+source.commit = "e06ba8e69638b3e53a48acb13a149490fb11029d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 source.sha256 = "57e4eaf996225524b780c15d9a7e3dabc4abe7030c3c146d212f6a0804a9553e"
