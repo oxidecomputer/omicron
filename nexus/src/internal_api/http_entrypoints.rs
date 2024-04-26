@@ -58,6 +58,7 @@ use omicron_uuid_kinds::UpstairsRepairKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -93,6 +94,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
+        api.register(bgtask_activate)?;
 
         api.register(blueprint_list)?;
         api.register(blueprint_view)?;
@@ -737,12 +739,18 @@ struct BackgroundTaskPathParam {
     bgtask_name: String,
 }
 
+/// Query parameters for Background Task activation requests.
+#[derive(Deserialize, JsonSchema)]
+struct BackgroundTasksActivateRequest {
+    bgtask_names: BTreeSet<String>,
+}
+
 /// Fetch status of one background task
 ///
 /// This is exposed for support and debugging.
 #[endpoint {
     method = GET,
-    path = "/bgtasks/{bgtask_name}",
+    path = "/bgtasks/view/{bgtask_name}",
 }]
 async fn bgtask_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -755,6 +763,27 @@ async fn bgtask_view(
         let path = path_params.into_inner();
         let bgtask = nexus.bgtask_status(&opctx, &path.bgtask_name).await?;
         Ok(HttpResponseOk(bgtask))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Activates one or more background tasks, causing them to be run immediately
+/// if idle, or scheduled to run again as soon as possible if already running.
+#[endpoint {
+    method = POST,
+    path = "/bgtasks/activate",
+}]
+async fn bgtask_activate(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<BackgroundTasksActivateRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let body = body.into_inner();
+        nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
