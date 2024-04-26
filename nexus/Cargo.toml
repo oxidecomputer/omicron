@@ -118,6 +118,7 @@ omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 oxide-client.workspace = true
+oximeter-collector.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 pretty_assertions.workspace = true

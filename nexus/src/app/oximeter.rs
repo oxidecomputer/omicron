@@ -16,11 +16,9 @@ use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{DataPageParams, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
-use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
-use oximeter_producer::register;
 use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -107,36 +105,6 @@ impl super::Nexus {
             .producers_list_by_oximeter_id(opctx, collector_id, pagparams)
             .await
             .map(|list| list.into_iter().map(ProducerEndpoint::from).collect())
-    }
-
-    /// Register as a metric producer with the oximeter metric collection server.
-    pub(crate) async fn register_as_producer(&self, address: SocketAddr) {
-        let producer_endpoint = nexus::ProducerEndpoint {
-            id: self.id,
-            kind: nexus::ProducerKind::Service,
-            address,
-            base_route: String::from("/metrics/collect"),
-            interval: Duration::from_secs(10),
-        };
-        let register = || async {
-            debug!(self.log, "registering nexus as metric producer");
-            register(address, &self.log, &producer_endpoint)
-                .await
-                .map_err(backoff::BackoffError::transient)
-        };
-        let log_registration_failure = |error, delay| {
-            warn!(
-                self.log,
-                "failed to register nexus as a metric producer, will retry in {:?}", delay;
-                "error_message" => ?error,
-            );
-        };
-        backoff::retry_notify(
-            backoff::retry_policy_internal_service(),
-            register,
-            log_registration_failure,
-        ).await
-        .expect("expected an infinite retry loop registering nexus as a metric producer");
     }
 
     /// Assign a newly-registered metric producer to an oximeter collector server.

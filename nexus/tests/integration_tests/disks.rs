@@ -1761,10 +1761,6 @@ const ALL_METRICS: [&'static str; 6] =
 
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let oximeter = &cptestctx.oximeter;
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
@@ -1835,10 +1831,6 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
 #[nexus_test]
 async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
