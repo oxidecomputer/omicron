@@ -8,10 +8,7 @@ use nexus_networking::sled_client_from_address;
 use nexus_types::{external_api::views::SledPolicy, identity::Asset};
 use omicron_common::api::external::Vni;
 use serde_json::json;
-use sled_agent_client::types::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
-use uuid::Uuid;
+use sled_agent_client::types::VirtualNetworkInterfaceHost;
 
 use super::common::BackgroundTask;
 
@@ -90,11 +87,7 @@ impl BackgroundTask for V2PManager {
 
                     let vni = mapping.vni.0;
 
-                    // TODO: after looking at the sled-agent side of things, we may not need nic_id?
-                    // the nic_id path parameter is not used in sled_agent
-                    let _nic_id = mapping.nic_id;
-
-                    let mapping = SetVirtualNetworkInterfaceHost {
+                    let mapping = VirtualNetworkInterfaceHost {
                         virtual_ip: mapping.ip.ip(),
                         virtual_mac: *mapping.mac,
                         physical_host_ip,
@@ -107,7 +100,7 @@ impl BackgroundTask for V2PManager {
             for (sled, client) in sled_clients {
                 // Get the current mappings on each sled
                 // Ignore vopte interfaces that are used for services
-                let found_v2p: HashSet<SetVirtualNetworkInterfaceHost> = match client.list_v2p().await {
+                let found_v2p: HashSet<VirtualNetworkInterfaceHost> = match client.list_v2p().await {
                     Ok(v) => v.into_inner(),
                     Err(e) => {
                         error!(
@@ -124,16 +117,11 @@ impl BackgroundTask for V2PManager {
 
                 let v2p_to_add: Vec<_> = desired_v2p.difference(&found_v2p).collect();
 
-                let v2p_to_del: Vec<_> = found_v2p
-                    .difference(&desired_v2p)
-                    .map(|mapping| DeleteVirtualNetworkInterfaceHost{
-                        virtual_ip: mapping.virtual_ip,
-                        vni: mapping.vni,
-                    }).collect();
+                let v2p_to_del: Vec<_> = found_v2p.difference(&desired_v2p).collect();
 
                 info!(&log, "v2p mappings to delete"; "sled" => sled.serial_number(), "mappings" => ?v2p_to_del);
                 for mapping in v2p_to_del {
-                    if let Err(e) = client.del_v2p(&Uuid::default(), &mapping).await {
+                    if let Err(e) = client.del_v2p(&mapping).await {
                         error!(
                             &log,
                             "failed to delete v2p mapping from sled";
@@ -146,7 +134,7 @@ impl BackgroundTask for V2PManager {
 
                 info!(&log, "v2p mappings to add"; "sled" => sled.serial_number(), "mappings" => ?v2p_to_add);
                 for mapping in v2p_to_add {
-                    if let Err(e) = client.set_v2p(&Uuid::default(), mapping).await {
+                    if let Err(e) = client.set_v2p(mapping).await {
                         error!(
                             &log,
                             "failed to add v2p mapping to sled";

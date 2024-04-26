@@ -25,9 +25,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
 };
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
@@ -643,24 +641,16 @@ async fn vpc_firewall_rules_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Path parameters for V2P mapping related requests (sled agent API)
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema)]
-struct V2pPathParam {
-    interface_id: Uuid,
-}
-
 /// Create a mapping from a virtual NIC to a physical host
 // Keep interface_id to maintain parity with the simulated sled agent, which
 // requires interface_id on the path.
 #[endpoint {
     method = PUT,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn set_v2p(
     rqctx: RequestContext<SledAgent>,
-    _path_params: Path<V2pPathParam>,
-    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -675,12 +665,11 @@ async fn set_v2p(
 // requires interface_id on the path.
 #[endpoint {
     method = DELETE,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn del_v2p(
     rqctx: RequestContext<SledAgent>,
-    _path_params: Path<V2pPathParam>,
-    body: TypedBody<DeleteVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -698,7 +687,7 @@ async fn del_v2p(
 }]
 async fn list_v2p(
     rqctx: RequestContext<SledAgent>,
-) -> Result<HttpResponseOk<Vec<SetVirtualNetworkInterfaceHost>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError> {
     let sa = rqctx.context();
 
     let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;

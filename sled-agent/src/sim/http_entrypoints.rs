@@ -21,8 +21,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use illumos_utils::opte::params::DeleteVirtualNetworkInterfaceHost;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use ipnetwork::Ipv6Network;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
@@ -346,7 +345,7 @@ struct V2pPathParam {
 async fn set_v2p(
     rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<V2pPathParam>,
-    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let interface_id = path_params.into_inner().interface_id;
@@ -367,7 +366,7 @@ async fn set_v2p(
 async fn del_v2p(
     rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<V2pPathParam>,
-    body: TypedBody<DeleteVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let interface_id = path_params.into_inner().interface_id;

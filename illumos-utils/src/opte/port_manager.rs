@@ -5,8 +5,7 @@
 //! Manager for all OPTE ports on a Helios system
 
 use crate::opte::opte_firewall_rules;
-use crate::opte::params::DeleteVirtualNetworkInterfaceHost;
-use crate::opte::params::SetVirtualNetworkInterfaceHost;
+use crate::opte::params::VirtualNetworkInterfaceHost;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
@@ -573,7 +572,7 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn list_virtual_nics(
         &self,
-    ) -> Result<Vec<SetVirtualNetworkInterfaceHost>, Error> {
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
         use macaddr::MacAddr6;
         use opte_ioctl::OpteHdl;
 
@@ -584,7 +583,7 @@ impl PortManager {
 
         for mapping in v2p.mappings {
             for entry in mapping.ip4 {
-                mappings.push(SetVirtualNetworkInterfaceHost {
+                mappings.push(VirtualNetworkInterfaceHost {
                     virtual_ip: IpAddr::V4(entry.0.into()),
                     virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
                     physical_host_ip: entry.1.ip.into(),
@@ -597,7 +596,7 @@ impl PortManager {
             }
 
             for entry in mapping.ip6 {
-                mappings.push(SetVirtualNetworkInterfaceHost {
+                mappings.push(VirtualNetworkInterfaceHost {
                     virtual_ip: IpAddr::V6(entry.0.into()),
                     virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
                     physical_host_ip: entry.1.ip.into(),
@@ -616,7 +615,7 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn list_virtual_nics(
         &self,
-    ) -> Result<Vec<SetVirtualNetworkInterfaceHost>, Error> {
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
         info!(
             self.inner.log,
             "Listing virtual nics (ignored)";
@@ -627,7 +626,7 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn set_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
 
@@ -654,7 +653,7 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn set_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(
             self.inner.log,
@@ -667,18 +666,35 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &DeleteVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        // TODO requires https://github.com/oxidecomputer/opte/issues/332
+        use opte_ioctl::OpteHdl;
 
-        slog::warn!(self.inner.log, "unset_virtual_nic_host unimplmented");
+        info!(
+            self.inner.log,
+            "Clearing mapping of virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        hdl.clear_v2p(&oxide_vpc::api::ClearVirt2PhysReq {
+            vip: mapping.virtual_ip.into(),
+            phys: oxide_vpc::api::PhysNet {
+                ether: oxide_vpc::api::MacAddr::from(
+                    (*mapping.virtual_mac).into_array(),
+                ),
+                ip: mapping.physical_host_ip.into(),
+                vni: Vni::new(mapping.vni).unwrap(),
+            },
+        })?;
+
         Ok(())
     }
 
     #[cfg(not(target_os = "illumos"))]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &DeleteVirtualNetworkInterfaceHost,
+        _mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())
