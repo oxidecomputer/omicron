@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+clap.workspace = true
 base64.workspace = true
 futures.workspace = true
 humantime.workspace = true
@@ -18,6 +19,8 @@ schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
 tabled.workspace = true

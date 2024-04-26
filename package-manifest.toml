@@ -100,7 +100,7 @@ only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "omicron-nexus.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz",
 ]
@@ -130,11 +130,7 @@ output.intermediate_only = true
 service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [
-  "oximeter-collector.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
-]
+source.packages = [ "oximeter-collector.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 [package.oximeter-collector]
@@ -157,8 +153,8 @@ source.type = "composite"
 source.packages = [
   "clickhouse_svc.tar.gz",
   "internal-dns-cli.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -183,8 +179,8 @@ source.type = "composite"
 source.packages = [
   "clickhouse_keeper_svc.tar.gz",
   "internal-dns-cli.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -209,8 +205,8 @@ source.type = "composite"
 source.packages = [
   "cockroachdb-service.tar.gz",
   "internal-dns-cli.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -245,8 +241,8 @@ source.type = "composite"
 source.packages = [
   "dns-server.tar.gz",
   "internal-dns-customizations.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -257,7 +253,7 @@ source.type = "composite"
 source.packages = [
   "dns-server.tar.gz",
   "external-dns-customizations.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz",
 ]
@@ -298,10 +294,11 @@ service_name = "ntp"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
+  "chrony-setup.tar.gz",
   "ntp-svc.tar.gz",
   "opte-interface-setup.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -311,8 +308,17 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },
-  { from = "smf/ntp/method", to = "/var/svc/method" },
-  { from = "smf/ntp/etc", to = "/etc" },
+]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.chrony-setup]
+service_name = "chrony-setup"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "smf/chrony-setup/manifest.xml", to = "/var/svc/manifest/site/chrony-setup/manifest.xml" },
+  { from = "smf/chrony-setup/etc", to = "/etc" },
 ]
 output.intermediate_only = true
 output.type = "zone"
@@ -457,11 +463,7 @@ output.intermediate_only = true
 service_name = "crucible"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [
-  "crucible.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
-]
+source.packages = [ "crucible.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 
@@ -469,11 +471,7 @@ output.type = "zone"
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [
-  "crucible-pantry.tar.gz",
-  "zone-network-setup.tar.gz",
-  "zone-network-install.tar.gz",
-]
+source.packages = [ "crucible-pantry.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
@@ -492,10 +490,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "4661c23b248da18862012cf55af21b17b79a468e"
+source.commit = "1ef72f3c935e7dc936bf43310c04668fb60d7a20"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "14e607d04234a6749e981c8049437523dbc75494938541822e31ea61090800bf"
+source.sha256 = "f4b9189d82729f851bab25ee7991134db2732f82657a15e88889500ed8a6e6c2"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -504,10 +502,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "4661c23b248da18862012cf55af21b17b79a468e"
+source.commit = "1ef72f3c935e7dc936bf43310c04668fb60d7a20"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "9a2181b43d7581468d075e37b5286e478ff008de65dd73b7f49a6e72bc9a43f5"
+source.sha256 = "e7bf9cf165c3191c899c1f019df4edb6a34c0fe83d61cce861ae0aefc649882d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -519,10 +517,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "84e423bfd3bf84ebb04acb95cf7600731e9f361f"
+source.commit = "dd788a311a382b09ce1d3e35f7777b378e09fdf7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "db72c83b4c0a09e0759ec52e48a5589e9d732c3f390fb4c084f820d173b4f058"
+source.sha256 = "f9ebee502fdaa115563ac84e855805c0bf5582437820445dd1734423216dfc5b"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -581,6 +579,26 @@ source.commit = "daab8580d6994c29f3c45ffa5a76b1de765b30da"
 source.sha256 = "15a9068fdd4521a77f7d32c80d1e6d3a6a4ad15accab77641ed8f14175ae0db6"
 output.type = "zone"
 output.intermediate_only = true
+
+[package.pumpkind]
+service_name = "pumpkind"
+source.type = "prebuilt"
+source.repo = "pumpkind"
+source.commit = "b648f61cb1cc23ec3c850349a5db49c980580ead"
+source.sha256 = "d20d877ca42eb6207a870802e7cec8a9c7143348c22ed9271646b3d6bfcc2b85"
+output.type = "zone"
+output.intermediate_only = true
+only_for_targets.image = "standard"
+only_for_targets.switch = "asic"
+
+[package.pumpkind-gz]
+service_name = "pumpkind-gz"
+source.type = "prebuilt"
+source.repo = "pumpkind"
+source.commit = "b648f61cb1cc23ec3c850349a5db49c980580ead"
+source.sha256 = "83b29f0694c1750296d3c52698ca284980efd779bd1ef635b014931e5083d630"
+output.type = "tarball"
+only_for_targets.image = "standard"
 
 [package.dendrite-stub]
 service_name = "dendrite"
@@ -678,6 +696,7 @@ source.packages = [
   "omicron-gateway-asic.tar.gz",
   "dendrite-asic.tar.gz",
   "lldp.tar.gz",
+  "pumpkind.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
@@ -746,11 +765,11 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 
-[package.zone-network-setup]
-service_name = "zone-network-cli"
+[package.zone-setup]
+service_name = "zone-setup-cli"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["zone-networking"]
+source.rust.binary_names = ["zone-setup"]
 source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true

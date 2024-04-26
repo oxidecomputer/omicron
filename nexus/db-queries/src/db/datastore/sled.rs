@@ -19,7 +19,9 @@ use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pool::DbConnection;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
+use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -33,8 +35,10 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::bail_unless;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -43,22 +47,27 @@ use uuid::Uuid;
 impl DataStore {
     /// Stores a new sled in the database.
     ///
+    /// Returns the sled, and whether or not it was updated on success.
+    ///
     /// Returns an error if `sled_agent_gen` is stale, or the sled is
     /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<Sled> {
+    ) -> CreateResult<(Sled, bool)> {
         use db::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
-        diesel::insert_into(dsl::sled)
-            .values(sled_update.clone().into_insertable())
+        let insertable_sled = sled_update.clone().into_insertable();
+        let now = insertable_sled.time_modified();
+
+        let sled = diesel::insert_into(dsl::sled)
+            .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
             .set((
-                dsl::time_modified.eq(Utc::now()),
+                dsl::time_modified.eq(now),
                 dsl::ip.eq(sled_update.ip),
                 dsl::port.eq(sled_update.port),
                 dsl::rack_id.eq(sled_update.rack_id),
@@ -82,18 +91,51 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })
+            })?;
+
+        // We compare only seconds since the epoch, because writing to and
+        // reading from the database causes us to lose precision.
+        let was_modified = now.timestamp() == sled.time_modified().timestamp();
+        Ok((sled, was_modified))
+    }
+
+    /// Confirms that a sled exists and is in-service.
+    ///
+    /// This function may be called from a transaction context.
+    pub async fn check_sled_in_service_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: Uuid,
+    ) -> Result<(), TransactionError<Error>> {
+        use db::schema::sled::dsl;
+        let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
+            dsl::sled
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(sled_id))
+                .sled_filter(SledFilter::InService),
+        ))
+        .get_result_async::<bool>(conn)
+        .await?;
+
+        bail_unless!(
+            sled_exists_and_in_service,
+            "Sled {} is not in service",
+            sled_id,
+        );
+
+        Ok(())
     }
 
     pub async fn sled_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
+        sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
+            .sled_filter(sled_filter)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -107,6 +149,7 @@ impl DataStore {
     pub async fn sled_list_all_batched(
         &self,
         opctx: &OpContext,
+        sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
@@ -114,7 +157,9 @@ impl DataStore {
         let mut all_sleds = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch = self.sled_list(opctx, &p.current_pagparams()).await?;
+            let batch = self
+                .sled_list(opctx, &p.current_pagparams(), sled_filter)
+                .await?;
             paginator =
                 p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
             all_sleds.extend(batch);
@@ -737,6 +782,8 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use predicates::{prelude::*, BoxPredicate};
     use std::net::{Ipv6Addr, SocketAddrV6};
 
@@ -751,7 +798,7 @@ mod test {
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let mut sled_update = test_new_sled_update();
-        let observed_sled =
+        let (observed_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
@@ -784,7 +831,7 @@ mod test {
         sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let observed_sled = datastore
+        let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
@@ -811,7 +858,7 @@ mod test {
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let mut sled_update = test_new_sled_update();
-        let observed_sled =
+        let (observed_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
 
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
@@ -833,7 +880,7 @@ mod test {
         sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let observed_sled = datastore
+        let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
@@ -855,7 +902,7 @@ mod test {
         );
         sled_update.sled_agent_gen.0 = current_gen.0.next();
         // Test that upserting the sled propagates those changes to the DB.
-        let observed_sled = datastore
+        let (observed_sled, _) = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
@@ -874,7 +921,7 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let mut sled_update = test_new_sled_update();
-        let observed_sled =
+        let (observed_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
@@ -891,7 +938,7 @@ mod test {
         sled_set_state(
             &opctx,
             &datastore,
-            observed_sled.id(),
+            SledUuid::from_untyped_uuid(observed_sled.id()),
             SledState::Decommissioned,
             ValidateTransition::No,
             Expected::Ok(SledState::Active),
@@ -953,20 +1000,26 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Define some sleds that resources cannot be provisioned on.
-        let non_provisionable_sled =
+        let (non_provisionable_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let expunged_sled =
+        let (expunged_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let decommissioned_sled =
+        let (decommissioned_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let illegal_decommissioned_sled =
+        let (illegal_decommissioned_sled, _) =
             datastore.sled_upsert(test_new_sled_update()).await.unwrap();
 
         let ineligible_sleds = IneligibleSleds {
-            non_provisionable: non_provisionable_sled.id(),
-            expunged: expunged_sled.id(),
-            decommissioned: decommissioned_sled.id(),
-            illegal_decommissioned: illegal_decommissioned_sled.id(),
+            non_provisionable: SledUuid::from_untyped_uuid(
+                non_provisionable_sled.id(),
+            ),
+            expunged: SledUuid::from_untyped_uuid(expunged_sled.id()),
+            decommissioned: SledUuid::from_untyped_uuid(
+                decommissioned_sled.id(),
+            ),
+            illegal_decommissioned: SledUuid::from_untyped_uuid(
+                illegal_decommissioned_sled.id(),
+            ),
         };
         ineligible_sleds.setup(&opctx, &datastore).await.unwrap();
 
@@ -992,7 +1045,7 @@ mod test {
 
         // Now add a provisionable sled and try again.
         let sled_update = test_new_sled_update();
-        let provisionable_sled =
+        let (provisionable_sled, _) =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
 
         // Try a few times to ensure that resources never get allocated to the
@@ -1053,7 +1106,8 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Set up a sled to test against.
-        let sled = datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let (sled, _) =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
         let sled_id = sled.id();
 
         // Add a couple disks to this sled.
@@ -1079,11 +1133,11 @@ mod test {
         );
 
         datastore
-            .physical_disk_upsert(&opctx, disk1.clone())
+            .physical_disk_insert(&opctx, disk1.clone())
             .await
             .expect("Failed to upsert physical disk");
         datastore
-            .physical_disk_upsert(&opctx, disk2.clone())
+            .physical_disk_insert(&opctx, disk2.clone())
             .await
             .expect("Failed to upsert physical disk");
 
@@ -1104,7 +1158,7 @@ mod test {
         sled_set_policy(
             &opctx,
             &datastore,
-            sled_id,
+            SledUuid::from_untyped_uuid(sled_id),
             SledPolicy::Expunged,
             ValidateTransition::Yes,
             Expected::Ok(SledPolicy::provisionable()),
@@ -1222,14 +1276,15 @@ mod test {
             .enumerate();
 
         // Set up a sled to test against.
-        let sled = datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let (sled, _) =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
         let sled_id = sled.id();
 
         for (i, ((policy, state), after)) in all_transitions {
             test_sled_state_transitions_once(
                 &opctx,
                 &datastore,
-                sled_id,
+                SledUuid::from_untyped_uuid(sled_id),
                 policy,
                 state,
                 after,
@@ -1252,7 +1307,7 @@ mod test {
     async fn test_sled_state_transitions_once(
         opctx: &OpContext,
         datastore: &DataStore,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         before_policy: SledPolicy,
         before_state: SledState,
         after: SledTransition,
@@ -1397,9 +1452,10 @@ mod test {
         assert_eq!(ninserted, size);
 
         let sleds = datastore
-            .sled_list_all_batched(&opctx)
+            .sled_list_all_batched(&opctx, SledFilter::All)
             .await
             .expect("failed to list all sleds");
+
         // We don't need to sort these ids because the sleds are enumerated in
         // id order.
         let found_ids: Vec<_> = sleds.into_iter().map(|s| s.id()).collect();

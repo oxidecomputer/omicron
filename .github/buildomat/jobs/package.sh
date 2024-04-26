@@ -29,6 +29,9 @@ set -o xtrace
 cargo --version
 rustc --version
 
+WORK=/work
+pfexec mkdir -p $WORK && pfexec chown $USER $WORK
+
 #
 # Generate the version for control plane artifacts here. We use `0.git` as the
 # prerelease field because it comes before `alpha`.
@@ -37,7 +40,7 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="7.0.0-0.ci+git${COMMIT:0:11}"
+VERSION="8.0.0-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
@@ -50,6 +53,9 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
+# Build the xtask binary used by the deploy job
+ptime -m cargo build --locked --release -p xtask
+
 # Assemble some utilities into a tarball that can be used by deployment
 # phases of buildomat.
 
@@ -60,24 +66,14 @@ files=(
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
-	tools/create_virtual_hardware.sh
-    tools/virtual_hardware.sh
-	tools/scrimlet/*
+	target/release/xtask
 )
 
-pfexec mkdir -p /work && pfexec chown $USER /work
-ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
+ptime -m tar cvzf $WORK/package.tar.gz "${files[@]}"
 
 tarball_src_dir="$(pwd)/out/versioned"
 stamp_packages() {
 	for package in "$@"; do
-		# TODO: remove once https://github.com/oxidecomputer/omicron-package/pull/54 lands
-		if [[ $package == mg-ddm-gz ]]; then
-			echo "0.0.0" > VERSION
-			tar rvf "out/$package.tar" VERSION
-			rm VERSION
-		fi
-
 		cargo run --locked --release --bin omicron-package -- stamp "$package" "$VERSION"
 	done
 }
@@ -91,10 +87,10 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay oxlog
+stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay oxlog pumpkind-gz
 
-# Create global zone package @ /work/global-zone-packages.tar.gz
-ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
+# Create global zone package @ $WORK/global-zone-packages.tar.gz
+ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" $WORK
 
 # Non-Global Zones
 
@@ -106,7 +102,7 @@ ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
 #
 # Note that when building for a real gimlet, `propolis-server` and `switch-*`
 # should be included in the OS ramdisk.
-mkdir -p /work/zones
+mkdir -p $WORK/zones
 zones=(
   out/clickhouse.tar.gz
   out/clickhouse_keeper.tar.gz
@@ -126,7 +122,7 @@ zones=(
   out/overlay.tar.gz
   out/probe.tar.gz
 )
-cp "${zones[@]}" /work/zones/
+cp "${zones[@]}" $WORK/zones/
 
 #
 # Global Zone files for Trampoline image
@@ -139,5 +135,5 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery package
 stamp_packages installinator mg-ddm-gz
 
-# Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
-ptime -m ./tools/build-trampoline-global-zone-packages.sh "$tarball_src_dir" /work
+# Create trampoline global zone package @ $WORK/trampoline-global-zone-packages.tar.gz
+ptime -m ./tools/build-trampoline-global-zone-packages.sh "$tarball_src_dir" $WORK

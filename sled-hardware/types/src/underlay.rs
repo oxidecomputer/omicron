@@ -45,9 +45,9 @@ fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
 
     Ipv6Addr::new(
         BOOTSTRAP_PREFIX,
-        ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
-        ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
-        ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
+        (u16::from(mac_bytes[0]) << 8) | u16::from(mac_bytes[1]),
+        (u16::from(mac_bytes[2]) << 8) | u16::from(mac_bytes[3]),
+        (u16::from(mac_bytes[4]) << 8) | u16::from(mac_bytes[5]),
         (interface_id >> 48 & 0xffff).try_into().unwrap(),
         (interface_id >> 32 & 0xffff).try_into().unwrap(),
         (interface_id >> 16 & 0xffff).try_into().unwrap(),

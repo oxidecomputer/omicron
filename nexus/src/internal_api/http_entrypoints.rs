@@ -11,6 +11,7 @@ use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -40,11 +41,11 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
@@ -54,8 +55,6 @@ use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
-use oximeter::types::ProducerResults;
-use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -79,7 +78,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_producers_post)?;
         api.register(cpapi_assigned_producers_list)?;
         api.register(cpapi_collectors_post)?;
-        api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
 
         api.register(cpapi_upstairs_repair_start)?;
@@ -102,7 +100,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
         api.register(blueprint_target_set_enabled)?;
-        api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
         api.register(blueprint_import)?;
 
@@ -377,15 +374,23 @@ async fn cpapi_disk_remove_read_only_parent(
 async fn cpapi_producers_post(
     request_context: RequestContext<Arc<ServerContext>>,
     producer_info: TypedBody<ProducerEndpoint>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError> {
     let context = request_context.context();
     let handler = async {
         let nexus = &context.nexus;
         let producer_info = producer_info.into_inner();
         let opctx =
             crate::context::op_context_for_internal_api(&request_context).await;
-        nexus.assign_producer(&opctx, producer_info).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        nexus
+            .assign_producer(&opctx, producer_info)
+            .await
+            .map_err(HttpError::from)
+            .map(|_| {
+                HttpResponseCreated(ProducerRegistrationResponse {
+                    lease_duration:
+                        crate::app::oximeter::PRODUCER_LEASE_DURATION,
+                })
+            })
     };
     context
         .internal_latencies
@@ -457,25 +462,6 @@ async fn cpapi_collectors_post(
         nexus.upsert_oximeter_collector(&opctx, &oximeter_info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
-    context
-        .internal_latencies
-        .instrument_dropshot_handler(&request_context, handler)
-        .await
-}
-
-/// Endpoint for oximeter to collect nexus server metrics.
-#[endpoint {
-    method = GET,
-    path = "/metrics/collect/{producer_id}",
-}]
-async fn cpapi_metrics_collect(
-    request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let context = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    let handler =
-        async { collect(&context.producer_registry, producer_id).await };
     context
         .internal_latencies
         .instrument_dropshot_handler(&request_context, handler)
@@ -908,10 +894,7 @@ async fn blueprint_target_view(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
-        let target =
-            nexus.blueprint_target_view(&opctx).await?.ok_or_else(|| {
-                Error::conflict("no target blueprint has been configured")
-            })?;
+        let target = nexus.blueprint_target_view(&opctx).await?;
         Ok(HttpResponseOk(target))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -958,33 +941,6 @@ async fn blueprint_target_set_enabled(
 }
 
 // Generating blueprints
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct CollectionId {
-    collection_id: Uuid,
-}
-
-/// Generates a new blueprint matching the specified inventory collection
-#[endpoint {
-    method = POST,
-    path = "/deployment/blueprints/generate-from-collection",
-}]
-async fn blueprint_generate_from_collection(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    params: TypedBody<CollectionId>,
-) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let nexus = &apictx.nexus;
-        let collection_id = params.into_inner().collection_id;
-        let result = nexus
-            .blueprint_generate_from_collection(&opctx, collection_id)
-            .await?;
-        Ok(HttpResponseOk(result))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 /// Generates a new blueprint for the current system, re-evaluating anything
 /// that's changed since the last one was generated

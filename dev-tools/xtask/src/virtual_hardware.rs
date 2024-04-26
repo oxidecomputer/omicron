@@ -19,7 +19,7 @@ enum Commands {
         /// The physical link over which Chelsio links are simulated
         ///
         /// Will be inferred by `dladm show-phys` if unsupplied.
-        #[clap(long)]
+        #[clap(long, env)]
         physical_link: Option<String>,
 
         /// Sets `promisc-filtered` off for the sc0_1 vnic.
@@ -33,6 +33,10 @@ enum Commands {
         /// Will be inferred via `netstat` if unsupplied.
         #[clap(long)]
         gateway_ip: Option<String>,
+
+        /// The configured mode for softnpu
+        #[clap(long, env, default_value = "zone")]
+        softnpu_mode: String,
 
         /// The MAC address of your gateway IP
         ///
@@ -153,6 +157,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
         Commands::Create {
             physical_link,
             promiscuous_filter_off,
+            softnpu_mode,
             gateway_ip,
             gateway_mac,
             pxa,
@@ -168,7 +173,9 @@ pub fn run_cmd(args: Args) -> Result<()> {
             if matches!(args.scope, Scope::All | Scope::Disks) {
                 ensure_vdevs(&sled_agent_config, &args.vdev_dir)?;
             }
-            if matches!(args.scope, Scope::All | Scope::Network) {
+            if matches!(args.scope, Scope::All | Scope::Network)
+                && softnpu_mode == "zone"
+            {
                 ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
                 ensure_softnpu_zone(&npu_zone)?;
                 initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
@@ -210,7 +217,7 @@ fn demount_backingfs() -> Result<()> {
     const BACKED_SERVICES: &str = "svc:/system/fmd:default";
     println!("Disabling {BACKED_SERVICES}");
     svcadm_temporary_toggle(BACKED_SERVICES, false)?;
-    for dataset in zfs_list_internal("yes", "noauto")? {
+    for dataset in zfs_list_internal("noauto", "yes")? {
         println!("unmounting: {dataset}");
         zfs_umount(&dataset)?;
     }
