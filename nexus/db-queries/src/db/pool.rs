@@ -224,6 +224,10 @@ mod test {
         simple_pool_query(&pools[1]).await.unwrap();
         simple_pool_query(&pools[2]).await.unwrap();
 
+        // Finish cleanup before completing the test
+        for mut node in crdb_nodes.into_iter() {
+            node.cleanup().await.unwrap();
+        }
         logctx.cleanup_successful();
     }
 }
