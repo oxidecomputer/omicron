@@ -13,7 +13,6 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use typed_rng::TypedUuidRng;
 
@@ -91,20 +90,17 @@ impl ExampleSystem {
         builder.set_rng_seed((test_name, "ExampleSystem collection"));
 
         for sled_id in blueprint.sleds() {
-            // TODO-cleanup use `TypedUuid` everywhere
-            let Some(zones) =
-                blueprint.blueprint_zones.get(sled_id.as_untyped_uuid())
-            else {
+            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
             for zone in zones.zones.iter() {
                 let service_id = zone.id;
-                if let Some(external_ip) = zone.zone_type.external_ip() {
+                if let Some((external_ip, nic)) =
+                    zone.zone_type.external_networking()
+                {
                     input_builder
                         .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
-                }
-                if let Some(nic) = zone.zone_type.opte_vnic() {
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,

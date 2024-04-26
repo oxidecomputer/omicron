@@ -58,7 +58,6 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::Logger;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -70,7 +69,6 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
-use uuid::Uuid;
 
 use super::zones::is_already_expunged;
 use super::zones::BuilderZoneState;
@@ -198,7 +196,7 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     zones: Vec::new(),
                 };
-                (sled_id.into_untyped_uuid(), config)
+                (sled_id, config)
             })
             .collect::<BTreeMap<_, _>>();
         let num_sleds = blueprint_zones.len();
@@ -291,7 +289,7 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
 
-            if let Some(external_ip) = zone_type.external_ip() {
+            if let Some((external_ip, nic)) = zone_type.external_networking() {
                 // For the test suite, ignore localhost.  It gets reused many
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
@@ -300,9 +298,7 @@ impl<'a> BlueprintBuilder<'a> {
                 {
                     bail!("duplicate external IP: {external_ip:?}");
                 }
-            }
 
-            if let Some(nic) = zone_type.opte_vnic() {
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
@@ -963,17 +959,14 @@ impl BlueprintBuilderRng {
 /// struct makes it easy for callers iterate over the right set of zones.
 pub(super) struct BlueprintZonesBuilder<'a> {
     changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
-    // Temporarily make a clone of the parent blueprint's zones so we can use
-    // typed UUIDs everywhere. Once we're done migrating, this `Cow` can be
-    // removed.
-    parent_zones: Cow<'a, BTreeMap<SledUuid, BlueprintZonesConfig>>,
+    parent_zones: &'a BTreeMap<SledUuid, BlueprintZonesConfig>,
 }
 
 impl<'a> BlueprintZonesBuilder<'a> {
     pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZonesBuilder {
         BlueprintZonesBuilder {
             changed_zones: BTreeMap::new(),
-            parent_zones: Cow::Owned(parent_blueprint.typed_blueprint_zones()),
+            parent_zones: &parent_blueprint.blueprint_zones,
         }
     }
 
@@ -1020,25 +1013,26 @@ impl<'a> BlueprintZonesBuilder<'a> {
     pub fn into_zones_map(
         mut self,
         sled_ids: impl Iterator<Item = SledUuid>,
-    ) -> BTreeMap<Uuid, BlueprintZonesConfig> {
+    ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
         sled_ids
             .map(|sled_id| {
                 // Start with self.changed_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
                 if let Some(zones) = self.changed_zones.remove(&sled_id) {
-                    (sled_id.into_untyped_uuid(), zones.build())
+                    (sled_id, zones.build())
                 }
-                // Next, check self.parent_zones, to represent an unchanged sled.
+                // Next, check self.parent_zones, to represent an unchanged
+                // sled.
                 else if let Some(parent_zones) =
                     self.parent_zones.get(&sled_id)
                 {
-                    (sled_id.into_untyped_uuid(), parent_zones.clone())
+                    (sled_id, parent_zones.clone())
                 } else {
-                    // If the sled is not in self.parent_zones, then it must be a
-                    // new sled and we haven't added any zones to it yet.  Use the
-                    // standard initial config.
+                    // If the sled is not in self.parent_zones, then it must be
+                    // a new sled and we haven't added any zones to it yet.  Use
+                    // the standard initial config.
                     (
-                        sled_id.into_untyped_uuid(),
+                        sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new(),
                             zones: vec![],
@@ -1467,7 +1461,7 @@ pub mod test {
                     // Also remove this zone from the blueprint.
                     parent
                         .blueprint_zones
-                        .get_mut(sled_id.as_untyped_uuid())
+                        .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
                         .retain(|z| !z.zone_type.is_nexus());
@@ -1518,7 +1512,9 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
-                if let Some(external_ip) = z.zone_type.external_ip() {
+                if let Some((external_ip, _)) =
+                    z.zone_type.external_networking()
+                {
                     used_ip_ranges.push(IpRange::from(external_ip.ip()));
                 }
             }

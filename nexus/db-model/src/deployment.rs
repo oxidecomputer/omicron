@@ -232,8 +232,10 @@ impl BpOmicronZone {
         sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
-        let external_ip_id =
-            blueprint_zone.zone_type.external_ip().map(|ip| ip.id());
+        let external_ip_id = blueprint_zone
+            .zone_type
+            .external_networking()
+            .map(|(ip, _)| ip.id());
         let zone = OmicronZone::new(
             sled_id,
             blueprint_zone.id.into_untyped_uuid(),
@@ -381,7 +383,7 @@ impl BpOmicronZoneNic {
         blueprint_id: Uuid,
         zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let Some(nic) = zone.zone_type.opte_vnic() else {
+        let Some((_, nic)) = zone.zone_type.external_networking() else {
             return Ok(None);
         };
         let nic = OmicronZoneNic::new(zone.id.into_untyped_uuid(), nic)?;

@@ -213,6 +213,31 @@ Usage: omdb db dns names <GROUP> <VERSION>
 
 For more information, try '--help'.
 =============================================
+EXECUTING COMMAND: omdb ["db", "sleds", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Print information about sleds
+
+Usage: omdb db sleds [OPTIONS]
+
+Options:
+  -F, --filter <FILTER>
+          Show sleds that match the given filter
+
+          Possible values:
+          - all:                All sleds
+          - discretionary:      Sleds that are eligible for discretionary services
+          - in-service:         Sleds that are in service (even if they might not be eligible for
+            discretionary services)
+          - reservation-create: Sleds on which reservations can be created
+          - vpc-firewall:       Sleds which should be sent VPC firewall rules
+
+  -h, --help
+          Print help (see a summary with '-h')
+---------------------------------------------
+stderr:
+=============================================
 EXECUTING COMMAND: omdb ["db", "snapshots"]
 termination: Exited(2)
 ---------------------------------------------

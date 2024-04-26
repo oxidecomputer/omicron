@@ -4732,7 +4732,9 @@ name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-bb8-diesel",
  "chrono",
+ "diesel",
  "dns-service-client",
  "futures",
  "httptest",
@@ -4885,6 +4887,7 @@ dependencies = [
  "api_identity",
  "base64 0.22.0",
  "chrono",
+ "clap",
  "dns-service-client",
  "futures",
  "gateway-client",
