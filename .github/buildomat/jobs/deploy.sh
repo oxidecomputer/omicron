@@ -302,6 +302,12 @@ curl -sSfL -o debian-11-genericcloud-amd64.raw \
 	http://catacomb.eng.oxide.computer:12346/debian-11-genericcloud-amd64.raw
 
 #
+# Create the "omicron" project that sled-agent will inhabit.
+#
+projects -l omicron >/dev/null 2>&1 || \
+    pfexec projadd -c 'The Oxide Control Plane' omicron
+
+#
 # The lab-netdev target is a ramdisk system that is always cleared
 # out between runs, so it has not had any state yet that requires
 # uninstallation.
