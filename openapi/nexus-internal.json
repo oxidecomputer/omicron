@@ -90,7 +90,35 @@
         }
       }
     },
-    "/bgtasks/{bgtask_name}": {
+    "/bgtasks/activate": {
+      "post": {
+        "summary": "Activates one or more background tasks, causing them to be run immediately",
+        "description": "if idle, or scheduled to run again as soon as possible if already running.",
+        "operationId": "bgtask_activate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackgroundTasksActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/bgtasks/view/{bgtask_name}": {
       "get": {
         "summary": "Fetch status of one background task",
         "description": "This is exposed for support and debugging.",
@@ -1394,6 +1422,22 @@
           "last",
           "name",
           "period"
+        ]
+      },
+      "BackgroundTasksActivateRequest": {
+        "description": "Query parameters for Background Task activation requests.",
+        "type": "object",
+        "properties": {
+          "bgtask_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "bgtask_names"
         ]
       },
       "Baseboard": {

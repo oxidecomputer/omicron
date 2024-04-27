@@ -254,6 +254,9 @@ pub enum SledFilter {
     /// discretionary services).
     InService,
 
+    /// Sleds whose sled agents should be queried for inventory
+    QueryDuringInventory,
+
     /// Sleds on which reservations can be created.
     ReservationCreate,
 
@@ -308,6 +311,7 @@ impl SledPolicy {
                 SledFilter::All => true,
                 SledFilter::Discretionary => true,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
@@ -317,6 +321,7 @@ impl SledPolicy {
                 SledFilter::All => true,
                 SledFilter::Discretionary => false,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => true,
             },
@@ -324,6 +329,7 @@ impl SledPolicy {
                 SledFilter::All => true,
                 SledFilter::Discretionary => false,
                 SledFilter::InService => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
             },
@@ -353,6 +359,7 @@ impl SledState {
                 SledFilter::All => true,
                 SledFilter::Discretionary => true,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
@@ -360,6 +367,7 @@ impl SledState {
                 SledFilter::All => true,
                 SledFilter::Discretionary => false,
                 SledFilter::InService => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
             },
