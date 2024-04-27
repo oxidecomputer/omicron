@@ -1580,9 +1580,9 @@ checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
 name = "datatest-stable"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb7ab9130d87ff4c281e2ac877103ee8b4e31cc6028f879ae362ec74b11961d"
+checksum = "a560b3fd20463b56397bd457aa71243ccfdcffe696050b66e3b1e0ec0457e7f1"
 dependencies = [
  "camino",
  "fancy-regex",
