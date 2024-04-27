@@ -1275,6 +1275,7 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use once_cell::sync::Lazy;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
@@ -1282,8 +1283,8 @@ mod tests {
     use std::mem;
     use std::net::Ipv6Addr;
 
-    static EMPTY_PLANNING_INPUT: PlanningInput =
-        PlanningInputBuilder::empty_input();
+    static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
+        Lazy::new(|| PlanningInputBuilder::empty_input());
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific

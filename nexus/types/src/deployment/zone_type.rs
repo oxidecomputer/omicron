@@ -196,7 +196,7 @@ impl BlueprintZoneType {
 }
 
 pub mod blueprint_zone_type {
-    use crate::deployment::planning_input::OmicronZoneExternalFloatingAddr;
+    use crate::deployment::OmicronZoneExternalFloatingAddr;
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
     use crate::inventory::OmicronZoneDataset;

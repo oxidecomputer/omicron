@@ -13,7 +13,9 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
 pub struct ExampleSystem {
@@ -105,7 +107,8 @@ impl ExampleSystem {
                         .add_omicron_zone_nic(
                             service_id,
                             OmicronZoneNic {
-                                id: nic.id,
+                                // TODO-cleanup use `TypedUuid` everywhere
+                                id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
                                 ip: nic.ip,
                                 slot: nic.slot,
