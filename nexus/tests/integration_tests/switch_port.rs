@@ -92,6 +92,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
         asn: 47,
         vrf: None,
+        checker: None,
+        shaper: None,
     };
 
     NexusRequest::objects_post(
@@ -263,6 +265,13 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 delay_open: 0,
                 connect_retry: 3,
                 keepalive: 2,
+                remote_asn: None,
+                min_ttl: None,
+                md5_auth_key: None,
+                multi_exit_discriminator: None,
+                communities: Vec::new(),
+                local_pref: None,
+                enforce_first_as: false,
             }],
         },
     );

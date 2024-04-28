@@ -27,8 +27,9 @@ use dpd_client::types::PortId;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig,
-    DeleteStaticRoute4Request, Prefix4, StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
+    DeleteStaticRoute4Request, Prefix4, ShaperSource, StaticRoute4,
+    StaticRoute4List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -587,6 +588,54 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
+                        let ttl: Option<u8> = match peer.min_ttl.as_ref() {
+                            Some(x) => {
+                                match x.0.try_into() {
+                                    Ok(ttl) => Some(ttl),
+                                    Err(e) => {
+                                        error!(log,
+                                            "peer ttl out of range {} > 255",
+                                            x;
+                                            "error" => ?e
+                                        );
+                                        return json!({
+                                            "error":
+                                                format!(
+                                                    "peer ttl out of range: \
+                                                        {:#}",
+                                                    e
+                                                )
+                                        });
+                                    }
+                                }
+                            }
+                            None => None,
+                        };
+
+                        let communities = match self.datastore.communities_for_peer(
+                            opctx,
+                            peer.port_settings_id,
+                            &peer.interface_name,
+                            peer.addr,
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get communities for peer";
+                                    "peer" => ?peer,
+                                    "error" => ?e
+                                );
+                                return json!({
+                                    "error":
+                                        format!(
+                                            "failed to get port settings for peer {:?}: {:?}",
+                                            peer,
+                                            e
+                                        )
+                                });
+                            }
+                        };
+
                         // now that the peer passes the above validations, add it to the list for configuration
                         let peer_config = BgpPeerConfig {
                             name: format!("{}", peer.addr.ip()),
@@ -598,6 +647,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             keepalive: peer.keepalive.0.into(),
                             resolution: BGP_SESSION_RESOLUTION,
                             passive: false,
+                            remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                            min_ttl: ttl,
+                            md5_auth_key: peer.md5_auth_key.clone(),
+                            multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
+                            local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                            enforce_first_as: peer.enforce_first_as,
+                            communities: communities.into_iter().map(|c| c.community.0).collect(),
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -637,6 +693,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         asn: *request_bgp_config.asn,
                         peers,
                         originate: request_prefixes.clone(),
+                        checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
+                            asn: *request_bgp_config.asn,
+                            code: code.clone(),
+                        }),
+                        shaper: request_bgp_config.shaper.as_ref().map(|code| ShaperSource{
+                            asn: *request_bgp_config.asn,
+                            code: code.clone(),
+                        }),
                     };
 
                     match desired_bgp_configs.entry(*location) {
@@ -728,7 +792,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                // TODO: @rcgoodfellow is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
+                // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
                 let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
                     let announcements: Vec<Ipv4Network> = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
@@ -743,6 +807,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     SledBgpConfig {
                         asn: config.asn.0,
                         originate: announcements,
+                        checker: config.checker.clone(),
+                        shaper: config.shaper.clone(),
                     }
                 }).collect();
 
@@ -769,7 +835,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-                    let port_config = PortConfigV1 {
+                    let mut port_config = PortConfigV1 {
                         addresses: info.addresses.iter().map(|a| a.address).collect(),
                         autoneg: info
                             .links
@@ -792,6 +858,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     delay_open: Some(c.delay_open.0.into()),
                                     connect_retry: Some(c.connect_retry.0.into()),
                                     keepalive: Some(c.keepalive.0.into()),
+                                    enforce_first_as: c.enforce_first_as,
+                                    local_pref: c.local_pref.map(|x| x.into()),
+                                    md5_auth_key: c.md5_auth_key,
+                                    min_ttl: c.min_ttl.map(|x| x.0 as u8), //TODO avoid cast return error
+                                    multi_exit_discriminator: c.multi_exit_discriminator.map(|x| x.into()),
+                                    remote_asn: c.remote_asn.map(|x| x.into()),
+                                    communities: Vec::new(),
                                 }
                         }).collect(),
                         port: port.port_name.clone(),
@@ -817,6 +890,27 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .unwrap_or(SwitchLinkSpeed::Speed100G)
                             .into(),
                     };
+
+                    for peer in port_config.bgp_peers.iter_mut() {
+                        peer.communities = match self
+                            .datastore
+                            .communities_for_peer(
+                                opctx,
+                                port.port_settings_id.unwrap(),
+                                &peer.port,
+                                IpNetwork::from(IpAddr::from(peer.addr))
+                            ).await {
+                                Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
+                                Err(e) => {
+                                    error!(log,
+                                        "failed to get communities for peer";
+                                        "peer" => ?peer,
+                                        "error" => ?e,
+                                    );
+                                    continue;
+                                }
+                            };
+                    }
                     ports.push(port_config);
                 }
 
@@ -1523,20 +1617,45 @@ async fn static_routes_on_switch<'a>(
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: HashSet<(Ipv4Addr, Prefix4)> =
-            match client.static_list_v4_routes().await {
-                Ok(routes) => {
-                    routes.list.iter().map(|r| (r.nexthop, r.prefix)).collect()
+        let static_routes: HashSet<(Ipv4Addr, Prefix4)> = match client
+            .static_list_v4_routes()
+            .await
+        {
+            Ok(routes) => {
+                let mut flattened = HashSet::new();
+                for (destination, paths) in routes.iter() {
+                    let Ok(dst) = destination.parse() else {
+                        error!(
+                                log,
+                                "failed to parse static route destination: {destination}"
+                            );
+                        continue;
+                    };
+                    for p in paths.iter() {
+                        let nh = match p.nexthop {
+                            IpAddr::V4(addr) => addr,
+                            IpAddr::V6(addr) => {
+                                error!(
+                                    log,
+                                    "ipv6 nexthops not supported: {addr}"
+                                );
+                                continue;
+                            }
+                        };
+                        flattened.insert((nh, dst));
+                    }
                 }
-                Err(_) => {
-                    error!(
-                        &log,
-                        "unable to retrieve routes from switch";
-                        "switch_location" => ?location,
-                    );
-                    continue;
-                }
-            };
+                flattened
+            }
+            Err(_) => {
+                error!(
+                    &log,
+                    "unable to retrieve routes from switch";
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch

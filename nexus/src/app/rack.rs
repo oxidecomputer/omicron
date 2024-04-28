@@ -469,6 +469,8 @@ impl super::Nexus {
                         asn: bgp_config.asn,
                         bgp_announce_set_id: announce_set_name.into(),
                         vrf: None,
+                        shaper: bgp_config.shaper.clone(),
+                        checker: bgp_config.checker.clone(),
                     },
                 )
                 .await
@@ -560,6 +562,13 @@ impl super::Nexus {
                     delay_open: r.delay_open.unwrap_or(0) as u32,
                     connect_retry: r.connect_retry.unwrap_or(3) as u32,
                     keepalive: r.keepalive.unwrap_or(2) as u32,
+                    remote_asn: r.remote_asn,
+                    min_ttl: r.min_ttl,
+                    md5_auth_key: r.md5_auth_key.clone(),
+                    multi_exit_discriminator: r.multi_exit_discriminator,
+                    local_pref: r.local_pref,
+                    enforce_first_as: r.enforce_first_as,
+                    communities: r.communities.clone(),
                 })
                 .collect();
 

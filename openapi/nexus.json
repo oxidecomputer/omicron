@@ -9491,11 +9491,21 @@
           "bgp_announce_set_id": {
             "$ref": "#/components/schemas/NameOrId"
           },
+          "checker": {
+            "nullable": true,
+            "description": "A checker program to apply to incomming open and update messages.",
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "A shaper program to apply to outgoing open and update messages.",
+            "type": "string"
           },
           "vrf": {
             "nullable": true,
@@ -9600,6 +9610,15 @@
               }
             ]
           },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
           "connect_retry": {
             "description": "How long to to wait between TCP connection retries (seconds).",
             "type": "integer",
@@ -9611,6 +9630,10 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths recieved from this peer is the peer's AS.",
+            "type": "boolean"
           },
           "hold_time": {
             "description": "How long to hold peer connections between keppalives (seconds).",
@@ -9633,14 +9656,49 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Requre that a peer has a specified ASN.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
           "bgp_announce_set",
           "bgp_config",
+          "communities",
           "connect_retry",
           "delay_open",
+          "enforce_first_as",
           "hold_time",
           "idle_hold_time",
           "interface_name",

@@ -180,6 +180,14 @@ pub struct BgpConfig {
     pub asn: u32,
     /// The set of prefixes for the BGP router to originate.
     pub originate: Vec<Ipv4Network>,
+
+    /// Shaper to apply to outgoing messages.
+    #[serde(default)]
+    pub shaper: Option<String>,
+
+    /// Checker to apply to incomming messages.
+    #[serde(default)]
+    pub checker: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -201,6 +209,27 @@ pub struct BgpPeerConfig {
     pub connect_retry: Option<u64>,
     /// The interval to send keepalive messages at.
     pub keepalive: Option<u64>,
+    /// Requre that a peer has a specified ASN.
+    #[serde(default)]
+    pub remote_asn: Option<u32>,
+    /// Require messages from a peer have a minimum IP time to live field.
+    #[serde(default)]
+    pub min_ttl: Option<u8>,
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    #[serde(default)]
+    pub md5_auth_key: Option<String>,
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    #[serde(default)]
+    pub multi_exit_discriminator: Option<u32>,
+    /// Include the provided communities in updates sent to the peer.
+    #[serde(default)]
+    pub communities: Vec<u32>,
+    /// Apply a local preference to routes received from this peer.
+    #[serde(default)]
+    pub local_pref: Option<u32>,
+    /// Enforce that the first AS in paths recieved from this peer is the peer's AS.
+    #[serde(default)]
+    pub enforce_first_as: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]

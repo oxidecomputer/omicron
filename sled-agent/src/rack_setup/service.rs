@@ -766,6 +766,13 @@ impl ServiceInner {
                                 delay_open: b.delay_open,
                                 idle_hold_time: b.idle_hold_time,
                                 keepalive: b.keepalive,
+                                remote_asn: b.remote_asn,
+                                min_ttl: b.min_ttl,
+                                md5_auth_key: b.md5_auth_key.clone(),
+                                multi_exit_discriminator: b.multi_exit_discriminator,
+                                local_pref: b.local_pref,
+                                enforce_first_as: b.enforce_first_as,
+                                communities: b.communities.clone(),
                             })
                             .collect(),
                     })
@@ -776,6 +783,8 @@ impl ServiceInner {
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
                         originate: config.originate.clone(),
+                        shaper: config.shaper.clone(),
+                        checker: config.checker.clone(),
                     })
                     .collect(),
                 bfd: config

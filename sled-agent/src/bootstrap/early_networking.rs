@@ -17,7 +17,7 @@ use internal_dns::ServiceName;
 use ipnetwork::Ipv6Network;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
-    Prefix4, StaticRoute4, StaticRoute4List,
+    CheckerSource, Prefix4, ShaperSource, StaticRoute4, StaticRoute4List,
 };
 use mg_admin_client::Client as MgdClient;
 use omicron_common::address::DENDRITE_PORT;
@@ -497,6 +497,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                     keepalive: peer.keepalive.unwrap_or(2),
                     resolution: BGP_SESSION_RESOLUTION,
                     passive: false,
+                    remote_asn: peer.remote_asn,
+                    min_ttl: peer.min_ttl,
+                    md5_auth_key: peer.md5_auth_key.clone(),
+                    multi_exit_discriminator: peer.multi_exit_discriminator,
+                    communities: peer.communities.clone(),
+                    local_pref: peer.local_pref,
+                    enforce_first_as: peer.enforce_first_as,
                 };
                 match bgp_peer_configs.get_mut(&port.port) {
                     Some(peers) => {
@@ -514,6 +521,14 @@ impl<'a> EarlyNetworkSetup<'a> {
                 mgd.bgp_apply(&ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
+                    shaper: config.shaper.as_ref().map(|x| ShaperSource {
+                        code: x.clone(),
+                        asn: config.asn,
+                    }),
+                    checker: config.checker.as_ref().map(|x| CheckerSource {
+                        code: x.clone(),
+                        asn: config.asn,
+                    }),
                     originate: config
                         .originate
                         .iter()

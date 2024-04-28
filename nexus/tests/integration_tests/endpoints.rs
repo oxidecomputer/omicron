@@ -561,6 +561,8 @@ pub static DEMO_BGP_CONFIG: Lazy<params::BgpConfigCreate> =
         bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
         asn: 47,
         vrf: None,
+        checker: None,
+        shaper: None,
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs";
