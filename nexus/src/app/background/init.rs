@@ -349,7 +349,6 @@ impl BackgroundTasks {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore,
                 resolver.clone(),
-                config.instance_watcher.max_retries,
             );
             driver.register(
                 "instance_watcher".to_string(),

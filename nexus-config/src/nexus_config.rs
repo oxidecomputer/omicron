@@ -895,8 +895,7 @@ mod test {
                         },
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
-                            max_retries: NonZeroU32::new(5).unwrap(),
-                        }
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -964,7 +963,6 @@ mod test {
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             instance_watcher.period_secs = 30
-            instance_watcher.max_retries = 10
             [default_region_allocation_strategy]
             type = "random"
             "##,

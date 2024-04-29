@@ -6,7 +6,6 @@
 
 use super::common::BackgroundTask;
 use crate::app::instance::InstanceUpdated;
-use crate::Error;
 use futures::{future::BoxFuture, FutureExt};
 use nexus_db_model::{Sled, SledInstance};
 use nexus_db_queries::context::OpContext;
