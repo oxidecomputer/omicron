@@ -27,6 +27,7 @@ use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
+use nexus_internal_api::NexusInternalApi_to_stub_api_description;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -67,11 +68,9 @@ pub fn run_openapi_external() -> Result<(), String> {
 }
 
 pub fn run_openapi_internal() -> Result<(), String> {
-    internal_api()
-        .openapi("Nexus internal API", "0.0.1")
-        .description("Nexus internal API")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
+    let api = NexusInternalApi_to_stub_api_description()
+        .map_err(|e| e.to_string())?;
+    nexus_internal_api::openapi_definition(&api)
         .write(&mut std::io::stdout())
         .map_err(|e| e.to_string())
 }
@@ -82,7 +81,7 @@ pub struct InternalServer {
     /// shared state used by API request handlers
     apictx: Arc<ServerContext>,
     /// dropshot server for internal API
-    http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+    http_server_internal: dropshot::HttpServer<()>,
 
     config: NexusConfig,
     log: Logger,
@@ -106,8 +105,8 @@ impl InternalServer {
         // Launch the internal server.
         let server_starter_internal = dropshot::HttpServerStarter::new(
             &config.deployment.dropshot_internal,
-            internal_api(),
-            Arc::clone(&apictx),
+            internal_api(Arc::clone(&apictx)),
+            (),
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;

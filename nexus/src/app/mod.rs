@@ -143,7 +143,7 @@ pub struct Nexus {
     techport_external_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Internal dropshot server
-    internal_server: std::sync::Mutex<Option<DropshotServer>>,
+    internal_server: std::sync::Mutex<Option<dropshot::HttpServer<()>>>,
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
@@ -586,7 +586,7 @@ impl Nexus {
         &self,
         external_server: DropshotServer,
         techport_external_server: DropshotServer,
-        internal_server: DropshotServer,
+        internal_server: dropshot::HttpServer<()>,
         producer_server: ProducerServer,
     ) {
         // If any servers already exist, close them.

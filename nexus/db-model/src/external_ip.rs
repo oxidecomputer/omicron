@@ -23,6 +23,8 @@ use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
+use nexus_types::external_api::views::ProbeExternalIp;
+use nexus_types::external_api::views::ProbeIpKind;
 use nexus_types::inventory::SourceNatConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
@@ -90,6 +92,16 @@ impl std::fmt::Display for IpKind {
     }
 }
 
+impl From<IpKind> for ProbeIpKind {
+    fn from(kind: IpKind) -> ProbeIpKind {
+        match kind {
+            IpKind::Floating => ProbeIpKind::Floating,
+            IpKind::Ephemeral => ProbeIpKind::Ephemeral,
+            IpKind::SNat => ProbeIpKind::Snat,
+        }
+    }
+}
+
 /// The main model type for external IP addresses for instances
 /// and externally-facing services.
 ///
@@ -138,6 +150,17 @@ pub struct ExternalIp {
     pub project_id: Option<Uuid>,
     pub state: IpAttachState,
     pub is_probe: bool,
+}
+
+impl From<ExternalIp> for ProbeExternalIp {
+    fn from(ip: ExternalIp) -> Self {
+        Self {
+            ip: ip.ip.ip(),
+            first_port: ip.first_port.0,
+            last_port: ip.last_port.0,
+            kind: ip.kind.into(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]

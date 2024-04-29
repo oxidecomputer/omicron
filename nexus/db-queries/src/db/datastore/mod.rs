@@ -105,7 +105,6 @@ pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
-pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;

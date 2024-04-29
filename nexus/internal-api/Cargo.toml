@@ -1,0 +1,20 @@
+[package]
+name = "nexus-internal-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dropshot.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+serde.workspace = true
+schemars.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+openapiv3.workspace = true
+openapi-lint.workspace = true
+serde_json.workspace = true

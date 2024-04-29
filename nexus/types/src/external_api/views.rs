@@ -15,6 +15,7 @@ use omicron_common::api::external::{
     ByteCount, Digest, Error, IdentityMetadata, InstanceState, Ipv4Net,
     Ipv6Net, Name, ObjectIdentity, RoleName, SimpleIdentity,
 };
+use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -947,4 +948,29 @@ pub struct Ping {
     /// Whether the external API is reachable. Will always be Ok if the endpoint
     /// returns anything at all.
     pub status: PingStatus,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    pub sled: Uuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterface,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeExternalIp {
+    pub ip: IpAddr,
+    pub first_port: u16,
+    pub last_port: u16,
+    pub kind: ProbeIpKind,
+}
+
+#[derive(Debug, Copy, Clone, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeIpKind {
+    Snat,
+    Floating,
+    Ephemeral,
 }

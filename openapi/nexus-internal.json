@@ -2980,14 +2980,6 @@
           }
         ]
       },
-      "IpKind": {
-        "type": "string",
-        "enum": [
-          "snat",
-          "floating",
-          "ephemeral"
-        ]
-      },
       "IpNet": {
         "oneOf": [
           {
@@ -3643,7 +3635,7 @@
             "format": "ip"
           },
           "kind": {
-            "$ref": "#/components/schemas/IpKind"
+            "$ref": "#/components/schemas/ProbeIpKind"
           },
           "last_port": {
             "type": "integer",
@@ -3688,6 +3680,14 @@
           "interface",
           "name",
           "sled"
+        ]
+      },
+      "ProbeIpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
         ]
       },
       "ProducerEndpoint": {

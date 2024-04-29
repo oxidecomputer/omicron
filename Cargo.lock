@@ -2043,12 +2043,12 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#29ae98d1f909c6832661408a4c03f929e8afa6e9"
+version = "0.10.1-dev"
+source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#284d2a881bf677b24d83880bd7d43705cef9937d"
 dependencies = [
  "async-stream",
  "async-trait",
- "base64 0.21.7",
+ "base64 0.22.0",
  "bytes",
  "camino",
  "chrono",
@@ -2056,7 +2056,7 @@ dependencies = [
  "dropshot_endpoint",
  "form_urlencoded",
  "futures",
- "hostname",
+ "hostname 0.4.0",
  "http 0.2.12",
  "hyper 0.14.28",
  "indexmap 2.2.6",
@@ -2064,7 +2064,6 @@ dependencies = [
  "openapiv3",
  "paste",
  "percent-encoding",
- "proc-macro2",
  "rustls 0.22.4",
  "rustls-pemfile 2.1.2",
  "schemars",
@@ -2081,7 +2080,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.12",
- "usdt 0.3.5",
+ "usdt 0.5.0",
  "uuid 1.8.0",
  "version_check",
  "waitgroup",
@@ -2089,8 +2088,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#29ae98d1f909c6832661408a4c03f929e8afa6e9"
+version = "0.10.1-dev"
+source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#284d2a881bf677b24d83880bd7d43705cef9937d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3131,6 +3130,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9c7c7c8ac16c798734b8a24560c1362120597c40d5e1459f09498f8f6c8f2ba"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows 0.52.0",
+]
+
+[[package]]
 name = "http"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3416,7 +3426,7 @@ dependencies = [
  "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
- "windows",
+ "windows 0.48.0",
 ]
 
 [[package]]
@@ -4647,6 +4657,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-internal-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "expectorate",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "openapi-lint",
+ "openapiv3",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid 1.8.0",
+]
+
+[[package]]
 name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
@@ -5393,6 +5421,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-internal-api",
  "nexus-inventory",
  "nexus-metrics-producer-gc",
  "nexus-networking",
@@ -5737,7 +5766,6 @@ dependencies = [
  "aho-corasick",
  "anyhow",
  "base16ct",
- "base64 0.22.0",
  "bit-set",
  "bit-vec",
  "bitflags 1.3.2",
@@ -5838,7 +5866,7 @@ dependencies = [
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
- "usdt 0.3.5",
+ "usdt 0.5.0",
  "usdt-impl 0.5.0",
  "uuid 1.8.0",
  "yasna",
@@ -7629,7 +7657,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52e44394d2086d010551b14b53b1f24e31647570cd1deb0379e2c21b329aba00"
 dependencies = [
- "hostname",
+ "hostname 0.3.1",
  "quick-error",
 ]
 
@@ -8761,7 +8789,7 @@ version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcaaf6e68789d3f0411f1e72bc443214ef252a1038b6e344836e50442541f190"
 dependencies = [
- "hostname",
+ "hostname 0.3.1",
  "slog",
  "slog-json",
  "time",
@@ -11078,6 +11106,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
 dependencies = [
  "windows-targets 0.48.5",
+]
+
+[[package]]
+name = "windows"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
+dependencies = [
+ "windows-core",
+ "windows-targets 0.52.0",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
+dependencies = [
+ "windows-targets 0.52.0",
 ]
 
 [[package]]

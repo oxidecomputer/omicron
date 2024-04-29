@@ -3,6 +3,7 @@
 
 //! Shared state used by API request handlers
 use super::Nexus;
+use crate::internal_api::http_entrypoints::NexusInternalApiImpl;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
@@ -284,18 +285,18 @@ pub(crate) async fn op_context_for_external_api(
     .await
 }
 
-pub(crate) async fn op_context_for_internal_api(
-    rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+pub(crate) async fn op_context_for_internal_api<T: Send + Sync + 'static>(
+    internal_api: &NexusInternalApiImpl,
+    rqctx: &dropshot::RequestContext<T>,
 ) -> OpContext {
-    let apictx = rqctx.context();
     OpContext::new_async(
         &rqctx.log,
         async {
-            let authn = Arc::clone(&apictx.internal_authn);
-            let datastore = Arc::clone(apictx.nexus.datastore());
+            let authn = Arc::clone(&internal_api.context.internal_authn);
+            let datastore = Arc::clone(internal_api.context.nexus.datastore());
             let authz = authz::Context::new(
                 Arc::clone(&authn),
-                Arc::clone(&apictx.authz),
+                Arc::clone(&internal_api.context.authz),
                 datastore,
             );
             Ok::<_, std::convert::Infallible>((authn, authz))
