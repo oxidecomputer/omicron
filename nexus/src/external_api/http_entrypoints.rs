@@ -291,6 +291,9 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bfd_disable)?;
         api.register(networking_bfd_status)?;
 
+        api.register(networking_allow_list_view)?;
+        api.register(networking_allow_list_update)?;
+
         api.register(utilization_view)?;
 
         // Fleet-wide API operations
@@ -3767,6 +3770,53 @@ async fn networking_bfd_status(
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let status = nexus.bfd_status(&opctx).await?;
         Ok(HttpResponseOk(status))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get user-facing services IP allowlist
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
+async fn networking_allow_list_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .allow_list_view(&opctx)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update user-facing services IP allowlist
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
+async fn networking_allow_list_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    params: TypedBody<params::AllowListUpdate>,
+) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let remote_addr = rqctx.request.remote_addr().ip();
+        nexus
+            .allow_list_upsert(&opctx, remote_addr, params)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

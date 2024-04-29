@@ -7,6 +7,7 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::ledger::Ledgerable;
 use schemars::JsonSchema;
@@ -41,6 +42,8 @@ struct UnvalidatedRackInitializeRequest {
     external_certificates: Vec<Certificate>,
     recovery_silo: RecoverySiloConfig,
     rack_network_config: RackNetworkConfig,
+    #[serde(default = "default_allowed_source_ips")]
+    allowed_source_ips: AllowedSourceIps,
 }
 
 /// Configuration for the "rack setup service".
@@ -87,6 +90,17 @@ pub struct RackInitializeRequest {
 
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
+
+    /// IPs or subnets allowed to make requests to user-facing services
+    #[serde(default = "default_allowed_source_ips")]
+    pub allowed_source_ips: AllowedSourceIps,
+}
+
+/// This field was added after several racks were already deployed. RSS plans
+/// for those racks should default to allowing any source IP, since that is
+/// effectively what they did.
+const fn default_allowed_source_ips() -> AllowedSourceIps {
+    AllowedSourceIps::Any
 }
 
 // This custom debug implementation hides the private keys.
@@ -105,6 +119,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             external_certificates: _,
             recovery_silo,
             rack_network_config,
+            allowed_source_ips,
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
@@ -121,6 +136,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("external_certificates", &"<redacted>")
             .field("recovery_silo", recovery_silo)
             .field("rack_network_config", rack_network_config)
+            .field("allowed_source_ips", allowed_source_ips)
             .finish()
     }
 }
@@ -161,6 +177,7 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
             external_certificates: value.external_certificates,
             recovery_silo: value.recovery_silo,
             rack_network_config: value.rack_network_config,
+            allowed_source_ips: value.allowed_source_ips,
         })
     }
 }
@@ -495,6 +512,7 @@ mod tests {
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         // Valid configs: all external DNS IPs are contained in the IP pool

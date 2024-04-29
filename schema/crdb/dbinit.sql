@@ -3805,6 +3805,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
+-- An allowlist of IP addresses that can make requests to user-facing services.
+CREATE TABLE IF NOT EXISTS omicron.public.allow_list (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- A nullable list of allowed source IPs.
+    --
+    -- NULL is used to indicate _any_ source IP is allowed. A _non-empty_ list
+    -- represents an explicit allow list of IPs or IP subnets. Note that the
+    -- list itself may never be empty.
+    allowed_ips INET[] CHECK (array_length(allowed_ips, 1) > 0)
+);
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -3816,7 +3829,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '56.0.0', NULL)
+    (TRUE, NOW(), NOW(), '57.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

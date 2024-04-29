@@ -844,6 +844,15 @@ impl ServiceInner {
             })
             .collect();
 
+        // Convert the IP allowlist into the Nexus types.
+        //
+        // This is really infallible. We have a list of IpNet's here, which
+        // we're converting to Nexus client types through their string
+        // representation.
+        let allowed_source_ips =
+            NexusTypes::AllowedSourceIps::try_from(&config.allowed_source_ips)
+                .expect("Expected valid Nexus IP networks");
+
         let request = NexusTypes::RackInitializationRequest {
             blueprint,
             physical_disks,
@@ -856,6 +865,7 @@ impl ServiceInner {
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
             external_port_count: port_discovery_mode.into(),
+            allowed_source_ips,
         };
 
         let notify_nexus = || async {

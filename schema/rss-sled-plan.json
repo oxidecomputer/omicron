@@ -23,6 +23,48 @@
     }
   },
   "definitions": {
+    "AllowedSourceIps": {
+      "description": "Description of source IPs allowed to reach rack services.",
+      "oneOf": [
+        {
+          "description": "Allow traffic from any external IP address.",
+          "type": "object",
+          "required": [
+            "allow"
+          ],
+          "properties": {
+            "allow": {
+              "type": "string",
+              "enum": [
+                "any"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+          "type": "object",
+          "required": [
+            "allow",
+            "ips"
+          ],
+          "properties": {
+            "allow": {
+              "type": "string",
+              "enum": [
+                "list"
+              ]
+            },
+            "ips": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/IpNet"
+              }
+            }
+          }
+        }
+      ]
+    },
     "Baseboard": {
       "description": "Describes properties that should uniquely identify a Gimlet.",
       "oneOf": [
@@ -212,7 +254,7 @@
           ]
         },
         "asn": {
-          "description": "The autonomous sysetm number of the router the peer belongs to.",
+          "description": "The autonomous system number of the router the peer belongs to.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
@@ -541,7 +583,7 @@
         "fd12:3456::/64"
       ],
       "type": "string",
-      "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
     },
     "Ipv6Network": {
       "type": "string",
@@ -698,6 +740,17 @@
         "recovery_silo"
       ],
       "properties": {
+        "allowed_source_ips": {
+          "description": "IPs or subnets allowed to make requests to user-facing services",
+          "default": {
+            "allow": "any"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AllowedSourceIps"
+            }
+          ]
+        },
         "bootstrap_discovery": {
           "description": "Describes how bootstrap addresses should be collected during RSS.",
           "allOf": [

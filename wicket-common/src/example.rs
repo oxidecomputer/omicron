@@ -10,8 +10,11 @@ use gateway_client::types::{SpIdentifier, SpType};
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::internal::shared::{
-        BgpConfig, BgpPeerConfig, PortFec, PortSpeed, RouteConfig,
+    api::{
+        external::AllowedSourceIps,
+        internal::shared::{
+            BgpConfig, BgpPeerConfig, PortFec, PortSpeed, RouteConfig,
+        },
     },
 };
 use sled_hardware_types::Baseboard;
@@ -210,6 +213,7 @@ impl ExampleRackSetupData {
             external_dns_ips,
             ntp_servers,
             rack_network_config: Some(rack_network_config),
+            allowed_source_ips: Some(AllowedSourceIps::Any),
         };
 
         for tweak in tweaks {
@@ -243,6 +247,7 @@ impl ExampleRackSetupData {
                 .rack_network_config
                 .clone()
                 .unwrap(),
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         Self {

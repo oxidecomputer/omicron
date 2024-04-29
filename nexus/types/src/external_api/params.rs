@@ -9,10 +9,10 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, ImportExportPolicy, InstanceCpuCount, IpNet,
-    Ipv4Net, Ipv6Net, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, SemverVersion,
+    AddressLotKind, AllowedSourceIps, BfdMode, ByteCount, Hostname,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    ImportExportPolicy, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net, Name,
+    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -2099,4 +2099,13 @@ pub struct ProbeListSelector {
 pub struct TimeseriesQuery {
     /// A timeseries query string, written in the Oximeter query language.
     pub query: String,
+}
+
+// Allowed source IPs
+
+/// Parameters for updating allowed source IPs
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AllowListUpdate {
+    /// The new list of allowed source IPs.
+    pub allowed_ips: AllowedSourceIps,
 }

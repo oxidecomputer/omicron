@@ -485,7 +485,6 @@ mod tests {
             "tests/output/example_non_empty.toml",
             &template,
         );
-
         let parsed: PutRssUserConfigInsensitive =
             toml::de::from_str(&template).unwrap();
         assert_eq!(example.put_insensitive, parsed);

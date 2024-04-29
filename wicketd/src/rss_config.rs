@@ -28,6 +28,7 @@ use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
 use once_cell::sync::Lazy;
 use sled_hardware_types::Baseboard;
@@ -87,7 +88,7 @@ pub(crate) struct CurrentRssConfig {
     //
     // Currently these are always TCP-MD5 keys,
     bgp_auth_keys: BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-
+    allowed_source_ips: Option<AllowedSourceIps>,
     // External certificates are uploaded in two separate actions (cert then
     // key, or vice versa). Here we store a partial certificate; once we have
     // both parts, we validate it and promote it to be a member of
@@ -299,6 +300,10 @@ impl CurrentRssConfig {
                 user_password_hash,
             },
             rack_network_config,
+            allowed_source_ips: self
+                .allowed_source_ips
+                .clone()
+                .unwrap_or(AllowedSourceIps::Any),
         };
 
         Ok(request)
@@ -576,6 +581,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
+                allowed_source_ips: rss.allowed_source_ips.clone(),
             },
         }
     }

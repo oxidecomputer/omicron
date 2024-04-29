@@ -19,6 +19,7 @@ use crate::Control;
 use crate::State;
 use itertools::Itertools;
 use omicron_common::address::IpRange;
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::layout::Constraint;
@@ -653,6 +654,7 @@ fn rss_config_text<'a>(
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
+        allowed_source_ips,
     } = &config.insensitive;
 
     // Special single-line values, where we convert some kind of condition into
@@ -1082,6 +1084,30 @@ fn rss_config_text<'a>(
             .map(|ip| plain_list_item(ip.to_string()))
             .collect(),
     );
+
+    // Add the allowlist for connecting to user-facing rack services.
+    let allowed_source_ip_spans = match &allowed_source_ips {
+        None | Some(AllowedSourceIps::Any) => {
+            vec![plain_list_item(String::from("Any"))]
+        }
+        Some(AllowedSourceIps::List(list)) => list
+            .iter()
+            .map(|net| {
+                let as_str = if net.first_address() == net.last_address() {
+                    net.ip().to_string()
+                } else {
+                    net.to_string()
+                };
+                plain_list_item(as_str)
+            })
+            .collect(),
+    };
+    append_list(
+        &mut spans,
+        "Allowed source IPs for user-facing services: ".into(),
+        allowed_source_ip_spans,
+    );
+
     append_list(
         &mut spans,
         "Sleds: ".into(),

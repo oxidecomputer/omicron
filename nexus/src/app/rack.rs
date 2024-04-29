@@ -651,6 +651,7 @@ impl super::Nexus {
                         .user_password_hash
                         .into(),
                     dns_update,
+                    allowed_source_ips: request.allowed_source_ips,
                 },
             )
             .await?;
