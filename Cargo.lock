@@ -2044,7 +2044,6 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.1-dev"
-source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#e6f46e6bcfe1758ee62e872428a3e34f355d67a4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2080,6 +2079,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.12",
+ "trait-variant",
  "usdt 0.5.0",
  "uuid 1.8.0",
  "version_check",
@@ -2089,7 +2089,6 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.1-dev"
-source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#e6f46e6bcfe1758ee62e872428a3e34f355d67a4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10019,6 +10018,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.60",
 ]
 
 [[package]]

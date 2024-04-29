@@ -82,7 +82,6 @@ pub(crate) struct NexusInternalApiImpl {
     pub(crate) context: Arc<ServerContext>,
 }
 
-#[async_trait::async_trait]
 impl NexusInternalApi for NexusInternalApiImpl {
     async fn sled_agent_get(
         rqctx: RequestContext<Self>,
