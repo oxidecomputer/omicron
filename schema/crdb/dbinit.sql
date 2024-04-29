@@ -3726,6 +3726,9 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
+COMMIT;
+BEGIN;
+
 -- view for v2p mapping rpw
 CREATE VIEW IF NOT EXISTS omicron.public.v2p_mapping_view
 AS
@@ -3737,13 +3740,13 @@ WITH VmV2pMappings AS (
     v.vni,
     n.mac,
     n.ip
-  FROM omicron.public.vmm vmm
-  JOIN omicron.public.sled s ON vmm.sled_id = s.id
-  JOIN omicron.public.network_interface n ON n.parent_id = vmm.instance_id
+  FROM omicron.public.network_interface n
   JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
   JOIN omicron.public.vpc v ON v.id = n.vpc_id
-  WHERE vmm.time_deleted IS NULL
-  AND n.kind != 'service'
+  JOIN omicron.public.vmm vmm ON n.parent_id = vmm.instance_id
+  JOIN omicron.public.sled s ON vmm.sled_id = s.id
+  WHERE n.time_deleted IS NULL
+  AND n.kind = 'instance'
   AND s.sled_policy = 'in_service'
   AND s.sled_state = 'active'
 ),
@@ -3760,8 +3763,8 @@ ProbeV2pMapping AS (
   JOIN omicron.public.vpc v ON v.id = n.vpc_id
   JOIN omicron.public.probe p ON n.parent_id = p.id
   JOIN omicron.public.sled s ON p.sled = s.id
-  WHERE p.time_deleted IS NULL
-  AND n.kind != 'service'
+  WHERE n.time_deleted IS NULL
+  AND n.kind = 'probe'
   AND s.sled_policy = 'in_service'
   AND s.sled_state = 'active'
 )
@@ -3777,7 +3780,16 @@ CREATE INDEX IF NOT EXISTS sled_by_policy_and_state
 ON omicron.public.sled (sled_policy, sled_state, id) STORING (ip);
 
 CREATE INDEX IF NOT EXISTS active_vmm
-on omicron.public.vmm (time_deleted, sled_id, instance_id);
+ON omicron.public.vmm (time_deleted, sled_id, instance_id);
+
+CREATE INDEX IF NOT EXISTS v2p_mapping_details
+ON network_interface (time_deleted, kind, subnet_id, vpc_id, parent_id) STORING (mac, ip);
+
+CREATE INDEX IF NOT EXISTS sled_by_policy
+ON sled (sled_policy) STORING (ip, sled_state);
+
+CREATE INDEX IF NOT EXISTS vmm_by_instance_id
+ON vmm (instance_id) STORING (sled_id);
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
