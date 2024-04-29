@@ -2320,6 +2320,8 @@ impl ServiceManager {
                 let mut wicketd_service = ServiceBuilder::new("oxide/wicketd");
                 let mut switch_zone_setup_service =
                     ServiceBuilder::new("oxide/switch_zone_setup");
+                let mut dendrite_service =
+                    ServiceBuilder::new("oxide/dendrite");
 
                 // Set properties for each service
                 for service in services {
@@ -2455,12 +2457,139 @@ impl ServiceManager {
                                         ),
                                 );
                         }
-                        SwitchService::Dendrite { asic } => match asic {
-                            DendriteAsic::TofinoAsic => {}
-                            DendriteAsic::TofinoStub => {}
-                            asic @ (DendriteAsic::SoftNpuZone
-                            | DendriteAsic::SoftNpuPropolisDevice) => {}
-                        },
+                        SwitchService::Dendrite { asic } => {
+                            let mut dendrite_config =
+                                PropertyGroupBuilder::new("config")
+                                    .add_property(
+                                        "sled_id",
+                                        "astring",
+                                        &info.config.sled_id.to_string(),
+                                    )
+                                    .add_property(
+                                        "rack_id",
+                                        "astring",
+                                        &info.rack_id.to_string(),
+                                    )
+                                    .add_property("address", "astring", "*")
+                                    .add_property("dns_server", "astring", "*");
+
+                            for address in addresses {
+                                dendrite_config = dendrite_config.add_property(
+                                    "address",
+                                    "astring",
+                                    &format!("[{}]:{}", address, DENDRITE_PORT),
+                                );
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        dendrite_config = dendrite_config
+                                            .add_property(
+                                                "dns_server",
+                                                "astring",
+                                                &format!("{addr}"),
+                                            );
+                                    }
+                                }
+                            }
+
+                            match asic {
+                                DendriteAsic::TofinoAsic => {
+                                    // There should be exactly one device_name
+                                    // associated with this zone: the /dev path
+                                    // for the tofino ASIC.
+                                    let dev_cnt = device_names.len();
+                                    if dev_cnt == 1 {
+                                        dendrite_config = dendrite_config
+                                            .add_property("", "astring", "");
+                                    } else {
+                                        return Err(Error::SledLocalZone(
+                                            anyhow::anyhow!(
+                                                "{dev_cnt} devices needed \
+                                                    for tofino asic"
+                                            ),
+                                        ));
+                                    }
+                                    dendrite_config = dendrite_config
+                                        .add_property(
+                                            "port_config",
+                                            "astring",
+                                            "/opt/oxide/dendrite/misc/sidecar_config.toml",
+                                        )
+                                        .add_property("board_rev", "astring", &sidecar_revision);
+                                }
+                                DendriteAsic::TofinoStub => {
+                                    dendrite_config = dendrite_config
+                                        .add_property(
+                                            "port_config",
+                                            "astring",
+                                            "/opt/oxide/dendrite/misc/model_config.toml",
+                                        );
+                                }
+                                asic @ (DendriteAsic::SoftNpuZone
+                                | DendriteAsic::SoftNpuPropolisDevice) => {
+                                    let s = match self.inner.sidecar_revision {
+                                        SidecarRevision::SoftZone(ref s) => s,
+                                        SidecarRevision::SoftPropolis(
+                                            ref s,
+                                        ) => s,
+                                        _ => {
+                                            return Err(Error::SidecarRevision(
+                                                anyhow::anyhow!(
+                                                    "expected soft sidecar \
+                                                    revision"
+                                                ),
+                                            ))
+                                        }
+                                    };
+
+                                    dendrite_config = dendrite_config
+                                        .add_property(
+                                            "front_ports",
+                                            "astring",
+                                            &s.front_port_count.to_string(),
+                                        )
+                                        .add_property(
+                                            "rear_ports",
+                                            "astring",
+                                            &s.rear_port_count.to_string(),
+                                        )
+                                        .add_property(
+                                            "port_config",
+                                            "astring",
+                                            "/opt/oxide/dendrite/misc/softnpu_single_sled_config.toml",
+                                        );
+
+                                    if asic == &DendriteAsic::SoftNpuZone {
+                                        dendrite_config = dendrite_config
+                                            .add_property(
+                                                "mgmt", "astring", "uds",
+                                            )
+                                            .add_property(
+                                                "uds_path",
+                                                "astring",
+                                                "/opt/softnpu/stuff",
+                                            );
+                                    }
+
+                                    if asic
+                                        == &DendriteAsic::SoftNpuPropolisDevice
+                                    {
+                                        dendrite_config = dendrite_config
+                                            .add_property(
+                                                "mgmt", "astring", "uart",
+                                            );
+                                    }
+                                }
+                            }
+
+                            dendrite_service = dendrite_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(dendrite_config),
+                            );
+                        }
                         SwitchService::Tfport { pkt_source, asic } => {}
                         SwitchService::Lldpd { baseboard } => {}
                         SwitchService::Uplink => {
