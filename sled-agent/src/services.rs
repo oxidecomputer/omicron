@@ -2322,6 +2322,7 @@ impl ServiceManager {
                     ServiceBuilder::new("oxide/switch_zone_setup");
                 let mut dendrite_service =
                     ServiceBuilder::new("oxide/dendrite");
+                let mut tfport_service = ServiceBuilder::new("oxide/tfport");
 
                 // Set properties for each service
                 for service in services {
@@ -2590,7 +2591,80 @@ impl ServiceManager {
                                     .add_property_group(dendrite_config),
                             );
                         }
-                        SwitchService::Tfport { pkt_source, asic } => {}
+                        SwitchService::Tfport { pkt_source, asic } => {
+                            let mut tfport_config =
+                                PropertyGroupBuilder::new("config")
+                                    .add_property(
+                                        "host",
+                                        "astring",
+                                        &format!("[{}]", Ipv6Addr::LOCALHOST),
+                                    )
+                                    .add_property(
+                                        "port",
+                                        "astring",
+                                        &format!("{}", DENDRITE_PORT),
+                                    );
+
+                            let is_gimlet = is_gimlet().map_err(|e| {
+                                Error::Underlay(
+                                    underlay::Error::SystemDetection(e),
+                                )
+                            })?;
+
+                            if is_gimlet {
+                                // Collect the prefixes for each techport.
+                                let nameaddr =
+                                    bootstrap_name_and_address.as_ref();
+                                let techport_prefixes = match nameaddr {
+                                    Some((_, addr)) => {
+                                        Self::bootstrap_addr_to_techport_prefixes(addr)
+                                    }
+                                    None => {
+                                        return Err(Error::BadServiceRequest {
+                                            service: "tfport".into(),
+                                            message: "bootstrap addr missing"
+                                                .into(),
+                                        });
+                                    }
+                                };
+
+                                for (i, prefix) in
+                                    techport_prefixes.into_iter().enumerate()
+                                {
+                                    // Each `prefix` is an `Ipv6Subnet`
+                                    // including a netmask.  Stringify just the
+                                    // network address, without the mask.
+                                    tfport_config = tfport_config.add_property(
+                                        &format!("techport{i}_prefix"),
+                                        "astring",
+                                        &prefix.net().network().to_string(),
+                                    )
+                                }
+                            };
+
+                            if is_gimlet
+                                || asic == &DendriteAsic::SoftNpuPropolisDevice
+                            {
+                                tfport_config = tfport_config.add_property(
+                                    "pkt_source",
+                                    "astring",
+                                    &pkt_source,
+                                );
+                            };
+
+                            if asic == &DendriteAsic::SoftNpuZone {
+                                tfport_config = tfport_config.add_property(
+                                    "flags",
+                                    "astring",
+                                    "--sync-only",
+                                );
+                            }
+
+                            tfport_service = tfport_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(tfport_config),
+                            );
+                        }
                         SwitchService::Lldpd { baseboard } => {}
                         SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
@@ -2608,7 +2682,9 @@ impl ServiceManager {
                     .add_service(disabled_dns_client_service)
                     .add_service(mgs_service)
                     .add_service(wicketd_service)
-                    .add_service(switch_zone_setup_service);
+                    .add_service(switch_zone_setup_service)
+                    .add_service(dendrite_service)
+                    .add_service(tfport_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
