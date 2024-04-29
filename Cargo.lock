@@ -6246,7 +6246,6 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot",
- "hyper 0.14.28",
  "internal-dns",
  "nexus-client",
  "omicron-common",

@@ -460,21 +460,22 @@ mod tests {
     use super::LogConfig;
     use super::ProducerEndpoint;
     use super::Server;
-    use hyper::service::make_service_fn;
-    use hyper::service::service_fn;
-    use hyper::Body;
-    use hyper::Request;
-    use hyper::Response;
+    use dropshot::endpoint;
+    use dropshot::ApiDescription;
+    use dropshot::ConfigDropshot;
+    use dropshot::HttpError;
+    use dropshot::HttpResponseCreated;
+    use dropshot::HttpServer;
+    use dropshot::HttpServerStarter;
+    use dropshot::RequestContext;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
     use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
     use slog::Drain;
     use slog::Logger;
-    use std::net::IpAddr;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddr;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
+    use std::sync::Arc;
     use std::time::Duration;
     use uuid::Uuid;
 
@@ -490,49 +491,49 @@ mod tests {
     // Re-registration interval for tests.
     const INTERVAL: Duration = Duration::from_secs(1);
 
-    // Number of requests made to the fake Nexus server.
-    static N_REQUESTS_MADE: AtomicU32 = AtomicU32::new(0);
+    type Context = Arc<AtomicU32>;
 
-    struct FakeNexus {
-        task: tokio::task::JoinHandle<()>,
-        addr: SocketAddr,
+    // Mock endpoint for the test Nexus server.
+    #[endpoint {
+        method = POST,
+        path = "/metrics/producers",
+    }]
+    async fn register_producer(
+        rqctx: RequestContext<Context>,
+    ) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError>
+    {
+        rqctx.context().fetch_add(1, Ordering::SeqCst);
+        Ok(HttpResponseCreated(ProducerRegistrationResponse {
+            lease_duration: INTERVAL,
+        }))
     }
 
-    async fn register(
-        _: Request<Body>,
-    ) -> Result<Response<Body>, hyper::http::Error> {
-        N_REQUESTS_MADE.fetch_add(1, Ordering::SeqCst);
-        let body = ProducerRegistrationResponse { lease_duration: INTERVAL };
-        Response::builder()
-            .status(hyper::StatusCode::CREATED)
-            .body(Body::from(serde_json::to_string(&body).unwrap()))
-    }
-
-    impl FakeNexus {
-        async fn new() -> Self {
-            let server = hyper::server::Server::bind(&SocketAddr::new(
-                IpAddr::V6(Ipv6Addr::LOCALHOST),
-                0,
-            ));
-            let addr = server.local_addr();
-            let make_service = make_service_fn(|_| async move {
-                Ok::<_, hyper::Error>(service_fn(register))
-            });
-            let task = tokio::spawn(async move {
-                server.serve(make_service).await.unwrap();
-            });
-            Self { task, addr }
-        }
+    // Start a Dropshot server mocking the Nexus registration endpoint.
+    fn spawn_fake_nexus_server(log: &Logger) -> HttpServer<Context> {
+        let mut api = ApiDescription::new();
+        api.register(register_producer).expect("Expected to register endpoint");
+        HttpServerStarter::new(
+            &ConfigDropshot {
+                bind_address: "[::1]:0".parse().unwrap(),
+                request_body_max_bytes: 2048,
+                ..Default::default()
+            },
+            api,
+            Arc::new(AtomicU32::new(0)),
+            log,
+        )
+        .expect("Expected to start Dropshot server")
+        .start()
     }
 
     #[tokio::test]
     async fn test_producer_registration_task() {
         let log = test_logger();
-        let fake_nexus = FakeNexus::new().await;
+        let fake_nexus = spawn_fake_nexus_server(&log);
         slog::info!(
             log,
             "fake nexus test server listening";
-            "address" => ?fake_nexus.addr,
+            "address" => ?fake_nexus.local_addr(),
         );
 
         let address = "[::1]:0".parse().unwrap();
@@ -544,7 +545,7 @@ mod tests {
                 base_route: String::new(),
                 interval: Duration::from_secs(10),
             },
-            registration_address: Some(fake_nexus.addr),
+            registration_address: Some(fake_nexus.local_addr()),
             request_body_max_bytes: 1024,
             log: LogConfig::Logger(log),
         };
@@ -556,10 +557,15 @@ mod tests {
         let _server = Server::start(&config).unwrap();
         const N_REQUESTS: u32 = 10;
         const POLL_INTERVAL: Duration = Duration::from_millis(100);
-        const POLL_DURATION: Duration = Duration::from_secs(10);
+
+        // The poll interval is 1s (see `INTERVAL`), and the producer attempts
+        // to register every 1/4 interval, so this should be quite sufficient
+        // for even heavily-loaded tests.
+        const POLL_DURATION: Duration = Duration::from_secs(30);
         wait_for_condition(
             || async {
-                if N_REQUESTS_MADE.load(Ordering::SeqCst) >= N_REQUESTS {
+                if fake_nexus.app_private().load(Ordering::SeqCst) >= N_REQUESTS
+                {
                     Ok(())
                 } else {
                     Err(CondCheckError::<()>::NotYet)
@@ -570,6 +576,6 @@ mod tests {
         )
         .await
         .expect("Expected all registration requests to be made within timeout");
-        fake_nexus.task.abort();
+        fake_nexus.close().await.expect("Expected to close server");
     }
 }
