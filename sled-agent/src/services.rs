@@ -2324,6 +2324,8 @@ impl ServiceManager {
                     ServiceBuilder::new("oxide/dendrite");
                 let mut tfport_service = ServiceBuilder::new("oxide/tfport");
                 let mut lldpd_service = ServiceBuilder::new("oxide/lldpd");
+                let mut pumpkind_service =
+                    ServiceBuilder::new("oxide/pumpkind");
 
                 // Set properties for each service
                 for service in services {
@@ -2709,6 +2711,31 @@ impl ServiceManager {
                                     .add_property_group(lldpd_config),
                             );
                         }
+                        SwitchService::Pumpkind { asic } => {
+                            // The pumpkin daemon is only needed when running on
+                            // with real sidecar.
+                            if asic == &DendriteAsic::TofinoAsic {
+                                let pumpkind_config =
+                                    PropertyGroupBuilder::new("config")
+                                        .add_property(
+                                            "mode", "astring", "switch",
+                                        );
+
+                                pumpkind_service = pumpkind_service
+                                    .add_instance(
+                                        ServiceInstanceBuilder::new("default")
+                                            .add_property_group(
+                                                pumpkind_config,
+                                            ),
+                                    );
+                            } else {
+                                pumpkind_service = pumpkind_service
+                                    .add_instance(
+                                        ServiceInstanceBuilder::new("default")
+                                            .disable(),
+                                    );
+                            }
+                        }
                         SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
                             // configured in
@@ -2716,7 +2743,6 @@ impl ServiceManager {
                         }
                         SwitchService::Mgd => {}
                         SwitchService::MgDdm { mode } => {}
-                        SwitchService::Pumpkind { asic } => {}
                     }
                 }
 
@@ -2728,7 +2754,8 @@ impl ServiceManager {
                     .add_service(switch_zone_setup_service)
                     .add_service(dendrite_service)
                     .add_service(tfport_service)
-                    .add_service(lldpd_service);
+                    .add_service(lldpd_service)
+                    .add_service(pumpkind_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
