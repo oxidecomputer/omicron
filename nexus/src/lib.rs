@@ -52,6 +52,8 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::internal_api::http_entrypoints::NexusInternalApiImpl;
+
 #[macro_use]
 extern crate slog;
 
@@ -81,7 +83,7 @@ pub struct InternalServer {
     /// shared state used by API request handlers
     apictx: Arc<ServerContext>,
     /// dropshot server for internal API
-    http_server_internal: dropshot::HttpServer<()>,
+    http_server_internal: dropshot::HttpServer<NexusInternalApiImpl>,
 
     config: NexusConfig,
     log: Logger,
@@ -105,8 +107,8 @@ impl InternalServer {
         // Launch the internal server.
         let server_starter_internal = dropshot::HttpServerStarter::new(
             &config.deployment.dropshot_internal,
-            internal_api(Arc::clone(&apictx)),
-            (),
+            internal_api(),
+            NexusInternalApiImpl { context: Arc::clone(&apictx) },
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;

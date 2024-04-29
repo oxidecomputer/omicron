@@ -285,18 +285,18 @@ pub(crate) async fn op_context_for_external_api(
     .await
 }
 
-pub(crate) async fn op_context_for_internal_api<T: Send + Sync + 'static>(
-    internal_api: &NexusInternalApiImpl,
-    rqctx: &dropshot::RequestContext<T>,
+pub(crate) async fn op_context_for_internal_api(
+    rqctx: &dropshot::RequestContext<NexusInternalApiImpl>,
 ) -> OpContext {
+    let apictx = &rqctx.context().context;
     OpContext::new_async(
         &rqctx.log,
         async {
-            let authn = Arc::clone(&internal_api.context.internal_authn);
-            let datastore = Arc::clone(internal_api.context.nexus.datastore());
+            let authn = Arc::clone(&apictx.internal_authn);
+            let datastore = Arc::clone(apictx.nexus.datastore());
             let authz = authz::Context::new(
                 Arc::clone(&authn),
-                Arc::clone(&internal_api.context.authz),
+                Arc::clone(&apictx.authz),
                 datastore,
             );
             Ok::<_, std::convert::Infallible>((authn, authz))

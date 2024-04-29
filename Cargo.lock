@@ -2044,7 +2044,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.1-dev"
-source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#284d2a881bf677b24d83880bd7d43705cef9937d"
+source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#e6f46e6bcfe1758ee62e872428a3e34f355d67a4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2089,7 +2089,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.1-dev"
-source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#284d2a881bf677b24d83880bd7d43705cef9937d"
+source = "git+https://github.com/oxidecomputer//dropshot?branch=sunshowers/spr/wip-prototype-for-trait-based-dropshot-servers#e6f46e6bcfe1758ee62e872428a3e34f355d67a4"
 dependencies = [
  "proc-macro2",
  "quote",

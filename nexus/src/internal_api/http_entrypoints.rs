@@ -71,12 +71,11 @@ use omicron_common::update::ArtifactId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-type NexusApiDescription = ApiDescription<()>;
+type NexusApiDescription = ApiDescription<NexusInternalApiImpl>;
 
 /// Returns a description of the internal nexus API
-pub(crate) fn internal_api(context: Arc<ServerContext>) -> NexusApiDescription {
-    NexusInternalApi_to_api_description(NexusInternalApiImpl { context })
-        .expect("registered entrypoints")
+pub(crate) fn internal_api() -> NexusApiDescription {
+    NexusInternalApi_to_api_description().expect("registered entrypoints")
 }
 
 pub(crate) struct NexusInternalApiImpl {
@@ -86,13 +85,12 @@ pub(crate) struct NexusInternalApiImpl {
 #[async_trait::async_trait]
 impl NexusInternalApi for NexusInternalApiImpl {
     async fn sled_agent_get(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SledAgentPathParam>,
     ) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
@@ -100,21 +98,20 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 nexus.sled_lookup(&opctx, sled_id)?.fetch().await?;
             Ok(HttpResponseOk(sled.into()))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn sled_agent_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SledAgentPathParam>,
         sled_info: TypedBody<SledAgentInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let path = path_params.into_inner();
         let info = sled_info.into_inner();
         let sled_id = &path.sled_id;
@@ -122,162 +119,161 @@ impl NexusInternalApi for NexusInternalApiImpl {
             nexus.upsert_sled(&opctx, *sled_id, info).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn sled_firewall_rules_request(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SledAgentPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
             nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn rack_initialization_complete(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<RackPathParam>,
         info: TypedBody<RackInitializationRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let request = info.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
 
         nexus.rack_initialize(&opctx, path.rack_id, request).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn switch_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SwitchPathParam>,
         body: TypedBody<SwitchPutRequest>,
     ) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError> {
+        let apictx = &rqctx.context().context;
+
         let handler = async {
-            let nexus = &self.context.nexus;
+            let nexus = &apictx.nexus;
             let path = path_params.into_inner();
             let switch = body.into_inner();
             nexus.switch_upsert(path.switch_id, switch).await?;
             Ok(HttpResponseOk(SwitchPutResponse {}))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_instances_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<InstancePathParam>,
         new_runtime_state: TypedBody<SledInstanceState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let new_state = new_runtime_state.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             nexus
                 .notify_instance_updated(&opctx, &path.instance_id, &new_state)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_disks_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<DiskPathParam>,
         new_runtime_state: TypedBody<DiskRuntimeState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let new_state = new_runtime_state.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus.notify_disk_updated(&opctx, path.disk_id, &new_state).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_volume_remove_read_only_parent(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<VolumePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .volume_remove_read_only_parent(&opctx, path.volume_id)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_disk_remove_read_only_parent(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<DiskPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus.disk_remove_read_only_parent(&opctx, path.disk_id).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_producers_post(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         producer_info: TypedBody<ProducerEndpoint>,
     ) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError>
     {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let producer_info = producer_info.into_inner();
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .assign_producer(&opctx, producer_info)
                 .await
@@ -289,25 +285,25 @@ impl NexusInternalApi for NexusInternalApiImpl {
                     })
                 })
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_assigned_producers_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<CollectorIdPathParams>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let collector_id = path_params.into_inner().collector_id;
             let query = query_params.into_inner();
             let pagparams = data_page_params_for(&rqctx, &query)?;
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let producers = nexus
                 .list_assigned_producers(&opctx, collector_id, &pagparams)
                 .await?;
@@ -317,62 +313,62 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 &|_, producer: &ProducerEndpoint| producer.id,
             )?))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_collectors_post(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         oximeter_info: TypedBody<OximeterInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let oximeter_info = oximeter_info.into_inner();
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus.upsert_oximeter_collector(&opctx, &oximeter_info).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_artifact_download(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<ArtifactId>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let body = nexus
                 .updates_download_artifact(&opctx, path_params.into_inner())
                 .await?;
             Ok(HttpResponseOk(Body::from(body).into()))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_upstairs_repair_start(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsPathParam>,
         repair_start_info: TypedBody<RepairStartInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .upstairs_repair_start(
                     &opctx,
@@ -382,23 +378,23 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_upstairs_repair_finish(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsPathParam>,
         repair_finish_info: TypedBody<RepairFinishInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .upstairs_repair_finish(
                     &opctx,
@@ -408,23 +404,23 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_upstairs_repair_progress(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsRepairPathParam>,
         repair_progress: TypedBody<RepairProgress>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .upstairs_repair_progress(
                     &opctx,
@@ -435,23 +431,23 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_downstairs_client_stop_request(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsDownstairsPathParam>,
         downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .downstairs_client_stop_request_notification(
                     &opctx,
@@ -462,23 +458,23 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn cpapi_downstairs_client_stopped(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsDownstairsPathParam>,
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus
                 .downstairs_client_stopped_notification(
                     &opctx,
@@ -489,22 +485,22 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn saga_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pagparams = data_page_params_for(&rqctx, &query)?;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
             let view_list = to_list(saga_stream).await;
@@ -514,98 +510,97 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 &|_, saga: &Saga| saga.id,
             )?))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn saga_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SagaPathParam>,
     ) -> Result<HttpResponseOk<Saga>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             let saga = nexus.saga_get(&opctx, path.saga_id).await?;
             Ok(HttpResponseOk(saga))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn bgtask_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<BTreeMap<String, BackgroundTask>>, HttpError>
     {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             let bgtask_list = nexus.bgtasks_list(&opctx).await?;
             Ok(HttpResponseOk(bgtask_list))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn bgtask_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<BackgroundTaskPathParam>,
     ) -> Result<HttpResponseOk<BackgroundTask>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             let bgtask = nexus.bgtask_status(&opctx, &path.bgtask_name).await?;
             Ok(HttpResponseOk(bgtask))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn bgtask_activate(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         body: TypedBody<BackgroundTasksActivateRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let body = body.into_inner();
             nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn ipv4_nat_changeset(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
     ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             let mut changeset = nexus
                 .datastore()
@@ -614,21 +609,21 @@ impl NexusInternalApi for NexusInternalApiImpl {
             changeset.sort_by_key(|e| e.gen);
             Ok(HttpResponseOk(changeset))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let pagparams = data_page_params_for(&rqctx, &query)?;
         let handler = async {
             let blueprints = nexus.blueprint_list(&opctx, &pagparams).await?;
@@ -638,209 +633,204 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 &|_, blueprint: &BlueprintMetadata| blueprint.id,
             )?))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<nexus_types::external_api::params::BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             let blueprint =
                 nexus.blueprint_view(&opctx, path.blueprint_id).await?;
             Ok(HttpResponseOk(blueprint))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_delete(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<nexus_types::external_api::params::BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
         let handler = async {
             nexus.blueprint_delete(&opctx, path.blueprint_id).await?;
             Ok(HttpResponseDeleted())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_target_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             let target = nexus.blueprint_target_view(&opctx).await?;
             Ok(HttpResponseOk(target))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_target_set(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         target: TypedBody<BlueprintTargetSet>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             let target = target.into_inner();
             let target = nexus.blueprint_target_set(&opctx, target).await?;
             Ok(HttpResponseOk(target))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_target_set_enabled(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         target: TypedBody<BlueprintTargetSet>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             let target = target.into_inner();
             let target =
                 nexus.blueprint_target_set_enabled(&opctx, target).await?;
             Ok(HttpResponseOk(target))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_regenerate(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             let result = nexus.blueprint_create_regenerate(&opctx).await?;
             Ok(HttpResponseOk(result))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn blueprint_import(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let blueprint = blueprint.into_inner();
             nexus.blueprint_import(&opctx, blueprint).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn sled_list_uninitialized(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
-        let nexus = &self.context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(self, &rqctx).await;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             let sleds = nexus.sled_list_uninitialized(&opctx).await?;
             Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn sled_add(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         sled: TypedBody<UninitializedSledId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             nexus.sled_add(&opctx, sled.into_inner()).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn sled_expunge(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         sled: TypedBody<SledSelector>,
     ) -> Result<HttpResponseOk<SledPolicy>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let previous_policy =
                 nexus.sled_expunge(&opctx, sled.into_inner().sled).await?;
             Ok(HttpResponseOk(previous_policy))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
 
     async fn probes_get(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
-        let nexus = &self.context.nexus;
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
         let handler = async {
             let query = query_params.into_inner();
             let path = path_params.into_inner();
             let opctx =
-                crate::context::op_context_for_internal_api(self, &rqctx).await;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let pagparams = data_page_params_for(&rqctx, &query)?;
             Ok(HttpResponseOk(
                 nexus
@@ -848,7 +838,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                     .await?,
             ))
         };
-        self.context
+        apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await

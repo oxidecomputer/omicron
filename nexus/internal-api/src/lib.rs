@@ -145,15 +145,14 @@ pub struct ProbePathParam {
 }
 
 #[dropshot_server]
-pub trait NexusInternalApi: Send + Sync + 'static {
+pub trait NexusInternalApi: Send + Sync + Sized + 'static {
     /// Return information about the given sled agent
     #[endpoint {
         method = GET,
         path = "/sled-agents/{sled_id}",
     }]
     async fn sled_agent_get(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SledAgentPathParam>,
     ) -> Result<HttpResponseOk<SledAgentInfo>, HttpError>;
 
@@ -163,8 +162,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sled-agents/{sled_id}",
     }]
     async fn sled_agent_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SledAgentPathParam>,
         body: TypedBody<SledAgentInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -179,8 +177,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sled-agents/{sled_id}/firewall-rules-update",
     }]
     async fn sled_firewall_rules_request(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SledAgentPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -192,8 +189,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/racks/{rack_id}/initialization-complete",
     }]
     async fn rack_initialization_complete(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<RackPathParam>,
         info: TypedBody<RackInitializationRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -203,8 +199,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/switch/{switch_id}",
     }]
     async fn switch_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SwitchPathParam>,
         body: TypedBody<SwitchPutRequest>,
     ) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError>;
@@ -215,8 +210,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/instances/{instance_id}",
     }]
     async fn cpapi_instances_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<InstancePathParam>,
         new_runtime_state: TypedBody<SledInstanceState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -227,8 +221,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/disks/{disk_id}",
     }]
     async fn cpapi_disks_put(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<DiskPathParam>,
         new_runtime_state: TypedBody<DiskRuntimeState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -246,8 +239,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/volume/{volume_id}/remove-read-only-parent",
     }]
     async fn cpapi_volume_remove_read_only_parent(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<VolumePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -261,8 +253,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/disk/{disk_id}/remove-read-only-parent",
     }]
     async fn cpapi_disk_remove_read_only_parent(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<DiskPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -272,8 +263,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/metrics/producers",
     }]
     async fn cpapi_producers_post(
-        &self,
-        request_context: RequestContext<()>,
+        request_context: RequestContext<Self>,
         producer_info: TypedBody<ProducerEndpoint>,
     ) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError>;
 
@@ -283,8 +273,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/metrics/collectors/{collector_id}/producers",
     }]
     async fn cpapi_assigned_producers_list(
-        &self,
-        request_context: RequestContext<()>,
+        request_context: RequestContext<Self>,
         path_params: Path<CollectorIdPathParams>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError>;
@@ -295,8 +284,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/metrics/collectors",
     }]
     async fn cpapi_collectors_post(
-        &self,
-        request_context: RequestContext<()>,
+        request_context: RequestContext<Self>,
         oximeter_info: TypedBody<OximeterInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -306,8 +294,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/artifacts/{kind}/{name}/{version}",
     }]
     async fn cpapi_artifact_download(
-        &self,
-        request_context: RequestContext<()>,
+        request_context: RequestContext<Self>,
         path_params: Path<ArtifactId>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 
@@ -317,8 +304,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/crucible/0/upstairs/{upstairs_id}/repair-start",
     }]
     async fn cpapi_upstairs_repair_start(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsPathParam>,
         repair_start_info: TypedBody<RepairStartInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -329,8 +315,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/crucible/0/upstairs/{upstairs_id}/repair-finish",
     }]
     async fn cpapi_upstairs_repair_finish(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsPathParam>,
         repair_finish_info: TypedBody<RepairFinishInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -341,8 +326,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress",
     }]
     async fn cpapi_upstairs_repair_progress(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsRepairPathParam>,
         repair_progress: TypedBody<RepairProgress>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -354,8 +338,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request",
     }]
     async fn cpapi_downstairs_client_stop_request(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsDownstairsPathParam>,
         downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -367,8 +350,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped",
     }]
     async fn cpapi_downstairs_client_stopped(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<UpstairsDownstairsPathParam>,
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -381,8 +363,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sagas",
     }]
     async fn saga_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError>;
 
@@ -392,8 +373,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sagas/{saga_id}",
     }]
     async fn saga_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<SagaPathParam>,
     ) -> Result<HttpResponseOk<Saga>, HttpError>;
 
@@ -408,8 +388,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/bgtasks",
     }]
     async fn bgtask_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<BTreeMap<String, BackgroundTask>>, HttpError>;
 
     /// Fetch status of one background task
@@ -420,8 +399,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/bgtasks/view/{bgtask_name}",
     }]
     async fn bgtask_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<BackgroundTaskPathParam>,
     ) -> Result<HttpResponseOk<BackgroundTask>, HttpError>;
 
@@ -432,8 +410,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/bgtasks/activate",
     }]
     async fn bgtask_activate(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         body: TypedBody<BackgroundTasksActivateRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -451,8 +428,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/nat/ipv4/changeset/{from_gen}"
     }]
     async fn ipv4_nat_changeset(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
     ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError>;
@@ -470,8 +446,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/all",
     }]
     async fn blueprint_list(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError>;
 
@@ -481,8 +456,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/all/{blueprint_id}",
     }]
     async fn blueprint_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<nexus_types::external_api::params::BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError>;
 
@@ -492,8 +466,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/all/{blueprint_id}",
     }]
     async fn blueprint_delete(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<nexus_types::external_api::params::BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
@@ -505,8 +478,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/target",
     }]
     async fn blueprint_target_view(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError>;
 
     /// Make the specified blueprint the new target
@@ -515,8 +487,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/target",
     }]
     async fn blueprint_target_set(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         target: TypedBody<BlueprintTargetSet>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError>;
 
@@ -526,8 +497,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/target/enabled",
     }]
     async fn blueprint_target_set_enabled(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         target: TypedBody<BlueprintTargetSet>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError>;
 
@@ -540,8 +510,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/regenerate",
     }]
     async fn blueprint_regenerate(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError>;
 
     /// Imports a client-provided blueprint
@@ -552,8 +521,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/deployment/blueprints/import",
     }]
     async fn blueprint_import(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -563,8 +531,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sleds/uninitialized",
     }]
     async fn sled_list_uninitialized(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError>;
 
     /// Add sled to initialized rack
@@ -578,8 +545,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sleds/add",
     }]
     async fn sled_add(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         sled: TypedBody<UninitializedSledId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -594,8 +560,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/sleds/expunge",
     }]
     async fn sled_expunge(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         sled: TypedBody<SledSelector>,
     ) -> Result<HttpResponseOk<SledPolicy>, HttpError>;
 
@@ -605,8 +570,7 @@ pub trait NexusInternalApi: Send + Sync + 'static {
         path = "/probes/{sled}"
     }]
     async fn probes_get(
-        &self,
-        rqctx: RequestContext<()>,
+        rqctx: RequestContext<Self>,
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
