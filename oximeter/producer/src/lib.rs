@@ -460,16 +460,22 @@ mod tests {
     use super::LogConfig;
     use super::ProducerEndpoint;
     use super::Server;
-    use httptest::matchers::request;
-    use httptest::responders::status_code;
-    use httptest::Expectation;
-    use httptest::Server as TestServer;
+    use hyper::service::make_service_fn;
+    use hyper::service::service_fn;
+    use hyper::Body;
+    use hyper::Request;
+    use hyper::Response;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
+    use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
     use slog::Drain;
     use slog::Logger;
+    use std::net::IpAddr;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddr;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tokio::time::Instant;
     use uuid::Uuid;
 
     fn test_logger() -> Logger {
@@ -481,60 +487,89 @@ mod tests {
         log
     }
 
+    // Re-registration interval for tests.
+    const INTERVAL: Duration = Duration::from_secs(1);
+
+    // Number of requests made to the fake Nexus server.
+    static N_REQUESTS_MADE: AtomicU32 = AtomicU32::new(0);
+
+    struct FakeNexus {
+        task: tokio::task::JoinHandle<()>,
+        addr: SocketAddr,
+    }
+
+    async fn register(
+        _: Request<Body>,
+    ) -> Result<Response<Body>, hyper::http::Error> {
+        N_REQUESTS_MADE.fetch_add(1, Ordering::SeqCst);
+        let body = ProducerRegistrationResponse { lease_duration: INTERVAL };
+        Response::builder()
+            .status(hyper::StatusCode::CREATED)
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+    }
+
+    impl FakeNexus {
+        async fn new() -> Self {
+            let server = hyper::server::Server::bind(&SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+                0,
+            ));
+            let addr = server.local_addr();
+            let make_service = make_service_fn(|_| async move {
+                Ok::<_, hyper::Error>(service_fn(register))
+            });
+            let task = tokio::spawn(async move {
+                server.serve(make_service).await.unwrap();
+            });
+            Self { task, addr }
+        }
+    }
+
     #[tokio::test]
     async fn test_producer_registration_task() {
         let log = test_logger();
-        let fake_nexus = TestServer::run();
+        let fake_nexus = FakeNexus::new().await;
         slog::info!(
             log,
             "fake nexus test server listening";
-            "address" => ?fake_nexus.addr(),
+            "address" => ?fake_nexus.addr,
         );
 
-        const INTERVAL: Duration = Duration::from_secs(1);
-        let body = ProducerRegistrationResponse { lease_duration: INTERVAL };
-        fake_nexus.expect(
-            Expectation::matching(request::method_path(
-                "POST",
-                "/metrics/producers",
-            ))
-            .times(2..)
-            .respond_with(
-                status_code(201).body(serde_json::to_string(&body).unwrap()),
-            ),
-        );
         let address = "[::1]:0".parse().unwrap();
         let config = Config {
             server_info: ProducerEndpoint {
                 id: Uuid::new_v4(),
                 kind: ProducerKind::Service,
                 address,
-                base_route: String::from("/collect"),
+                base_route: String::new(),
                 interval: Duration::from_secs(10),
             },
-            registration_address: Some(fake_nexus.addr()),
+            registration_address: Some(fake_nexus.addr),
             request_body_max_bytes: 1024,
             log: LogConfig::Logger(log),
         };
 
         // Ideally, we would check pretty carefully that there are exactly N
         // registrations after N renewal periods. That's brittle, especially on
-        // a loaded system. Instead, we'll run for a number of intervals, and
-        // just check that we have more than one.
+        // a loaded system. Instead, we'll wait until we've received the
+        // expected number of registration requests.
         let _server = Server::start(&config).unwrap();
-        let now = Instant::now();
-        tokio::time::pause();
-        let max = INTERVAL * 10;
-        while now.elapsed() < max {
-            tokio::time::advance(Duration::from_millis(10)).await;
-        }
-        tokio::time::resume();
-
-        // Drop the server to check its requests, rather than calling
-        // `verify_and_clear()`. It's possible for requests to be in-flight
-        // between when we called `verify_and_clear()` and when we exit this
-        // test, at which point the drop impl of the `TestServer` checks the
-        // expectations _again_. Let's just do the check by dropping here.
-        drop(fake_nexus);
+        const N_REQUESTS: u32 = 10;
+        const POLL_INTERVAL: Duration = Duration::from_millis(100);
+        const POLL_DURATION: Duration = Duration::from_secs(10);
+        wait_for_condition(
+            || async {
+                if N_REQUESTS_MADE.load(Ordering::SeqCst) >= N_REQUESTS {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &POLL_INTERVAL,
+            &POLL_DURATION,
+        )
+        .await
+        .expect("Expected all registration requests to be made within timeout");
+        fake_nexus.task.abort();
     }
 }

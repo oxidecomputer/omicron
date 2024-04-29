@@ -24,6 +24,7 @@ internal-dns.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 clap.workspace = true
-httptest.workspace = true
+hyper.workspace = true
+omicron-test-utils.workspace = true
 serde_json.workspace = true
 slog-term.workspace = true
