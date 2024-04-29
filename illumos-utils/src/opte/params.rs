@@ -31,7 +31,9 @@ pub struct VpcFirewallRule {
 }
 
 /// A mapping from a virtual NIC to a physical host
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 pub struct VirtualNetworkInterfaceHost {
     pub virtual_ip: IpAddr,
     pub virtual_mac: external::MacAddr,

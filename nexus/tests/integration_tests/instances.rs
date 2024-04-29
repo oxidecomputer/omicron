@@ -656,14 +656,6 @@ async fn test_instance_start_creates_networking_state(
         .await
         .unwrap();
 
-    let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .unwrap();
-
-    let sled_id =
-        instance_state.sled_id().expect("running instance should have a sled");
-
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
@@ -671,13 +663,7 @@ async fn test_instance_start_creates_networking_state(
 
     assert_eq!(guest_nics.len(), 1);
     for agent in &sled_agents {
-        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
-        // itself.
-        if agent.id != sled_id {
-            assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
-        } else {
-            assert!(agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
     }
 }
 
@@ -857,24 +843,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
     for sled_agent in &sled_agents {
-        // Starting the instance should have programmed V2P mappings to all the
-        // sleds except the one where the instance is running.
-        //
-        // TODO(#3107): In practice, the instance's sled also has V2P mappings, but
-        // these are established during VMM setup (i.e. as part of creating the
-        // instance's OPTE ports) instead of being established by explicit calls
-        // from Nexus. Simulated sled agent handles the latter calls but does
-        // not currently update any mappings during simulated instance creation,
-        // so the check below verifies that no mappings exist on the instance's
-        // own sled instead of checking for a real mapping. Once Nexus programs
-        // all mappings explicitly (without skipping the instance's current
-        // sled) this bifurcation should be removed.
-        if sled_agent.id != original_sled_id {
-            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
-                .await;
-        } else {
-            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
     let dst_sled_id = if original_sled_id == cptestctx.sled_agent.sled_agent.id
@@ -4535,14 +4504,6 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .unwrap();
-
-    let sled_id =
-        instance_state.sled_id().expect("running instance should have a sled");
-
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
@@ -4555,14 +4516,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     sled_agents.push(&cptestctx.sled_agent.sled_agent);
 
     for sled_agent in &sled_agents {
-        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
-        // itself.
-        if sled_agent.id != sled_id {
-            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
-                .await;
-        } else {
-            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
     // Delete the instance
@@ -4678,13 +4632,13 @@ async fn assert_sled_v2p_mappings(
     vni: Vni,
 ) {
     let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-    assert!(!v2p_mappings.is_empty());
-
-    let mapping = v2p_mappings.get(&nic.identity.id).unwrap().last().unwrap();
-    assert_eq!(mapping.virtual_ip, nic.ip);
-    assert_eq!(mapping.virtual_mac, nic.mac);
-    assert_eq!(mapping.physical_host_ip, sled_agent.ip);
-    assert_eq!(mapping.vni, vni);
+    let mapping = v2p_mappings.iter().find(|mapping| {
+        mapping.virtual_ip == nic.ip
+            && mapping.virtual_mac == nic.mac
+            && mapping.physical_host_ip == sled_agent.ip
+            && mapping.vni == vni
+    });
+    assert!(mapping.is_some())
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we
