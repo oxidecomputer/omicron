@@ -964,6 +964,7 @@ mod test {
         BlueprintZoneDisposition, OmicronZoneExternalSnatIp,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::inventory::NetworkInterface;
@@ -996,6 +997,7 @@ mod test {
                     id: Uuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
+                    sled_state: BTreeMap::new(),
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
@@ -1234,6 +1236,12 @@ mod test {
         }
     }
 
+    fn sled_states_active(
+        sled_ids: impl Iterator<Item = SledUuid>,
+    ) -> BTreeMap<SledUuid, SledState> {
+        sled_ids.map(|sled_id| (sled_id, SledState::Active)).collect()
+    }
+
     #[tokio::test]
     async fn rack_set_initialized_with_services() {
         let test_name = "rack_set_initialized_with_services";
@@ -1466,6 +1474,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -1721,6 +1730,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -1932,6 +1942,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -2070,6 +2081,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,

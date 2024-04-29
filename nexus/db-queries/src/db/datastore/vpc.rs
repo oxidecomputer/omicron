@@ -1245,6 +1245,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::external_api::params;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Asset;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::api::external;
@@ -1603,6 +1604,12 @@ mod tests {
         }
     }
 
+    fn sled_states_active(
+        sled_ids: impl Iterator<Item = SledUuid>,
+    ) -> BTreeMap<SledUuid, SledState> {
+        sled_ids.map(|sled_id| (sled_id, SledState::Active)).collect()
+    }
+
     async fn assert_service_sled_ids(
         datastore: &DataStore,
         expected_sled_ids: &[SledUuid],
@@ -1659,6 +1666,7 @@ mod tests {
         let bp1_id = Uuid::new_v4();
         let bp1 = Blueprint {
             id: bp1_id,
+            sled_state: sled_states_active(bp1_zones.keys().copied()),
             blueprint_zones: bp1_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -1711,6 +1719,7 @@ mod tests {
         let bp2_id = Uuid::new_v4();
         let bp2 = Blueprint {
             id: bp2_id,
+            sled_state: BTreeMap::new(),
             blueprint_zones: BTreeMap::new(),
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp1_id),
@@ -1771,6 +1780,7 @@ mod tests {
         let bp3_id = Uuid::new_v4();
         let bp3 = Blueprint {
             id: bp3_id,
+            sled_state: sled_states_active(bp3_zones.keys().copied()),
             blueprint_zones: bp3_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp2_id),
@@ -1831,6 +1841,7 @@ mod tests {
         let bp4_id = Uuid::new_v4();
         let bp4 = Blueprint {
             id: bp4_id,
+            sled_state: sled_states_active(bp4_zones.keys().copied()),
             blueprint_zones: bp4_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp3_id),
@@ -1939,6 +1950,7 @@ mod tests {
         let bp5_id = Uuid::new_v4();
         let bp5 = Blueprint {
             id: bp5_id,
+            sled_state: sled_states_active(bp5_zones.keys().copied()),
             blueprint_zones: bp5_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: Some(bp4_id),

@@ -550,6 +550,7 @@ impl DataStore {
             id: blueprint_id,
             blueprint_zones,
             blueprint_disks,
+            sled_state: BTreeMap::new(), // TODO-john FIXME
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,

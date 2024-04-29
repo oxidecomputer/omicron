@@ -136,6 +136,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks,
+                sled_state: BTreeMap::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
