@@ -271,7 +271,6 @@ async fn test_floating_ip_create_non_admin(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
-    // not automatically linked to currently silo. see below
     create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
     link_ip_pool(&client, "other-pool", &silo.identity.id, false).await;
 
@@ -280,7 +279,6 @@ async fn test_floating_ip_create_non_admin(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),
     );
-    // not automatically linked to currently silo. see below
     create_ip_pool(&client, "unlinked-pool", Some(unlinked_pool_range)).await;
 
     // Create a silo user
@@ -302,8 +300,8 @@ async fn test_floating_ip_create_non_admin(
     )
     .await;
 
-    // create project as user
-    let result = NexusRequest::objects_post(
+    // create project as user (i.e., in their silo)
+    NexusRequest::objects_post(
         client,
         "/v1/projects",
         &params::ProjectCreate {
@@ -315,7 +313,8 @@ async fn test_floating_ip_create_non_admin(
     )
     .authn_as(AuthnMode::SiloUser(user.id))
     .execute()
-    .await;
+    .await
+    .expect("Failed to create project");
 
     let create_url = get_floating_ips_url(PROJECT_NAME);
 
@@ -325,36 +324,54 @@ async fn test_floating_ip_create_non_admin(
             name: "root-beer".parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        ip: None,
         pool: None,
+        ip: None,
     };
-    let _: views::FloatingIp =
+    let fip: views::FloatingIp =
         NexusRequest::objects_post(client, &create_url, &body)
             .authn_as(AuthnMode::SiloUser(user.id))
             .execute_and_parse_unwrap()
             .await;
+    assert_eq!(fip.identity.name.to_string(), "root-beer");
 
     // now with other pool linked to my silo
     let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "another-soda".parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
         pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
-        ..body
+        ip: None,
     };
-    let _: views::FloatingIp =
+    let fip: views::FloatingIp =
         NexusRequest::objects_post(client, &create_url, &body)
             .authn_as(AuthnMode::SiloUser(user.id))
             .execute_and_parse_unwrap()
             .await;
+    assert_eq!(fip.identity.name.to_string(), "another-soda");
 
     // now with pool not linked to my silo (fails with 404)
     let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "secret-third-soda".parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
         pool: Some(NameOrId::Name("unlinked-pool".parse().unwrap())),
-        ..body
+        ip: None,
     };
-    let _: views::FloatingIp =
-        NexusRequest::objects_post(client, &create_url, &body)
-            .authn_as(AuthnMode::SiloUser(user.id))
-            .execute_and_parse_unwrap()
-            .await;
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &create_url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap();
+
+    assert_eq!(error.message, "not found: ip-pool with name \"unlinked-pool\"");
 }
 
 #[nexus_test]
