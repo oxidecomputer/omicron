@@ -4,6 +4,7 @@ set -ex -o pipefail
 
 . /lib/svc/share/smf_include.sh
 
+# TODO: Remove this file if we are confident we'll keep using the set up CLI
 BASEBOARD_INFO="$(svcprop -c -p config/baseboard-info "${SMF_FMRI}")"
 
 # set up the users required for wicket and support.

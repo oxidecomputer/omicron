@@ -16,7 +16,10 @@
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
-  <exec_method type='method' name='start' exec='/opt/oxide/bin/switch_zone_setup' timeout_seconds='300' />
+  <exec_method type='method' name='start' 
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i %{config/baseboard-info}'
+    timeout_seconds='300'>
+  </exec_method>
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
 
   <property_group name='startd' type='framework'>
