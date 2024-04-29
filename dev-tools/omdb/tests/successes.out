@@ -489,6 +489,10 @@ parent:    <none>
     internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
     nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
 
+  -------------------------
+    vendor   model  serial 
+  -------------------------
+
 METADATA:
   created by:            nexus-test-utils        
   created at:            <REDACTED     TIMESTAMP>
@@ -521,6 +525,10 @@ parent:    <none>
     external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
     internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
     nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+
+  -------------------------
+    vendor   model  serial 
+  -------------------------
 
 METADATA:
   created by:            nexus-test-utils        
