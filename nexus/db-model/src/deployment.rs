@@ -9,11 +9,13 @@ use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_target,
+    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
+    bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
+    impl_enum_type, ipv6, Generation, MacAddr, Name, SledState, SqlU16, SqlU32,
+    SqlU8,
 };
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
@@ -101,6 +103,15 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
             time_made_target: value.time_made_target,
         }
     }
+}
+
+/// See [`nexus_types::deployment::Blueprint::sled_state`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_sled_state)]
+pub struct BpSledState {
+    pub blueprint_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub sled_state: SledState,
 }
 
 /// See [`nexus_types::deployment::BlueprintPhysicalDisksConfig`].
