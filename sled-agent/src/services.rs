@@ -2323,6 +2323,7 @@ impl ServiceManager {
                 let mut dendrite_service =
                     ServiceBuilder::new("oxide/dendrite");
                 let mut tfport_service = ServiceBuilder::new("oxide/tfport");
+                let mut lldpd_service = ServiceBuilder::new("oxide/lldpd");
 
                 // Set properties for each service
                 for service in services {
@@ -2470,9 +2471,7 @@ impl ServiceManager {
                                         "rack_id",
                                         "astring",
                                         &info.rack_id.to_string(),
-                                    )
-                                    .add_property("address", "astring", "*")
-                                    .add_property("dns_server", "astring", "*");
+                                    );
 
                             for address in addresses {
                                 dendrite_config = dendrite_config.add_property(
@@ -2665,7 +2664,51 @@ impl ServiceManager {
                                     .add_property_group(tfport_config),
                             );
                         }
-                        SwitchService::Lldpd { baseboard } => {}
+                        SwitchService::Lldpd { baseboard } => {
+                            let mut lldpd_config =
+                                PropertyGroupBuilder::new("config")
+                                    // Always tell MGS to listen on localhost so wicketd
+                                    // can contact it even before we have an underlay
+                                    // network.
+                                    .add_property(
+                                        "board_rev",
+                                        "astring",
+                                        &sidecar_revision,
+                                    );
+
+                            match baseboard {
+                                Baseboard::Gimlet {
+                                    identifier, model, ..
+                                }
+                                | Baseboard::Pc { identifier, model, .. } => {
+                                    lldpd_config = lldpd_config
+                                        .add_property(
+                                            "scrimlet_id",
+                                            "astring",
+                                            &identifier,
+                                        )
+                                        .add_property(
+                                            "scrimlet_model",
+                                            "astring",
+                                            &model,
+                                        );
+                                }
+                                Baseboard::Unknown => {}
+                            }
+
+                            for address in addresses {
+                                lldpd_config = lldpd_config.add_property(
+                                    "address",
+                                    "astring",
+                                    &format!("[{}]:{}", address, LLDP_PORT),
+                                );
+                            }
+
+                            lldpd_service = lldpd_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(lldpd_config),
+                            );
+                        }
                         SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
                             // configured in
@@ -2684,7 +2727,8 @@ impl ServiceManager {
                     .add_service(wicketd_service)
                     .add_service(switch_zone_setup_service)
                     .add_service(dendrite_service)
-                    .add_service(tfport_service);
+                    .add_service(tfport_service)
+                    .add_service(lldpd_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
