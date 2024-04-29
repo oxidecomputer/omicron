@@ -93,7 +93,7 @@ impl super::DataStore {
 
             result.push(ProbeInfo {
                 id: probe.id(),
-                name: probe.name().clone().into(),
+                name: probe.name().clone(),
                 sled: probe.sled,
                 interface,
                 external_ips,
@@ -136,7 +136,7 @@ impl super::DataStore {
 
         Ok(ProbeInfo {
             id: probe.id(),
-            name: probe.name().clone().into(),
+            name: probe.name().clone(),
             sled: probe.sled,
             interface,
             external_ips,
