@@ -648,19 +648,31 @@ impl CockroachInstance {
 
     /// Cleans up the child process and temporary directory
     ///
-    /// If the child process is still running, it will be killed with SIGKILL and
+    /// If the child process is still running, it will be killed with SIGTERM and
     /// this function will wait for it to exit.  Then the temporary directory
     /// will be cleaned up.
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
-        // SIGTERM the process and wait for it to exit so that we can remove the
+        self.cleanup_internal(libc::SIGTERM).await
+    }
+
+    /// An alternative to "cleanup", which forcefully kills the Cockroach node.
+    pub async fn cleanup_forceful(&mut self) -> Result<(), anyhow::Error> {
+        self.cleanup_internal(libc::SIGKILL).await
+    }
+
+    async fn cleanup_internal(
+        &mut self,
+        signal: libc::c_int,
+    ) -> Result<(), anyhow::Error> {
+        // Signal the process and wait for it to exit so that we can remove the
         // temporary directory that we may have used to store its data.  We
         // don't care what the result of the process was.
         if let Some(child_process) = self.child_process.as_mut() {
             let pid = child_process.id().expect("Missing child PID") as i32;
             let success =
-                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+                0 == unsafe { libc::kill(pid as libc::pid_t, signal) };
             if !success {
-                bail!("Failed to send SIGTERM to DB");
+                bail!("Failed to send signal {signal} to DB");
             }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;

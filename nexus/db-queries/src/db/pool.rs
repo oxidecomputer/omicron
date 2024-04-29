@@ -116,27 +116,15 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::IntoSql;
     use omicron_test_utils::dev;
+    use slog::Logger;
 
-    // This test aims to verify that with a multi-node CRDB setup,
-    // we can gracefully migrate between nodes that are remaining.
-    #[tokio::test]
-    async fn dead_cockroach_nodes_do_not_kill_connection() {
-        let logctx =
-            dev::test_setup_log("dead_cockroach_nodes_do_not_kill_connection");
-        let log = &logctx.log;
-
-        // These ports are chosen somewhat arbitrarily, though they are outside
-        // the typical "ephemeral ranges" where port zero can be chosen.
-        //
-        // I wish it was easier to start a cluster of CockroachDB nodes
-        // using ephemeral ports, but it seems like the "cockroach start"
-        // command wants to have both the "--listen-addr" and "--join" addresses
-        // known precisely ahead-of-time.
-        let all_crdb_ports = vec![7709_u16, 7710_u16, 7711_u16];
-
+    async fn create_multinode_cluster(
+        log: &Logger,
+        ports: &Vec<u16>,
+    ) -> Vec<dev::db::CockroachInstance> {
         // Spin up all the nodes, with "start"
         let mut crdb_nodes = vec![];
-        for port in &all_crdb_ports {
+        for port in ports {
             let mut builder = dev::db::CockroachStarterBuilder::new();
 
             // Start in "multi-node" cluster mode, joining with the other nodes,
@@ -144,7 +132,7 @@ mod test {
             builder
                 .single_node(false)
                 .listen_port(*port)
-                .join_ports(all_crdb_ports.clone())
+                .join_ports(ports.clone())
                 .redirect_stdio_to_files();
 
             let starter = builder
@@ -172,7 +160,41 @@ mod test {
         // Initialize the cluster. Note that this doesn't populate the cluster
         // with any data, it's just a necessary one-time setup for Cockroach
         // itself.
-        crdb_nodes[0].initialize_multinode(all_crdb_ports[0]).await.unwrap();
+        crdb_nodes[0].initialize_multinode(ports[0]).await.unwrap();
+
+        crdb_nodes
+    }
+
+    // Issues a simple operation to verify that the pool is alive
+    async fn simple_pool_query(pool: &Pool) -> anyhow::Result<()> {
+        let conn =
+            pool.pool().get().await.context("Failed to get connection")?;
+        diesel::select(1_i32.into_sql::<diesel::sql_types::Integer>())
+            .get_result_async::<i32>(&*conn)
+            .await
+            .context("Failed to execute query")?;
+        Ok(())
+    }
+
+    // This test aims to verify that with a multi-node CRDB setup,
+    // we can gracefully migrate between nodes that are remaining.
+    #[tokio::test]
+    async fn dead_cockroach_nodes_do_not_kill_connection() {
+        let logctx =
+            dev::test_setup_log("dead_cockroach_nodes_do_not_kill_connection");
+        let log = &logctx.log;
+
+        // These ports are chosen somewhat arbitrarily, though they are outside
+        // the typical "ephemeral ranges" where port zero can be chosen.
+        //
+        // I wish it was easier to start a cluster of CockroachDB nodes
+        // using ephemeral ports, but it seems like the "cockroach start"
+        // command wants to have both the "--listen-addr" and "--join" addresses
+        // known precisely ahead-of-time.
+        let all_crdb_ports = vec![7709_u16, 7710_u16, 7711_u16];
+
+        let mut crdb_nodes =
+            create_multinode_cluster(log, &all_crdb_ports).await;
 
         // Spin up a pool to access each node
         let mut pools = vec![];
@@ -192,16 +214,6 @@ mod test {
             pools.push(pool);
         }
 
-        // Issue a simple operation to verify that the pool is alive
-        async fn simple_pool_query(pool: &Pool) -> anyhow::Result<()> {
-            let conn =
-                pool.pool().get().await.context("Failed to get connection")?;
-            diesel::select(1_i32.into_sql::<diesel::sql_types::Integer>())
-                .get_result_async::<i32>(&*conn)
-                .await
-                .context("Failed to execute query")?;
-            Ok(())
-        }
         for pool in &pools {
             simple_pool_query(pool).await.unwrap();
         }
@@ -209,9 +221,10 @@ mod test {
         // Kill one of the Cockroach nodes, observe that the pool fails to
         // access the connection.
         crdb_nodes[0]
-            .cleanup()
+            .cleanup_forceful()
             .await
             .expect("Should have been able to clear node");
+        info!(log, "Shut down first node");
 
         // Pool on dead node: Should not be able to access DB
         let err = simple_pool_query(&pools[0]).await.unwrap_err();
@@ -221,12 +234,14 @@ mod test {
         );
 
         // Pools on live nodes: Should be able to access DB
+        info!(log, "Querying remaining live nodes");
         simple_pool_query(&pools[1]).await.unwrap();
         simple_pool_query(&pools[2]).await.unwrap();
 
         // Finish cleanup before completing the test
         for mut node in crdb_nodes.into_iter() {
-            node.cleanup().await.unwrap();
+            info!(log, "Test complete, shutting down node"; "url" => node.pg_config().to_string());
+            node.cleanup_forceful().await.unwrap();
         }
         logctx.cleanup_successful();
     }
