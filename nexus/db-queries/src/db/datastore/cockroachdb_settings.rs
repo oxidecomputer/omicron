@@ -137,39 +137,6 @@ mod test {
         include_str!("../../../../../tools/cockroachdb_version");
 
     #[tokio::test]
-    async fn test_state_fingerprint() {
-        let logctx = dev::test_setup_log("test_preserve_downgrade");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-
-        // Verify that if a fingerprint is wrong, we get the expected SQL error
-        // back.
-        let Err(Error::InternalError { internal_message }) = datastore
-            .cockroachdb_setting_set_string(
-                &opctx,
-                String::new(),
-                "version",
-                String::new(),
-            )
-            .await
-        else {
-            panic!("should have returned an internal error");
-        };
-        assert_eq!(
-            internal_message,
-            "unexpected database error: \
-            cannot use unknown tree.dNull value for string setting"
-        );
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
     async fn test_preserve_downgrade() {
         let logctx = dev::test_setup_log("test_preserve_downgrade");
         let mut db = test_setup_database(&logctx.log).await;
@@ -189,6 +156,30 @@ mod test {
         // With a fresh cluster, this is the expected state
         assert_eq!(settings.version, version);
         assert_eq!(settings.preserve_downgrade, "");
+
+        // Verify that if a fingerprint is wrong, we get the expected SQL error
+        // back.
+        let Err(Error::InternalError { internal_message }) = datastore
+            .cockroachdb_setting_set_string(
+                &opctx,
+                String::new(),
+                "cluster.preserve_downgrade_option",
+                version.to_string(),
+            )
+            .await
+        else {
+            panic!("should have returned an internal error");
+        };
+        assert_eq!(
+            internal_message,
+            "unexpected database error: \
+            cannot use unknown tree.dNull value for string setting"
+        );
+        // And ensure that the state didn't change.
+        assert_eq!(
+            settings,
+            datastore.cockroachdb_settings(&opctx).await.unwrap()
+        );
 
         // Test setting it (twice, to verify doing it again doesn't trigger
         // an error)
