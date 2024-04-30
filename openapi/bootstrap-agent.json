@@ -285,7 +285,7 @@
           },
           "checker": {
             "nullable": true,
-            "description": "Checker to apply to incomming messages.",
+            "description": "Checker to apply to incoming messages.",
             "default": null,
             "type": "string"
           },
@@ -347,7 +347,7 @@
             "minimum": 0
           },
           "enforce_first_as": {
-            "description": "Enforce that the first AS in paths recieved from this peer is the peer's AS.",
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
             "default": false,
             "type": "boolean"
           },
@@ -408,7 +408,7 @@
           },
           "remote_asn": {
             "nullable": true,
-            "description": "Requre that a peer has a specified ASN.",
+            "description": "Require that a peer has a specified ASN.",
             "default": null,
             "type": "integer",
             "format": "uint32",

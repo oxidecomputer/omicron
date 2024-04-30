@@ -9493,7 +9493,7 @@
           },
           "checker": {
             "nullable": true,
-            "description": "A checker program to apply to incomming open and update messages.",
+            "description": "A checker program to apply to incoming open and update messages.",
             "type": "string"
           },
           "description": {
@@ -9632,7 +9632,7 @@
             "minimum": 0
           },
           "enforce_first_as": {
-            "description": "Enforce that the first AS in paths recieved from this peer is the peer's AS.",
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
             "type": "boolean"
           },
           "hold_time": {
@@ -9685,7 +9685,7 @@
           },
           "remote_asn": {
             "nullable": true,
-            "description": "Requre that a peer has a specified ASN.",
+            "description": "Require that a peer has a specified ASN.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0

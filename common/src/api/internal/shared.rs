@@ -227,7 +227,7 @@ pub struct BgpPeerConfig {
     /// Apply a local preference to routes received from this peer.
     #[serde(default)]
     pub local_pref: Option<u32>,
-    /// Enforce that the first AS in paths recieved from this peer is the peer's AS.
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
     #[serde(default)]
     pub enforce_first_as: bool,
 }
