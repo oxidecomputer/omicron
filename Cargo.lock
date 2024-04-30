@@ -10984,6 +10984,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "rand 0.8.5",
