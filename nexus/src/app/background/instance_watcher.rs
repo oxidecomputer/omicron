@@ -7,11 +7,13 @@
 use super::common::BackgroundTask;
 use crate::app::instance::InstanceUpdated;
 use futures::{future::BoxFuture, FutureExt};
+use http::StatusCode;
 use nexus_db_model::{Sled, SledInstance};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
+use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
 use std::future::Future;
 use std::num::NonZeroU32;
@@ -33,6 +35,7 @@ impl InstanceWatcher {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
+        producer_registry: &ProducerRegistry,
     ) -> Self {
         Self { datastore, resolver }
     }
@@ -43,7 +46,7 @@ impl InstanceWatcher {
         client: &SledAgentClient,
         instance: SledInstance,
     ) -> impl Future<
-        Output = Result<crate::app::instance::InstanceUpdated, CheckError>,
+        Output = CheckResult,
     > + Send
            + 'static {
         let instance_id = instance.instance_id();
@@ -58,7 +61,12 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            let InstanceWatcher { datastore, resolver } = watcher;
+            let InstanceWatcher { datastore, resolver } = watcher; 
+            let target = CheckTarget {
+                sled_agent_ip: client.address().ip(),
+                sled_agent_port: client.address().port(),
+                instance,
+            };
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client.instance_get_state(&instance_id).await;
             let state = match rsp {
@@ -69,14 +77,22 @@ impl InstanceWatcher {
                             == Some("NO_SUCH_INSTANCE") =>
                 {
                     slog::debug!(opctx.log, "instance is wayyyyy gone");
-                    todo!();
+                    return CheckResult { target, check_failure: Some(CheckFailure::NoSuchInstance), update_failure: None };
                 }
                 Err(e) => {
+                    let status = e.status();
                     slog::warn!(
                         opctx.log,
-                        "error checking up on instance: {e}"
+                        "error checking up on instance";
+                        "error" => ?e,
+                        "status" => ?status,
                     );
-                    return Err(CheckError::SledAgent);
+                    if let Some(status) = status {
+                        let check_failure = Some(CheckFailure::SledAgentResponse(status));
+                        return CheckResult { check_failure, update_failure: None };
+                    } else {
+                        match e.
+                    }
                 }
             };
 
@@ -91,17 +107,42 @@ impl InstanceWatcher {
                 &state.into(),
             )
             .await
-            .map_err(|_| CheckError::Update)?
-            .ok_or(CheckError::NotFound)
+            .map_err(|_| CheckError::UpdateFailed)?
+            .ok_or(CheckError::UnknownInstance)
         }
     }
 }
 
-enum CheckError {
-    SledAgent,
-    Update,
-    NotFound,
+struct CheckTarget {
+    sled_agent_ip: IpAddr,
+    sled_agent_port: u16,
+    instance: SledInstance,
 }
+
+struct CheckResult {
+    target: CheckTarget,
+    instance_updated: Option<crate::instances::InstanceUpdated>,
+    check_failure: Option<CheckFailure>,
+    update_failure: Option<UpdateFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum CheckFailure {
+    SledAgentUnreachable,
+    SledAgentResponse(StatusCode),
+    NoSuchInstance,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum UpdateFailure {
+    ClientError,
+    InstanceNotFound,
+    UpdateFailed,
+    Other,
+}
+
+// impl
 
 type ClientError = sled_agent_client::Error<sled_agent_client::types::Error>;
 
@@ -225,5 +266,188 @@ impl BackgroundTask for InstanceWatcher {
             })
         }
         .boxed()
+    }
+}
+
+mod metrics {
+    use super::{CheckFailure, InstanceUpdated, UpdateFailure};
+    use oximeter::types::Cumulative;
+    use oximeter::Metric;
+    use std::collections::BTreeMap;
+    use std::net::IpAddr;
+    use uuid::Uuid;
+
+    pub(super) struct Metrics {
+        sled_agents: BTreeMap<Uuid, SledAgent>,
+    }
+
+    type SledAgent = BTreeMap<Uuid, Instance>;
+
+    pub(super) struct Instance {
+        no_update: InstanceChecks,
+        instance_updated: InstanceChecks,
+        vmm_updated: InstanceChecks,
+        both_updated: InstanceChecks,
+        check_failures: BTreeMap<CheckFailure, InstanceCheckFailures>,
+        update_failures: BTreeMap<UpdateFailure, InstanceUpdateFailures>,
+        touched: bool,
+    }
+
+    impl Metrics {
+        pub fn instance(
+            &mut self,
+            sled_id: Uuid,
+            sled_ip: IpAddr,
+            sled_port: u16,
+            instance_id: Uuid,
+        ) -> &mut Instance {
+            self.sled_agents
+                .entry(sled_id)
+                .or_default()
+                .entry(instance_id)
+                .or_insert_with(|| Instance {
+                    no_update: InstanceChecks {
+                        instance_id,
+                        sled_agent_id: sled_id,
+                        sled_agent_ip: sled_ip,
+                        sled_agent_port: sled_port,
+                        instance_updated: false,
+                        vmm_updated: false,
+                        datum: Cumulative::default(),
+                    },
+                    instance_updated: InstanceChecks {
+                        instance_id,
+                        sled_agent_id: sled_id,
+                        sled_agent_ip: sled_ip,
+                        sled_agent_port: sled_port,
+                        instance_updated: true,
+                        vmm_updated: false,
+                        datum: Cumulative::default(),
+                    },
+                    vmm_updated: InstanceChecks {
+                        instance_id,
+                        sled_agent_id: sled_id,
+                        sled_agent_ip: sled_ip,
+                        sled_agent_port: sled_port,
+                        instance_updated: false,
+                        vmm_updated: true,
+                        datum: Cumulative::default(),
+                    },
+                    both_updated: InstanceChecks {
+                        instance_id,
+                        sled_agent_id: sled_id,
+                        sled_agent_ip: sled_ip,
+                        sled_agent_port: sled_port,
+                        instance_updated: true,
+                        vmm_updated: true,
+                        datum: Cumulative::default(),
+                    },
+                    check_failures: BTreeMap::new(),
+                    update_failures: BTreeMap::new(),
+                    touched: false,
+                })
+        }
+    }
+
+    impl Instance {
+        pub fn success(&mut self, updated: InstanceUpdated) {
+            match updated {
+                InstanceUpdated { instance_updated: true, vmm_updated: true } => self.both_updated.datum += 1,
+                InstanceUpdated { instance_updated: true, vmm_updated: false } => self.instance_updated.datum += 1,
+                InstanceUpdated { instance_updated: false, vmm_updated: true } => self.vmm_updated.datum += 1,
+                InstanceUpdated { instance_updated: false, vmm_updated: false } => self.no_update.datum += 1,
+            }
+            self.touched = true;
+        }
+
+        pub fn check_failure(&mut self, reason: CheckFailure) {
+            self.check_failures
+                .entry(reason)
+                .or_insert_with(|| InstanceCheckFailures {
+                    instance_id: self.no_update.instance_id,
+                    sled_agent_id: self.no_update.sled_agent_id,
+                    sled_agent_ip: self.no_update.sled_agent_ip,
+                    sled_agent_port: self.no_update.sled_agent_port,
+                    reason: reason.to_string(),
+                    datum: Cumulative::default(),
+                })
+                .datum += 1;
+            self.touched = true;
+        }
+
+        pub fn update_failure(&mut self, reason: UpdateFailure) {
+            self.update_failures
+                .entry(reason)
+                .or_insert_with(|| InstanceUpdateFailures {
+                    instance_id: self.no_update.instance_id,
+                    sled_agent_id: self.no_update.sled_agent_id,
+                    sled_agent_ip: self.no_update.sled_agent_ip,
+                    sled_agent_port: self.no_update.sled_agent_port,
+                    reason: reason.as_str(),
+                    datum: Cumulative::default(),
+                })
+                .datum += 1;
+            self.touched = true;
+        }
+    }
+
+    /// The number of successful checks for a single instance and sled agent
+    /// pair.
+    #[derive(Clone, Debug, Metric)]
+    struct InstanceChecks {
+        /// The instance's ID.
+        instance_id: Uuid,
+        /// The sled-agent's ID.
+        sled_agent_id: Uuid,
+        /// The sled agent's IP address.
+        sled_agent_ip: IpAddr,
+        /// The sled agent's port.
+        sled_agent_port: u16,
+        instance_updated: bool,
+        vmm_updated: bool,
+        /// The number of successful checks for this instance and sled agent.
+        datum: Cumulative<u64>,
+    }
+
+    /// The number of failed checks for an instance and sled agent pair.
+    #[derive(Clone, Debug, Metric)]
+    struct InstanceCheckFailures {
+        /// The instance's ID.
+        instance_id: Uuid,
+        /// The sled-agent's ID.
+        sled_agent_id: Uuid,
+        /// The sled agent's IP address.
+        sled_agent_ip: IpAddr,
+        /// The sled agent's port.
+        sled_agent_port: u16,
+        /// The reason why the check failed.
+        ///
+        /// # Note
+        /// This must always be generated from a `CheckFailure` enum.
+        reason: String,
+        /// The number of failed checks for this instance and sled agent.
+        datum: Cumulative<u64>,
+    }
+
+    /// The number of failed instance updates for an instance and sled agent pair.
+    #[derive(Clone, Debug, Metric)]
+    struct InstanceUpdateFailures {
+        /// The instance's ID.
+        instance_id: Uuid,
+        /// The sled-agent's ID.
+        sled_agent_id: Uuid,
+        /// The sled agent's IP address.
+        sled_agent_ip: IpAddr,
+        /// The sled agent's port.
+        sled_agent_port: u16,
+        /// The reason why the check failed.
+        ///
+        /// # Note
+        /// This must always be generated from a `CheckFailure` enum.
+        // TODO(eliza): it would be nice if this was a `oximeter::FieldType`:
+        // From<&str>` impl, so that this could be a `&'static str`.
+        reason: String,
+        /// The number of failed checks for this instance and sled agent.
+        datum: Cumulative<u64>,
     }
 }

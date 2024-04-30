@@ -28,6 +28,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -107,6 +108,7 @@ impl BackgroundTasks {
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
+        producer_registry: &ProducerRegistry,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -349,6 +351,7 @@ impl BackgroundTasks {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore,
                 resolver.clone(),
+                producer_registry,
             );
             driver.register(
                 "instance_watcher".to_string(),
