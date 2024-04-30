@@ -21,6 +21,7 @@ use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
+use uuid::Uuid;
 
 /// Background task that periodically checks instance states.
 #[derive(Clone)]
@@ -41,8 +42,8 @@ impl InstanceWatcher {
         resolver: internal_dns::resolver::Resolver,
         producer_registry: &ProducerRegistry,
     ) -> Self {
-        let (metrics, producer) = metrics::Metrics::new();
-        producer_registry.register_producer(producer);
+        let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
+        producer_registry.register_producer(metrics::Producer(metrics.clone()));
         Self { datastore, resolver, metrics }
     }
 
@@ -55,10 +56,11 @@ impl InstanceWatcher {
     ) -> impl Future<Output = CheckResult> + Send + 'static {
         let instance_id = instance.instance_id();
         let watcher = self.clone();
-        let target = CheckTarget {
+        let target = InstanceTarget {
+            instance_id,
+            sled_agent_id: sled.id(),
             sled_agent_ip: std::net::Ipv6Addr::from(sled.ip).into(),
             sled_agent_port: sled.port.into(),
-            instance,
         };
         let opctx = opctx.child(
             std::iter::once((
@@ -176,14 +178,22 @@ impl InstanceWatcher {
     }
 }
 
-struct CheckTarget {
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, oximeter::Target,
+)]
+struct InstanceTarget {
+    /// The instance's ID.
+    instance_id: Uuid,
+    /// The sled-agent's ID.
+    sled_agent_id: Uuid,
+    /// The sled agent's IP address.
     sled_agent_ip: IpAddr,
+    /// The sled agent's port.
     sled_agent_port: u16,
-    instance: SledInstance,
 }
 
 struct CheckResult {
-    target: CheckTarget,
+    target: InstanceTarget,
     instance_updated: Option<crate::app::instance::InstanceUpdated>,
     check_failure: Option<CheckFailure>,
     update_failure: Option<UpdateFailure>,
@@ -306,6 +316,7 @@ impl BackgroundTask for InstanceWatcher {
             while let Some(result) = tasks.join_next().await {
                 total += 1;
                 let CheckResult {
+                    target,
                     instance_updated,
                     check_failure,
                     update_failure,
@@ -317,28 +328,31 @@ impl BackgroundTask for InstanceWatcher {
                     `panic=\"abort\"`, so neither of these cases should \
                     ever occur",
                 );
-                if let Some(InstanceUpdated { vmm_updated, instance_updated }) =
-                    instance_updated
-                {
-                    if instance_updated {
+                let metric = self.metrics.lock().unwrap().instance(target);
+                if let Some(up) = instance_updated {
+                    if up.instance_updated {
                         instances_updated += 1;
                     }
 
-                    if vmm_updated {
+                    if up.vmm_updated {
                         vmms_updated += 1;
                     }
 
-                    if !(vmm_updated || instance_updated) {
+                    if !(up.vmm_updated || up.instance_updated) {
                         no_change += 1;
                     }
+                    metric.success(up);
                 }
-                if let Some(failure) = check_failure {
-                    match failure {
+                if let Some(reason) = check_failure {
+                    match reason {
                         CheckFailure::NoSuchInstance => not_found += 1,
                         _ => sled_agent_errors += 1,
                     }
+
+                    metric.check_failure(reason);
                 }
-                if update_failure.is_some() {
+                if let Some(reason) = update_failure {
+                    metric.update_failure(reason);
                     update_errors += 1;
                 }
             }
@@ -369,32 +383,22 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
-    use super::{CheckFailure, InstanceUpdated, UpdateFailure};
+    use super::{CheckFailure, InstanceTarget, InstanceUpdated, UpdateFailure};
     use oximeter::types::Cumulative;
-    use oximeter::types::ProducerResultsItem;
     use oximeter::Metric;
     use oximeter::MetricsError;
     use oximeter::Sample;
-    use oximeter::Target;
     use std::collections::BTreeMap;
-    use std::net::IpAddr;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use uuid::Uuid;
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub(super) struct Metrics {
-        sled_agents: BTreeMap<Uuid, SledAgent>,
-        instance_count: usize,
+        instances: BTreeMap<InstanceTarget, Instance>,
     }
 
     #[derive(Debug)]
-    pub(super) struct Producer {
-        metrics: Arc<Mutex<Metrics>>,
-        target: InstanceWatcherTarget,
-    }
-
-    type SledAgent = BTreeMap<Uuid, Instance>;
+    pub(super) struct Producer(pub(super) Arc<Mutex<Metrics>>);
 
     #[derive(Debug)]
     pub(super) struct Instance {
@@ -408,111 +412,51 @@ mod metrics {
     }
 
     impl Metrics {
-        pub fn new() -> (Arc<Mutex<Self>>, Producer) {
-            let metrics = Arc::new(Mutex::new(Self {
-                sled_agents: BTreeMap::new(),
-                instance_count: 0,
-            }));
-            let producer = Producer {
-                metrics: metrics.clone(),
-                target: InstanceWatcherTarget {
-                    name: "instance-watcher".to_string(),
-                },
-            };
-            (metrics, producer)
-        }
-
         pub(crate) fn instance(
             &mut self,
-            sled_id: Uuid,
-            sled_ip: IpAddr,
-            sled_port: u16,
-            instance_id: Uuid,
+            instance: InstanceTarget,
         ) -> &mut Instance {
-            let count = &mut self.instance_count;
-            self.sled_agents
-                .entry(sled_id)
-                .or_default()
-                .entry(instance_id)
-                .or_insert_with(|| {
-                    *count += 1;
-                    Instance {
-                        no_update: InstanceChecks {
-                            instance_id,
-                            sled_agent_id: sled_id,
-                            sled_agent_ip: sled_ip,
-                            sled_agent_port: sled_port,
-                            instance_updated: false,
-                            vmm_updated: false,
-                            datum: Cumulative::default(),
-                        },
-                        instance_updated: InstanceChecks {
-                            instance_id,
-                            sled_agent_id: sled_id,
-                            sled_agent_ip: sled_ip,
-                            sled_agent_port: sled_port,
-                            instance_updated: true,
-                            vmm_updated: false,
-                            datum: Cumulative::default(),
-                        },
-                        vmm_updated: InstanceChecks {
-                            instance_id,
-                            sled_agent_id: sled_id,
-                            sled_agent_ip: sled_ip,
-                            sled_agent_port: sled_port,
-                            instance_updated: false,
-                            vmm_updated: true,
-                            datum: Cumulative::default(),
-                        },
-                        both_updated: InstanceChecks {
-                            instance_id,
-                            sled_agent_id: sled_id,
-                            sled_agent_ip: sled_ip,
-                            sled_agent_port: sled_port,
-                            instance_updated: true,
-                            vmm_updated: true,
-                            datum: Cumulative::default(),
-                        },
-                        check_failures: BTreeMap::new(),
-                        update_failures: BTreeMap::new(),
-                        touched: false,
-                    }
-                })
-        }
-
-        pub(super) fn sample(
-            &self,
-            target: &impl Target,
-        ) -> impl IntoIterator<Item = Sample> {
-            let mut v = Vec::with_capacity(self.instance_count);
-            for sled in self.sled_agents.values() {
-                for instance in sled.values() {
-                    if instance.touched {
-                        v.push(match instance.sample(target) {
-                            Ok(samples) => ProducerResultsItem::Ok(samples),
-                            Err(e) => ProducerResultsItem::Err(e),
-                        });
-                    }
-                }
-            }
-            v
+            self.instances.entry(instance).or_insert_with(|| Instance {
+                no_update: InstanceChecks {
+                    instance_updated: false,
+                    vmm_updated: false,
+                    datum: Cumulative::default(),
+                },
+                instance_updated: InstanceChecks {
+                    instance_updated: true,
+                    vmm_updated: false,
+                    datum: Cumulative::default(),
+                },
+                vmm_updated: InstanceChecks {
+                    instance_updated: false,
+                    vmm_updated: true,
+                    datum: Cumulative::default(),
+                },
+                both_updated: InstanceChecks {
+                    instance_updated: true,
+                    vmm_updated: true,
+                    datum: Cumulative::default(),
+                },
+                check_failures: BTreeMap::new(),
+                update_failures: BTreeMap::new(),
+                touched: false,
+            })
         }
 
         pub(super) fn prune(&mut self) -> usize {
             let mut pruned = 0;
-            self.sled_agents.retain(|_, sled| {
-                sled.retain(|_, instance| {
-                    let touched =
-                        std::mem::replace(&mut instance.touched, false);
-                    if !touched {
-                        pruned += 1;
-                    }
-                    touched
-                });
-                !sled.is_empty()
+            self.instances.retain(|_, instance| {
+                let touched = std::mem::replace(&mut instance.touched, false);
+                if !touched {
+                    pruned += 1;
+                }
+                touched
             });
-            self.instance_count -= pruned;
             pruned
+        }
+
+        fn len(&self) -> usize {
+            self.instances.values().map(Instance::len).sum()
         }
     }
 
@@ -520,9 +464,12 @@ mod metrics {
         fn produce(
             &mut self,
         ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
-            Box::new(
-                self.metrics.lock().unwrap().sample(&self.target).into_iter(),
-            )
+            let metrics = self.0.lock().unwrap();
+            let mut v = Vec::with_capacity(metrics.len());
+            for (target, instance) in &metrics.instances {
+                instance.sample_into(target, &mut v)?;
+            }
+            Ok(Box::new(v.into_iter()))
         }
     }
 
@@ -553,10 +500,6 @@ mod metrics {
             self.check_failures
                 .entry(reason)
                 .or_insert_with(|| InstanceCheckFailures {
-                    instance_id: self.no_update.instance_id,
-                    sled_agent_id: self.no_update.sled_agent_id,
-                    sled_agent_ip: self.no_update.sled_agent_ip,
-                    sled_agent_port: self.no_update.sled_agent_port,
                     reason: reason.to_string(),
                     datum: Cumulative::default(),
                 })
@@ -568,10 +511,6 @@ mod metrics {
             self.update_failures
                 .entry(reason)
                 .or_insert_with(|| InstanceUpdateFailures {
-                    instance_id: self.no_update.instance_id,
-                    sled_agent_id: self.no_update.sled_agent_id,
-                    sled_agent_ip: self.no_update.sled_agent_ip,
-                    sled_agent_port: self.no_update.sled_agent_port,
                     reason: reason.to_string(),
                     datum: Cumulative::default(),
                 })
@@ -583,43 +522,32 @@ mod metrics {
             4 + self.check_failures.len() + self.update_failures.len()
         }
 
-        fn sample(
+        fn sample_into(
             &self,
-            target: &impl Target,
-        ) -> Result<Vec<Sample>, MetricsError> {
-            let mut v = Vec::with_capacity(self.len());
-            v.push(Sample::new(target, &self.no_update)?);
-            v.push(Sample::new(target, &self.instance_updated)?);
-            v.push(Sample::new(target, &self.vmm_updated)?);
-            v.push(Sample::new(target, &self.both_updated)?);
+            target: &InstanceTarget,
+            dest: &mut Vec<Sample>,
+        ) -> Result<(), MetricsError> {
+            dest.push(Sample::new(target, &self.no_update)?);
+            dest.push(Sample::new(target, &self.instance_updated)?);
+            dest.push(Sample::new(target, &self.vmm_updated)?);
+            dest.push(Sample::new(target, &self.both_updated)?);
             for metric in self.check_failures.values() {
-                v.push(Sample::new(target, metric)?);
+                dest.push(Sample::new(target, metric)?);
             }
             for metric in self.update_failures.values() {
-                v.push(Sample::new(target, metric)?)
+                dest.push(Sample::new(target, metric)?);
             }
-            Ok(v)
+            Ok(())
         }
-    }
-
-    #[derive(Clone, Debug, Target)]
-    struct InstanceWatcherTarget {
-        name: String,
     }
 
     /// The number of successful checks for a single instance and sled agent
     /// pair.
     #[derive(Clone, Debug, Metric)]
     struct InstanceChecks {
-        /// The instance's ID.
-        instance_id: Uuid,
-        /// The sled-agent's ID.
-        sled_agent_id: Uuid,
-        /// The sled agent's IP address.
-        sled_agent_ip: IpAddr,
-        /// The sled agent's port.
-        sled_agent_port: u16,
+        /// `true` if the instance state changed as a result of this check.
         instance_updated: bool,
+        /// `true` if the VMM state changed as a result of this check.
         vmm_updated: bool,
         /// The number of successful checks for this instance and sled agent.
         datum: Cumulative<u64>,
@@ -628,14 +556,6 @@ mod metrics {
     /// The number of failed checks for an instance and sled agent pair.
     #[derive(Clone, Debug, Metric)]
     struct InstanceCheckFailures {
-        /// The instance's ID.
-        instance_id: Uuid,
-        /// The sled-agent's ID.
-        sled_agent_id: Uuid,
-        /// The sled agent's IP address.
-        sled_agent_ip: IpAddr,
-        /// The sled agent's port.
-        sled_agent_port: u16,
         /// The reason why the check failed.
         ///
         /// # Note
@@ -648,14 +568,6 @@ mod metrics {
     /// The number of failed instance updates for an instance and sled agent pair.
     #[derive(Clone, Debug, Metric)]
     struct InstanceUpdateFailures {
-        /// The instance's ID.
-        instance_id: Uuid,
-        /// The sled-agent's ID.
-        sled_agent_id: Uuid,
-        /// The sled agent's IP address.
-        sled_agent_ip: IpAddr,
-        /// The sled agent's port.
-        sled_agent_port: u16,
         /// The reason why the check failed.
         ///
         /// # Note
