@@ -50,7 +50,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -84,33 +83,14 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         probe_id: Uuid,
-        pool_name: Option<NameOrId>,
+        pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
-        let pool = match pool_name {
-            Some(NameOrId::Name(name)) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_name(&name.into())
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-                pool
-            }
-            Some(NameOrId::Id(id)) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(id)
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-                pool
-            }
-            // If no name given, use the default pool
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.identity.id;
-        let data =
-            IncompleteExternalIp::for_ephemeral_probe(ip_id, probe_id, pool_id);
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let data = IncompleteExternalIp::for_ephemeral_probe(
+            ip_id,
+            probe_id,
+            authz_pool.id(),
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -206,7 +186,7 @@ impl DataStore {
 
     /// If a pool is specified, make sure it's linked to this silo. If a pool is
     /// not specified, fetch the default pool for this silo. Once the pool is
-    /// resolved (by either method) do an auth check.
+    /// resolved (by either method) do an auth check. Then return the pool.
     async fn resolve_pool_for_allocation(
         &self,
         opctx: &OpContext,
