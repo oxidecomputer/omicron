@@ -2326,6 +2326,7 @@ impl ServiceManager {
                 let mut lldpd_service = ServiceBuilder::new("oxide/lldpd");
                 let mut pumpkind_service =
                     ServiceBuilder::new("oxide/pumpkind");
+                let mut mgd_service = ServiceBuilder::new("oxide/mgd");
 
                 // Set properties for each service
                 for service in services {
@@ -2741,7 +2742,41 @@ impl ServiceManager {
                             // configured in
                             // `ensure_switch_zone_uplinks_configured`
                         }
-                        SwitchService::Mgd => {}
+                        SwitchService::Mgd => {
+                            let mut mgd_config =
+                                PropertyGroupBuilder::new("config")
+                                    .add_property(
+                                        "sled_uuid",
+                                        "astring",
+                                        &info.config.sled_id.to_string(),
+                                    )
+                                    .add_property(
+                                        "rack_uuid",
+                                        "astring",
+                                        &info.rack_id.to_string(),
+                                    );
+
+                            for address in addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        mgd_config = mgd_config.add_property(
+                                            "dns_server",
+                                            "astring",
+                                            &format!("{addr}"),
+                                        );
+                                    }
+                                }
+                            }
+
+                            mgd_service = mgd_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(mgd_config),
+                            );
+                        }
                         SwitchService::MgDdm { mode } => {}
                     }
                 }
@@ -2760,7 +2795,7 @@ impl ServiceManager {
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
-                        Error::io("Failed to setup Oximeter profile", err)
+                        Error::io("Failed to setup Switch zone profile", err)
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
