@@ -296,6 +296,7 @@ mod tests {
     use super::*;
     use crate::model::DbFieldList;
     use crate::model::DbTimeseriesSchema;
+    use std::borrow::Cow;
     use uuid::Uuid;
 
     // Validates that the timeseries_key stability for a sample is stable.
@@ -332,7 +333,7 @@ mod tests {
         use strum::EnumCount;
 
         let values = [
-            ("string", FieldValue::String(String::default())),
+            ("string", FieldValue::String(Cow::Owned(String::default()))),
             ("i8", FieldValue::I8(-0x0A)),
             ("u8", FieldValue::U8(0x0A)),
             ("i16", FieldValue::I16(-0x0ABC)),
