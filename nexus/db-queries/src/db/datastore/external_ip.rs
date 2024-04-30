@@ -241,27 +241,22 @@ impl DataStore {
 
         // This implements the same pattern as in `allocate_instance_ephemeral_ip` to
         // check that a chosen pool is valid from within the current silo.
-        let pool = match pool {
+        let authz_pool = match pool {
             Some(authz_pool) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(authz_pool.id())
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
+                self.ip_pool_fetch_link(opctx, authz_pool.id())
+                    .await
+                    .map_err(|_| authz_pool.not_found())?;
 
-                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
-                    return Err(authz_pool.not_found());
-                }
-
-                pool
+                authz_pool
             }
-            // If no name given, use the default logic
+            // If no pool specified, use the default logic
             None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
+                let (authz_pool, ..) =
+                    self.ip_pools_fetch_default(&opctx).await?;
+                authz_pool
             }
         };
-
-        let pool_id = pool.id();
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
 
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
@@ -270,7 +265,7 @@ impl DataStore {
                 &identity.description,
                 project_id,
                 ip,
-                pool_id,
+                authz_pool.id(),
             )
         } else {
             IncompleteExternalIp::for_floating(
@@ -278,7 +273,7 @@ impl DataStore {
                 &Name(identity.name),
                 &identity.description,
                 project_id,
-                pool_id,
+                authz_pool.id(),
             )
         };
 
