@@ -249,6 +249,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_watcher"
+    periodically checks instance states
+
+
 task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
@@ -390,6 +394,13 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "instance_watcher"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "instance_watcher" (don't know how to interpret details: Object {"instances_updated": Number(0), "no_change": Number(0), "not_found": Number(0), "pruned_instances": Number(0), "sled_agent_errors": Number(0), "total_instances": Number(0), "update_errors": Number(0), "vmms_updated": Number(0)})
 
 task: "inventory_collection"
   configured period: every 10m
