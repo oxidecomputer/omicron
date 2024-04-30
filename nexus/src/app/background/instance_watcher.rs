@@ -328,7 +328,8 @@ impl BackgroundTask for InstanceWatcher {
                     `panic=\"abort\"`, so neither of these cases should \
                     ever occur",
                 );
-                let metric = self.metrics.lock().unwrap().instance(target);
+                let mut metrics = self.metrics.lock().unwrap();
+                let metric = metrics.instance(target);
                 if let Some(up) = instance_updated {
                     if up.instance_updated {
                         instances_updated += 1;
