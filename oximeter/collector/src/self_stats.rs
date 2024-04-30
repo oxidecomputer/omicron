@@ -14,6 +14,7 @@ use oximeter::MetricsError;
 use oximeter::Sample;
 use oximeter::Target;
 use reqwest::StatusCode;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -65,9 +66,22 @@ pub enum FailureReason {
 impl std::fmt::Display for FailureReason {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Unreachable => write!(f, "unreachable"),
-            Self::Deserialization => write!(f, "deserialization"),
+            Self::Unreachable => f.write_str(Self::UNREACHABLE),
+            Self::Deserialization => f.write_str(Self::DESERIALIZATION),
             Self::Other(c) => write!(f, "{}", c.as_u16()),
+        }
+    }
+}
+
+impl FailureReason {
+    const UNREACHABLE: &'static str = "unreachable";
+    const DESERIALIZATION: &'static str = "deserialization";
+
+    fn as_string(&self) -> Cow<'static, str> {
+        match self {
+            Self::Unreachable => Cow::Borrowed(Self::UNREACHABLE),
+            Self::Deserialization => Cow::Borrowed(Self::DESERIALIZATION),
+            Self::Other(c) => Cow::Owned(c.as_u16().to_string()),
         }
     }
 }
@@ -88,7 +102,7 @@ pub struct FailedCollections {
     /// The reason we could not collect.
     //
     // NOTE: This should always be generated through a `FailureReason`.
-    pub reason: String,
+    pub reason: Cow<'static, str>,
     pub datum: Cumulative<u64>,
 }
 
@@ -128,7 +142,7 @@ impl CollectionTaskStats {
                 producer_ip: self.collections.producer_ip,
                 producer_port: self.collections.producer_port,
                 base_route: self.collections.base_route.clone(),
-                reason: reason.to_string(),
+                reason: reason.as_string(),
                 datum: Cumulative::new(0),
             }
         })
@@ -200,7 +214,7 @@ mod tests {
             producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
             producer_port: 12345,
             base_route: String::from("/"),
-            reason: FailureReason::Unreachable.to_string(),
+            reason: FailureReason::Unreachable.as_string(),
             datum: Cumulative::new(0),
         }
     }
