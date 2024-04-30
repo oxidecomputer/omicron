@@ -15,11 +15,11 @@ use toml_edit::InlineTable;
 use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::Value;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicket_common::rack_update::SpType;
 use wicketd_client::types::BootstrapSledDescription;
 use wicketd_client::types::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::IpRange;
-use wicketd_client::types::UserSpecifiedRackNetworkConfig;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -349,31 +349,19 @@ fn populate_network_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_common::api::external::SwitchLocation;
+    use omicron_common::api::internal::shared::{
+        BgpConfig, BgpPeerConfig, PortConfigV1, PortFec, PortSpeed, RouteConfig,
+    };
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicket_common::rack_update::SpIdentifier;
     use wicketd_client::types::Baseboard;
-    use wicketd_client::types::BgpConfig;
-    use wicketd_client::types::BgpPeerConfig;
-    use wicketd_client::types::PortConfigV1;
-    use wicketd_client::types::PortFec;
-    use wicketd_client::types::PortSpeed;
-    use wicketd_client::types::RouteConfig;
-    use wicketd_client::types::SwitchLocation;
 
     fn put_config_from_current_config(
         value: CurrentRssUserConfigInsensitive,
     ) -> PutRssUserConfigInsensitive {
-        use omicron_common::api::internal::shared::BgpConfig as InternalBgpConfig;
-        use omicron_common::api::internal::shared::BgpPeerConfig as InternalBgpPeerConfig;
-        use omicron_common::api::internal::shared::PortConfigV1 as InternalPortConfig;
-        use omicron_common::api::internal::shared::PortFec as InternalPortFec;
-        use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
-        use omicron_common::api::internal::shared::RouteConfig as InternalRouteConfig;
-        use omicron_common::api::internal::shared::SwitchLocation as InternalSwitchLocation;
-        use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig as InternalUserSpecifiedRackNetworkConfig;
-
-        let rnc = value.rack_network_config.unwrap();
+        let rack_network_config = value.rack_network_config.unwrap();
 
         PutRssUserConfigInsensitive {
             bootstrap_sleds: value
@@ -400,79 +388,7 @@ mod tests {
                 .collect(),
             external_dns_ips: value.external_dns_ips,
             ntp_servers: value.ntp_servers,
-            rack_network_config: InternalUserSpecifiedRackNetworkConfig {
-                infra_ip_first: rnc.infra_ip_first,
-                infra_ip_last: rnc.infra_ip_last,
-                ports: rnc
-                    .ports
-                    .iter()
-                    .map(|config| InternalPortConfig {
-                        routes: config
-                            .routes
-                            .iter()
-                            .map(|r| InternalRouteConfig {
-                                destination: r.destination,
-                                nexthop: r.nexthop,
-                            })
-                            .collect(),
-                        addresses: config.addresses.clone(),
-                        bgp_peers: config
-                            .bgp_peers
-                            .iter()
-                            .map(|p| InternalBgpPeerConfig {
-                                asn: p.asn,
-                                port: p.port.clone(),
-                                addr: p.addr,
-                                hold_time: p.hold_time,
-                                connect_retry: p.connect_retry,
-                                delay_open: p.delay_open,
-                                idle_hold_time: p.idle_hold_time,
-                                keepalive: p.keepalive,
-                            })
-                            .collect(),
-                        port: config.port.clone(),
-                        uplink_port_speed: match config.uplink_port_speed {
-                            PortSpeed::Speed0G => InternalPortSpeed::Speed0G,
-                            PortSpeed::Speed1G => InternalPortSpeed::Speed1G,
-                            PortSpeed::Speed10G => InternalPortSpeed::Speed10G,
-                            PortSpeed::Speed25G => InternalPortSpeed::Speed25G,
-                            PortSpeed::Speed40G => InternalPortSpeed::Speed40G,
-                            PortSpeed::Speed50G => InternalPortSpeed::Speed50G,
-                            PortSpeed::Speed100G => {
-                                InternalPortSpeed::Speed100G
-                            }
-                            PortSpeed::Speed200G => {
-                                InternalPortSpeed::Speed200G
-                            }
-                            PortSpeed::Speed400G => {
-                                InternalPortSpeed::Speed400G
-                            }
-                        },
-                        uplink_port_fec: match config.uplink_port_fec {
-                            PortFec::Firecode => InternalPortFec::Firecode,
-                            PortFec::None => InternalPortFec::None,
-                            PortFec::Rs => InternalPortFec::Rs,
-                        },
-                        autoneg: config.autoneg,
-                        switch: match config.switch {
-                            SwitchLocation::Switch0 => {
-                                InternalSwitchLocation::Switch0
-                            }
-                            SwitchLocation::Switch1 => {
-                                InternalSwitchLocation::Switch1
-                            }
-                        },
-                    })
-                    .collect(),
-                bgp: rnc
-                    .bgp
-                    .iter()
-                    .map(|config| InternalBgpConfig {
-                        asn: config.asn,
-                        originate: config.originate.clone(),
-                    })
-                    .collect(),
-            },
+            rack_network_config,
         }
     }
 

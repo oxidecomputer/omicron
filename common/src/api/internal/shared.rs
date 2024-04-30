@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fmt::Display,
+    fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
@@ -174,7 +174,7 @@ pub struct RackNetworkConfigV1 {
     pub bfd: Vec<BfdPeerConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpConfig {
     /// The autonomous system number for the BGP configuration.
     pub asn: u32,
@@ -182,7 +182,7 @@ pub struct BgpConfig {
     pub originate: Vec<Ipv4Network>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpPeerConfig {
     /// The autonomous sysetm number of the router the peer belongs to.
     pub asn: u32,
@@ -203,7 +203,7 @@ pub struct BgpPeerConfig {
     pub keepalive: Option<u64>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BfdPeerConfig {
     pub local: Option<IpAddr>,
     pub remote: IpAddr,
@@ -213,7 +213,7 @@ pub struct BfdPeerConfig {
     pub switch: SwitchLocation,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RouteConfig {
     /// The destination of the route.
     pub destination: IpNetwork,
@@ -221,7 +221,7 @@ pub struct RouteConfig {
     pub nexthop: IpAddr,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV1 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
@@ -325,8 +325,8 @@ pub enum SwitchLocation {
     Switch1,
 }
 
-impl Display for SwitchLocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for SwitchLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SwitchLocation::Switch0 => write!(f, "switch0"),
             SwitchLocation::Switch1 => write!(f, "switch1"),
@@ -386,6 +386,22 @@ pub enum PortSpeed {
     Speed400G,
 }
 
+impl fmt::Display for PortSpeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PortSpeed::Speed0G => write!(f, "0G"),
+            PortSpeed::Speed1G => write!(f, "1G"),
+            PortSpeed::Speed10G => write!(f, "10G"),
+            PortSpeed::Speed25G => write!(f, "25G"),
+            PortSpeed::Speed40G => write!(f, "40G"),
+            PortSpeed::Speed50G => write!(f, "50G"),
+            PortSpeed::Speed100G => write!(f, "100G"),
+            PortSpeed::Speed200G => write!(f, "200G"),
+            PortSpeed::Speed400G => write!(f, "400G"),
+        }
+    }
+}
+
 /// Switchport FEC options
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
@@ -395,4 +411,14 @@ pub enum PortFec {
     Firecode,
     None,
     Rs,
+}
+
+impl fmt::Display for PortFec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PortFec::Firecode => write!(f, "Firecode R-FEC"),
+            PortFec::None => write!(f, "None"),
+            PortFec::Rs => write!(f, "RS-FEC"),
+        }
+    }
 }
