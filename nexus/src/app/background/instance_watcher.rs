@@ -43,7 +43,9 @@ impl InstanceWatcher {
         producer_registry: &ProducerRegistry,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
-        producer_registry.register_producer(metrics::Producer(metrics.clone()));
+        producer_registry
+            .register_producer(metrics::Producer(metrics.clone()))
+            .unwrap();
         Self { datastore, resolver, metrics }
     }
 
