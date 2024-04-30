@@ -107,8 +107,11 @@ impl DataStore {
             .param()
             .sql(" WHEN TRUE THEN ")
             .param()
-            // CockroachDB settings are typed, but none of them are nullable,
-            // and NULL cannot be coerced into any of them.
+            // This is the gadget that allows us to reject changing a setting
+            // if the fingerprint doesn't match. CockroachDB settings are typed,
+            // but none of them are nullable, and NULL cannot be coerced into
+            // any of them, so this branch returns an error if it's hit (tested
+            // below in `test_state_fingerprint`).
             .sql(" ELSE NULL END")
             .bind::<sql_types::Text, _>(state_fingerprint)
             .bind::<sql_types::Text, _>(value)
