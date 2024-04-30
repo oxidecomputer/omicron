@@ -16,7 +16,7 @@ use std::net::Ipv4Addr;
 
 /// User-specified parts of
 /// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct UserSpecifiedRackNetworkConfig {
     pub infra_ip_first: Ipv4Addr,
     pub infra_ip_last: Ipv4Addr,

@@ -11022,6 +11022,7 @@ dependencies = [
  "chrono",
  "installinator-common",
  "ipnetwork",
+ "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
  "regress",
