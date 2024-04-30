@@ -114,7 +114,11 @@ impl super::Nexus {
         let pool = match pool {
             Some(pool) => Some(
                 self.ip_pool_lookup(opctx, &pool)?
-                    .lookup_for(authz::Action::Read)
+                    // every authenticated user has CreateChild on IP pools
+                    // because they need to be able to allocate IPs from them.
+                    // The check that the pool is linked to the current silo
+                    // happens inside allocate_floating_ip
+                    .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
             ),
