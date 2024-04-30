@@ -8,6 +8,7 @@ license = "MPL-2.0"
 chrono.workspace = true
 installinator-common.workspace = true
 ipnetwork.workspace = true
+omicron-common.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

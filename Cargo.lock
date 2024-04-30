@@ -850,9 +850,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_toml"
-version = "0.20.1"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a60491a82bdc0440640298990087ac1625e23c2feacd584eb33775903d5bb3"
+checksum = "c8cb1d556b8b8f36e5ca74938008be3ac102f5dcb5b68a0477e4249ae2291cd3"
 dependencies = [
  "serde",
  "toml 0.8.12",
@@ -1580,9 +1580,9 @@ checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
 name = "datatest-stable"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb7ab9130d87ff4c281e2ac877103ee8b4e31cc6028f879ae362ec74b11961d"
+checksum = "a560b3fd20463b56397bd457aa71243ccfdcffe696050b66e3b1e0ec0457e7f1"
 dependencies = [
  "camino",
  "fancy-regex",
@@ -6246,10 +6246,10 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot",
- "httptest",
  "internal-dns",
  "nexus-client",
  "omicron-common",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter",
  "schemars",
@@ -8277,9 +8277,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.198"
+version = "1.0.199"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9846a40c979031340571da2545a4e5b7c4163bdae79b301d5f86d03979451fcc"
+checksum = "0c9f6e76df036c77cd94996771fb40db98187f096dd0b9af39c6c6e452ba966a"
 dependencies = [
  "serde_derive",
 ]
@@ -8324,9 +8324,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.198"
+version = "1.0.199"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e88edab869b01783ba905e7d0153f9fc1a6505a96e4ad3018011eedb838566d9"
+checksum = "11bd257a6541e141e42ca6d24ae26f7714887b47e89aa739099104c7e4d3b7fc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10984,6 +10984,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "rand 0.8.5",
@@ -11021,6 +11022,7 @@ dependencies = [
  "chrono",
  "installinator-common",
  "ipnetwork",
+ "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
  "regress",

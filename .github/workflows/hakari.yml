@@ -24,7 +24,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install cargo-hakari
-        uses: taiki-e/install-action@1eda5d19daf935cb04d43ac3bb1b761ec2c8d8f8 # v2
+        uses: taiki-e/install-action@00a67321d66e038602baf558d366a594a7019ea2 # v2
         with:
           tool: cargo-hakari
       - name: Check workspace-hack Cargo.toml is up-to-date
