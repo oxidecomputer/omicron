@@ -3783,13 +3783,15 @@ CREATE INDEX IF NOT EXISTS active_vmm
 ON omicron.public.vmm (time_deleted, sled_id, instance_id);
 
 CREATE INDEX IF NOT EXISTS v2p_mapping_details
-ON network_interface (time_deleted, kind, subnet_id, vpc_id, parent_id) STORING (mac, ip);
+ON omicron.public.network_interface (
+  time_deleted, kind, subnet_id, vpc_id, parent_id
+) STORING (mac, ip);
 
 CREATE INDEX IF NOT EXISTS sled_by_policy
-ON sled (sled_policy) STORING (ip, sled_state);
+ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
 
 CREATE INDEX IF NOT EXISTS vmm_by_instance_id
-ON vmm (instance_id) STORING (sled_id);
+ON omicron.public.vmm (instance_id) STORING (sled_id);
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
