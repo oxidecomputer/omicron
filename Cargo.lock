@@ -4888,6 +4888,7 @@ dependencies = [
  "base64 0.22.0",
  "chrono",
  "clap",
+ "derive_more",
  "dns-service-client",
  "futures",
  "gateway-client",

@@ -20,8 +20,10 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use derive_more::From;
 use newtype_uuid::GenericUuid;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -32,6 +34,7 @@ use serde::Serialize;
 use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::AddrParseError;
@@ -203,6 +206,12 @@ impl Blueprint {
                 .collect(),
             self.metadata(),
             self.blueprint_zones.clone(),
+            before
+                .blueprint_disks
+                .iter()
+                .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
+                .collect(),
+            self.blueprint_disks.clone(),
         )
     }
 
@@ -227,11 +236,31 @@ impl Blueprint {
             })
             .collect();
 
+        let before_disks = before
+            .sled_agents
+            .iter()
+            .map(|(sled_id, sa)| {
+                (
+                    *sled_id,
+                    CollectionPhysicalDisksConfig {
+                        disks: sa
+                            .disks
+                            .iter()
+                            .map(|d| d.identity.clone())
+                            .collect::<BTreeSet<_>>(),
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.metadata(),
             self.blueprint_zones.clone(),
+            before_disks,
+            self.blueprint_disks.clone(),
         )
     }
 
@@ -863,6 +892,7 @@ pub struct BlueprintDiff {
     before_meta: DiffBeforeMetadata,
     after_meta: BlueprintMetadata,
     sleds: DiffSleds,
+    physical_disks: DiffPhysicalDisks,
 }
 
 impl BlueprintDiff {
@@ -873,13 +903,16 @@ impl BlueprintDiff {
         before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
         after_meta: BlueprintMetadata,
         after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        before_disks: BTreeMap<SledUuid, BlueprintOrCollectionDisksConfig>,
+        after_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> Result<Self, BlueprintDiffError> {
         let mut errors = Vec::new();
 
         let sleds = DiffSleds::new(before_zones, after_zones, &mut errors);
+        let physical_disks = DiffPhysicalDisks::new(before_disks, after_disks);
 
         if errors.is_empty() {
-            Ok(Self { before_meta, after_meta, sleds })
+            Ok(Self { before_meta, after_meta, sleds, physical_disks })
         } else {
             Err(BlueprintDiffError {
                 before_meta,
@@ -983,6 +1016,86 @@ impl DiffSleds {
         // We removed everything common from `after` above, so anything left is
         // an added sled.
         Self { added: after, removed, modified, unchanged }
+    }
+}
+
+#[derive(Debug)]
+struct DiffBlueprintPhysicalDiskConfig {
+    // Disks that come from inventory don't have generation numbers
+    before_generation: Option<Generation>,
+    after_generation: Option<Generation>,
+
+    // Sleds added, removed, or unmodified
+    disks: BTreeSet<DiskIdentity>,
+}
+
+#[derive(Debug, Default)]
+struct DiffPhysicalDisks {
+    added: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
+    removed: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
+    unchanged: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
+}
+
+impl DiffPhysicalDisks {
+    fn new(
+        before: BTreeMap<SledUuid, BlueprintOrCollectionDisksConfig>,
+        mut after: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+    ) -> Self {
+        let mut diffs = DiffPhysicalDisks::default();
+        for (sled_id, before_disks) in before {
+            let before_generation = before_disks.generation();
+            if let Some(after_disks) = after.remove(&sled_id) {
+                let after_generation = Some(after_disks.generation);
+                let a: BTreeSet<DiskIdentity> =
+                    after_disks.disks.into_iter().map(|d| d.identity).collect();
+                let b = before_disks.disks();
+                let added: BTreeSet<_> = a.difference(&b).cloned().collect();
+                let removed: BTreeSet<_> = b.difference(&a).cloned().collect();
+                let unchanged: BTreeSet<_> =
+                    a.intersection(&b).cloned().collect();
+                if !added.is_empty() {
+                    diffs.added.insert(
+                        sled_id,
+                        DiffBlueprintPhysicalDiskConfig {
+                            before_generation,
+                            after_generation,
+                            disks: added,
+                        },
+                    );
+                }
+                if !removed.is_empty() {
+                    diffs.removed.insert(
+                        sled_id,
+                        DiffBlueprintPhysicalDiskConfig {
+                            before_generation,
+                            after_generation,
+                            disks: removed,
+                        },
+                    );
+                }
+                if !unchanged.is_empty() {
+                    diffs.unchanged.insert(
+                        sled_id,
+                        DiffBlueprintPhysicalDiskConfig {
+                            before_generation,
+                            after_generation,
+                            disks: unchanged,
+                        },
+                    );
+                }
+            } else {
+                diffs.removed.insert(
+                    sled_id,
+                    DiffBlueprintPhysicalDiskConfig {
+                        before_generation,
+                        after_generation: None,
+                        disks: before_disks.disks().into_iter().collect(),
+                    },
+                );
+            }
+        }
+
+        diffs
     }
 }
 
@@ -1249,6 +1362,41 @@ impl BlueprintOrCollectionZoneConfig {
             }
         }
     }
+}
+
+/// Single sled's disks config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub enum BlueprintOrCollectionDisksConfig {
+    /// The diff was made from a collection.
+    Collection(CollectionPhysicalDisksConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintPhysicalDisksConfig),
+}
+
+impl BlueprintOrCollectionDisksConfig {
+    pub fn generation(&self) -> Option<Generation> {
+        match self {
+            BlueprintOrCollectionDisksConfig::Collection(_) => None,
+            BlueprintOrCollectionDisksConfig::Blueprint(c) => {
+                Some(c.generation)
+            }
+        }
+    }
+
+    pub fn disks(&self) -> BTreeSet<DiskIdentity> {
+        match self {
+            BlueprintOrCollectionDisksConfig::Collection(c) => c.disks.clone(),
+            BlueprintOrCollectionDisksConfig::Blueprint(c) => {
+                c.disks.iter().map(|d| d.identity.clone()).collect()
+            }
+        }
+    }
+}
+
+/// Single sled's disk config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub struct CollectionPhysicalDisksConfig {
+    disks: BTreeSet<DiskIdentity>,
 }
 
 /// Describes a sled that appeared on both sides of a diff and is changed.
