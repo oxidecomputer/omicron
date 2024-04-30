@@ -185,7 +185,7 @@ pub struct BgpConfig {
     #[serde(default)]
     pub shaper: Option<String>,
 
-    /// Checker to apply to incomming messages.
+    /// Checker to apply to incoming messages.
     #[serde(default)]
     pub checker: Option<String>,
 }
@@ -209,7 +209,7 @@ pub struct BgpPeerConfig {
     pub connect_retry: Option<u64>,
     /// The interval to send keepalive messages at.
     pub keepalive: Option<u64>,
-    /// Requre that a peer has a specified ASN.
+    /// Require that a peer has a specified ASN.
     #[serde(default)]
     pub remote_asn: Option<u32>,
     /// Require messages from a peer have a minimum IP time to live field.

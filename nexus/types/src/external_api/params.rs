@@ -1749,7 +1749,7 @@ pub struct BgpPeer {
     /// How often to send keepalive requests (seconds).
     pub keepalive: u32,
 
-    /// Requre that a peer has a specified ASN.
+    /// Require that a peer has a specified ASN.
     pub remote_asn: Option<u32>,
 
     /// Require messages from a peer have a minimum IP time to live field.
@@ -1831,7 +1831,7 @@ pub struct BgpConfigCreate {
     /// A shaper program to apply to outgoing open and update messages.
     pub shaper: Option<String>,
 
-    /// A checker program to apply to incomming open and update messages.
+    /// A checker program to apply to incoming open and update messages.
     pub checker: Option<String>,
 }
 
