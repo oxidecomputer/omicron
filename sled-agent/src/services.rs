@@ -2327,6 +2327,7 @@ impl ServiceManager {
                 let mut pumpkind_service =
                     ServiceBuilder::new("oxide/pumpkind");
                 let mut mgd_service = ServiceBuilder::new("oxide/mgd");
+                let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
 
                 // Set properties for each service
                 for service in services {
@@ -2764,7 +2765,7 @@ impl ServiceManager {
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
                                         mgd_config = mgd_config.add_property(
-                                            "dns_server",
+                                            "dns_servers",
                                             "astring",
                                             &format!("{addr}"),
                                         );
@@ -2777,7 +2778,109 @@ impl ServiceManager {
                                     .add_property_group(mgd_config),
                             );
                         }
-                        SwitchService::MgDdm { mode } => {}
+                        SwitchService::MgDdm { mode } => {
+                            let mut mg_ddm_config =
+                                PropertyGroupBuilder::new("config")
+                                    .add_property("mode", "astring", mode)
+                                    .add_property("dendrite", "astring", "true")
+                                    .add_property(
+                                        "sled_uuid",
+                                        "astring",
+                                        &info.config.sled_id.to_string(),
+                                    )
+                                    .add_property(
+                                        "rack_uuid",
+                                        "astring",
+                                        &info.rack_id.to_string(),
+                                    );
+
+                            for address in addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        mg_ddm_config = mg_ddm_config
+                                            .add_property(
+                                                "dns_servers",
+                                                "astring",
+                                                &format!("{addr}"),
+                                            );
+                                    }
+                                }
+                            }
+
+                            let is_gimlet = is_gimlet().map_err(|e| {
+                                Error::Underlay(
+                                    underlay::Error::SystemDetection(e),
+                                )
+                            })?;
+
+                            let maghemite_interfaces: Vec<AddrObject> =
+                                if is_gimlet {
+                                    (0..32)
+                                        .map(|i| {
+                                            // See the `tfport_name` function
+                                            // for how tfportd names the
+                                            // addrconf it creates.  Right now,
+                                            // that's `tfportrear[0-31]_0` for
+                                            // all rear ports, which is what
+                                            // we're directing ddmd to listen
+                                            // for advertisements on.
+                                            //
+                                            // This may grow in a multi-rack
+                                            // future to include a subset of
+                                            // "front" ports too, when racks are
+                                            // cabled together.
+                                            AddrObject::new(
+                                                &format!("tfportrear{}_0", i),
+                                                IPV6_LINK_LOCAL_NAME,
+                                            )
+                                            .unwrap()
+                                        })
+                                        .collect()
+                                } else {
+                                    self.inner
+                                        .switch_zone_maghemite_links
+                                        .iter()
+                                        .map(|i| {
+                                            AddrObject::new(
+                                                &i.to_string(),
+                                                IPV6_LINK_LOCAL_NAME,
+                                            )
+                                            .unwrap()
+                                        })
+                                        .collect()
+                                };
+
+                            mg_ddm_config = mg_ddm_config.add_property(
+                                "interfaces",
+                                "astring",
+                                // `svccfg setprop` requires a list of values to
+                                // be enclosed in `()`, and each string value to
+                                // be enclosed in `""`.
+                                &format!(
+                                    "({})",
+                                    maghemite_interfaces
+                                        .iter()
+                                        .map(|interface| format!(
+                                            r#""{}""#,
+                                            interface
+                                        ))
+                                        .join(" "),
+                                ),
+                            );
+
+                            if is_gimlet {
+                                mg_ddm_config = mg_ddm_config.add_property("dpd_host", "astring", "[::1]").add_property("dpd_port", "astring", &DENDRITE_PORT.to_string())
+                            }
+
+                            mg_ddm_service = mg_ddm_service.add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(mg_ddm_config),
+                            );
+                        }
                     }
                 }
 
@@ -2790,7 +2893,9 @@ impl ServiceManager {
                     .add_service(dendrite_service)
                     .add_service(tfport_service)
                     .add_service(lldpd_service)
-                    .add_service(pumpkind_service);
+                    .add_service(pumpkind_service)
+                    .add_service(mgd_service)
+                    .add_service(mg_ddm_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
