@@ -15,15 +15,19 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
+use std::fmt;
 use std::future::Future;
+use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Background task that periodically checks instance states.
 #[derive(Clone)]
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
+    metrics: Arc<Mutex<metrics::Metrics>>,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -37,20 +41,25 @@ impl InstanceWatcher {
         resolver: internal_dns::resolver::Resolver,
         producer_registry: &ProducerRegistry,
     ) -> Self {
-        Self { datastore, resolver }
+        let (metrics, producer) = metrics::Metrics::new();
+        producer_registry.register_producer(producer);
+        Self { datastore, resolver, metrics }
     }
 
     fn check_instance(
         &self,
         opctx: &OpContext,
+        sled: &Sled,
         client: &SledAgentClient,
         instance: SledInstance,
-    ) -> impl Future<
-        Output = CheckResult,
-    > + Send
-           + 'static {
+    ) -> impl Future<Output = CheckResult> + Send + 'static {
         let instance_id = instance.instance_id();
         let watcher = self.clone();
+        let target = CheckTarget {
+            sled_agent_ip: std::net::Ipv6Addr::from(sled.ip).into(),
+            sled_agent_port: sled.port.into(),
+            instance,
+        };
         let opctx = opctx.child(
             std::iter::once((
                 "instance_id".to_string(),
@@ -61,43 +70,77 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            let InstanceWatcher { datastore, resolver } = watcher; 
-            let target = CheckTarget {
-                sled_agent_ip: client.address().ip(),
-                sled_agent_port: client.address().port(),
-                instance,
-            };
+            let InstanceWatcher { datastore, resolver, .. } = watcher;
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client.instance_get_state(&instance_id).await;
             let state = match rsp {
                 Ok(rsp) => rsp.into_inner(),
-                Err(ClientError::ErrorResponse(rsp))
-                    if rsp.status() == http::StatusCode::NOT_FOUND
+                Err(ClientError::ErrorResponse(rsp)) => {
+                    let status = rsp.status();
+                    if status == StatusCode::NOT_FOUND
                         && rsp.as_ref().error_code.as_deref()
-                            == Some("NO_SUCH_INSTANCE") =>
-                {
-                    slog::debug!(opctx.log, "instance is wayyyyy gone");
-                    return CheckResult { target, check_failure: Some(CheckFailure::NoSuchInstance), update_failure: None };
+                            == Some("NO_SUCH_INSTANCE")
+                    {
+                        slog::info!(opctx.log, "instance is wayyyyy gone");
+                        return CheckResult {
+                            target,
+                            check_failure: Some(CheckFailure::NoSuchInstance),
+                            update_failure: None,
+                            instance_updated: None,
+                        };
+                    }
+                    if status.is_client_error() {
+                        slog::warn!(opctx.log, "check failed due to client error";
+                            "status" => ?status, "error" => ?rsp.into_inner());
+                        return CheckResult {
+                            target,
+                            check_failure: None,
+                            update_failure: Some(
+                                UpdateFailure::ClientHttpError(status),
+                            ),
+                            instance_updated: None,
+                        };
+                    }
+
+                    slog::info!(opctx.log, "check failed due to server error";
+                        "status" => ?status, "error" => ?rsp.into_inner());
+
+                    return CheckResult {
+                        target,
+                        check_failure: Some(CheckFailure::SledAgentResponse(
+                            status,
+                        )),
+                        update_failure: None,
+                        instance_updated: None,
+                    };
+                }
+                Err(ClientError::CommunicationError(e)) => {
+                    slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
+                    return CheckResult {
+                        target,
+                        check_failure: Some(CheckFailure::SledAgentUnreachable),
+                        update_failure: None,
+                        instance_updated: None,
+                    };
                 }
                 Err(e) => {
-                    let status = e.status();
                     slog::warn!(
                         opctx.log,
                         "error checking up on instance";
                         "error" => ?e,
-                        "status" => ?status,
+                        "status" => ?e.status(),
                     );
-                    if let Some(status) = status {
-                        let check_failure = Some(CheckFailure::SledAgentResponse(status));
-                        return CheckResult { check_failure, update_failure: None };
-                    } else {
-                        match e.
-                    }
+                    return CheckResult {
+                        target,
+                        check_failure: None,
+                        update_failure: Some(UpdateFailure::ClientError),
+                        instance_updated: None,
+                    };
                 }
             };
 
             slog::debug!(opctx.log, "updating instance state: {state:?}");
-            crate::app::instance::notify_instance_updated(
+            let update_result = crate::app::instance::notify_instance_updated(
                 &datastore,
                 &resolver,
                 &opctx,
@@ -107,8 +150,28 @@ impl InstanceWatcher {
                 &state.into(),
             )
             .await
-            .map_err(|_| CheckError::UpdateFailed)?
-            .ok_or(CheckError::UnknownInstance)
+            .map_err(|_| UpdateFailure::UpdateFailed)
+            .and_then(|updated| updated.ok_or(UpdateFailure::InstanceNotFound));
+            match update_result {
+                Ok(updated) => {
+                    slog::debug!(opctx.log, "update successful"; "instance_updated" => updated.instance_updated, "vmm_updated" => updated.vmm_updated);
+                    CheckResult {
+                        target,
+                        instance_updated: Some(updated),
+                        check_failure: None,
+                        update_failure: None,
+                    }
+                }
+                Err(e) => {
+                    slog::warn!(opctx.log, "error updating instance"; "error" => ?e);
+                    CheckResult {
+                        target,
+                        instance_updated: None,
+                        check_failure: None,
+                        update_failure: Some(e),
+                    }
+                }
+            }
         }
     }
 }
@@ -121,28 +184,48 @@ struct CheckTarget {
 
 struct CheckResult {
     target: CheckTarget,
-    instance_updated: Option<crate::instances::InstanceUpdated>,
+    instance_updated: Option<crate::app::instance::InstanceUpdated>,
     check_failure: Option<CheckFailure>,
     update_failure: Option<UpdateFailure>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CheckFailure {
     SledAgentUnreachable,
     SledAgentResponse(StatusCode),
     NoSuchInstance,
-    Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum UpdateFailure {
+    ClientHttpError(StatusCode),
     ClientError,
     InstanceNotFound,
     UpdateFailed,
-    Other,
 }
 
-// impl
+impl fmt::Display for CheckFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SledAgentUnreachable => f.write_str("unreachable"),
+            Self::SledAgentResponse(status) => {
+                write!(f, "{status}")
+            }
+            Self::NoSuchInstance => f.write_str("no_such_instance"),
+        }
+    }
+}
+
+impl fmt::Display for UpdateFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ClientHttpError(status) => write!(f, "{status}"),
+            Self::ClientError => f.write_str("client_error"),
+            Self::InstanceNotFound => f.write_str("instance_not_found"),
+            Self::UpdateFailed => f.write_str("update_failed"),
+        }
+    }
+}
 
 type ClientError = sled_agent_client::Error<sled_agent_client::types::Error>;
 
@@ -187,6 +270,7 @@ impl BackgroundTask for InstanceWatcher {
                     let mut client = mk_client(&curr_sled);
                     tasks.spawn(self.check_instance(
                         opctx,
+                        &curr_sled,
                         &client,
                         sled_instance,
                     ));
@@ -199,6 +283,7 @@ impl BackgroundTask for InstanceWatcher {
                         }
                         tasks.spawn(self.check_instance(
                             opctx,
+                            &curr_sled,
                             &client,
                             sled_instance,
                         ));
@@ -206,54 +291,67 @@ impl BackgroundTask for InstanceWatcher {
                 }
             }
 
-            // All requests fired off, let's wait for them to come back.
-            let mut total = 0;
-            let mut instances_updated = 0;
-            let mut vmms_updated = 0;
-            let mut no_change = 0;
-            let mut not_found = 0;
-            let mut sled_agent_errors = 0;
-            let mut update_errors = 0;
+            // All requests fired off! While we wait for them to come back,
+            // let's prune old instances.
+            let pruned = self.metrics.lock().unwrap().prune();
+
+            // Now, wait for the check results to come back.
+            let mut total: usize = 0;
+            let mut instances_updated: usize = 0;
+            let mut vmms_updated: usize = 0;
+            let mut no_change: usize = 0;
+            let mut not_found: usize = 0;
+            let mut sled_agent_errors: usize = 0;
+            let mut update_errors: usize = 0;
             while let Some(result) = tasks.join_next().await {
                 total += 1;
-                match result {
-                    Ok(Ok(InstanceUpdated {
-                        vmm_updated,
-                        instance_updated,
-                    })) => {
-                        if instance_updated {
-                            instances_updated += 1;
-                        }
-
-                        if vmm_updated {
-                            vmms_updated += 1;
-                        }
-
-                        if !(vmm_updated || instance_updated) {
-                            no_change += 1;
-                        }
+                let CheckResult {
+                    instance_updated,
+                    check_failure,
+                    update_failure,
+                    ..
+                } = result.expect(
+                    "a `JoinError` is returned if a spawned task \
+                    panics, or if the task is aborted. we never abort \
+                    tasks on this `JoinSet`, and nexus is compiled with \
+                    `panic=\"abort\"`, so neither of these cases should \
+                    ever occur",
+                );
+                if let Some(InstanceUpdated { vmm_updated, instance_updated }) =
+                    instance_updated
+                {
+                    if instance_updated {
+                        instances_updated += 1;
                     }
-                    Ok(Err(CheckError::NotFound)) => not_found += 1,
-                    Ok(Err(CheckError::SledAgent)) => sled_agent_errors += 1,
-                    Ok(Err(CheckError::Update)) => update_errors += 1,
-                    Err(e) => unreachable!(
-                        "a `JoinError` is returned if a spawned task \
-                        panics, or if the task is aborted. we never abort \
-                        tasks on this `JoinSet`, and nexus is compiled with \
-                        `panic=\"abort\"`, so neither of these cases should \
-                        ever occur: {e}",
-                    ),
+
+                    if vmm_updated {
+                        vmms_updated += 1;
+                    }
+
+                    if !(vmm_updated || instance_updated) {
+                        no_change += 1;
+                    }
+                }
+                if let Some(failure) = check_failure {
+                    match failure {
+                        CheckFailure::NoSuchInstance => not_found += 1,
+                        _ => sled_agent_errors += 1,
+                    }
+                }
+                if update_failure.is_some() {
+                    update_errors += 1;
                 }
             }
 
             slog::info!(opctx.log, "all instance checks complete";
-                "total_instances" => ?total,
-                "instances_updated" => ?instances_updated,
-                "vmms_updated" => ?vmms_updated,
-                "no_change" => ?no_change,
-                "not_found" => ?not_found,
-                "sled_agent_errors" => ?sled_agent_errors,
-                "update_errors" => ?update_errors,
+                "total_instances" => total,
+                "instances_updated" => instances_updated,
+                "vmms_updated" => vmms_updated,
+                "no_change" => no_change,
+                "not_found" => not_found,
+                "sled_agent_errors" => sled_agent_errors,
+                "update_errors" => update_errors,
+                "pruned_instances" => pruned,
             );
             serde_json::json!({
                 "total_instances": total,
@@ -263,6 +361,7 @@ impl BackgroundTask for InstanceWatcher {
                 "not_found": not_found,
                 "sled_agent_errors": sled_agent_errors,
                 "update_errors": update_errors,
+                "pruned_instances": pruned,
             })
         }
         .boxed()
@@ -272,17 +371,32 @@ impl BackgroundTask for InstanceWatcher {
 mod metrics {
     use super::{CheckFailure, InstanceUpdated, UpdateFailure};
     use oximeter::types::Cumulative;
+    use oximeter::types::ProducerResultsItem;
     use oximeter::Metric;
+    use oximeter::MetricsError;
+    use oximeter::Sample;
+    use oximeter::Target;
     use std::collections::BTreeMap;
     use std::net::IpAddr;
+    use std::sync::Arc;
+    use std::sync::Mutex;
     use uuid::Uuid;
 
+    #[derive(Debug)]
     pub(super) struct Metrics {
         sled_agents: BTreeMap<Uuid, SledAgent>,
+        instance_count: usize,
+    }
+
+    #[derive(Debug)]
+    pub(super) struct Producer {
+        metrics: Arc<Mutex<Metrics>>,
+        target: InstanceWatcherTarget,
     }
 
     type SledAgent = BTreeMap<Uuid, Instance>;
 
+    #[derive(Debug)]
     pub(super) struct Instance {
         no_update: InstanceChecks,
         instance_updated: InstanceChecks,
@@ -294,73 +408,148 @@ mod metrics {
     }
 
     impl Metrics {
-        pub fn instance(
+        pub fn new() -> (Arc<Mutex<Self>>, Producer) {
+            let metrics = Arc::new(Mutex::new(Self {
+                sled_agents: BTreeMap::new(),
+                instance_count: 0,
+            }));
+            let producer = Producer {
+                metrics: metrics.clone(),
+                target: InstanceWatcherTarget {
+                    name: "instance-watcher".to_string(),
+                },
+            };
+            (metrics, producer)
+        }
+
+        pub(crate) fn instance(
             &mut self,
             sled_id: Uuid,
             sled_ip: IpAddr,
             sled_port: u16,
             instance_id: Uuid,
         ) -> &mut Instance {
+            let count = &mut self.instance_count;
             self.sled_agents
                 .entry(sled_id)
                 .or_default()
                 .entry(instance_id)
-                .or_insert_with(|| Instance {
-                    no_update: InstanceChecks {
-                        instance_id,
-                        sled_agent_id: sled_id,
-                        sled_agent_ip: sled_ip,
-                        sled_agent_port: sled_port,
-                        instance_updated: false,
-                        vmm_updated: false,
-                        datum: Cumulative::default(),
-                    },
-                    instance_updated: InstanceChecks {
-                        instance_id,
-                        sled_agent_id: sled_id,
-                        sled_agent_ip: sled_ip,
-                        sled_agent_port: sled_port,
-                        instance_updated: true,
-                        vmm_updated: false,
-                        datum: Cumulative::default(),
-                    },
-                    vmm_updated: InstanceChecks {
-                        instance_id,
-                        sled_agent_id: sled_id,
-                        sled_agent_ip: sled_ip,
-                        sled_agent_port: sled_port,
-                        instance_updated: false,
-                        vmm_updated: true,
-                        datum: Cumulative::default(),
-                    },
-                    both_updated: InstanceChecks {
-                        instance_id,
-                        sled_agent_id: sled_id,
-                        sled_agent_ip: sled_ip,
-                        sled_agent_port: sled_port,
-                        instance_updated: true,
-                        vmm_updated: true,
-                        datum: Cumulative::default(),
-                    },
-                    check_failures: BTreeMap::new(),
-                    update_failures: BTreeMap::new(),
-                    touched: false,
+                .or_insert_with(|| {
+                    *count += 1;
+                    Instance {
+                        no_update: InstanceChecks {
+                            instance_id,
+                            sled_agent_id: sled_id,
+                            sled_agent_ip: sled_ip,
+                            sled_agent_port: sled_port,
+                            instance_updated: false,
+                            vmm_updated: false,
+                            datum: Cumulative::default(),
+                        },
+                        instance_updated: InstanceChecks {
+                            instance_id,
+                            sled_agent_id: sled_id,
+                            sled_agent_ip: sled_ip,
+                            sled_agent_port: sled_port,
+                            instance_updated: true,
+                            vmm_updated: false,
+                            datum: Cumulative::default(),
+                        },
+                        vmm_updated: InstanceChecks {
+                            instance_id,
+                            sled_agent_id: sled_id,
+                            sled_agent_ip: sled_ip,
+                            sled_agent_port: sled_port,
+                            instance_updated: false,
+                            vmm_updated: true,
+                            datum: Cumulative::default(),
+                        },
+                        both_updated: InstanceChecks {
+                            instance_id,
+                            sled_agent_id: sled_id,
+                            sled_agent_ip: sled_ip,
+                            sled_agent_port: sled_port,
+                            instance_updated: true,
+                            vmm_updated: true,
+                            datum: Cumulative::default(),
+                        },
+                        check_failures: BTreeMap::new(),
+                        update_failures: BTreeMap::new(),
+                        touched: false,
+                    }
                 })
+        }
+
+        pub(super) fn sample(
+            &self,
+            target: &impl Target,
+        ) -> impl IntoIterator<Item = Sample> {
+            let mut v = Vec::with_capacity(self.instance_count);
+            for sled in self.sled_agents.values() {
+                for instance in sled.values() {
+                    if instance.touched {
+                        v.push(match instance.sample(target) {
+                            Ok(samples) => ProducerResultsItem::Ok(samples),
+                            Err(e) => ProducerResultsItem::Err(e),
+                        });
+                    }
+                }
+            }
+            v
+        }
+
+        pub(super) fn prune(&mut self) -> usize {
+            let mut pruned = 0;
+            self.sled_agents.retain(|_, sled| {
+                sled.retain(|_, instance| {
+                    let touched =
+                        std::mem::replace(&mut instance.touched, false);
+                    if !touched {
+                        pruned += 1;
+                    }
+                    touched
+                });
+                !sled.is_empty()
+            });
+            self.instance_count -= pruned;
+            pruned
+        }
+    }
+
+    impl oximeter::Producer for Producer {
+        fn produce(
+            &mut self,
+        ) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
+            Box::new(
+                self.metrics.lock().unwrap().sample(&self.target).into_iter(),
+            )
         }
     }
 
     impl Instance {
-        pub fn success(&mut self, updated: InstanceUpdated) {
+        pub(super) fn success(&mut self, updated: InstanceUpdated) {
             match updated {
-                InstanceUpdated { instance_updated: true, vmm_updated: true } => self.both_updated.datum += 1,
-                InstanceUpdated { instance_updated: true, vmm_updated: false } => self.instance_updated.datum += 1,
-                InstanceUpdated { instance_updated: false, vmm_updated: true } => self.vmm_updated.datum += 1,
-                InstanceUpdated { instance_updated: false, vmm_updated: false } => self.no_update.datum += 1,
+                InstanceUpdated {
+                    instance_updated: true,
+                    vmm_updated: true,
+                } => self.both_updated.datum += 1,
+                InstanceUpdated {
+                    instance_updated: true,
+                    vmm_updated: false,
+                } => self.instance_updated.datum += 1,
+                InstanceUpdated {
+                    instance_updated: false,
+                    vmm_updated: true,
+                } => self.vmm_updated.datum += 1,
+                InstanceUpdated {
+                    instance_updated: false,
+                    vmm_updated: false,
+                } => self.no_update.datum += 1,
             }
             self.touched = true;
         }
 
-        pub fn check_failure(&mut self, reason: CheckFailure) {
+        pub(super) fn check_failure(&mut self, reason: CheckFailure) {
             self.check_failures
                 .entry(reason)
                 .or_insert_with(|| InstanceCheckFailures {
@@ -375,7 +564,7 @@ mod metrics {
             self.touched = true;
         }
 
-        pub fn update_failure(&mut self, reason: UpdateFailure) {
+        pub(super) fn update_failure(&mut self, reason: UpdateFailure) {
             self.update_failures
                 .entry(reason)
                 .or_insert_with(|| InstanceUpdateFailures {
@@ -383,12 +572,39 @@ mod metrics {
                     sled_agent_id: self.no_update.sled_agent_id,
                     sled_agent_ip: self.no_update.sled_agent_ip,
                     sled_agent_port: self.no_update.sled_agent_port,
-                    reason: reason.as_str(),
+                    reason: reason.to_string(),
                     datum: Cumulative::default(),
                 })
                 .datum += 1;
             self.touched = true;
         }
+
+        fn len(&self) -> usize {
+            4 + self.check_failures.len() + self.update_failures.len()
+        }
+
+        fn sample(
+            &self,
+            target: &impl Target,
+        ) -> Result<Vec<Sample>, MetricsError> {
+            let mut v = Vec::with_capacity(self.len());
+            v.push(Sample::new(target, &self.no_update)?);
+            v.push(Sample::new(target, &self.instance_updated)?);
+            v.push(Sample::new(target, &self.vmm_updated)?);
+            v.push(Sample::new(target, &self.both_updated)?);
+            for metric in self.check_failures.values() {
+                v.push(Sample::new(target, metric)?);
+            }
+            for metric in self.update_failures.values() {
+                v.push(Sample::new(target, metric)?)
+            }
+            Ok(v)
+        }
+    }
+
+    #[derive(Clone, Debug, Target)]
+    struct InstanceWatcherTarget {
+        name: String,
     }
 
     /// The number of successful checks for a single instance and sled agent
