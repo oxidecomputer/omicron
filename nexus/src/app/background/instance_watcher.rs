@@ -86,10 +86,12 @@ impl InstanceWatcher {
                             == Some("NO_SUCH_INSTANCE")
                     {
                         slog::info!(opctx.log, "instance is wayyyyy gone");
+                        // TODO(eliza): eventually, we should attempt to put the
+                        // instance in the `Failed` state here.
                         return CheckResult {
                             target,
                             check_failure: Some(CheckFailure::NoSuchInstance),
-                            update_failure: None,
+                            error: None,
                             instance_updated: None,
                         };
                     }
@@ -99,9 +101,7 @@ impl InstanceWatcher {
                         return CheckResult {
                             target,
                             check_failure: None,
-                            update_failure: Some(
-                                UpdateFailure::ClientHttpError(status),
-                            ),
+                            error: Some(CheckError::ClientHttpError(status)),
                             instance_updated: None,
                         };
                     }
@@ -114,16 +114,20 @@ impl InstanceWatcher {
                         check_failure: Some(CheckFailure::SledAgentResponse(
                             status,
                         )),
-                        update_failure: None,
+                        error: None,
                         instance_updated: None,
                     };
                 }
                 Err(ClientError::CommunicationError(e)) => {
+                    // TODO(eliza): eventually, we may want to transition the
+                    // instance to the `Failed` state if the sled-agent has been
+                    // unreachable for a while. We may also want to take other
+                    // corrective actions or alert an operator in this case.
                     slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
                     return CheckResult {
                         target,
                         check_failure: Some(CheckFailure::SledAgentUnreachable),
-                        update_failure: None,
+                        error: None,
                         instance_updated: None,
                     };
                 }
@@ -137,7 +141,7 @@ impl InstanceWatcher {
                     return CheckResult {
                         target,
                         check_failure: None,
-                        update_failure: Some(UpdateFailure::ClientError),
+                        error: Some(CheckError::ClientError),
                         instance_updated: None,
                     };
                 }
@@ -154,8 +158,8 @@ impl InstanceWatcher {
                 &state.into(),
             )
             .await
-            .map_err(|_| UpdateFailure::UpdateFailed)
-            .and_then(|updated| updated.ok_or(UpdateFailure::InstanceNotFound));
+            .map_err(|_| CheckError::UpdateFailed)
+            .and_then(|updated| updated.ok_or(CheckError::InstanceNotFound));
             match update_result {
                 Ok(updated) => {
                     slog::debug!(opctx.log, "update successful"; "instance_updated" => updated.instance_updated, "vmm_updated" => updated.vmm_updated);
@@ -163,7 +167,7 @@ impl InstanceWatcher {
                         target,
                         instance_updated: Some(updated),
                         check_failure: None,
-                        update_failure: None,
+                        error: None,
                     }
                 }
                 Err(e) => {
@@ -172,7 +176,7 @@ impl InstanceWatcher {
                         target,
                         instance_updated: None,
                         check_failure: None,
-                        update_failure: Some(e),
+                        error: Some(e),
                     }
                 }
             }
@@ -196,23 +200,63 @@ struct InstanceTarget {
 
 struct CheckResult {
     target: InstanceTarget,
+    /// `Some` if the instance's state was up
     instance_updated: Option<crate::app::instance::InstanceUpdated>,
+
+    /// `Some` if the instance check indicated that the instance is in a bad state.
+    ///
+    /// This is a result that indicates that something is *wrong* with either the
+    /// sled on which the instance is running, the sled-agent on that sled, or the
+    /// instance itself. This is distinct from a [`CheckError`], which indicates
+    /// that we were *unable* to check on the instance or update its state.
     check_failure: Option<CheckFailure>,
-    update_failure: Option<UpdateFailure>,
+
+    /// `Some` if the instance check was unsuccessful.
+    ///
+    /// This indicates that something went wrong *while performing the check* that
+    /// does not necessarily indicate that the instance itself is in a bad
+    /// state. For example, the sled-agent client may have constructed an
+    /// invalid request, or an error may have occurred while updating the
+    /// instance in the database.
+    ///
+    /// Depending on when the error occurred, the `CheckFailure` field may also
+    /// be populated.
+    error: Option<CheckError>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CheckFailure {
+    /// The sled-agent for the sled on which the instance is running was
+    /// unreachable.
+    ///
+    /// This may indicate a network partition between us and that sled, that
+    /// the sled-agent process has crashed, or that the sled is down.
     SledAgentUnreachable,
+    /// The sled-agent responded with an unexpected HTTP error.
     SledAgentResponse(StatusCode),
+    /// The sled-agent indicated that it doesn't know about an instance ID that
+    /// we believe it *should* know about. This probably means the sled-agent,
+    /// and potentially the whole sled, has been restarted.
     NoSuchInstance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum UpdateFailure {
+enum CheckError {
+    /// The sled-agent responded with an HTTP client error, indicating that our
+    /// request as somehow malformed.
     ClientHttpError(StatusCode),
+    /// Something else went wrong while making an HTTP request.
     ClientError,
+    /// We attempted to update the instance state in the database, but no
+    /// instance with that UUID existed.
+    ///
+    /// Because the instance UUIDs that we perform checks on come from querying
+    /// the instances table, this would probably indicate that the instance was
+    /// removed from the database between when we listed instances and when the
+    /// check completed.
     InstanceNotFound,
+    /// Something went wrong while updating the state of the instance in the
+    /// database.
     UpdateFailed,
 }
 
@@ -228,7 +272,7 @@ impl fmt::Display for CheckFailure {
     }
 }
 
-impl fmt::Display for UpdateFailure {
+impl fmt::Display for CheckError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ClientHttpError(status) => write!(f, "{status}"),
@@ -321,7 +365,7 @@ impl BackgroundTask for InstanceWatcher {
                     target,
                     instance_updated,
                     check_failure,
-                    update_failure,
+                    error: update_failure,
                     ..
                 } = result.expect(
                     "a `JoinError` is returned if a spawned task \
@@ -386,7 +430,7 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
-    use super::{CheckFailure, InstanceTarget, InstanceUpdated, UpdateFailure};
+    use super::{CheckError, CheckFailure, InstanceTarget, InstanceUpdated};
     use oximeter::types::Cumulative;
     use oximeter::Metric;
     use oximeter::MetricsError;
@@ -410,7 +454,7 @@ mod metrics {
         vmm_updated: InstanceChecks,
         both_updated: InstanceChecks,
         check_failures: BTreeMap<CheckFailure, InstanceCheckFailures>,
-        update_failures: BTreeMap<UpdateFailure, InstanceUpdateFailures>,
+        update_failures: BTreeMap<CheckError, InstanceCheckErrors>,
         touched: bool,
     }
 
@@ -510,10 +554,10 @@ mod metrics {
             self.touched = true;
         }
 
-        pub(super) fn update_failure(&mut self, reason: UpdateFailure) {
+        pub(super) fn update_failure(&mut self, reason: CheckError) {
             self.update_failures
                 .entry(reason)
-                .or_insert_with(|| InstanceUpdateFailures {
+                .or_insert_with(|| InstanceCheckErrors {
                     reason: reason.to_string(),
                     datum: Cumulative::default(),
                 })
@@ -570,7 +614,7 @@ mod metrics {
 
     /// The number of failed instance updates for an instance and sled agent pair.
     #[derive(Clone, Debug, Metric)]
-    struct InstanceUpdateFailures {
+    struct InstanceCheckErrors {
         /// The reason why the check failed.
         ///
         /// # Note
