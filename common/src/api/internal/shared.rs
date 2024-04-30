@@ -232,6 +232,43 @@ pub struct BgpPeerConfig {
     pub enforce_first_as: bool,
 }
 
+impl BgpPeerConfig {
+    /// The default hold time for a BGP peer in seconds.
+    pub const DEFAULT_HOLD_TIME: u64 = 6;
+
+    /// The default idle hold time for a BGP peer in seconds.
+    pub const DEFAULT_IDLE_HOLD_TIME: u64 = 3;
+
+    /// The default delay open time for a BGP peer in seconds.
+    pub const DEFAULT_DELAY_OPEN: u64 = 0;
+
+    /// The default connect retry time for a BGP peer in seconds.
+    pub const DEFAULT_CONNECT_RETRY: u64 = 3;
+
+    /// The default keepalive time for a BGP peer in seconds.
+    pub const DEFAULT_KEEPALIVE: u64 = 2;
+
+    pub fn hold_time(&self) -> u64 {
+        self.hold_time.unwrap_or(Self::DEFAULT_HOLD_TIME)
+    }
+
+    pub fn idle_hold_time(&self) -> u64 {
+        self.idle_hold_time.unwrap_or(Self::DEFAULT_IDLE_HOLD_TIME)
+    }
+
+    pub fn delay_open(&self) -> u64 {
+        self.delay_open.unwrap_or(Self::DEFAULT_DELAY_OPEN)
+    }
+
+    pub fn connect_retry(&self) -> u64 {
+        self.connect_retry.unwrap_or(Self::DEFAULT_CONNECT_RETRY)
+    }
+
+    pub fn keepalive(&self) -> u64 {
+        self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BfdPeerConfig {
     pub local: Option<IpAddr>,

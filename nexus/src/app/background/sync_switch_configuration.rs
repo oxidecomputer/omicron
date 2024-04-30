@@ -1297,15 +1297,11 @@ fn build_sled_agent_clients(
     sled_agent_clients
 }
 
+type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>)>;
+
 fn static_routes_to_del(
-    current_static_routes: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
-    desired_static_routes: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
+    current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
+    desired_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
 ) -> HashMap<SwitchLocation, DeleteStaticRoute4Request> {
     let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request> =
         HashMap::new();
@@ -1360,14 +1356,8 @@ fn static_routes_to_del(
 }
 
 fn static_routes_to_add(
-    desired_static_routes: &HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
-    current_static_routes: &HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
+    desired_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
+    current_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, AddStaticRoute4Request> {
     let mut routes_to_add: HashMap<SwitchLocation, AddStaticRoute4Request> =
@@ -1419,11 +1409,9 @@ fn static_routes_in_db(
         nexus_db_model::SwitchPort,
         PortSettingsChange,
     )],
-) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4, Option<u16>)>> {
-    let mut routes_from_db: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    > = HashMap::new();
+) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
+    let mut routes_from_db: HashMap<SwitchLocation, SwitchStaticRoutes> =
+        HashMap::new();
 
     for (location, _port, change) in changes {
         // we only need to check for ports that have a configuration present. No config == no routes.
@@ -1617,47 +1605,49 @@ async fn apply_switch_port_changes(
 async fn static_routes_on_switch<'a>(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4, Option<u16>)>> {
+) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: HashSet<(Ipv4Addr, Prefix4, Option<u16>)> =
-            match client.static_list_v4_routes().await {
-                Ok(routes) => {
-                    let mut flattened = HashSet::new();
-                    for (destination, paths) in routes.iter() {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
+        let static_routes: SwitchStaticRoutes = match client
+            .static_list_v4_routes()
+            .await
+        {
+            Ok(routes) => {
+                let mut flattened = HashSet::new();
+                for (destination, paths) in routes.iter() {
+                    let Ok(dst) = destination.parse() else {
+                        error!(
                                 log,
                                 "failed to parse static route destination: {destination}"
                             );
-                            continue;
+                        continue;
+                    };
+                    for p in paths.iter() {
+                        let nh = match p.nexthop {
+                            IpAddr::V4(addr) => addr,
+                            IpAddr::V6(addr) => {
+                                error!(
+                                    log,
+                                    "ipv6 nexthops not supported: {addr}"
+                                );
+                                continue;
+                            }
                         };
-                        for p in paths.iter() {
-                            let nh = match p.nexthop {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(addr) => {
-                                    error!(
-                                        log,
-                                        "ipv6 nexthops not supported: {addr}"
-                                    );
-                                    continue;
-                                }
-                            };
-                            flattened.insert((nh, dst, p.vlan_id));
-                        }
+                        flattened.insert((nh, dst, p.vlan_id));
                     }
-                    flattened
                 }
-                Err(_) => {
-                    error!(
-                        &log,
-                        "unable to retrieve routes from switch";
-                        "switch_location" => ?location,
-                    );
-                    continue;
-                }
-            };
+                flattened
+            }
+            Err(_) => {
+                error!(
+                    &log,
+                    "unable to retrieve routes from switch";
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch
