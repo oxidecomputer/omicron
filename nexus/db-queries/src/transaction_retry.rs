@@ -353,7 +353,9 @@ mod test {
             assert_eq!(
                 target_fields["name"].value,
                 FieldValue::String(
-                    "test_transaction_retry_produces_samples".to_string()
+                    "test_transaction_retry_produces_samples"
+                        .to_string()
+                        .into()
                 )
             );
 
