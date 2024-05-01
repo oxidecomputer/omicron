@@ -3958,13 +3958,10 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         "Expected ephemeral IP to come from pool2"
     );
 
-    // SNAT comes from default pool, but count does not change because
-    // SNAT IPs can be shared. https://github.com/oxidecomputer/omicron/issues/5043
-    // is about getting SNAT IP from specified pool instead of default.
     assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
 
-    // ephemeral IP comes from specified pool
-    assert_ip_pool_utilization(client, "pool2", 1, 5, 0, 0).await;
+    // ephemeral IP and SNAT IP come from specified pool, so +2
+    assert_ip_pool_utilization(client, "pool2", 2, 5, 0, 0).await;
 
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
     let _: views::IpPoolSiloLink = object_put(
@@ -3983,7 +3980,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // pool1 unchanged
     assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
-    // +1 snat (now that pool2 is default) and +1 ephemeral
+    // +1 ephemeral makes 3. SNAT comes from pool2 again, but count does not
+    // change because SNAT IPs can be shared.
     assert_ip_pool_utilization(client, "pool2", 3, 5, 0, 0).await;
 
     // try to delete association with pool1, but it fails because there is an
@@ -4005,9 +4003,9 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     stop_and_delete_instance(&cptestctx, "pool2-inst").await;
 
     // pool1 is down to 0 because it had 1 snat + 1 ephemeral from pool1-inst
-    // and 1 snat from pool2-inst
     assert_ip_pool_utilization(client, "pool1", 0, 5, 0, 0).await;
-    // pool2 drops one because it had 1 ephemeral from pool2-inst
+    // pool2 drops one because it had 1 snat + 1 ephemeral from pool2-inst, but
+    // the snat is still in use by pool2-inst2
     assert_ip_pool_utilization(client, "pool2", 2, 5, 0, 0).await;
 
     // now unlink works
@@ -4163,8 +4161,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    let msg = "not found: default IP pool for current silo".to_string();
-    assert_eq!(error.message, msg);
+    assert_eq!(error.message, "not found: default IP pool for current silo");
 
     // same deal if you specify a pool that doesn't exist
     let body = params::InstanceCreate {
@@ -4175,7 +4172,10 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
     };
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, msg);
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"nonexistent-pool\""
+    );
 }
 
 #[nexus_test]
