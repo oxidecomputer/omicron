@@ -358,7 +358,7 @@ impl BackgroundTask for InstanceWatcher {
             let mut no_change: usize = 0;
             let mut not_found: usize = 0;
             let mut sled_agent_errors: usize = 0;
-            let mut update_errors: usize = 0;
+            let mut check_errors: usize = 0;
             while let Some(result) = tasks.join_next().await {
                 total += 1;
                 let CheckResult {
@@ -400,7 +400,7 @@ impl BackgroundTask for InstanceWatcher {
                 }
                 if let Some(reason) = update_failure {
                     metric.update_failure(reason);
-                    update_errors += 1;
+                    check_errors += 1;
                 }
             }
 
@@ -411,7 +411,7 @@ impl BackgroundTask for InstanceWatcher {
                 "no_change" => no_change,
                 "not_found" => not_found,
                 "sled_agent_errors" => sled_agent_errors,
-                "update_errors" => update_errors,
+                "check_errors" => check_errors,
                 "pruned_instances" => pruned,
             );
             serde_json::json!({
@@ -421,7 +421,7 @@ impl BackgroundTask for InstanceWatcher {
                 "no_change": no_change,
                 "not_found": not_found,
                 "sled_agent_errors": sled_agent_errors,
-                "update_errors": update_errors,
+                "check_errors": check_errors,
                 "pruned_instances": pruned,
             })
         }
