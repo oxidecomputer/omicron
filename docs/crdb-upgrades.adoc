@@ -80,10 +80,10 @@ this to the desired cluster version set by policy (which we update in
 tock releases).
 
 If they do not match, CockroachDB ensures the
-`cluster.preserve_downgrade_option` setting is not set, which allows
-CockroachDB to perform the upgrade to the desired version. The end
-result of this upgrade is that the current and desired cluster versions
-will match.
+`cluster.preserve_downgrade_option` setting is the default value (an
+empty string), which allows CockroachDB to perform the upgrade to the
+desired version. The end result of this upgrade is that the current and
+desired cluster versions will match.
 
 When they match, Nexus ensures that the
 `cluster.preserve_downgrade_option` setting is set to the current
