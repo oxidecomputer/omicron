@@ -1642,7 +1642,7 @@
             "format": "uuid"
           },
           "sled_state": {
-            "description": "A map of sled id -> state of the sled.",
+            "description": "A map of sled id -> desired state of the sled.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/SledState"
