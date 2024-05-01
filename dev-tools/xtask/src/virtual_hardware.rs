@@ -22,6 +22,14 @@ enum Commands {
         #[clap(long, env)]
         physical_link: Option<String>,
 
+        /// An optional VLAN ID to use for the sc0_1 vnic.
+        ///
+        /// This tags all the simulated sled traffic going over
+        /// `physical_link` with the provided vid and expects
+        /// incoming traffic to be tagged appropriately.
+        #[clap(long)]
+        uplink_vlan_id: Option<u16>,
+
         /// Sets `promisc-filtered` off for the sc0_1 vnic.
         ///
         /// Won't do anything if unsupplied.
@@ -156,6 +164,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
     match args.command {
         Commands::Create {
             physical_link,
+            uplink_vlan_id,
             promiscuous_filter_off,
             softnpu_mode,
             gateway_ip,
@@ -176,7 +185,11 @@ pub fn run_cmd(args: Args) -> Result<()> {
             if matches!(args.scope, Scope::All | Scope::Network)
                 && softnpu_mode == "zone"
             {
-                ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
+                ensure_simulated_links(
+                    &physical_link,
+                    uplink_vlan_id,
+                    promiscuous_filter_off,
+                )?;
                 ensure_softnpu_zone(&npu_zone)?;
                 initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
             }
@@ -293,6 +306,7 @@ fn remove_vnics() -> Result<()> {
 
 fn ensure_simulated_links(
     physical_link: &str,
+    uplink_vlan_id: Option<u16>,
     promiscuous_filter_off: bool,
 ) -> Result<()> {
     for i in 0..=1 {
@@ -309,7 +323,7 @@ fn ensure_simulated_links(
 
     let sc = "sc0_1".to_string();
     if !vnic_exists(&sc) {
-        create_vnic(&sc, physical_link, PXA_MAC_DEFAULT)?;
+        create_vnic(&sc, physical_link, PXA_MAC_DEFAULT, uplink_vlan_id)?;
         if promiscuous_filter_off {
             set_linkprop(&sc, "promisc-filtered", "off")?;
         }
@@ -818,7 +832,12 @@ fn vnic_exists(vnic: &str) -> bool {
     }
 }
 
-fn create_vnic(vnic: &str, physical_link: &str, mac: &str) -> Result<()> {
+fn create_vnic(
+    vnic: &str,
+    physical_link: &str,
+    mac: &str,
+    vid: Option<u16>,
+) -> Result<()> {
     let mut cmd = Command::new(PFEXEC);
     cmd.args([DLADM, "create-vnic", "-t"]);
     cmd.arg(vnic);
@@ -826,6 +845,10 @@ fn create_vnic(vnic: &str, physical_link: &str, mac: &str) -> Result<()> {
     cmd.arg(physical_link);
     cmd.arg("-m");
     cmd.arg(mac);
+    if let Some(vid) = vid {
+        cmd.arg("-v");
+        cmd.arg(vid.to_string());
+    }
     execute(cmd)?;
     Ok(())
 }
