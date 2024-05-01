@@ -914,7 +914,7 @@ impl RunningZone {
 
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links
+        &self.inner.links()
     }
 
     /// Return a mutable reference to the links for this zone.
@@ -1148,6 +1148,11 @@ impl InstalledZone {
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
         self.zonepath.join(Self::ROOT_FS_PATH)
+    }
+
+    /// Return a reference to the links for this zone.
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
     }
 }
 

@@ -704,6 +704,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "xcvradm.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -728,6 +730,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-stub.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -752,6 +756,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-softnpu.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 

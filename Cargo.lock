@@ -11412,6 +11412,7 @@ dependencies = [
  "illumos-utils",
  "omicron-common",
  "omicron-workspace-hack",
+ "serde_json",
  "slog",
  "tokio",
  "uzers",

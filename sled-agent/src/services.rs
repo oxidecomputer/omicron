@@ -2329,6 +2329,23 @@ impl ServiceManager {
                 let mut mgd_service = ServiceBuilder::new("oxide/mgd");
                 let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
 
+                let mut switch_zone_setup_config = PropertyGroupBuilder::new(
+                    "config",
+                )
+                .add_property("zone_name", "astring", &installed_zone.name());
+                for (link, needs_link_local) in
+                    installed_zone.links().iter().zip(links_need_link_local)
+                {
+                    if needs_link_local {
+                        switch_zone_setup_config = switch_zone_setup_config
+                            .add_property(
+                                "link_local_links",
+                                "astring",
+                                link.name(),
+                            );
+                    }
+                }
+
                 // Set properties for each service
                 for service in services {
                     match service {
@@ -2401,9 +2418,6 @@ impl ServiceManager {
                                 info.underlay_address,
                             );
 
-                            let baseboard_info =
-                                serde_json::to_string_pretty(&baseboard)?;
-
                             let wicketd_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
@@ -2435,11 +2449,6 @@ impl ServiceManager {
                                         "rack-subnet",
                                         "astring",
                                         &rack_subnet.net().ip().to_string(),
-                                    )
-                                    .add_property(
-                                        "config/baseboard-file",
-                                        "astring",
-                                        "/opt/oxide/baseboard.json",
                                     );
 
                             wicketd_service = wicketd_service.add_instance(
@@ -2447,20 +2456,14 @@ impl ServiceManager {
                                     .add_property_group(wicketd_config),
                             );
 
-                            let switch_zone_setup_config =
-                                PropertyGroupBuilder::new("config")
-                                    .add_property(
-                                        "config/baseboard-info",
-                                        "astring",
-                                        &baseboard_info,
-                                    );
+                            let baseboard_info =
+                                serde_json::to_string_pretty(&baseboard)?;
 
-                            switch_zone_setup_service =
-                                switch_zone_setup_service.add_instance(
-                                    ServiceInstanceBuilder::new("default")
-                                        .add_property_group(
-                                            switch_zone_setup_config,
-                                        ),
+                            switch_zone_setup_config =
+                                switch_zone_setup_config.clone().add_property(
+                                    "config/baseboard_info",
+                                    "astring",
+                                    &baseboard_info,
                                 );
                         }
                         SwitchService::Dendrite { asic } => {
@@ -2873,7 +2876,15 @@ impl ServiceManager {
                             );
 
                             if is_gimlet {
-                                mg_ddm_config = mg_ddm_config.add_property("dpd_host", "astring", "[::1]").add_property("dpd_port", "astring", &DENDRITE_PORT.to_string())
+                                mg_ddm_config = mg_ddm_config
+                                    .add_property(
+                                        "dpd_host", "astring", "[::1]",
+                                    )
+                                    .add_property(
+                                        "dpd_port",
+                                        "astring",
+                                        &DENDRITE_PORT.to_string(),
+                                    )
                             }
 
                             mg_ddm_service = mg_ddm_service.add_instance(
@@ -2883,6 +2894,13 @@ impl ServiceManager {
                         }
                     }
                 }
+
+                // TODO: add link local address service only if links needed
+                switch_zone_setup_service = switch_zone_setup_service
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(switch_zone_setup_config),
+                    );
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
@@ -2908,52 +2926,55 @@ impl ServiceManager {
 
         // TODO: Remove from here until end
         let running_zone = RunningZone::boot(installed_zone).await?;
-        //
-        //        for (link, needs_link_local) in
-        //            running_zone.links().iter().zip(links_need_link_local)
-        //        {
-        //            if needs_link_local {
-        //                info!(
-        //                    self.inner.log,
-        //                    "Ensuring {}/{} exists in zone",
-        //                    link.name(),
-        //                    IPV6_LINK_LOCAL_NAME
-        //                );
-        //                Zones::ensure_has_link_local_v6_address(
-        //                    Some(running_zone.name()),
-        //                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
-        //                        .unwrap(),
-        //                )?;
-        //            }
-        //        }
 
-        //        if let Some((bootstrap_name, bootstrap_address)) =
-        //            bootstrap_name_and_address.as_ref()
-        //        {
-        //            info!(
-        //                self.inner.log,
-        //                "Ensuring bootstrap address {} exists in {} zone",
-        //                bootstrap_address.to_string(),
-        //                &zone_type_str,
-        //            );
-        //            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
-        //            info!(
-        //                self.inner.log,
-        //                "Forwarding bootstrap traffic via {} to {}",
-        //                bootstrap_name,
-        //                self.inner.global_zone_bootstrap_link_local_address,
-        //            );
-        //            running_zone
-        //                .add_bootstrap_route(
-        //                    BOOTSTRAP_PREFIX,
-        //                    self.inner.global_zone_bootstrap_link_local_address,
-        //                    bootstrap_name,
-        //                )
-        //                .map_err(|err| Error::ZoneCommand {
-        //                    intent: "add bootstrap network route".to_string(),
-        //                    err,
-        //                })?;
-        //        }
+        // TODO: Perhaps add a new tiny service that adds these links?
+        for (link, needs_link_local) in
+            running_zone.links().iter().zip(links_need_link_local)
+        {
+            if needs_link_local {
+                info!(
+                    self.inner.log,
+                    "Ensuring {}/{} exists in zone",
+                    link.name(),
+                    IPV6_LINK_LOCAL_NAME
+                );
+                Zones::ensure_has_link_local_v6_address(
+                    Some(running_zone.name()),
+                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
+                        .unwrap(),
+                )?;
+            }
+        }
+
+        // TODO: Make this part of the switch zone install service
+
+        if let Some((bootstrap_name, bootstrap_address)) =
+            bootstrap_name_and_address.as_ref()
+        {
+            info!(
+                self.inner.log,
+                "Ensuring bootstrap address {} exists in {} zone",
+                bootstrap_address.to_string(),
+                &zone_type_str,
+            );
+            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+            info!(
+                self.inner.log,
+                "Forwarding bootstrap traffic via {} to {}",
+                bootstrap_name,
+                self.inner.global_zone_bootstrap_link_local_address,
+            );
+            running_zone
+                .add_bootstrap_route(
+                    BOOTSTRAP_PREFIX,
+                    self.inner.global_zone_bootstrap_link_local_address,
+                    bootstrap_name,
+                )
+                .map_err(|err| Error::ZoneCommand {
+                    intent: "add bootstrap network route".to_string(),
+                    err,
+                })?;
+        }
 
         //        let addresses = match &request {
         //            ZoneArgs::Omicron(OmicronZoneConfigLocal {

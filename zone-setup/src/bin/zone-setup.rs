@@ -6,11 +6,14 @@
 
 use anyhow::anyhow;
 use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
+use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
+use illumos_utils::zone::Zones;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use serde_json::Value;
 use slog::{info, Logger};
 use std::fs::{
     copy, create_dir_all, metadata, read_to_string, set_permissions, write,
@@ -351,6 +354,18 @@ fn parse_wicket_conf(s: &str) -> anyhow::Result<String> {
         .map_err(|_| anyhow!("ERROR: Invalid baseboard configuration file"))
 }
 
+fn parse_baseboard_info(s: &str) -> anyhow::Result<String> {
+    if s == "" {
+        return Err(anyhow!("ERROR: Missing baseboard information"));
+    };
+
+    let _: Value = serde_json::from_str(s)
+        .map_err(|_| anyhow!("ERROR: Value cannot be parsed as JSON"))?;
+
+    s.parse()
+        .map_err(|_| anyhow!("ERROR: Invalid baseboard configuration file"))
+}
+
 fn parse_boundary(s: &str) -> anyhow::Result<bool> {
     s.parse().map_err(|_| anyhow!("ERROR: Invalid boundary input"))
 }
@@ -441,7 +456,24 @@ async fn do_run() -> Result<(), CmdError> {
                     arg!(
                         -i --baseboard_info <STRING> "baseboard_info"
                     )
-                    .value_parser(parse_wicket_conf),
+                    .required(true)
+                    .value_parser(parse_baseboard_info),
+                )
+                .arg(
+                    arg!(
+                        -n --zone_name <STRING> "zone_name"
+                    )
+                    .required(true),
+                )
+                .arg(
+                    Arg::new("link_local_links")
+                    .short('l')
+                    .long("link_local_links")
+                    .num_args(1..)
+                    .value_delimiter(' ')
+                    .value_parser(value_parser!(String))
+                    .help("List of links that require link local addresses")
+                    .required(true)
                 ),
         )
         .subcommand(
@@ -499,6 +531,11 @@ async fn switch_zone_setup(
 ) -> Result<(), CmdError> {
     let file: &String = matches.get_one("baseboard_file").unwrap();
     let info: &String = matches.get_one("baseboard_info").unwrap();
+    let zone_name: &String = matches.get_one("zone_name").unwrap();
+    let links = matches
+        .get_many::<String>("link_local_links")
+        .unwrap()
+        .collect::<Vec<_>>();
 
     info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
     generate_switch_zone_baseboard_file(file, info)?;
@@ -528,6 +565,25 @@ async fn switch_zone_setup(
     let users = vec![wicket_user, support_user];
     for u in users {
         u.setup_switch_zone_user(&log)?;
+    }
+
+    if links.len() > 0 {
+        info!(&log, "Ensuring link local links"; "links" => ?links, "zone name" => ?zone_name);
+        for link in &links {
+            println!("{link}");
+            println!("{zone_name}");
+            Zones::ensure_has_link_local_v6_address(
+                Some(zone_name),
+                &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
+            )
+            .map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "Could not ensure link local link {:?}: {}",
+                    links,
+                    err
+                ))
+            })?;
+        }
     }
 
     Ok(())

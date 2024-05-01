@@ -163,6 +163,7 @@ impl Display for ServiceInstanceBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct PropertyGroupBuilder {
     name: String,
     /// names of the properties that were added, in the order they were added

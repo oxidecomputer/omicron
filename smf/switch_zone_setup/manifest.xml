@@ -17,14 +17,19 @@
   </dependency>
 
   <exec_method type='method' name='start' 
-    exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i %{config/baseboard-info}'
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i %{config/baseboard_info} -l %{config/link_local_links} -n %{config/zone_name}'
     timeout_seconds='300'>
   </exec_method>
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
 
   <property_group name='startd' type='framework'>
-    <propval name='baseboard-info' type='astring' value='unknown' />
     <propval name='duration' type='astring' value='transient' />
+  </property_group>
+
+  <property_group name="config" type="application">
+    <propval name='baseboard_info' type='astring' value='unknown' />
+    <propval name='link_local_links' type='astring' value='' />
+    <propval name='zone_name' type='astring' value='unknown' />
   </property_group>
 
   <stability value='Unstable' />
