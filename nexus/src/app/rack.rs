@@ -254,6 +254,12 @@ impl super::Nexus {
 
         let rack_network_config = &request.rack_network_config;
 
+        // The `rack` row is created with the rack ID we know when Nexus starts,
+        // but we didn't know the rack subnet until now. Set it.
+        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
+        rack.rack_subnet = Some(rack_network_config.rack_subnet.into());
+        self.datastore().update_rack_subnet(opctx, &rack).await?;
+
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
         // register all switches found during rack initialization
         // identify requested switch from config and associate
@@ -612,8 +618,6 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
           // record port speed
 
-        self.initial_bootstore_sync(&opctx).await?;
-
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -687,31 +691,6 @@ impl super::Nexus {
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
-    }
-
-    pub(crate) async fn initial_bootstore_sync(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(), Error> {
-        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        if rack.rack_subnet.is_some() {
-            return Ok(());
-        }
-        let sa = self.get_any_sled_agent_client(opctx).await?;
-        let result = sa
-            .read_network_bootstore_config_cache()
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: format!("read bootstore network config: {e}"),
-            })?
-            .into_inner();
-
-        rack.rack_subnet =
-            result.body.rack_network_config.map(|x| x.rack_subnet.into());
-
-        self.datastore().update_rack_subnet(opctx, &rack).await?;
-
-        Ok(())
     }
 
     /// Return the list of sleds that are inserted into an initialized rack
@@ -884,14 +863,6 @@ impl super::Nexus {
             })?
             .address();
         Ok(format!("http://{}", addr))
-    }
-
-    async fn get_any_sled_agent_client(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<sled_agent_client::Client, Error> {
-        let url = self.get_any_sled_agent_url(opctx).await?;
-        Ok(sled_agent_client::Client::new(&url, self.log.clone()))
     }
 }
 
