@@ -10,10 +10,11 @@ use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
-use illumos_utils::zone::Zones;
+use illumos_utils::zone::{AddressRequest, Zones};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use serde_json::Value;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::{info, Logger};
 use std::fs::{
     copy, create_dir_all, metadata, read_to_string, set_permissions, write,
@@ -461,7 +462,33 @@ async fn do_run() -> Result<(), CmdError> {
                 )
                 .arg(
                     arg!(
-                        -n --zone_name <STRING> "zone_name"
+                        -a --bootstrap_addr <Ipv6Addr> "bootstrap_addr"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv6),
+                )
+                .arg(
+                    arg!(
+                        -n --bootstrap_name <String> "bootstrap_name"
+                    )
+                    .required(true),
+                )
+                .arg(
+                    arg!(
+                        -v --bootstrap_vnic <String> "bootstrap_vnic"
+                    )
+                    .required(true),
+                )
+                .arg(
+                    arg!(
+                        -g --gz_local_link_addr <Ipv6Addr> "gz_local_link_addr"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv6),
+                )
+                .arg(
+                    arg!(
+                        -z --zone_name <STRING> "zone_name"
                     )
                     .required(true),
                 )
@@ -532,6 +559,11 @@ async fn switch_zone_setup(
     let file: &String = matches.get_one("baseboard_file").unwrap();
     let info: &String = matches.get_one("baseboard_info").unwrap();
     let zone_name: &String = matches.get_one("zone_name").unwrap();
+    let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
+    let bootstrap_name: &String = matches.get_one("bootstrap_name").unwrap();
+    let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
+    let gz_local_link_addr: &Ipv6Addr =
+        matches.get_one("gz_local_link_addr").unwrap();
     let links = matches
         .get_many::<String>("link_local_links")
         .unwrap()
@@ -567,7 +599,14 @@ async fn switch_zone_setup(
         u.setup_switch_zone_user(&log)?;
     }
 
+    // Clap only checks if a flag is present or not. In this case, an
+    // empty list could sneak through if the flag is set without a value
+    // like `-l ""`.
     if links.len() > 0 {
+        return Err(CmdError::Failure(anyhow!(
+            "At least one link local link must be provided"
+        )));
+    } else {
         info!(&log, "Ensuring link local links"; "links" => ?links, "zone name" => ?zone_name);
         for link in &links {
             println!("{link}");
@@ -584,7 +623,43 @@ async fn switch_zone_setup(
                 ))
             })?;
         }
-    }
+    };
+
+    info!(&log, "Ensuring bootstrap address exists in zone";
+    "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic, "bootstrap address" => ?bootstrap_addr);
+    let addrtype =
+        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
+    let addrobj_name = "bootstrap6";
+    let addrobj =
+        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not create new addrobj {:?}: {}",
+                addrobj_name,
+                err
+            ))
+        })?;
+    let _ = Zones::ensure_address(Some(&zone_name), &addrobj, addrtype)
+        .map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not address {} {:?}: {}",
+                addrobj,
+                addrtype,
+                err
+            ))
+        })?;
+
+    info!(
+        &log,
+        "Forwarding bootstrap traffic via {} to {}",
+        bootstrap_name,
+        gz_local_link_addr
+    );
+    Route::add_bootstrap_route(
+        BOOTSTRAP_PREFIX,
+        *gz_local_link_addr,
+        &bootstrap_name,
+    )
+    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }

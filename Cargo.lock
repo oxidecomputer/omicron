@@ -11413,6 +11413,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "serde_json",
+ "sled-hardware-types",
  "slog",
  "tokio",
  "uzers",
