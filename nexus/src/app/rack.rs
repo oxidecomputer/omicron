@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
+use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::deployment::blueprint_zone_type;
@@ -56,7 +57,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
@@ -776,7 +780,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         sled: UninitializedSledId,
-    ) -> Result<(), Error> {
+    ) -> Result<SledUuid, Error> {
         let baseboard_id = sled.clone().into();
         let hw_baseboard_id = self
             .db_datastore
@@ -787,14 +791,26 @@ impl super::Nexus {
         let rack_subnet =
             Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
-        let allocation = self
+        let allocation = match self
             .db_datastore
             .allocate_sled_underlay_subnet_octets(
                 opctx,
                 self.rack_id,
                 hw_baseboard_id,
             )
-            .await?;
+            .await?
+        {
+            SledUnderlayAllocationResult::New(allocation) => allocation,
+            SledUnderlayAllocationResult::Existing(allocation) => {
+                return Err(Error::ObjectAlreadyExists {
+                    type_name: ResourceType::Sled,
+                    object_name: format!(
+                        "{} / {} ({})",
+                        sled.serial, sled.part, allocation.sled_id
+                    ),
+                });
+            }
+        };
 
         // Convert `UninitializedSledId` to the sled-agent type
         let baseboard_id = sled_agent_client::types::BaseboardId {
@@ -809,7 +825,7 @@ impl super::Nexus {
                 generation: 0,
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
-                    id: allocation.sled_id,
+                    id: allocation.sled_id.into_untyped_uuid(),
                     rack_id: allocation.rack_id,
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
@@ -852,7 +868,7 @@ impl super::Nexus {
             ),
         })?;
 
-        Ok(())
+        Ok(allocation.sled_id.into())
     }
 
     async fn get_any_sled_agent_url(
