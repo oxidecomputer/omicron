@@ -647,14 +647,35 @@ async fn sic_allocate_instance_snat_ip(
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
 
-    let (.., pool) = datastore
-        .ip_pools_fetch_default(&opctx)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let pool_id = pool.identity.id;
+    // If an ephemeral IP was asked for and it specified a pool, we
+    // want to use that pool for the SNAT IP. Otherwise we will use
+    // the default pool.
+    let maybe_pool = saga_params.create_params.external_ips.iter().find_map(
+        |eip| match eip {
+            params::ExternalIpCreate::Ephemeral { pool: Some(pool) } => {
+                Some(pool)
+            }
+            params::ExternalIpCreate::Ephemeral { pool: None } => None,
+            params::ExternalIpCreate::Floating { .. } => None,
+        },
+    );
+
+    let maybe_pool = match maybe_pool {
+        Some(pool) => Some(
+            osagactx
+                .nexus()
+                .ip_pool_lookup(&opctx, pool)
+                .map_err(ActionError::action_failed)?
+                .lookup_for(authz::Action::CreateChild)
+                .await
+                .map_err(ActionError::action_failed)?
+                .0,
+        ),
+        None => None,
+    };
 
     datastore
-        .allocate_instance_snat_ip(&opctx, ip_id, instance_id, pool_id)
+        .allocate_instance_snat_ip(&opctx, ip_id, instance_id, maybe_pool)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

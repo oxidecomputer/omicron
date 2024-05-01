@@ -67,12 +67,13 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: Uuid,
-        pool_id: Uuid,
+        pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
         let data = IncompleteExternalIp::for_instance_source_nat(
             ip_id,
             instance_id,
-            pool_id,
+            authz_pool.id(),
         );
         self.allocate_external_ip(opctx, data).await
     }

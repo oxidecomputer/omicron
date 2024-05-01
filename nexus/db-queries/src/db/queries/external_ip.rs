@@ -1038,15 +1038,6 @@ mod tests {
             instance_id
         }
 
-        async fn default_pool_id(&self) -> Uuid {
-            let (.., pool) = self
-                .db_datastore
-                .ip_pools_fetch_default(&self.opctx)
-                .await
-                .expect("Failed to lookup default ip pool");
-            pool.identity.id
-        }
-
         async fn success(mut self) {
             self.db.cleanup().await.unwrap();
             self.logctx.cleanup_successful();
@@ -1075,7 +1066,7 @@ mod tests {
                     &context.opctx,
                     id,
                     instance_id,
-                    context.default_pool_id().await,
+                    None,
                 )
                 .await
                 .expect("Failed to allocate instance external IP address");
@@ -1092,7 +1083,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                context.default_pool_id().await,
+                None,
             )
             .await
             .expect_err(
@@ -1148,7 +1139,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                context.default_pool_id().await,
+                None,
             )
             .await;
         assert!(
@@ -1225,7 +1216,7 @@ mod tests {
                     &context.opctx,
                     Uuid::new_v4(),
                     instance_id,
-                    context.default_pool_id().await,
+                    None,
                 )
                 .await
                 .expect("Failed to allocate instance external IP address");
@@ -1253,7 +1244,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                context.default_pool_id().await,
+                None,
             )
             .await
             .expect("Failed to allocate instance external IP address");
@@ -1280,7 +1271,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                context.default_pool_id().await,
+                None,
             )
             .await
             .expect("Failed to allocate instance external IP address");
@@ -1589,12 +1580,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_instance_snat_ip(
-                &context.opctx,
-                id,
-                instance_id,
-                context.default_pool_id().await,
-            )
+            .allocate_instance_snat_ip(&context.opctx, id, instance_id, None)
             .await
             .expect("Failed to allocate instance SNAT IP address");
         assert_eq!(ip.kind, IpKind::SNat);
@@ -1606,12 +1592,7 @@ mod tests {
         // value.
         let new_ip = context
             .db_datastore
-            .allocate_instance_snat_ip(
-                &context.opctx,
-                id,
-                instance_id,
-                context.default_pool_id().await,
-            )
+            .allocate_instance_snat_ip(&context.opctx, id, instance_id, None)
             .await
             .expect("Failed to allocate instance SNAT IP address");
 
