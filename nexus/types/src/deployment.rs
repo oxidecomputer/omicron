@@ -116,7 +116,7 @@ pub struct Blueprint {
     /// A map of sled id -> disks in use on each sled.
     pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
 
-    /// A map of sled id -> state of the sled.
+    /// A map of sled id -> desired state of the sled.
     pub sled_state: BTreeMap<SledUuid, SledState>,
 
     /// which blueprint this blueprint is based on
