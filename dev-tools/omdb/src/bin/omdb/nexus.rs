@@ -889,6 +889,83 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "instance_watcher" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// total number of instances checked
+            total_instances: usize,
+
+            /// number of instances whose check succeeded without a state
+            /// change
+            no_change: usize,
+
+            /// number of instances whose state has changed
+            instances_updated: usize,
+
+            /// number of instances whose VMM state has changed
+            vmms_updated: usize,
+
+            /// number of instances which the sled-agent indicated no longer exists
+            not_found: usize,
+
+            /// number of unexpected errors returned by sled-agent
+            sled_agent_errors: usize,
+
+            /// number of instances for which the sled agent was unreachable
+            unreachable_instances: usize,
+
+            /// number of checks that could not be completed successfully
+            check_errors: usize,
+
+            /// number of stale instance metrics that were deleted.
+            pruned_instances: usize,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!(
+                    "    total instances checked: {}",
+                    success.total_instances
+                );
+                println!(
+                    "    checks completed successfully: {}",
+                    success.total_instances - success.check_errors
+                );
+                println!("      -> {} instances unchanged", success.no_change);
+                println!(
+                    "      -> {} instance states updated",
+                    success.instances_updated
+                );
+                println!(
+                    "      -> {} VMM states updated",
+                    success.vmms_updated
+                );
+                println!(
+                    "      -> {} instances no longer exist",
+                    success.not_found
+                );
+                println!(
+                    "      -> {} sled-agent errors",
+                    success.sled_agent_errors
+                );
+                println!(
+                    "      -> {} instances with unreachable sled-agents",
+                    success.unreachable_instances
+                );
+                println!(
+                    "    checks that could not be completed successfully: {}",
+                    success.check_errors
+                );
+                println!(
+                    "    stale instance metrics removed: {}",
+                    success.pruned_instances
+                )
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

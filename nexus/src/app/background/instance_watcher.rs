@@ -357,6 +357,7 @@ impl BackgroundTask for InstanceWatcher {
             let mut vmms_updated: usize = 0;
             let mut no_change: usize = 0;
             let mut not_found: usize = 0;
+            let mut unreachable_instances: usize = 0;
             let mut sled_agent_errors: usize = 0;
             let mut check_errors: usize = 0;
             while let Some(result) = tasks.join_next().await {
@@ -365,7 +366,7 @@ impl BackgroundTask for InstanceWatcher {
                     target,
                     instance_updated,
                     check_failure,
-                    error: update_failure,
+                    error,
                     ..
                 } = result.expect(
                     "a `JoinError` is returned if a spawned task \
@@ -393,13 +394,16 @@ impl BackgroundTask for InstanceWatcher {
                 if let Some(reason) = check_failure {
                     match reason {
                         CheckFailure::NoSuchInstance => not_found += 1,
+                        CheckFailure::SledAgentUnreachable => {
+                            unreachable_instances += 1
+                        }
                         _ => sled_agent_errors += 1,
                     }
 
                     metric.check_failure(reason);
                 }
-                if let Some(reason) = update_failure {
-                    metric.update_failure(reason);
+                if let Some(reason) = error {
+                    metric.check_error(reason);
                     check_errors += 1;
                 }
             }
@@ -407,6 +411,7 @@ impl BackgroundTask for InstanceWatcher {
             slog::info!(opctx.log, "all instance checks complete";
                 "total_instances" => total,
                 "instances_updated" => instances_updated,
+                "unreachable_instances" => unreachable_instances,
                 "vmms_updated" => vmms_updated,
                 "no_change" => no_change,
                 "not_found" => not_found,
@@ -420,6 +425,7 @@ impl BackgroundTask for InstanceWatcher {
                 "vmms_updated": vmms_updated,
                 "no_change": no_change,
                 "not_found": not_found,
+                "unreachable_instances": unreachable_instances,
                 "sled_agent_errors": sled_agent_errors,
                 "check_errors": check_errors,
                 "pruned_instances": pruned,
@@ -554,7 +560,7 @@ mod metrics {
             self.touched = true;
         }
 
-        pub(super) fn update_failure(&mut self, reason: CheckError) {
+        pub(super) fn check_error(&mut self, reason: CheckError) {
             self.update_failures
                 .entry(reason)
                 .or_insert_with(|| InstanceCheckErrors {
@@ -612,7 +618,8 @@ mod metrics {
         datum: Cumulative<u64>,
     }
 
-    /// The number of failed instance updates for an instance and sled agent pair.
+    /// The number of instance checks that were unsuccessful for an instance and
+    /// sled agent.
     #[derive(Clone, Debug, Metric)]
     struct InstanceCheckErrors {
         /// The reason why the check failed.
