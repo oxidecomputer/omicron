@@ -227,6 +227,14 @@ If you're using an existing external network, you likely don't need to specify a
     --physical-link igb0           # The physical link for your external network.
 ----
 
+Additionally, you can also set a VLAN ID to demarcate the external Omicron traffic going over the chosen physical link:
+
+[source,base]
+----
+    --uplink-vlan-id <VID> --promiscuous-filter-off
+----
+Note that the chosen gateway must be reachable on this VLAN and configured to return back tagged traffic. The specific configuration necessary is outside the scope of this document.
+
 If you're running on a bench Gimlet, you may not need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU. You can tweak what resources are created with the `--scope` flag.
 
 Later, you can clean up the resources created by `cargo xtask virtual-hardware create` with:
