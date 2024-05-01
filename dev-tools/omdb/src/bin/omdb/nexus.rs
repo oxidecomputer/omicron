@@ -1231,14 +1231,16 @@ async fn cmd_nexus_sled_add(
     args: &SledAddArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    client
+    let sled_id = client
         .sled_add(&UninitializedSledId {
             part: args.part.clone(),
             serial: args.serial.clone(),
         })
         .await
-        .context("adding sled")?;
-    eprintln!("added sled {} ({})", args.serial, args.part);
+        .context("adding sled")?
+        .into_inner()
+        .id;
+    eprintln!("added sled {} ({}): {sled_id}", args.serial, args.part);
     Ok(())
 }
 

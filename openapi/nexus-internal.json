@@ -1223,8 +1223,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -4352,6 +4359,18 @@
           "usable_physical_ram"
         ]
       },
+      "SledId": {
+        "description": "The unique ID of a sled.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "SledInstanceState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
@@ -4584,6 +4603,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
       },
