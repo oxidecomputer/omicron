@@ -14,6 +14,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
 use nexus_types::inventory::Collection;
 use omicron_common::address::NEXUS_REDUNDANCY;
@@ -130,7 +131,8 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let sled_rows = datastore.sled_list_all_batched(opctx).await?;
+        let sled_rows =
+            datastore.sled_list_all_batched(opctx, SledFilter::All).await?;
         let zpool_rows =
             datastore.zpool_list_all_external_batched(opctx).await?;
         let ip_pool_range_rows = {

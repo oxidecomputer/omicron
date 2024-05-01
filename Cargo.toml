@@ -202,7 +202,7 @@ crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", re
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "1ef72f3c935e7dc936bf43310c04668fb60d7a20" }
 csv = "1.3.0"
 curve25519-dalek = "4"
-datatest-stable = "0.2.6"
+datatest-stable = "0.2.9"
 display-error-chain = "0.2.0"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
@@ -267,7 +267,6 @@ libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "6fffcc81d2c
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
-mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8207cb9c90cd7144c3f351823bfb2ae3e221ad10" }
@@ -426,7 +425,7 @@ tokio-stream = "0.1.15"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.12"
-toml_edit = "0.22.9"
+toml_edit = "0.22.12"
 tough = { version = "0.17.1", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"

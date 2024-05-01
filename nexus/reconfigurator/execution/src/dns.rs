@@ -478,6 +478,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -497,7 +498,6 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -561,7 +561,7 @@ mod test {
         let mut blueprint_zones = BTreeMap::new();
         for (sled_id, zones_config) in collection.omicron_zones {
             blueprint_zones.insert(
-                sled_id.into_untyped_uuid(),
+                sled_id,
                 BlueprintZonesConfig {
                     generation: zones_config.zones.generation,
                     zones: zones_config
@@ -631,9 +631,8 @@ mod test {
             .zip(possible_sled_subnets)
             .enumerate()
             .map(|(i, (sled_id, subnet))| {
-                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 let sled_info = Sled {
-                    id: sled_id,
+                    id: *sled_id,
                     sled_agent_address: get_sled_address(Ipv6Subnet::new(
                         subnet.network(),
                     )),
@@ -641,7 +640,7 @@ mod test {
                     // Scrimlets.
                     is_scrimlet: i < 2,
                 };
-                (sled_id, sled_info)
+                (*sled_id, sled_info)
             })
             .collect();
 
@@ -1191,7 +1190,10 @@ mod test {
         // Now, go through the motions of provisioning a new Nexus zone.
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
-        let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
+        let sled_rows = datastore
+            .sled_list_all_batched(&opctx, SledFilter::All)
+            .await
+            .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows = {

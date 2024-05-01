@@ -139,12 +139,12 @@ impl ReconfiguratorSim {
         for (_, zone) in
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
-            if let Some(external_ip) = zone.zone_type.external_ip() {
+            if let Some((external_ip, nic)) =
+                zone.zone_type.external_networking()
+            {
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
-            }
-            if let Some(nic) = zone.zone_type.opte_vnic() {
                 let nic = OmicronZoneNic {
                     id: nic.id,
                     mac: nic.mac,

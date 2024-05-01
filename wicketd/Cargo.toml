@@ -29,6 +29,7 @@ illumos-utils.workspace = true
 ipnetwork.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
+once_cell.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true

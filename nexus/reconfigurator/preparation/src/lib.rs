@@ -24,6 +24,7 @@ use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
@@ -189,7 +190,7 @@ pub async fn reconfigurator_state_load(
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
     let sled_rows = datastore
-        .sled_list_all_batched(opctx)
+        .sled_list_all_batched(opctx, SledFilter::All)
         .await
         .context("listing sleds")?;
     let zpool_rows = datastore

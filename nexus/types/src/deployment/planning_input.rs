@@ -10,6 +10,7 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use clap::ValueEnum;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -296,7 +297,7 @@ pub struct OmicronZoneNic {
 /// The meaning of a particular filter should not be overloaded -- each time a
 /// new use case wants to make a decision based on the zone disposition, a new
 /// variant should be added to this enum.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, ValueEnum)]
 pub enum SledFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
@@ -305,11 +306,14 @@ pub enum SledFilter {
     All,
 
     /// Sleds that are eligible for discretionary services.
-    EligibleForDiscretionaryServices,
+    Discretionary,
 
     /// Sleds that are in service (even if they might not be eligible for
     /// discretionary services).
     InService,
+
+    /// Sleds whose sled agents should be queried for inventory
+    QueryDuringInventory,
 
     /// Sleds on which reservations can be created.
     ReservationCreate,
@@ -363,8 +367,9 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::Discretionary => true,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
@@ -372,15 +377,17 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
             },
@@ -408,15 +415,17 @@ impl SledState {
         match self {
             SledState::Active => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::Discretionary => true,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
             },

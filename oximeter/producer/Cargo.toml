@@ -19,7 +19,11 @@ tokio.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+internal-dns.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
 clap.workspace = true
+omicron-test-utils.workspace = true
+serde_json.workspace = true
+slog-term.workspace = true

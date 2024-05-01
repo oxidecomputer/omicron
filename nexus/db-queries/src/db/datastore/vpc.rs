@@ -1567,7 +1567,8 @@ mod tests {
 
         fn blueprint_zone_configs(
             &self,
-        ) -> impl Iterator<Item = (Uuid, BlueprintZoneConfig)> + '_ {
+        ) -> impl Iterator<Item = (SledUuid, BlueprintZoneConfig)> + '_
+        {
             self.nexuses.iter().zip(self.db_nics()).map(|(nexus, nic)| {
                 let config = BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -1597,7 +1598,7 @@ mod tests {
                         },
                     ),
                 };
-                (nexus.sled_id.into_untyped_uuid(), config)
+                (nexus.sled_id, config)
             })
         }
     }

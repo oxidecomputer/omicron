@@ -11,7 +11,6 @@ use chrono::Utc;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
@@ -57,6 +56,7 @@ use omicron_test_utils::dev;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
@@ -592,9 +592,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         // Set up a test metric producer server
         let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
-        let producer = start_producer_server(nexus_internal_addr, producer_id)
-            .await
-            .unwrap();
+        let producer =
+            start_producer_server(nexus_internal_addr, producer_id).unwrap();
         register_test_producer(&producer).unwrap();
 
         self.producer = Some(producer);
@@ -758,7 +757,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             ] {
                 if let Some(sa) = maybe_sled_agent {
                     blueprint_zones.insert(
-                        sa.sled_agent.id,
+                        SledUuid::from_untyped_uuid(sa.sled_agent.id),
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
                             zones: zones.clone(),
@@ -1417,7 +1416,7 @@ impl oximeter::Producer for IntegrationProducer {
 ///
 /// Actual producers can be registered with the [`register_producer`]
 /// helper function.
-pub async fn start_producer_server(
+pub fn start_producer_server(
     nexus_address: SocketAddr,
     id: Uuid,
 ) -> Result<ProducerServer, String> {
@@ -1430,23 +1429,18 @@ pub async fn start_producer_server(
         id,
         kind: ProducerKind::Service,
         address: producer_address,
-        base_route: "/collect".to_string(),
+        base_route: String::new(), // Unused, will be removed.
         interval: Duration::from_secs(1),
     };
     let config = oximeter_producer::Config {
         server_info,
-        registration_address: nexus_address,
-        dropshot: ConfigDropshot {
-            bind_address: producer_address,
-            ..Default::default()
-        },
+        registration_address: Some(nexus_address),
+        request_body_max_bytes: 1024,
         log: LogConfig::Config(ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Error,
         }),
     };
-    let server =
-        ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
-    Ok(server)
+    ProducerServer::start(&config).map_err(|e| e.to_string())
 }
 
 /// Registers an arbitrary producer with the test server.

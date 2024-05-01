@@ -11,6 +11,7 @@ use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -44,6 +45,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
@@ -53,11 +55,10 @@ use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
-use oximeter::types::ProducerResults;
-use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -78,7 +79,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_producers_post)?;
         api.register(cpapi_assigned_producers_list)?;
         api.register(cpapi_collectors_post)?;
-        api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
 
         api.register(cpapi_upstairs_repair_start)?;
@@ -94,6 +94,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
+        api.register(bgtask_activate)?;
 
         api.register(blueprint_list)?;
         api.register(blueprint_view)?;
@@ -375,15 +376,23 @@ async fn cpapi_disk_remove_read_only_parent(
 async fn cpapi_producers_post(
     request_context: RequestContext<Arc<ServerContext>>,
     producer_info: TypedBody<ProducerEndpoint>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError> {
     let context = request_context.context();
     let handler = async {
         let nexus = &context.nexus;
         let producer_info = producer_info.into_inner();
         let opctx =
             crate::context::op_context_for_internal_api(&request_context).await;
-        nexus.assign_producer(&opctx, producer_info).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        nexus
+            .assign_producer(&opctx, producer_info)
+            .await
+            .map_err(HttpError::from)
+            .map(|_| {
+                HttpResponseCreated(ProducerRegistrationResponse {
+                    lease_duration:
+                        crate::app::oximeter::PRODUCER_LEASE_DURATION,
+                })
+            })
     };
     context
         .internal_latencies
@@ -455,25 +464,6 @@ async fn cpapi_collectors_post(
         nexus.upsert_oximeter_collector(&opctx, &oximeter_info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
-    context
-        .internal_latencies
-        .instrument_dropshot_handler(&request_context, handler)
-        .await
-}
-
-/// Endpoint for oximeter to collect nexus server metrics.
-#[endpoint {
-    method = GET,
-    path = "/metrics/collect/{producer_id}",
-}]
-async fn cpapi_metrics_collect(
-    request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let context = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    let handler =
-        async { collect(&context.producer_registry, producer_id).await };
     context
         .internal_latencies
         .instrument_dropshot_handler(&request_context, handler)
@@ -749,12 +739,18 @@ struct BackgroundTaskPathParam {
     bgtask_name: String,
 }
 
+/// Query parameters for Background Task activation requests.
+#[derive(Deserialize, JsonSchema)]
+struct BackgroundTasksActivateRequest {
+    bgtask_names: BTreeSet<String>,
+}
+
 /// Fetch status of one background task
 ///
 /// This is exposed for support and debugging.
 #[endpoint {
     method = GET,
-    path = "/bgtasks/{bgtask_name}",
+    path = "/bgtasks/view/{bgtask_name}",
 }]
 async fn bgtask_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -767,6 +763,27 @@ async fn bgtask_view(
         let path = path_params.into_inner();
         let bgtask = nexus.bgtask_status(&opctx, &path.bgtask_name).await?;
         Ok(HttpResponseOk(bgtask))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Activates one or more background tasks, causing them to be run immediately
+/// if idle, or scheduled to run again as soon as possible if already running.
+#[endpoint {
+    method = POST,
+    path = "/bgtasks/activate",
+}]
+async fn bgtask_activate(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<BackgroundTasksActivateRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let body = body.into_inner();
+        nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
