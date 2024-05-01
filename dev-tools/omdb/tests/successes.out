@@ -562,6 +562,10 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
      internal_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
      nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1         
 
+   ----------------------------------
+     vendor   model   serial  status 
+   ----------------------------------
+
   METADATA:
     internal DNS version:  1 (unchanged)
     external DNS version:  2 (unchanged)

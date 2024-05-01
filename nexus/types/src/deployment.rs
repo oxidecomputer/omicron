@@ -965,12 +965,42 @@ impl BlueprintDiff {
         self.sleds.unchanged.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
+    pub fn physical_disks_added(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &DiffBlueprintPhysicalDiskConfig)>
+    {
+        self.physical_disks
+            .added
+            .iter()
+            .map(|(sled_id, disks)| (*sled_id, disks))
+    }
+    pub fn physical_disks_removed(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &DiffBlueprintPhysicalDiskConfig)>
+    {
+        self.physical_disks
+            .removed
+            .iter()
+            .map(|(sled_id, disks)| (*sled_id, disks))
+    }
+
+    pub fn physical_disks_unchanged(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &DiffBlueprintPhysicalDiskConfig)>
+    {
+        self.physical_disks
+            .unchanged
+            .iter()
+            .map(|(sled_id, disks)| (*sled_id, disks))
+    }
+
     /// Return a struct that can be used to display the diff.
     pub fn display(&self) -> BlueprintDiffDisplay<'_> {
         BlueprintDiffDisplay::new(self)
     }
 }
 
+// TODO: Rename to `DiffZones`?
 #[derive(Debug)]
 struct DiffSleds {
     added: BTreeMap<SledUuid, BlueprintZonesConfig>,
@@ -1020,13 +1050,15 @@ impl DiffSleds {
 }
 
 #[derive(Debug)]
-struct DiffBlueprintPhysicalDiskConfig {
+pub struct DiffBlueprintPhysicalDiskConfig {
     // Disks that come from inventory don't have generation numbers
-    before_generation: Option<Generation>,
-    after_generation: Option<Generation>,
+    pub before_generation: Option<Generation>,
+
+    // Disks that are removed don't have "after" generation numbers
+    pub after_generation: Option<Generation>,
 
     // Sleds added, removed, or unmodified
-    disks: BTreeSet<DiskIdentity>,
+    pub disks: BTreeSet<DiskIdentity>,
 }
 
 #[derive(Debug, Default)]
@@ -1142,6 +1174,7 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         }
 
         writeln!(f, "\n{}", self.make_zone_diff_table())?;
+        writeln!(f, "\n{}", self.make_disk_diff_table())?;
 
         writeln!(f, "\n{}", table_display::metadata_diff_heading())?;
         writeln!(f, "{}", self.make_metadata_diff_table())?;
@@ -1573,7 +1606,6 @@ mod table_display {
     use crate::sectioned_table::SectionSpacing;
     use crate::sectioned_table::StBuilder;
     use crate::sectioned_table::StSectionBuilder;
-    use sled_agent_client::types::OmicronPhysicalDiskConfig;
     use tabled::builder::Builder;
     use tabled::settings::object::Columns;
     use tabled::settings::Modify;
@@ -1585,7 +1617,7 @@ mod table_display {
         pub(super) fn make_zone_table(&self) -> Table {
             let blueprint_zones = &self.blueprint.blueprint_zones;
             let mut builder = StBuilder::new();
-            builder.push_header_row(header_row());
+            builder.push_header_row(zone_header_row());
 
             for (sled_id, sled_zones) in blueprint_zones {
                 let heading = format!(
@@ -1633,7 +1665,7 @@ mod table_display {
                         for disk in &config.disks {
                             add_physical_disk_record(
                                 DISK_INDENT.to_string(),
-                                &disk,
+                                &disk.identity,
                                 section,
                             );
                         }
@@ -1709,7 +1741,7 @@ mod table_display {
             // Add the unchanged prefix to the zone indent since the first
             // column will be used as the prefix.
             let mut builder = StBuilder::new();
-            builder.push_header_row(diff_header_row());
+            builder.push_header_row(diff_zone_header_row());
 
             // The order is:
             //
@@ -1778,6 +1810,78 @@ mod table_display {
                         add_whole_sled_records(
                             sled_id,
                             &sled_zones.clone().into(),
+                            WholeSledKind::Added,
+                            section,
+                        );
+                    }
+                },
+            );
+
+            builder.build()
+        }
+
+        pub(super) fn make_disk_diff_table(&self) -> Table {
+            let diff = self.diff;
+
+            // Add the unchanged prefix to the indent since the first
+            // column will be used as the prefix.
+            let mut builder = StBuilder::new();
+            builder.push_header_row(diff_disk_header_row());
+
+            // The order is:
+            //
+            // 1. Unchanged
+            // 2. Removed
+            // 3. Added
+            //
+            // The idea behind the order is to (a) group all changes together
+            // and (b) put changes towards the bottom, so people have to scroll
+            // back less.
+            //
+            // Zones within a modified sled follow the same order. If you're
+            // changing the order here, make sure to keep that in sync.
+
+            // First, unchanged sleds.
+            builder.make_section(
+                SectionSpacing::Always,
+                unchanged_sleds_heading(),
+                |section| {
+                    for (sled_id, disks) in diff.physical_disks_unchanged() {
+                        add_whole_disk_records(
+                            sled_id,
+                            &disks,
+                            WholeSledKind::Unchanged,
+                            section,
+                        );
+                    }
+                },
+            );
+
+            // Then, removed sleds.
+            builder.make_section(
+                SectionSpacing::Always,
+                removed_sleds_heading(),
+                |section| {
+                    for (sled_id, disks) in diff.physical_disks_removed() {
+                        add_whole_disk_records(
+                            sled_id,
+                            &disks,
+                            WholeSledKind::Removed,
+                            section,
+                        );
+                    }
+                },
+            );
+
+            // Finally, added sleds.
+            builder.make_section(
+                SectionSpacing::Always,
+                added_sleds_heading(),
+                |section| {
+                    for (sled_id, disks) in diff.physical_disks_added() {
+                        add_whole_disk_records(
+                            sled_id,
+                            &disks,
                             WholeSledKind::Added,
                             section,
                         );
@@ -1896,6 +2000,44 @@ mod table_display {
                         add_zone_record(
                             format!("{prefix}{ZONE_INDENT}"),
                             &zone,
+                            s2,
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    fn add_whole_disk_records(
+        sled_id: SledUuid,
+        disks: &DiffBlueprintPhysicalDiskConfig,
+        kind: WholeSledKind,
+        section: &mut StSectionBuilder,
+    ) {
+        let heading = format!(
+            "{}{SLED_INDENT}sled {sled_id}: blueprint disks: old gen {:?}, new gen {:?}",
+            kind.prefix(),
+            disks.before_generation,
+            disks.after_generation
+        );
+        let prefix = kind.prefix();
+        let status = kind.status();
+        section.make_subsection(SectionSpacing::Always, heading, |s2| {
+            // Also add another section for zones.
+            for disk in &disks.disks {
+                match status {
+                    Some(status) => {
+                        add_physical_disk_record_with_status(
+                            format!("{prefix}{DISK_INDENT}"),
+                            disk,
+                            status,
+                            s2,
+                        );
+                    }
+                    None => {
+                        add_physical_disk_record(
+                            format!("{prefix}{DISK_INDENT}"),
+                            disk,
                             s2,
                         );
                     }
@@ -2039,14 +2181,29 @@ mod table_display {
     /// This is the meat-and-potatoes of the diff display.
     fn add_physical_disk_record(
         first_column: String,
-        disk: &OmicronPhysicalDiskConfig,
+        disk: &DiskIdentity,
         section: &mut StSectionBuilder,
     ) {
         section.push_record(vec![
             first_column,
-            disk.identity.vendor.to_string(),
-            disk.identity.model.to_string(),
-            disk.identity.serial.to_string(),
+            disk.vendor.to_string(),
+            disk.model.to_string(),
+            disk.serial.to_string(),
+        ]);
+    }
+
+    fn add_physical_disk_record_with_status(
+        first_column: String,
+        disk: &DiskIdentity,
+        status: &str,
+        section: &mut StSectionBuilder,
+    ) {
+        section.push_record(vec![
+            first_column,
+            disk.vendor.to_string(),
+            disk.model.to_string(),
+            disk.serial.to_string(),
+            status.to_string(),
         ]);
     }
 
@@ -2200,7 +2357,7 @@ mod table_display {
     const MODEL: &str = "model";
     const SERIAL: &str = "serial";
 
-    fn header_row() -> Vec<String> {
+    fn zone_header_row() -> Vec<String> {
         vec![
             // First column is so that the header border aligns with the ZONE
             // TABLE section header.
@@ -2212,7 +2369,7 @@ mod table_display {
         ]
     }
 
-    fn diff_header_row() -> Vec<String> {
+    fn diff_zone_header_row() -> Vec<String> {
         vec![
             // First column is so that the header border aligns with the ZONE
             // TABLE section header.
@@ -2221,6 +2378,18 @@ mod table_display {
             ZONE_ID.to_string(),
             DISPOSITION.to_string(),
             UNDERLAY_IP.to_string(),
+            STATUS.to_string(),
+        ]
+    }
+
+    fn diff_disk_header_row() -> Vec<String> {
+        vec![
+            // First column is so that the header border aligns with the ZONE
+            // TABLE section header.
+            DISK_HEAD_INDENT.to_string(),
+            VENDOR.to_string(),
+            MODEL.to_string(),
+            SERIAL.to_string(),
             STATUS.to_string(),
         ]
     }
