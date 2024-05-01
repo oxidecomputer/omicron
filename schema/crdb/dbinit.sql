@@ -2912,6 +2912,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.rot_image_error AS ENUM (
+        'unchecked',
+        'first_page_erased',
+        'partially_programmed',
+        'invalid_length',
+        'header_not_programmed',
+        'bootloader_too_small',
+        'bad_magic',
+        'header_image_size',
+        'unaligned_length',
+        'unsupported_type',
+        'not_thumb2',
+        'reset_vector',
+        'signature'
+);
+
 -- root of trust information reported by SP
 -- There's usually one row here for each row in inv_service_processor, but not
 -- necessarily.
@@ -2933,6 +2949,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
     slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
     slot_a_sha3_256 TEXT, -- nullable
     slot_b_sha3_256 TEXT, -- nullable
+    stage0_fwid TEXT, -- nullable
+    stage0next_fwid TEXT, -- nullable
+
+    slot_a_error omicron.public.rot_image_error, -- nullable
+    slot_b_error omicron.public.rot_image_error, -- nullable
+    stage0_error omicron.public.rot_image_error, -- nullable
+    stage0next_error omicron.public.rot_image_error, -- nullable
 
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
@@ -2941,7 +2964,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
     'sp_slot_0',
     'sp_slot_1',
     'rot_slot_A',
-    'rot_slot_B'
+    'rot_slot_B',
+    'stage0',
+    'stage0next'
 );
 
 -- cabooses found
@@ -4020,7 +4045,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '68.0.0', NULL)
+    (TRUE, NOW(), NOW(), '69.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

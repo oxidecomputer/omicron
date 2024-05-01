@@ -18,14 +18,14 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "dev-0"
 device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 1"
-capabilities.bits = 0x2
+capabilities = 0x2
 presence = "Present"
 
 [[simulated_sps.sidecar.components]]
 id = "dev-1"
 device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 2"
-capabilities.bits = 0x2
+capabilities = 0x2
 presence = "Failed"
 
 [[simulated_sps.sidecar]]
@@ -46,7 +46,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:0"
 
@@ -54,7 +54,7 @@ serial_console = "[::1]:0"
 id = "dev-0"
 device = "fake-tmp-sensor"
 description = "FAKE temperature sensor"
-capabilities.bits = 0x2
+capabilities = 0x2
 presence = "Failed"
 
 [[simulated_sps.gimlet]]
@@ -68,7 +68,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:0"
 

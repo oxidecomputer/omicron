@@ -17,6 +17,7 @@ use crate::update::SimSpUpdate;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::SIM_ROT_BOARD;
+use crate::SIM_ROT_STAGE0_BOARD;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
@@ -35,6 +36,7 @@ use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
 use gateway_messages::PowerState;
+use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
@@ -206,6 +208,8 @@ impl Sidecar {
                     FakeIgnition::new(&config.simulated_sps),
                     commands_rx,
                     log,
+                    sidecar.common.old_rot_state,
+                    sidecar.common.no_stage0_caboose,
                 );
                 let inner_task =
                     task::spawn(async move { inner.run().await.unwrap() });
@@ -262,6 +266,7 @@ struct Inner {
 }
 
 impl Inner {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
@@ -269,6 +274,8 @@ impl Inner {
         ignition: FakeIgnition,
         commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
+        old_rot_state: bool,
+        no_stage0_caboose: bool,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -276,6 +283,8 @@ impl Inner {
             components,
             ignition,
             log,
+            old_rot_state,
+            no_stage0_caboose,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -406,6 +415,8 @@ struct Handler {
     // this, our caller will pass us a function to call if they should ignore
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
+    no_stage0_caboose: bool,
+    old_rot_state: bool,
 }
 
 impl Handler {
@@ -414,6 +425,8 @@ impl Handler {
         components: Vec<SpComponentConfig>,
         ignition: FakeIgnition,
         log: Logger,
+        old_rot_state: bool,
+        no_stage0_caboose: bool,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -439,6 +452,8 @@ impl Handler {
             update_state: SimSpUpdate::default(),
             reset_pending: None,
             should_fail_to_respond_signal: None,
+            old_rot_state,
+            no_stage0_caboose,
         }
     }
 
@@ -1118,29 +1133,50 @@ impl SpHandler for Handler {
     fn get_component_caboose_value(
         &mut self,
         component: SpComponent,
-        _slot: u16,
+        slot: u16,
         key: [u8; 4],
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
-        static SP_GITC: &[u8] = b"ffffffff";
+        static SP_GITC0: &[u8] = b"ffffffff";
+        static SP_GITC1: &[u8] = b"fefefefe";
         static SP_BORD: &[u8] = SIM_SIDECAR_BOARD.as_bytes();
         static SP_NAME: &[u8] = b"SimSidecar";
-        static SP_VERS: &[u8] = b"0.0.1";
+        static SP_VERS0: &[u8] = b"0.0.2";
+        static SP_VERS1: &[u8] = b"0.0.1";
 
-        static ROT_GITC: &[u8] = b"eeeeeeee";
+        static ROT_GITC0: &[u8] = b"eeeeeeee";
+        static ROT_GITC1: &[u8] = b"edededed";
         static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
         static ROT_NAME: &[u8] = b"SimSidecar";
-        static ROT_VERS: &[u8] = b"0.0.1";
+        static ROT_VERS0: &[u8] = b"0.0.4";
+        static ROT_VERS1: &[u8] = b"0.0.3";
 
-        let val = match (component, &key) {
-            (SpComponent::SP_ITSELF, b"GITC") => SP_GITC,
-            (SpComponent::SP_ITSELF, b"BORD") => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME") => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS") => SP_VERS,
-            (SpComponent::ROT, b"GITC") => ROT_GITC,
-            (SpComponent::ROT, b"BORD") => ROT_BORD,
-            (SpComponent::ROT, b"NAME") => ROT_NAME,
-            (SpComponent::ROT, b"VERS") => ROT_VERS,
+        static STAGE0_GITC0: &[u8] = b"dddddddd";
+        static STAGE0_GITC1: &[u8] = b"dadadada";
+        static STAGE0_BORD: &[u8] = SIM_ROT_STAGE0_BOARD.as_bytes();
+        static STAGE0_NAME: &[u8] = b"SimSidecar";
+        static STAGE0_VERS0: &[u8] = b"0.0.200";
+        static STAGE0_VERS1: &[u8] = b"0.0.200";
+
+        let val = match (component, &key, slot, self.no_stage0_caboose) {
+            (SpComponent::SP_ITSELF, b"GITC", 0, _) => SP_GITC0,
+            (SpComponent::SP_ITSELF, b"GITC", 1, _) => SP_GITC1,
+            (SpComponent::SP_ITSELF, b"BORD", _, _) => SP_BORD,
+            (SpComponent::SP_ITSELF, b"NAME", _, _) => SP_NAME,
+            (SpComponent::SP_ITSELF, b"VERS", 0, _) => SP_VERS0,
+            (SpComponent::SP_ITSELF, b"VERS", 1, _) => SP_VERS1,
+            (SpComponent::ROT, b"GITC", 0, _) => ROT_GITC0,
+            (SpComponent::ROT, b"GITC", 1, _) => ROT_GITC1,
+            (SpComponent::ROT, b"BORD", _, _) => ROT_BORD,
+            (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
+            (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
+            (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
+            (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
+            (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
+            (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
+            (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
+            (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
+            (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 
@@ -1173,6 +1209,114 @@ impl SpHandler for Handler {
         buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
         buf[dummy_page.len()..].fill(0);
         Ok(RotResponse::Ok)
+    }
+
+    fn vpd_lock_status_all(
+        &mut self,
+        _buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn reset_component_trigger_with_watchdog(
+        &mut self,
+        component: SpComponent,
+        _time_ms: u32,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received sys-reset trigger with wathcdog request";
+            "component" => ?component,
+        );
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
+                self.update_state.sp_reset();
+                self.reset_pending = None;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
+    }
+
+    fn disable_component_watchdog(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+    fn component_watchdog_supported(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+
+    fn versioned_rot_boot_info(
+        &mut self,
+        _sender: SocketAddrV6,
+        _port: SpPort,
+        version: u8,
+    ) -> Result<RotBootInfo, SpError> {
+        if self.old_rot_state {
+            Err(SpError::RequestUnsupportedForSp)
+        } else {
+            const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
+            const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
+            const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
+            const STAGE0NEXT_DIGEST: [u8; 32] = [0xdd; 32];
+
+            match version {
+                0 => Err(SpError::Update(
+                    gateway_messages::UpdateError::VersionNotSupported,
+                )),
+                1 => Ok(RotBootInfo::V2(gateway_messages::RotStateV2 {
+                    active: RotSlotId::A,
+                    persistent_boot_preference: RotSlotId::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_sha3_256_digest: Some(SLOT_A_DIGEST),
+                    slot_b_sha3_256_digest: Some(SLOT_B_DIGEST),
+                })),
+                _ => Ok(RotBootInfo::V3(gateway_messages::RotStateV3 {
+                    active: RotSlotId::A,
+                    persistent_boot_preference: RotSlotId::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_fwid: gateway_messages::Fwid::Sha3_256(
+                        SLOT_A_DIGEST,
+                    ),
+                    slot_b_fwid: gateway_messages::Fwid::Sha3_256(
+                        SLOT_B_DIGEST,
+                    ),
+                    stage0_fwid: gateway_messages::Fwid::Sha3_256(
+                        STAGE0_DIGEST,
+                    ),
+                    stage0next_fwid: gateway_messages::Fwid::Sha3_256(
+                        STAGE0NEXT_DIGEST,
+                    ),
+                    slot_a_status: Ok(()),
+                    slot_b_status: Ok(()),
+                    stage0_status: Ok(()),
+                    stage0next_status: Ok(()),
+                })),
+            }
+        }
     }
 }
 

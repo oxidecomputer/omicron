@@ -12,6 +12,7 @@ use super::ImageVersion;
 use super::InstallinatorImageId;
 use super::PowerState;
 use super::RotImageDetails;
+use super::RotImageError;
 use super::RotSlot;
 use super::RotState;
 use super::SpComponentInfo;
@@ -27,6 +28,7 @@ use super::SpType;
 use super::SpUpdateStatus;
 use super::UpdatePreparationProgress;
 use dropshot::HttpError;
+use gateway_messages::RotBootInfo;
 use gateway_messages::SpComponent;
 use gateway_messages::StartupOptions;
 use gateway_messages::UpdateStatus;
@@ -133,6 +135,45 @@ impl From<gateway_messages::ImageVersion> for ImageVersion {
     }
 }
 
+impl From<gateway_messages::ImageError> for RotImageError {
+    fn from(error: gateway_messages::ImageError) -> Self {
+        match error {
+            gateway_messages::ImageError::Unchecked => RotImageError::Unchecked,
+            gateway_messages::ImageError::FirstPageErased => {
+                RotImageError::FirstPageErased
+            }
+            gateway_messages::ImageError::PartiallyProgrammed => {
+                RotImageError::PartiallyProgrammed
+            }
+            gateway_messages::ImageError::InvalidLength => {
+                RotImageError::InvalidLength
+            }
+            gateway_messages::ImageError::HeaderNotProgrammed => {
+                RotImageError::HeaderNotProgrammed
+            }
+            gateway_messages::ImageError::BootloaderTooSmall => {
+                RotImageError::BootloaderTooSmall
+            }
+            gateway_messages::ImageError::BadMagic => RotImageError::BadMagic,
+            gateway_messages::ImageError::HeaderImageSize => {
+                RotImageError::HeaderImageSize
+            }
+            gateway_messages::ImageError::UnalignedLength => {
+                RotImageError::UnalignedLength
+            }
+            gateway_messages::ImageError::UnsupportedType => {
+                RotImageError::UnsupportedType
+            }
+            gateway_messages::ImageError::ResetVectorNotThumb2 => {
+                RotImageError::ResetVectorNotThumb2
+            }
+            gateway_messages::ImageError::ResetVector => {
+                RotImageError::ResetVector
+            }
+            gateway_messages::ImageError::Signature => RotImageError::Signature,
+        }
+    }
+}
 // We expect serial and model numbers to be ASCII and 0-padded: find the first 0
 // byte and convert to a string. If that fails, hexlify the entire slice.
 fn stringify_byte_string(bytes: &[u8]) -> String {
@@ -143,8 +184,9 @@ fn stringify_byte_string(bytes: &[u8]) -> String {
         .unwrap_or_else(|_err| hex::encode(bytes))
 }
 
-impl From<gateway_messages::SpStateV1> for SpState {
-    fn from(state: gateway_messages::SpStateV1) -> Self {
+impl From<(gateway_messages::SpStateV1, RotState)> for SpState {
+    fn from(all: (gateway_messages::SpStateV1, RotState)) -> Self {
+        let (state, rot) = all;
         Self {
             serial_number: stringify_byte_string(&state.serial_number),
             model: stringify_byte_string(&state.model),
@@ -152,13 +194,41 @@ impl From<gateway_messages::SpStateV1> for SpState {
             hubris_archive_id: hex::encode(state.hubris_archive_id),
             base_mac_address: state.base_mac_address,
             power_state: PowerState::from(state.power_state),
-            rot: RotState::from(state.rot),
+            rot,
+        }
+    }
+}
+
+impl From<gateway_messages::SpStateV1> for SpState {
+    fn from(state: gateway_messages::SpStateV1) -> Self {
+        Self::from((state, RotState::from(state.rot)))
+    }
+}
+
+impl From<(gateway_messages::SpStateV2, RotState)> for SpState {
+    fn from(all: (gateway_messages::SpStateV2, RotState)) -> Self {
+        let (state, rot) = all;
+        Self {
+            serial_number: stringify_byte_string(&state.serial_number),
+            model: stringify_byte_string(&state.model),
+            revision: state.revision,
+            hubris_archive_id: hex::encode(state.hubris_archive_id),
+            base_mac_address: state.base_mac_address,
+            power_state: PowerState::from(state.power_state),
+            rot,
         }
     }
 }
 
 impl From<gateway_messages::SpStateV2> for SpState {
     fn from(state: gateway_messages::SpStateV2) -> Self {
+        Self::from((state, RotState::from(state.rot)))
+    }
+}
+
+impl From<(gateway_messages::SpStateV3, RotState)> for SpState {
+    fn from(all: (gateway_messages::SpStateV3, RotState)) -> Self {
+        let (state, rot) = all;
         Self {
             serial_number: stringify_byte_string(&state.serial_number),
             model: stringify_byte_string(&state.model),
@@ -166,16 +236,55 @@ impl From<gateway_messages::SpStateV2> for SpState {
             hubris_archive_id: hex::encode(state.hubris_archive_id),
             base_mac_address: state.base_mac_address,
             power_state: PowerState::from(state.power_state),
-            rot: RotState::from(state.rot),
+            rot,
         }
     }
 }
 
-impl From<gateway_sp_comms::VersionedSpState> for SpState {
-    fn from(value: gateway_sp_comms::VersionedSpState) -> Self {
-        match value {
-            gateway_sp_comms::VersionedSpState::V1(s) => Self::from(s),
-            gateway_sp_comms::VersionedSpState::V2(s) => Self::from(s),
+impl
+    From<(
+        gateway_sp_comms::VersionedSpState,
+        Result<
+            gateway_messages::RotBootInfo,
+            gateway_sp_comms::error::CommunicationError,
+        >,
+    )> for SpState
+{
+    fn from(
+        all: (
+            gateway_sp_comms::VersionedSpState,
+            Result<
+                gateway_messages::RotBootInfo,
+                gateway_sp_comms::error::CommunicationError,
+            >,
+        ),
+    ) -> Self {
+        // We need to keep this backwards compatible. If we get an error from reading `rot_state`
+        // it could be because the RoT/SP isn't updated or because we have failed for some
+        // other reason. If we're on V1/V2 SP info and we fail, just fall back to using the
+        // RoT info in that struct since any error will also be communicated there.
+        match (all.0, all.1) {
+            (gateway_sp_comms::VersionedSpState::V1(s), Err(_)) => {
+                Self::from(s)
+            }
+            (gateway_sp_comms::VersionedSpState::V1(s), Ok(r)) => {
+                Self::from((s, RotState::from(r)))
+            }
+            (gateway_sp_comms::VersionedSpState::V2(s), Err(_)) => {
+                Self::from(s)
+            }
+            (gateway_sp_comms::VersionedSpState::V2(s), Ok(r)) => {
+                Self::from((s, RotState::from(r)))
+            }
+            (gateway_sp_comms::VersionedSpState::V3(s), Ok(r)) => {
+                Self::from((s, RotState::from(r)))
+            }
+            (gateway_sp_comms::VersionedSpState::V3(s), Err(err)) => {
+                Self::from((
+                    s,
+                    RotState::CommunicationFailed { message: err.to_string() },
+                ))
+            }
         }
     }
 }
@@ -187,25 +296,7 @@ impl From<Result<gateway_messages::RotState, gateway_messages::RotError>>
         result: Result<gateway_messages::RotState, gateway_messages::RotError>,
     ) -> Self {
         match result {
-            Ok(state) => {
-                let boot_state = state.rot_updates.boot_state;
-                Self::Enabled {
-                    active: boot_state.active.into(),
-                    slot_a_sha3_256_digest: boot_state
-                        .slot_a
-                        .map(|details| hex::encode(details.digest)),
-                    slot_b_sha3_256_digest: boot_state
-                        .slot_b
-                        .map(|details| hex::encode(details.digest)),
-                    // RotState(V1) didn't have the following fields, so we make
-                    // it up as best we can. This RoT version is pre-shipping
-                    // and should only exist on (not updated recently) test
-                    // systems.
-                    persistent_boot_preference: boot_state.active.into(),
-                    pending_persistent_boot_preference: None,
-                    transient_boot_preference: None,
-                }
-            }
+            Ok(state) => Self::from(state),
             Err(err) => Self::CommunicationFailed { message: err.to_string() },
         }
     }
@@ -221,25 +312,95 @@ impl From<Result<gateway_messages::RotStateV2, gateway_messages::RotError>>
         >,
     ) -> Self {
         match result {
-            Ok(state) => Self::Enabled {
-                active: state.active.into(),
-                persistent_boot_preference: state
-                    .persistent_boot_preference
-                    .into(),
-                pending_persistent_boot_preference: state
-                    .pending_persistent_boot_preference
-                    .map(Into::into),
-                transient_boot_preference: state
-                    .transient_boot_preference
-                    .map(Into::into),
-                slot_a_sha3_256_digest: state
-                    .slot_a_sha3_256_digest
-                    .map(hex::encode),
-                slot_b_sha3_256_digest: state
-                    .slot_b_sha3_256_digest
-                    .map(hex::encode),
-            },
+            Ok(state) => Self::from(state),
             Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl RotState {
+    fn fwid_to_string(fwid: gateway_messages::Fwid) -> String {
+        match fwid {
+            gateway_messages::Fwid::Sha3_256(digest) => hex::encode(digest),
+        }
+    }
+}
+
+impl From<gateway_messages::RotStateV3> for RotState {
+    fn from(state: gateway_messages::RotStateV3) -> Self {
+        Self::V3 {
+            active: state.active.into(),
+            persistent_boot_preference: state.persistent_boot_preference.into(),
+            pending_persistent_boot_preference: state
+                .pending_persistent_boot_preference
+                .map(Into::into),
+            transient_boot_preference: state
+                .transient_boot_preference
+                .map(Into::into),
+            slot_a_fwid: Self::fwid_to_string(state.slot_a_fwid),
+            slot_b_fwid: Self::fwid_to_string(state.slot_b_fwid),
+
+            stage0_fwid: Self::fwid_to_string(state.stage0_fwid),
+            stage0next_fwid: Self::fwid_to_string(state.stage0next_fwid),
+
+            slot_a_error: state.slot_a_status.err().map(From::from),
+            slot_b_error: state.slot_b_status.err().map(From::from),
+
+            stage0_error: state.stage0_status.err().map(From::from),
+            stage0next_error: state.stage0next_status.err().map(From::from),
+        }
+    }
+}
+
+impl From<gateway_messages::RotStateV2> for RotState {
+    fn from(state: gateway_messages::RotStateV2) -> Self {
+        Self::V2 {
+            active: state.active.into(),
+            persistent_boot_preference: state.persistent_boot_preference.into(),
+            pending_persistent_boot_preference: state
+                .pending_persistent_boot_preference
+                .map(Into::into),
+            transient_boot_preference: state
+                .transient_boot_preference
+                .map(Into::into),
+            slot_a_sha3_256_digest: state
+                .slot_a_sha3_256_digest
+                .map(hex::encode),
+            slot_b_sha3_256_digest: state
+                .slot_b_sha3_256_digest
+                .map(hex::encode),
+        }
+    }
+}
+
+impl From<gateway_messages::RotState> for RotState {
+    fn from(state: gateway_messages::RotState) -> Self {
+        let boot_state = state.rot_updates.boot_state;
+        Self::V2 {
+            active: boot_state.active.into(),
+            slot_a_sha3_256_digest: boot_state
+                .slot_a
+                .map(|details| hex::encode(details.digest)),
+            slot_b_sha3_256_digest: boot_state
+                .slot_b
+                .map(|details| hex::encode(details.digest)),
+            // RotState(V1) didn't have the following fields, so we make
+            // it up as best we can. This RoT version is pre-shipping
+            // and should only exist on (not updated recently) test
+            // systems.
+            persistent_boot_preference: boot_state.active.into(),
+            pending_persistent_boot_preference: None,
+            transient_boot_preference: None,
+        }
+    }
+}
+
+impl From<gateway_messages::RotBootInfo> for RotState {
+    fn from(value: gateway_messages::RotBootInfo) -> Self {
+        match value {
+            RotBootInfo::V1(s) => Self::from(s),
+            RotBootInfo::V2(s) => Self::from(s),
+            RotBootInfo::V3(s) => Self::from(s),
         }
     }
 }
