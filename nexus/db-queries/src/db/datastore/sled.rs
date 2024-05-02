@@ -1452,7 +1452,7 @@ mod test {
         assert_eq!(ninserted, size);
 
         let sleds = datastore
-            .sled_list_all_batched(&opctx, SledFilter::All)
+            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
             .await
             .expect("failed to list all sleds");
 

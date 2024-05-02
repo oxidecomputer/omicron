@@ -1456,7 +1456,7 @@ async fn cmd_db_sleds(
         Some(filter) => filter,
         None => {
             eprintln!("note: listing all sleds (use -F to filter, e.g. -F in-service)");
-            SledFilter::All
+            SledFilter::Commissioned
         }
     };
 

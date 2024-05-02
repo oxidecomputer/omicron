@@ -559,7 +559,7 @@ fn cmd_sled_list(
         .to_planning_input_builder()
         .context("failed to generate planning input")?
         .build();
-    let rows = planning_input.all_sled_resources(SledFilter::All).map(
+    let rows = planning_input.all_sled_resources(SledFilter::Commissioned).map(
         |(sled_id, sled_resources)| Sled {
             id: sled_id,
             subnet: sled_resources.subnet.net().to_string(),
@@ -648,7 +648,7 @@ fn cmd_inventory_generate(
     // has no zones on it.
     let planning_input =
         sim.system.to_planning_input_builder().unwrap().build();
-    for sled_id in planning_input.all_sled_ids(SledFilter::All) {
+    for sled_id in planning_input.all_sled_ids(SledFilter::Commissioned) {
         builder
             .found_sled_omicron_zones(
                 "fake sled agent",
@@ -1077,7 +1077,7 @@ fn cmd_load(
         .context("generating planning input")?
         .build();
     for (sled_id, sled_details) in
-        loaded.planning_input.all_sleds(SledFilter::All)
+        loaded.planning_input.all_sleds(SledFilter::Commissioned)
     {
         if current_planning_input.sled_resources(&sled_id).is_some() {
             swriteln!(
@@ -1202,7 +1202,7 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
 
     for (sled_id, sled_resources) in
-        loaded.planning_input.all_sled_resources(SledFilter::All)
+        loaded.planning_input.all_sled_resources(SledFilter::Commissioned)
     {
         swriteln!(
             s,

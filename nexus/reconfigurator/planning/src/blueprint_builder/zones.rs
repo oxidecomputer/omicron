@@ -274,7 +274,7 @@ mod tests {
         // existing sled.
         let existing_sled_id = example
             .input
-            .all_sled_ids(SledFilter::All)
+            .all_sled_ids(SledFilter::Commissioned)
             .next()
             .expect("at least one sled present");
         let change = builder.zones.change_sled_zones(existing_sled_id);
@@ -351,7 +351,7 @@ mod tests {
         // become smarter and not do so (in which case this test will break).
         let control_sled_id = example
             .input
-            .all_sled_ids(SledFilter::All)
+            .all_sled_ids(SledFilter::Commissioned)
             .nth(2)
             .expect("at least 2 sleds present");
         _ = builder.zones.change_sled_zones(control_sled_id);

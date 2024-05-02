@@ -1194,7 +1194,7 @@ mod test {
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
         let sled_rows = datastore
-            .sled_list_all_batched(&opctx, SledFilter::All)
+            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
             .await
             .unwrap();
         let zpool_rows =

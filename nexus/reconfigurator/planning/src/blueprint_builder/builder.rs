@@ -340,20 +340,15 @@ impl<'a> BlueprintBuilder<'a> {
         let available_system_macs =
             AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
-        let sled_state = input
-            .all_sleds(SledFilter::All)
-            .map(|(sled_id, details)| {
-                // Prefer the sled state from our parent blueprint for sleds
-                // that were in it; there may be new sleds in `input`, in which
-                // case we'll use their current state as our starting point.
-                let state = parent_blueprint
-                    .sled_state
-                    .get(&sled_id)
-                    .copied()
-                    .unwrap_or(details.state);
-                (sled_id, state)
-            })
-            .collect();
+        // Prefer the sled state from our parent blueprint for sleds
+        // that were in it; there may be new sleds in `input`, in which
+        // case we'll use their current state as our starting point.
+        //
+        // TODO-correctness When can we drop decommissioned sleds from this map?
+        let mut sled_state = parent_blueprint.sled_state.clone();
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            sled_state.entry(sled_id).or_insert(details.state);
+        }
 
         Ok(BlueprintBuilder {
             log,
@@ -373,12 +368,20 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
+    /// Iterates over the list of sled IDs for which we have zones.
+    ///
+    /// This may include decommissioned sleds.
+    pub fn sled_ids_with_zones(&self) -> impl Iterator<Item = SledUuid> {
+        self.zones.sled_ids_with_zones()
+    }
+
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
-        let blueprint_zones =
-            self.zones.into_zones_map(self.input.all_sled_ids(SledFilter::All));
+        let blueprint_zones = self
+            .zones
+            .into_zones_map(self.input.all_sled_ids(SledFilter::Commissioned));
         let blueprint_disks = self
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
@@ -465,7 +468,7 @@ impl<'a> BlueprintBuilder<'a> {
                     &log,
                     "sled has state Decommissioned, yet has zones \
                      allocated to it; will expunge them \
-                     (sled policy is \"{policy}\")"
+                     (sled policy is \"{policy:?}\")"
                 );
             }
             ZoneExpungeReason::SledExpunged => {
@@ -1012,6 +1015,18 @@ impl<'a> BlueprintZonesBuilder<'a> {
         })
     }
 
+    /// Iterates over the list of sled IDs for which we have zones.
+    ///
+    /// This may include decommissioned sleds.
+    pub fn sled_ids_with_zones(&self) -> impl Iterator<Item = SledUuid> {
+        let mut sled_ids =
+            self.changed_zones.keys().copied().collect::<BTreeSet<_>>();
+        for &sled_id in self.parent_zones.keys() {
+            sled_ids.insert(sled_id);
+        }
+        sled_ids.into_iter()
+    }
+
     /// Iterates over the list of Omicron zones currently configured for this
     /// sled in the blueprint that's being built, along with each zone's state
     /// in the builder.
@@ -1036,36 +1051,32 @@ impl<'a> BlueprintZonesBuilder<'a> {
 
     /// Produces an owned map of zones for the requested sleds
     pub fn into_zones_map(
-        mut self,
-        sled_ids: impl Iterator<Item = SledUuid>,
+        self,
+        commissioned_sled_ids: impl Iterator<Item = SledUuid>,
     ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
-        sled_ids
-            .map(|sled_id| {
-                // Start with self.changed_zones, which contains entries for any
-                // sled whose zones config is changing in this blueprint.
-                if let Some(zones) = self.changed_zones.remove(&sled_id) {
-                    (sled_id, zones.build())
-                }
-                // Next, check self.parent_zones, to represent an unchanged
-                // sled.
-                else if let Some(parent_zones) =
-                    self.parent_zones.get(&sled_id)
-                {
-                    (sled_id, parent_zones.clone())
-                } else {
-                    // If the sled is not in self.parent_zones, then it must be
-                    // a new sled and we haven't added any zones to it yet.  Use
-                    // the standard initial config.
-                    (
-                        sled_id,
-                        BlueprintZonesConfig {
-                            generation: Generation::new(),
-                            zones: vec![],
-                        },
-                    )
-                }
-            })
-            .collect()
+        // Start with self.changed_zones, which contains entries for any
+        // sled whose zones config is changing in this blueprint.
+        let mut zones = self
+            .changed_zones
+            .into_iter()
+            .map(|(sled_id, zones)| (sled_id, zones.build()))
+            .collect::<BTreeMap<_, _>>();
+
+        // Carry forward any zones from our parent blueprint. This may include
+        // zones for decommissioned sleds.
+        for (sled_id, parent_zones) in self.parent_zones {
+            zones.entry(*sled_id).or_insert_with(|| parent_zones.clone());
+        }
+
+        // Finally, insert any newly-added sleds.
+        for sled_id in commissioned_sled_ids {
+            zones.entry(sled_id).or_insert_with(|| BlueprintZonesConfig {
+                generation: Generation::new(),
+                zones: vec![],
+            });
+        }
+
+        zones
     }
 }
 
@@ -1269,7 +1280,7 @@ pub mod test {
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
         for (sled_id, sled_resources) in
-            example.input.all_sled_resources(SledFilter::All)
+            example.input.all_sled_resources(SledFilter::Commissioned)
         {
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_id in sled_resources.zpools.keys() {
@@ -1384,7 +1395,7 @@ pub mod test {
 
         // Start with an empty blueprint (sleds with no zones).
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::All),
+            input.all_sled_ids(SledFilter::Commissioned),
             "test",
             TEST_NAME,
         );
@@ -1430,7 +1441,7 @@ pub mod test {
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::All),
+            input.all_sled_ids(SledFilter::Commissioned),
             "test",
             TEST_NAME,
         );

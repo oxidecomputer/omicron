@@ -85,10 +85,16 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
+        let mut commissioned_sled_ids = BTreeSet::new();
+
         // Remove services from sleds marked expunged. We use `SledFilter::All`
         // and have a custom `needs_zone_expungement` function that allows us
         // to produce better errors.
-        for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
+        for (sled_id, sled_details) in
+            self.input.all_sleds(SledFilter::Commissioned)
+        {
+            commissioned_sled_ids.insert(sled_id);
+
             // Does this sled need zone expungement based on the details?
             let Some(reason) =
                 needs_zone_expungement(sled_details.state, sled_details.policy)
@@ -98,6 +104,21 @@ impl<'a> Planner<'a> {
 
             // Perform the expungement.
             self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+        }
+
+        // Check for any decommissioned sleds (i.e., sleds for which our
+        // blueprint has zones, but are not in the input sled list). Any zones
+        // for decommissioned sleds _should_ already be expunged; ensure that is
+        // the case.
+        for sled_id in self.blueprint.sled_ids_with_zones() {
+            if !commissioned_sled_ids.contains(&sled_id) {
+                self.blueprint.expunge_all_zones_for_sled(
+                    sled_id,
+                    // Decommissioned sleds are not present in our input, so we
+                    // don't know what its policy was.
+                    ZoneExpungeReason::SledDecommissioned { policy: None },
+                )?;
+            }
         }
 
         Ok(())
@@ -372,7 +393,9 @@ fn needs_zone_expungement(
             // an illegal state, but representable. If we see a sled in this
             // state, we should still expunge all zones in it, but parent code
             // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned { policy });
+            return Some(ZoneExpungeReason::SledDecommissioned {
+                policy: Some(policy),
+            });
         }
     }
 
@@ -388,7 +411,7 @@ fn needs_zone_expungement(
 /// logical flow.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ZoneExpungeReason {
-    SledDecommissioned { policy: SledPolicy },
+    SledDecommissioned { policy: Option<SledPolicy> },
     SledExpunged,
 }
 
