@@ -5,7 +5,7 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
@@ -41,6 +41,7 @@ progenitor::generate_api!(
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
+        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },
@@ -417,28 +418,5 @@ impl TryFrom<types::ProducerEndpoint>
             base_route: ep.base_route,
             interval: ep.interval.into(),
         })
-    }
-}
-
-impl From<omicron_common::api::internal::shared::ImportExportPolicy>
-    for types::ImportExportPolicy
-{
-    fn from(
-        value: omicron_common::api::internal::shared::ImportExportPolicy,
-    ) -> Self {
-        match value {
-            omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering =>
-                types::ImportExportPolicy::NoFiltering,
-            omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) => {
-                types::ImportExportPolicy::Allow(list.clone().into_iter().map(|x| match x {
-                    omicron_common::api::external::IpNet::V4(x) => types::IpNet::V4(
-                        types::Ipv4Net::from_str(x.to_string().as_str()).unwrap(),
-                    ),
-                    omicron_common::api::external::IpNet::V6(x) => types::IpNet::V6(
-                        types::Ipv6Net::from_str(x.to_string().as_str()).unwrap(),
-                    ),
-                }).collect())
-            }
-        }
     }
 }

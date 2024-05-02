@@ -28,8 +28,8 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, ImportExportPolicy, Prefix4, ShaperSource,
-    StaticRoute4, StaticRoute4List,
+    DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy, Prefix4, ShaperSource,
+    StaticRoute4, StaticRoute4List, Prefix as MgPrefix, Prefix6
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -43,6 +43,7 @@ use omicron_common::{
     api::{
         external::{DataPageParams, SwitchLocation},
         internal::shared::ParseSwitchLocationError,
+        internal::shared::ImportExportPolicy,
     },
 };
 use serde_json::json;
@@ -662,18 +663,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let import_policy = match allow_import {
                             Some(list) => {
-                                ImportExportPolicy::Allow(list
+                                MgImportExportPolicy::Allow(list
                                     .into_iter()
                                     .map(|x| 
                                         match x.prefix {
-                                            IpNetwork::V4(p) =>  mg_admin_client::types::Prefix::V4(
-                                                mg_admin_client::types::Prefix4{
+                                            IpNetwork::V4(p) =>  MgPrefix::V4(
+                                                Prefix4{
                                                     length: p.prefix(),
                                                     value: p.ip(),
                                                 }
                                             ),
-                                            IpNetwork::V6(p) =>  mg_admin_client::types::Prefix::V6(
-                                                mg_admin_client::types::Prefix6{
+                                            IpNetwork::V6(p) =>  MgPrefix::V6(
+                                                Prefix6{
                                                     length: p.prefix(),
                                                     value: p.ip(),
                                                 }
@@ -683,7 +684,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .collect()
                                 )
                             }
-                            None => ImportExportPolicy::NoFiltering,
+                            None => MgImportExportPolicy::NoFiltering,
                         };
 
                         let allow_export = match self.datastore.allow_export_for_peer(
@@ -712,18 +713,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         let export_policy = match allow_export {
                             Some(list) => {
-                                ImportExportPolicy::Allow(list
+                                MgImportExportPolicy::Allow(list
                                     .into_iter()
                                     .map(|x| 
                                         match x.prefix {
-                                            IpNetwork::V4(p) =>  mg_admin_client::types::Prefix::V4(
-                                                mg_admin_client::types::Prefix4{
+                                            IpNetwork::V4(p) =>  MgPrefix::V4(
+                                                Prefix4{
                                                     length: p.prefix(),
                                                     value: p.ip(),
                                                 }
                                             ),
-                                            IpNetwork::V6(p) =>  mg_admin_client::types::Prefix::V6(
-                                                mg_admin_client::types::Prefix6{
+                                            IpNetwork::V6(p) =>  MgPrefix::V6(
+                                                Prefix6{
                                                     length: p.prefix(),
                                                     value: p.ip(),
                                                 }
@@ -733,7 +734,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .collect()
                                 )
                             }
-                            None => ImportExportPolicy::NoFiltering,
+                            None => MgImportExportPolicy::NoFiltering,
                         };
 
                         // now that the peer passes the above validations, add it to the list for configuration
@@ -968,8 +969,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     multi_exit_discriminator: c.multi_exit_discriminator.map(|x| x.into()),
                                     remote_asn: c.remote_asn.map(|x| x.into()),
                                     communities: Vec::new(),
-                                    allowed_export: sled_agent_client::types::ImportExportPolicy::NoFiltering,
-                                    allowed_import: sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                                    allowed_export: ImportExportPolicy::NoFiltering,
+                                    allowed_import: ImportExportPolicy::NoFiltering,
                                     vlan_id: c.vlan_id.map(|x| x.0 as u16),
                                 }
                         }).collect(),
@@ -1036,17 +1037,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                         peer.allowed_import = match allow_import {
-                            Some(list) => {
-                                sled_agent_client::types::ImportExportPolicy::Allow(list.clone().iter().map(|x| {
-                                    match x.prefix {
-                                        IpNetwork::V4(x) =>
-                                            sled_agent_client::types::IpNet::V4(sled_agent_client::types::Ipv4Net::from_str(&x.to_string().as_str()).unwrap()),
-                                        IpNetwork::V6(x) =>
-                                            sled_agent_client::types::IpNet::V6(sled_agent_client::types::Ipv6Net::from_str(&x.to_string().as_str()).unwrap()),                                  
-                                    }
-                                }).collect())
-                            }
-                            None => sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                            Some(list) =>  ImportExportPolicy::Allow(
+                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
+                            ),
+                            None => ImportExportPolicy::NoFiltering,
                         };
 
                         let allow_export = match self.datastore.allow_export_for_peer(
@@ -1067,17 +1061,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                         peer.allowed_export = match allow_export {
-                            Some(list) => {
-                                sled_agent_client::types::ImportExportPolicy::Allow(list.clone().iter().map(|x| {
-                                    match x.prefix {
-                                        IpNetwork::V4(x) =>
-                                            sled_agent_client::types::IpNet::V4(sled_agent_client::types::Ipv4Net::from_str(&x.to_string().as_str()).unwrap()),
-                                        IpNetwork::V6(x) =>
-                                            sled_agent_client::types::IpNet::V6(sled_agent_client::types::Ipv6Net::from_str(&x.to_string().as_str()).unwrap()),                                  
-                                    }
-                                }).collect())
-                            }
-                            None => sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                            Some(list) =>  ImportExportPolicy::Allow(
+                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
+                            ),
+                            None => ImportExportPolicy::NoFiltering,
                         };
                     }
                     ports.push(port_config);
@@ -1465,15 +1452,11 @@ fn build_sled_agent_clients(
     sled_agent_clients
 }
 
+type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>)>;
+
 fn static_routes_to_del(
-    current_static_routes: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
-    desired_static_routes: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
+    current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
+    desired_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
 ) -> HashMap<SwitchLocation, DeleteStaticRoute4Request> {
     let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request> =
         HashMap::new();
@@ -1529,14 +1512,8 @@ fn static_routes_to_del(
 
 #[allow(clippy::type_complexity)]
 fn static_routes_to_add(
-    desired_static_routes: &HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
-    current_static_routes: &HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    >,
+    desired_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
+    current_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, AddStaticRoute4Request> {
     let mut routes_to_add: HashMap<SwitchLocation, AddStaticRoute4Request> =
@@ -1588,11 +1565,9 @@ fn static_routes_in_db(
         nexus_db_model::SwitchPort,
         PortSettingsChange,
     )],
-) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4, Option<u16>)>> {
-    let mut routes_from_db: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4, Option<u16>)>,
-    > = HashMap::new();
+) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
+    let mut routes_from_db: HashMap<SwitchLocation, SwitchStaticRoutes> =
+        HashMap::new();
 
     for (location, _port, change) in changes {
         // we only need to check for ports that have a configuration present. No config == no routes.
@@ -1786,47 +1761,49 @@ async fn apply_switch_port_changes(
 async fn static_routes_on_switch<'a>(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4, Option<u16>)>> {
+) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: HashSet<(Ipv4Addr, Prefix4, Option<u16>)> =
-            match client.static_list_v4_routes().await {
-                Ok(routes) => {
-                    let mut flattened = HashSet::new();
-                    for (destination, paths) in routes.iter() {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
+        let static_routes: SwitchStaticRoutes = match client
+            .static_list_v4_routes()
+            .await
+        {
+            Ok(routes) => {
+                let mut flattened = HashSet::new();
+                for (destination, paths) in routes.iter() {
+                    let Ok(dst) = destination.parse() else {
+                        error!(
                                 log,
                                 "failed to parse static route destination: {destination}"
                             );
-                            continue;
+                        continue;
+                    };
+                    for p in paths.iter() {
+                        let nh = match p.nexthop {
+                            IpAddr::V4(addr) => addr,
+                            IpAddr::V6(addr) => {
+                                error!(
+                                    log,
+                                    "ipv6 nexthops not supported: {addr}"
+                                );
+                                continue;
+                            }
                         };
-                        for p in paths.iter() {
-                            let nh = match p.nexthop {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(addr) => {
-                                    error!(
-                                        log,
-                                        "ipv6 nexthops not supported: {addr}"
-                                    );
-                                    continue;
-                                }
-                            };
-                            flattened.insert((nh, dst, p.vlan_id));
-                        }
+                        flattened.insert((nh, dst, p.vlan_id));
                     }
-                    flattened
                 }
-                Err(_) => {
-                    error!(
-                        &log,
-                        "unable to retrieve routes from switch";
-                        "switch_location" => ?location,
-                    );
-                    continue;
-                }
-            };
+                flattened
+            }
+            Err(_) => {
+                error!(
+                    &log,
+                    "unable to retrieve routes from switch";
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch

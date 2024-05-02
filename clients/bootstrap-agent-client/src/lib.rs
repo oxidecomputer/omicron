@@ -22,6 +22,7 @@ progenitor::generate_api!(
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
+        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
     }
 );
 

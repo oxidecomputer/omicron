@@ -34,7 +34,6 @@ progenitor::generate_api!(
         BgpPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        ImportExportPolicy = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
     },
     //TODO trade the manual transformations later in this file for the
@@ -56,6 +55,7 @@ progenitor::generate_api!(
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
+        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
     }
 );
 
