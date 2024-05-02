@@ -682,7 +682,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
  "vsss-rs",
  "zeroize",
 ]
@@ -701,7 +701,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1418,7 +1418,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1617,7 +1617,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1795,7 +1795,7 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1806,7 +1806,7 @@ dependencies = [
  "diesel",
  "serde",
  "usdt 0.5.0",
- "uuid 1.8.0",
+ "uuid",
  "version_check",
 ]
 
@@ -1960,7 +1960,7 @@ dependencies = [
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2038,7 +2038,7 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2082,7 +2082,7 @@ dependencies = [
  "tokio-rustls 0.25.0",
  "toml 0.8.12",
  "usdt 0.3.5",
- "uuid 1.8.0",
+ "uuid",
  "version_check",
  "waitgroup",
 ]
@@ -2263,7 +2263,7 @@ dependencies = [
  "tokio",
  "toml 0.8.12",
  "trust-dns-resolver",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2688,7 +2688,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.20.1",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2706,7 +2706,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2721,7 +2721,7 @@ dependencies = [
  "smoltcp 0.9.1",
  "static_assertions",
  "strum_macros 0.25.2",
- "uuid 1.8.0",
+ "uuid",
  "zerocopy 0.6.6",
 ]
 
@@ -2751,7 +2751,7 @@ dependencies = [
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
  "tokio",
  "usdt 0.3.5",
- "uuid 1.8.0",
+ "uuid",
  "version_check",
  "zip",
 ]
@@ -2769,7 +2769,7 @@ dependencies = [
  "slog",
  "sp-sim",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3512,7 +3512,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
  "whoami",
  "zone 0.3.0",
 ]
@@ -3631,7 +3631,7 @@ dependencies = [
  "tokio-stream",
  "tufaceous-lib",
  "update-engine",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3648,7 +3648,7 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3672,7 +3672,7 @@ dependencies = [
  "serde_json",
  "slog",
  "subprocess",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3731,7 +3731,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "trust-dns-resolver",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3768,7 +3768,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3963,7 +3963,7 @@ dependencies = [
  "libc",
  "libefi-sys",
  "thiserror",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4003,7 +4003,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.21.0",
  "toml 0.7.8",
- "uuid 1.8.0",
+ "uuid",
  "zone 0.1.8",
 ]
 
@@ -4452,7 +4452,7 @@ checksum = "3526cb7c660872e401beaf3297f95f548ce3b4b4bdd8121b7c0713771d7c4a6e"
 dependencies = [
  "schemars",
  "serde",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4483,7 +4483,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4503,7 +4503,7 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4547,7 +4547,7 @@ dependencies = [
  "strum",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4631,7 +4631,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "usdt 0.5.0",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4672,7 +4672,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "typed-rng",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4709,7 +4709,7 @@ dependencies = [
  "slog-error-chain",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4724,7 +4724,7 @@ dependencies = [
  "reqwest",
  "sled-agent-client",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4762,7 +4762,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4793,7 +4793,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "typed-rng",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4822,7 +4822,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4867,7 +4867,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "trust-dns-resolver",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4911,7 +4911,7 @@ dependencies = [
  "strum",
  "tabled",
  "thiserror",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5241,7 +5241,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5266,7 +5266,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5343,7 +5343,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.20.1",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5467,7 +5467,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "update-common",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5524,7 +5524,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "unicode-width",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5677,7 +5677,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.12",
  "usdt 0.5.0",
- "uuid 1.8.0",
+ "uuid",
  "zeroize",
  "zone 0.3.0",
 ]
@@ -5716,7 +5716,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "usdt 0.5.0",
- "uuid 1.8.0",
+ "uuid",
  "walkdir",
 ]
 
@@ -5819,6 +5819,7 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
+ "socket2 0.5.6",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -5840,7 +5841,7 @@ dependencies = [
  "unicode-normalization",
  "usdt 0.3.5",
  "usdt-impl 0.5.0",
- "uuid 1.8.0",
+ "uuid",
  "yasna",
  "zerocopy 0.7.32",
  "zeroize",
@@ -6065,7 +6066,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "trust-dns-resolver",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6102,7 +6103,7 @@ dependencies = [
  "strum",
  "thiserror",
  "trybuild",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6117,7 +6118,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6157,7 +6158,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.12",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6204,7 +6205,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "usdt 0.5.0",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6225,7 +6226,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6260,7 +6261,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6273,7 +6274,7 @@ dependencies = [
  "clap",
  "omicron-workspace-hack",
  "sigpipe",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -6831,7 +6832,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -7064,7 +7065,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "usdt 0.5.0",
- "uuid 1.8.0",
+ "uuid",
  "viona_api",
 ]
 
@@ -7086,7 +7087,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.20.1",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -7107,7 +7108,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.20.1",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -7137,7 +7138,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.20.1",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -7437,7 +7438,7 @@ dependencies = [
  "swrite",
  "tabled",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -8120,7 +8121,7 @@ dependencies = [
  "serde",
  "thiserror",
  "url",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -8162,8 +8163,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
- "uuid 0.8.2",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -8660,7 +8660,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -8691,7 +8691,7 @@ dependencies = [
  "thiserror",
  "tofino",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -8734,7 +8734,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -9110,7 +9110,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -10227,7 +10227,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.4",
  "rand_seeder",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -10440,7 +10440,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "unicode-width",
- "uuid 1.8.0",
+ "uuid",
 ]
 
 [[package]]
@@ -10590,12 +10590,6 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
-
-[[package]]
-name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 
 [[package]]
 name = "uuid"
@@ -11009,7 +11003,7 @@ dependencies = [
  "tufaceous-lib",
  "update-common",
  "update-engine",
- "uuid 1.8.0",
+ "uuid",
  "wicket",
  "wicket-common",
  "wicketd-client",
@@ -11032,7 +11026,7 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid 1.8.0",
+ "uuid",
  "wicket-common",
 ]
 
