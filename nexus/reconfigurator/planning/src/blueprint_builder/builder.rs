@@ -375,6 +375,13 @@ impl<'a> BlueprintBuilder<'a> {
         self.zones.sled_ids_with_zones()
     }
 
+    pub fn current_sled_zones(
+        &self,
+        sled_id: SledUuid,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.current_sled_zones(sled_id).map(|(config, _)| config)
+    }
+
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for all sleds, including sleds that
@@ -397,6 +404,15 @@ impl<'a> BlueprintBuilder<'a> {
             creator: self.creator,
             comment: self.comments.join(", "),
         }
+    }
+
+    /// Set the desired state of the given sled.
+    pub fn set_sled_state(
+        &mut self,
+        sled_id: SledUuid,
+        desired_state: SledState,
+    ) {
+        self.sled_state.insert(sled_id, desired_state);
     }
 
     /// Within tests, set a seeded RNG for deterministic results.

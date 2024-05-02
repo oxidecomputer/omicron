@@ -11,6 +11,7 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
@@ -80,6 +81,62 @@ impl<'a> Planner<'a> {
 
         self.do_plan_expunge()?;
         self.do_plan_add()?;
+        self.do_plan_decommission()?;
+
+        Ok(())
+    }
+
+    fn do_plan_decommission(&mut self) -> Result<(), Error> {
+        // Check for any sleds that are currently commissioned but can be
+        // decommissioned. Our gates for decommissioning are:
+        //
+        // 1. The policy indicates the sled has been removed (i.e., the policy
+        //    is "expunged"; we may have other policies that satisfy this
+        //    requirement in the future).
+        // 2. All zones associated with the sled have been marked expunged.
+        // 3. There are no instances assigned to this sled. This is blocked by
+        //    omicron#4872, so today we omit this check entirely, as any sled
+        //    that could be otherwise decommissioned that still has instances
+        //    assigned to it needs support intervention for cleanup.
+        // 4. All disks associated with the sled have been marked expunged. This
+        //    happens implicitly when a sled is expunged, so is covered by our
+        //    first check.
+        for (sled_id, sled_details) in
+            self.input.all_sleds(SledFilter::Commissioned)
+        {
+            // Check 1: look for sleds that are expunged.
+            match (sled_details.policy, sled_details.state) {
+                // If the sled is still in service, don't decommission it.
+                (SledPolicy::InService { .. }, _) => continue,
+                // If the sled is already decommissioned it... why is it showing
+                // up when we ask for commissioned sleds? Warn, but don't try to
+                // decommission it again.
+                (SledPolicy::Expunged, SledState::Decommissioned) => {
+                    warn!(self.log, "todo");
+                    continue;
+                }
+                // The sled is expunged but not yet decommissioned; fall through
+                // to check the rest of the criteria.
+                (SledPolicy::Expunged, SledState::Active) => (),
+            }
+
+            // Check 2: have all this sled's zones been expunged? It's possible
+            // we ourselves have made this change, which is fine.
+            let all_zones_expunged =
+                self.blueprint.current_sled_zones(sled_id).all(|zone| {
+                    zone.disposition == BlueprintZoneDisposition::Expunged
+                });
+
+            // Check 3: Are there any instances assigned to this sled? See
+            // comment above; while we wait for omicron#4872, we just assume
+            // there are no instances running.
+            let num_instances_assigned = 0;
+
+            if all_zones_expunged && num_instances_assigned == 0 {
+                self.blueprint
+                    .set_sled_state(sled_id, SledState::Decommissioned);
+            }
+        }
 
         Ok(())
     }
@@ -87,9 +144,9 @@ impl<'a> Planner<'a> {
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
         let mut commissioned_sled_ids = BTreeSet::new();
 
-        // Remove services from sleds marked expunged. We use `SledFilter::All`
-        // and have a custom `needs_zone_expungement` function that allows us
-        // to produce better errors.
+        // Remove services from sleds marked expunged. We use
+        // `SledFilter::Commissioned` and have a custom `needs_zone_expungement`
+        // function that allows us to produce better errors.
         for (sled_id, sled_details) in
             self.input.all_sleds(SledFilter::Commissioned)
         {
