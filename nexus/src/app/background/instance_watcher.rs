@@ -5,7 +5,6 @@
 //! Background task for pulling instance state from sled-agents.
 
 use super::common::BackgroundTask;
-use crate::app::instance::InstanceUpdated;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use nexus_db_model::{Sled, SledInstance};
@@ -13,8 +12,11 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
+use omicron_common::api::external::InstanceState;
+use omicron_common::api::internal::nexus::SledInstanceState;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::net::IpAddr;
@@ -55,10 +57,10 @@ impl InstanceWatcher {
         sled: &Sled,
         client: &SledAgentClient,
         instance: SledInstance,
-    ) -> impl Future<Output = CheckResult> + Send + 'static {
+    ) -> impl Future<Output = Check> + Send + 'static {
         let instance_id = instance.instance_id();
         let watcher = self.clone();
-        let target = InstanceTarget {
+        let target = VirtualMachine {
             instance_id,
             sled_agent_id: sled.id(),
             sled_agent_ip: std::net::Ipv6Addr::from(sled.ip).into(),
@@ -77,6 +79,7 @@ impl InstanceWatcher {
             let InstanceWatcher { datastore, resolver, .. } = watcher;
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client.instance_get_state(&instance_id).await;
+            let mut check = Check { target, outcome: None, result: Ok(()) };
             let state = match rsp {
                 Ok(rsp) => rsp.into_inner(),
                 Err(ClientError::ErrorResponse(rsp)) => {
@@ -88,35 +91,24 @@ impl InstanceWatcher {
                         slog::info!(opctx.log, "instance is wayyyyy gone");
                         // TODO(eliza): eventually, we should attempt to put the
                         // instance in the `Failed` state here.
-                        return CheckResult {
-                            target,
-                            check_failure: Some(CheckFailure::NoSuchInstance),
-                            error: None,
-                            instance_updated: None,
-                        };
+                        check.outcome =
+                            Some(CheckOutcome::Failed(Failure::NoSuchInstance));
+                        return check;
                     }
                     if status.is_client_error() {
                         slog::warn!(opctx.log, "check failed due to client error";
                             "status" => ?status, "error" => ?rsp.into_inner());
-                        return CheckResult {
-                            target,
-                            check_failure: None,
-                            error: Some(CheckError::ClientHttpError(status)),
-                            instance_updated: None,
-                        };
+                        check.result =
+                            Err(Incomplete::ClientHttpError(status.as_u16()));
+                    } else {
+                        slog::info!(opctx.log, "check failed due to server error";
+                        "status" => ?status, "error" => ?rsp.into_inner());
                     }
 
-                    slog::info!(opctx.log, "check failed due to server error";
-                        "status" => ?status, "error" => ?rsp.into_inner());
-
-                    return CheckResult {
-                        target,
-                        check_failure: Some(CheckFailure::SledAgentResponse(
-                            status,
-                        )),
-                        error: None,
-                        instance_updated: None,
-                    };
+                    check.outcome = Some(CheckOutcome::Failed(
+                        Failure::SledAgentResponse(status.as_u16()),
+                    ));
+                    return check;
                 }
                 Err(ClientError::CommunicationError(e)) => {
                     // TODO(eliza): eventually, we may want to transition the
@@ -124,12 +116,10 @@ impl InstanceWatcher {
                     // unreachable for a while. We may also want to take other
                     // corrective actions or alert an operator in this case.
                     slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
-                    return CheckResult {
-                        target,
-                        check_failure: Some(CheckFailure::SledAgentUnreachable),
-                        error: None,
-                        instance_updated: None,
-                    };
+                    check.outcome = Some(CheckOutcome::Failed(
+                        Failure::SledAgentUnreachable,
+                    ));
+                    return check;
                 }
                 Err(e) => {
                     slog::warn!(
@@ -138,48 +128,42 @@ impl InstanceWatcher {
                         "error" => ?e,
                         "status" => ?e.status(),
                     );
-                    return CheckResult {
-                        target,
-                        check_failure: None,
-                        error: Some(CheckError::ClientError),
-                        instance_updated: None,
-                    };
+                    check.result = Err(Incomplete::ClientError);
+                    return check;
                 }
             };
 
-            slog::debug!(opctx.log, "updating instance state: {state:?}");
-            let update_result = crate::app::instance::notify_instance_updated(
+            let new_runtime_state: SledInstanceState = state.into();
+            check.outcome = Some(CheckOutcome::Completed {
+                instance_state: new_runtime_state.vmm_state.state,
+                vmm_id: new_runtime_state.propolis_id,
+            });
+            slog::debug!(
+                opctx.log,
+                "updating instance state: {new_runtime_state:?}"
+            );
+            check.result = crate::app::instance::notify_instance_updated(
                 &datastore,
                 &resolver,
                 &opctx,
                 &opctx,
                 &opctx.log,
                 &instance_id,
-                &state.into(),
+                &new_runtime_state,
             )
             .await
-            .map_err(|_| CheckError::UpdateFailed)
-            .and_then(|updated| updated.ok_or(CheckError::InstanceNotFound));
-            match update_result {
-                Ok(updated) => {
-                    slog::debug!(opctx.log, "update successful"; "instance_updated" => updated.instance_updated, "vmm_updated" => updated.vmm_updated);
-                    CheckResult {
-                        target,
-                        instance_updated: Some(updated),
-                        check_failure: None,
-                        error: None,
-                    }
-                }
-                Err(e) => {
-                    slog::warn!(opctx.log, "error updating instance"; "error" => ?e);
-                    CheckResult {
-                        target,
-                        instance_updated: None,
-                        check_failure: None,
-                        error: Some(e),
-                    }
-                }
-            }
+            .map_err(|e| {
+                slog::warn!(opctx.log, "error updating instance"; "error" => ?e);
+                Incomplete::UpdateFailed
+            })
+            .and_then(|updated| updated.ok_or_else(|| {
+                slog::warn!(opctx.log, "error updating instance: not found in database");
+                Incomplete::InstanceNotFound
+            })).map(|updated| {
+                slog::debug!(opctx.log, "update successful"; "instance_updated" => updated.instance_updated, "vmm_updated" => updated.vmm_updated);
+            });
+
+            check
         }
     }
 }
@@ -187,7 +171,7 @@ impl InstanceWatcher {
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, oximeter::Target,
 )]
-struct InstanceTarget {
+struct VirtualMachine {
     /// The instance's ID.
     instance_id: Uuid,
     /// The sled-agent's ID.
@@ -198,18 +182,11 @@ struct InstanceTarget {
     sled_agent_port: u16,
 }
 
-struct CheckResult {
-    target: InstanceTarget,
-    /// `Some` if the instance's state was up
-    instance_updated: Option<crate::app::instance::InstanceUpdated>,
+struct Check {
+    target: VirtualMachine,
 
-    /// `Some` if the instance check indicated that the instance is in a bad state.
-    ///
-    /// This is a result that indicates that something is *wrong* with either the
-    /// sled on which the instance is running, the sled-agent on that sled, or the
-    /// instance itself. This is distinct from a [`CheckError`], which indicates
-    /// that we were *unable* to check on the instance or update its state.
-    check_failure: Option<CheckFailure>,
+    /// The outcome of performing this check.
+    outcome: Option<CheckOutcome>,
 
     /// `Some` if the instance check was unsuccessful.
     ///
@@ -219,13 +196,21 @@ struct CheckResult {
     /// invalid request, or an error may have occurred while updating the
     /// instance in the database.
     ///
-    /// Depending on when the error occurred, the `CheckFailure` field may also
+    /// Depending on when the error occurred, the `outcome` field may also
     /// be populated.
-    error: Option<CheckError>,
+    result: Result<(), Incomplete>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CheckFailure {
+enum CheckOutcome {
+    Completed { instance_state: InstanceState, vmm_id: Uuid },
+    Failed(Failure),
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
+)]
+enum Failure {
     /// The sled-agent for the sled on which the instance is running was
     /// unreachable.
     ///
@@ -233,18 +218,20 @@ enum CheckFailure {
     /// the sled-agent process has crashed, or that the sled is down.
     SledAgentUnreachable,
     /// The sled-agent responded with an unexpected HTTP error.
-    SledAgentResponse(StatusCode),
+    SledAgentResponse(u16),
     /// The sled-agent indicated that it doesn't know about an instance ID that
     /// we believe it *should* know about. This probably means the sled-agent,
     /// and potentially the whole sled, has been restarted.
     NoSuchInstance,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CheckError {
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
+)]
+enum Incomplete {
     /// The sled-agent responded with an HTTP client error, indicating that our
     /// request as somehow malformed.
-    ClientHttpError(StatusCode),
+    ClientHttpError(u16),
     /// Something else went wrong while making an HTTP request.
     ClientError,
     /// We attempted to update the instance state in the database, but no
@@ -260,7 +247,7 @@ enum CheckError {
     UpdateFailed,
 }
 
-impl fmt::Display for CheckFailure {
+impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SledAgentUnreachable => f.write_str("unreachable"),
@@ -272,7 +259,7 @@ impl fmt::Display for CheckFailure {
     }
 }
 
-impl fmt::Display for CheckError {
+impl fmt::Display for Incomplete {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ClientHttpError(status) => write!(f, "{status}"),
@@ -353,22 +340,14 @@ impl BackgroundTask for InstanceWatcher {
 
             // Now, wait for the check results to come back.
             let mut total: usize = 0;
-            let mut instances_updated: usize = 0;
-            let mut vmms_updated: usize = 0;
-            let mut no_change: usize = 0;
-            let mut not_found: usize = 0;
-            let mut unreachable_instances: usize = 0;
-            let mut sled_agent_errors: usize = 0;
-            let mut check_errors: usize = 0;
+            let mut instance_states: BTreeMap<InstanceState, usize> =
+                BTreeMap::new();
+            let mut check_failures: BTreeMap<Failure, usize> =
+                BTreeMap::new();
+            let mut check_errors: BTreeMap<Incomplete, usize> = BTreeMap::new();
             while let Some(result) = tasks.join_next().await {
                 total += 1;
-                let CheckResult {
-                    target,
-                    instance_updated,
-                    check_failure,
-                    error,
-                    ..
-                } = result.expect(
+                let Check { target, outcome, result } = result.expect(
                     "a `JoinError` is returned if a spawned task \
                     panics, or if the task is aborted. we never abort \
                     tasks on this `JoinSet`, and nexus is compiled with \
@@ -377,57 +356,37 @@ impl BackgroundTask for InstanceWatcher {
                 );
                 let mut metrics = self.metrics.lock().unwrap();
                 let metric = metrics.instance(target);
-                if let Some(up) = instance_updated {
-                    if up.instance_updated {
-                        instances_updated += 1;
-                    }
-
-                    if up.vmm_updated {
-                        vmms_updated += 1;
-                    }
-
-                    if !(up.vmm_updated || up.instance_updated) {
-                        no_change += 1;
-                    }
-                    metric.success(up);
-                }
-                if let Some(reason) = check_failure {
-                    match reason {
-                        CheckFailure::NoSuchInstance => not_found += 1,
-                        CheckFailure::SledAgentUnreachable => {
-                            unreachable_instances += 1
+                if let Some(outcome) = outcome {
+                    metric.completed(outcome);
+                    match outcome {
+                        CheckOutcome::Completed { instance_state, .. } => {
+                            *instance_states
+                                .entry(instance_state)
+                                .or_default() += 1;
                         }
-                        _ => sled_agent_errors += 1,
+                        CheckOutcome::Failed(reason) => {
+                            *check_failures.entry(reason).or_default() += 1;
+                        }
                     }
-
-                    metric.check_failure(reason);
                 }
-                if let Some(reason) = error {
+                if let Err(reason) = result {
                     metric.check_error(reason);
-                    check_errors += 1;
+                    *check_errors.entry(reason).or_default() += 1;
                 }
             }
 
             slog::info!(opctx.log, "all instance checks complete";
                 "total_instances" => total,
-                "instances_updated" => instances_updated,
-                "unreachable_instances" => unreachable_instances,
-                "vmms_updated" => vmms_updated,
-                "no_change" => no_change,
-                "not_found" => not_found,
-                "sled_agent_errors" => sled_agent_errors,
-                "check_errors" => check_errors,
+                "total_completed" => instance_states.len() + check_failures.len(),
+                "total_failed" => check_failures.len(),
+                "total_incomplete" => check_errors.len(),
                 "pruned_instances" => pruned,
             );
             serde_json::json!({
                 "total_instances": total,
-                "instances_updated": instances_updated,
-                "vmms_updated": vmms_updated,
-                "no_change": no_change,
-                "not_found": not_found,
-                "unreachable_instances": unreachable_instances,
-                "sled_agent_errors": sled_agent_errors,
-                "check_errors": check_errors,
+                "instance_states": instance_states,
+                "failed_checks": check_failures,
+                "incomplete_checks": check_errors,
                 "pruned_instances": pruned,
             })
         }
@@ -436,7 +395,9 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
-    use super::{CheckError, CheckFailure, InstanceTarget, InstanceUpdated};
+    use super::{
+        CheckOutcome, Failure, Incomplete, InstanceState, Uuid, VirtualMachine,
+    };
     use oximeter::types::Cumulative;
     use oximeter::Metric;
     use oximeter::MetricsError;
@@ -447,53 +408,31 @@ mod metrics {
 
     #[derive(Debug, Default)]
     pub(super) struct Metrics {
-        instances: BTreeMap<InstanceTarget, Instance>,
+        instances: BTreeMap<VirtualMachine, Instance>,
     }
 
     #[derive(Debug)]
     pub(super) struct Producer(pub(super) Arc<Mutex<Metrics>>);
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub(super) struct Instance {
-        no_update: InstanceChecks,
-        instance_updated: InstanceChecks,
-        vmm_updated: InstanceChecks,
-        both_updated: InstanceChecks,
-        check_failures: BTreeMap<CheckFailure, InstanceCheckFailures>,
-        update_failures: BTreeMap<CheckError, InstanceCheckErrors>,
+        instance_states: BTreeMap<StateKey, State>,
+        // N.B. that these names are a bit unfortunate; since the name of the
+        // metrics is generated from the name of the metric struct, we can't
+        // name the struct anything else.
+        check_failures: BTreeMap<Failure, FailedCheck>,
+        check_errors: BTreeMap<Incomplete, IncompleteCheck>,
         touched: bool,
     }
+
+    type StateKey = (Uuid, InstanceState);
 
     impl Metrics {
         pub(crate) fn instance(
             &mut self,
-            instance: InstanceTarget,
+            instance: VirtualMachine,
         ) -> &mut Instance {
-            self.instances.entry(instance).or_insert_with(|| Instance {
-                no_update: InstanceChecks {
-                    instance_updated: false,
-                    vmm_updated: false,
-                    datum: Cumulative::default(),
-                },
-                instance_updated: InstanceChecks {
-                    instance_updated: true,
-                    vmm_updated: false,
-                    datum: Cumulative::default(),
-                },
-                vmm_updated: InstanceChecks {
-                    instance_updated: false,
-                    vmm_updated: true,
-                    datum: Cumulative::default(),
-                },
-                both_updated: InstanceChecks {
-                    instance_updated: true,
-                    vmm_updated: true,
-                    datum: Cumulative::default(),
-                },
-                check_failures: BTreeMap::new(),
-                update_failures: BTreeMap::new(),
-                touched: false,
-            })
+            self.instances.entry(instance).or_default()
         }
 
         pub(super) fn prune(&mut self) -> usize {
@@ -527,43 +466,35 @@ mod metrics {
     }
 
     impl Instance {
-        pub(super) fn success(&mut self, updated: InstanceUpdated) {
-            match updated {
-                InstanceUpdated {
-                    instance_updated: true,
-                    vmm_updated: true,
-                } => self.both_updated.datum += 1,
-                InstanceUpdated {
-                    instance_updated: true,
-                    vmm_updated: false,
-                } => self.instance_updated.datum += 1,
-                InstanceUpdated {
-                    instance_updated: false,
-                    vmm_updated: true,
-                } => self.vmm_updated.datum += 1,
-                InstanceUpdated {
-                    instance_updated: false,
-                    vmm_updated: false,
-                } => self.no_update.datum += 1,
-            }
+        pub(super) fn completed(&mut self, outcome: CheckOutcome) {
+            match outcome {
+                CheckOutcome::Completed { instance_state, vmm_id } => {
+                    self.instance_states
+                        .entry((vmm_id, instance_state))
+                        .or_insert_with(|| State {
+                            state: instance_state.to_string(),
+                            vmm_id,
+                            datum: Cumulative::default(),
+                        })
+                        .datum += 1;
+                }
+                CheckOutcome::Failed(reason) => {
+                    self.check_failures
+                        .entry(reason)
+                        .or_insert_with(|| FailedCheck {
+                            reason: reason.to_string(),
+                            datum: Cumulative::default(),
+                        })
+                        .datum += 1;
+                }
+            };
             self.touched = true;
         }
 
-        pub(super) fn check_failure(&mut self, reason: CheckFailure) {
-            self.check_failures
+        pub(super) fn check_error(&mut self, reason: Incomplete) {
+            self.check_errors
                 .entry(reason)
-                .or_insert_with(|| InstanceCheckFailures {
-                    reason: reason.to_string(),
-                    datum: Cumulative::default(),
-                })
-                .datum += 1;
-            self.touched = true;
-        }
-
-        pub(super) fn check_error(&mut self, reason: CheckError) {
-            self.update_failures
-                .entry(reason)
-                .or_insert_with(|| InstanceCheckErrors {
+                .or_insert_with(|| IncompleteCheck {
                     reason: reason.to_string(),
                     datum: Cumulative::default(),
                 })
@@ -572,62 +503,54 @@ mod metrics {
         }
 
         fn len(&self) -> usize {
-            4 + self.check_failures.len() + self.update_failures.len()
+            self.instance_states.len()
+                + self.check_failures.len()
+                + self.check_errors.len()
         }
 
         fn sample_into(
             &self,
-            target: &InstanceTarget,
+            target: &VirtualMachine,
             dest: &mut Vec<Sample>,
         ) -> Result<(), MetricsError> {
-            dest.push(Sample::new(target, &self.no_update)?);
-            dest.push(Sample::new(target, &self.instance_updated)?);
-            dest.push(Sample::new(target, &self.vmm_updated)?);
-            dest.push(Sample::new(target, &self.both_updated)?);
+            for metric in self.instance_states.values() {
+                dest.push(Sample::new(target, metric)?);
+            }
             for metric in self.check_failures.values() {
                 dest.push(Sample::new(target, metric)?);
             }
-            for metric in self.update_failures.values() {
+            for metric in self.check_errors.values() {
                 dest.push(Sample::new(target, metric)?);
             }
             Ok(())
         }
     }
 
-    /// The number of successful checks for a single instance and sled agent
-    /// pair.
+    /// The number of successful checks for a single instance, VMM, and sled agent.
     #[derive(Clone, Debug, Metric)]
-    struct InstanceChecks {
-        /// `true` if the instance state changed as a result of this check.
-        instance_updated: bool,
-        /// `true` if the VMM state changed as a result of this check.
-        vmm_updated: bool,
+    struct State {
+        /// The UUID of the VMM process for which this state was reported.
+        vmm_id: Uuid,
+        /// The string representation of the instance's state as understood by
+        /// the VMM.
+        state: String,
         /// The number of successful checks for this instance and sled agent.
         datum: Cumulative<u64>,
     }
 
     /// The number of failed checks for an instance and sled agent pair.
     #[derive(Clone, Debug, Metric)]
-    struct InstanceCheckFailures {
+    struct FailedCheck {
         /// The reason why the check failed.
-        ///
-        /// # Note
-        /// This must always be generated from a `CheckFailure` enum.
         reason: String,
         /// The number of failed checks for this instance and sled agent.
         datum: Cumulative<u64>,
     }
 
-    /// The number of instance checks that were unsuccessful for an instance and
-    /// sled agent.
+    /// The number of unsuccessful checks for an instance and sled agent pair.
     #[derive(Clone, Debug, Metric)]
-    struct InstanceCheckErrors {
-        /// The reason why the check failed.
-        ///
-        /// # Note
-        /// This must always be generated from a `CheckFailure` enum.
-        // TODO(eliza): it would be nice if this was a `oximeter::FieldType`:
-        // From<&str>` impl, so that this could be a `&'static str`.
+    struct IncompleteCheck {
+        /// The reason why the check was unsuccessful.
         reason: String,
         /// The number of failed checks for this instance and sled agent.
         datum: Cumulative<u64>,
