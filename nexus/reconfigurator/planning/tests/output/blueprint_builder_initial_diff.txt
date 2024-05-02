@@ -49,6 +49,48 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
      internal_ntp   aac3ab51-9e2b-4605-9bf6-e3eb3681c2b5   in service    fd00:1122:3344:102::21         
      nexus          29278a22-1ba1-4117-bfdb-39fcb9ae7fd1   in service    fd00:1122:3344:102::22         
 
+        -------------------------------------------------------------------------------------------------
+             vendor           model           serial                                          status     
+        -------------------------------------------------------------------------------------------------
+                                                                                                         
+  REMOVED SLEDS:                                                                                         
+                                                                                                         
+-  sled 08c7046b-c9c4-4368-881f-19a72df22143: blueprint disks: old gen None, new gen Some(Generation(1)) 
+-            fake-vendor      fake-model      serial-04138a25-c575-42e1-8d23-d2d9754274ae     removed    
+-            fake-vendor      fake-model      serial-16bbc40a-f465-4da8-be9a-31662c267bc0     removed    
+-            fake-vendor      fake-model      serial-660b6fcf-4cff-40ed-9495-7a60f3d7d90f     removed    
+-            fake-vendor      fake-model      serial-818fdf58-55f2-42d0-b68c-52e480c4b6c3     removed    
+-            fake-vendor      fake-model      serial-971d2d04-83cf-4564-996a-9af440c9b350     removed    
+-            fake-vendor      fake-model      serial-9b583b97-9d7d-4416-ac69-b96ae421e962     removed    
+-            fake-vendor      fake-model      serial-9c3a13e9-a37a-4eba-b1be-ef2492aa9b93     removed    
+-            fake-vendor      fake-model      serial-b657bc35-336c-4cb0-9cec-7ffe18edd129     removed    
+-            fake-vendor      fake-model      serial-c311e953-3a56-48b3-8453-d07edeaad683     removed    
+-            fake-vendor      fake-model      serial-e5049408-6765-4924-af8c-7b32a0ee02ef     removed    
+                                                                                                         
+-  sled 84ac367e-9b03-4e9d-a846-df1a08deee6c: blueprint disks: old gen None, new gen Some(Generation(1)) 
+-            fake-vendor      fake-model      serial-12a5bea4-d3c8-496e-ad19-0877663106ca     removed    
+-            fake-vendor      fake-model      serial-ca8377ab-f65c-47a5-aae8-fb6c6783cb68     removed    
+-            fake-vendor      fake-model      serial-ca8858fc-26e1-4d6e-9f9c-a90716e82a4a     removed    
+-            fake-vendor      fake-model      serial-cef7e1bb-d82d-45ee-9822-9329cc0fc652     removed    
+-            fake-vendor      fake-model      serial-d1a87932-4dd7-43c4-b16b-d610d26f3fdd     removed    
+-            fake-vendor      fake-model      serial-d1ba577a-474b-4ccc-ba51-96680809345e     removed    
+-            fake-vendor      fake-model      serial-d538cdef-e723-4a4e-bd5e-39de33f46d27     removed    
+-            fake-vendor      fake-model      serial-d782a2e1-a587-4b5d-bce8-2d71e45b5761     removed    
+-            fake-vendor      fake-model      serial-e472e99d-3ae0-495a-b86c-bcadb01275bd     removed    
+-            fake-vendor      fake-model      serial-ee262dc3-2103-445f-bd5b-65058a014f72     removed    
+                                                                                                         
+-  sled be7f4375-2a6b-457f-b1a4-3074a715e5fe: blueprint disks: old gen None, new gen Some(Generation(1)) 
+-            fake-vendor      fake-model      serial-5255927b-eb2f-48f2-aaa6-02474c174994     removed    
+-            fake-vendor      fake-model      serial-6bf127c0-6695-4237-aea8-adb8aee679b5     removed    
+-            fake-vendor      fake-model      serial-769e436a-c0d0-4f6a-a119-d808fe65ef6c     removed    
+-            fake-vendor      fake-model      serial-846dd32a-a9e8-4274-8bcf-b6ed36aafb15     removed    
+-            fake-vendor      fake-model      serial-86f5af41-4fc8-4630-8d94-a235c615c5c5     removed    
+-            fake-vendor      fake-model      serial-b66e5714-c13a-4fef-8d2a-6936a94a3cf3     removed    
+-            fake-vendor      fake-model      serial-d769c5a2-c4eb-4555-8e9a-d883c5a029a0     removed    
+-            fake-vendor      fake-model      serial-dff09bd2-2160-43ce-8f0f-857be8768f84     removed    
+-            fake-vendor      fake-model      serial-e7814ff1-34e8-4d55-abc1-4bd6055c9d91     removed    
+-            fake-vendor      fake-model      serial-f3396a8f-33c3-4045-8549-540c508c437c     removed    
+
   METADATA:
 +   internal DNS version:  (not present in collection) -> 1
 +   external DNS version:  (not present in collection) -> 1

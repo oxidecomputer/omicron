@@ -453,6 +453,8 @@ mod test {
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
         assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.physical_disks().added.len(), 0);
+        assert_eq!(diff.physical_disks().removed.len(), 0);
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.

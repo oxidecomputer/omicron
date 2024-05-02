@@ -965,33 +965,9 @@ impl BlueprintDiff {
         self.sleds.unchanged.iter().map(|(sled_id, zones)| (*sled_id, zones))
     }
 
-    pub fn physical_disks_added(
-        &self,
-    ) -> impl Iterator<Item = (SledUuid, &DiffBlueprintPhysicalDiskConfig)>
-    {
-        self.physical_disks
-            .added
-            .iter()
-            .map(|(sled_id, disks)| (*sled_id, disks))
-    }
-    pub fn physical_disks_removed(
-        &self,
-    ) -> impl Iterator<Item = (SledUuid, &DiffBlueprintPhysicalDiskConfig)>
-    {
-        self.physical_disks
-            .removed
-            .iter()
-            .map(|(sled_id, disks)| (*sled_id, disks))
-    }
-
-    pub fn physical_disks_unchanged(
-        &self,
-    ) -> impl Iterator<Item = (SledUuid, &DiffBlueprintPhysicalDiskConfig)>
-    {
-        self.physical_disks
-            .unchanged
-            .iter()
-            .map(|(sled_id, disks)| (*sled_id, disks))
+    // Return the physical disk diffs
+    pub fn physical_disks(&self) -> &DiffPhysicalDisks {
+        &self.physical_disks
     }
 
     /// Return a struct that can be used to display the diff.
@@ -1062,10 +1038,12 @@ pub struct DiffBlueprintPhysicalDiskConfig {
 }
 
 #[derive(Debug, Default)]
-struct DiffPhysicalDisks {
-    added: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
-    removed: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
-    unchanged: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
+pub struct DiffPhysicalDisks {
+    pub added_sleds: BTreeSet<SledUuid>,
+    pub removed_sleds: BTreeSet<SledUuid>,
+    pub added: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
+    pub removed: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
+    pub unchanged: BTreeMap<SledUuid, DiffBlueprintPhysicalDiskConfig>,
 }
 
 impl DiffPhysicalDisks {
@@ -1116,12 +1094,31 @@ impl DiffPhysicalDisks {
                     );
                 }
             } else {
+                diffs.removed_sleds.insert(sled_id);
                 diffs.removed.insert(
                     sled_id,
                     DiffBlueprintPhysicalDiskConfig {
                         before_generation,
                         after_generation: None,
                         disks: before_disks.disks().into_iter().collect(),
+                    },
+                );
+            }
+        }
+
+        // Any sleds remaining in `after` have just been added, since we remove
+        // sleds from `after`, that were also in `before`, in the above looop.
+        for (sled_id, after_disks) in after {
+            diffs.added_sleds.insert(sled_id);
+            let added: BTreeSet<DiskIdentity> =
+                after_disks.disks.into_iter().map(|d| d.identity).collect();
+            if !added.is_empty() {
+                diffs.added.insert(
+                    sled_id,
+                    DiffBlueprintPhysicalDiskConfig {
+                        before_generation: None,
+                        after_generation: Some(after_disks.generation),
+                        disks: added,
                     },
                 );
             }
@@ -1747,15 +1744,11 @@ mod table_display {
             //
             // 1. Unchanged
             // 2. Removed
-            // 3. Modified
-            // 4. Added
+            // 3. Added
             //
             // The idea behind the order is to (a) group all changes together
             // and (b) put changes towards the bottom, so people have to scroll
             // back less.
-            //
-            // Zones within a modified sled follow the same order. If you're
-            // changing the order here, make sure to keep that in sync.
 
             // First, unchanged sleds.
             builder.make_section(
@@ -1828,28 +1821,19 @@ mod table_display {
             let mut builder = StBuilder::new();
             builder.push_header_row(diff_disk_header_row());
 
-            // The order is:
-            //
-            // 1. Unchanged
-            // 2. Removed
-            // 3. Added
-            //
-            // The idea behind the order is to (a) group all changes together
-            // and (b) put changes towards the bottom, so people have to scroll
-            // back less.
-            //
-            // Zones within a modified sled follow the same order. If you're
-            // changing the order here, make sure to keep that in sync.
+            // Same ordering and rationale as above in `make_zone_disk_table`.
+            // We keep the zones and disks in different tables primarily for
+            // legibility.
 
-            // First, unchanged sleds.
+            // First, unchanged disks.
             builder.make_section(
                 SectionSpacing::Always,
-                unchanged_sleds_heading(),
+                disks_heading("UNCHANGED DISKS"),
                 |section| {
-                    for (sled_id, disks) in diff.physical_disks_unchanged() {
+                    for (sled_id, disks) in &diff.physical_disks().unchanged {
                         add_whole_disk_records(
-                            sled_id,
-                            &disks,
+                            *sled_id,
+                            disks,
                             WholeSledKind::Unchanged,
                             section,
                         );
@@ -1857,33 +1841,45 @@ mod table_display {
                 },
             );
 
-            // Then, removed sleds.
+            // Then, removed disks.
             builder.make_section(
                 SectionSpacing::Always,
-                removed_sleds_heading(),
+                disks_heading("REMOVED DISKS"),
                 |section| {
-                    for (sled_id, disks) in diff.physical_disks_removed() {
+                    for (sled_id, disks) in &diff.physical_disks().removed {
+                        let sled_kind = if diff
+                            .physical_disks
+                            .removed_sleds
+                            .contains(sled_id)
+                        {
+                            WholeSledKind::Removed
+                        } else {
+                            WholeSledKind::Unchanged
+                        };
                         add_whole_disk_records(
-                            sled_id,
-                            &disks,
-                            WholeSledKind::Removed,
-                            section,
+                            *sled_id, disks, sled_kind, section,
                         );
                     }
                 },
             );
 
-            // Finally, added sleds.
+            // Finally, added disks.
             builder.make_section(
                 SectionSpacing::Always,
-                added_sleds_heading(),
+                disks_heading("ADDED DISKS"),
                 |section| {
-                    for (sled_id, disks) in diff.physical_disks_added() {
+                    for (sled_id, disks) in &diff.physical_disks.added {
+                        let sled_kind = if diff
+                            .physical_disks
+                            .added_sleds
+                            .contains(sled_id)
+                        {
+                            WholeSledKind::Added
+                        } else {
+                            WholeSledKind::Unchanged
+                        };
                         add_whole_disk_records(
-                            sled_id,
-                            &disks,
-                            WholeSledKind::Added,
-                            section,
+                            *sled_id, disks, sled_kind, section,
                         );
                     }
                 },
@@ -2307,7 +2303,7 @@ mod table_display {
     const SLED_HEAD_INDENT: &str = " ";
     const SLED_INDENT: &str = "  ";
     const ZONE_HEAD_INDENT: &str = "   ";
-    const DISK_HEAD_INDENT: &str = ZONE_HEAD_INDENT;
+    const DISK_HEAD_INDENT: &str = SLED_HEAD_INDENT;
     // Due to somewhat mysterious reasons with how padding works with tabled,
     // this needs to be 3 columns wide rather than 4.
     const ZONE_INDENT: &str = "   ";
@@ -2411,6 +2407,10 @@ mod table_display {
 
     pub(super) fn metadata_diff_heading() -> String {
         format!("{H1_INDENT}{METADATA_HEADING}:")
+    }
+
+    fn disks_heading(heading: &'static str) -> String {
+        format!("{UNCHANGED_PREFIX}{SLED_HEAD_INDENT}{heading}:")
     }
 
     fn sleds_heading(prefix: char, heading: &'static str) -> String {
