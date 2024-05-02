@@ -5,7 +5,6 @@
 //! Handler functions (entrypoints) for HTTP APIs internal to the control plane
 
 use super::params::{OximeterInfo, RackInitializationRequest};
-use crate::external_api::http_entrypoints::SledId;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -52,11 +51,13 @@ use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -400,14 +401,7 @@ async fn cpapi_producers_post(
         .await
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    serde::Deserialize,
-    schemars::JsonSchema,
-    serde::Serialize,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct CollectorIdPathParams {
     /// The ID of the oximeter collector.
     pub collector_id: Uuid,
@@ -1028,6 +1022,11 @@ async fn sled_list_uninitialized(
         Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct SledId {
+    pub id: SledUuid,
 }
 
 /// Add sled to initialized rack

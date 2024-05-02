@@ -4360,7 +4360,6 @@
         ]
       },
       "SledId": {
-        "description": "The unique ID of a sled.",
         "type": "object",
         "properties": {
           "id": {
