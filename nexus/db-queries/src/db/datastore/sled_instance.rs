@@ -40,7 +40,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<(Sled, SledInstance)> {
-        // TODO(eliza): should probably paginate this?
         use crate::db::schema::{sled::dsl as sled_dsl, sled_instance::dsl};
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;

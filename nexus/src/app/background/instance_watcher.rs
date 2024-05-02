@@ -185,7 +185,13 @@ struct VirtualMachine {
 struct Check {
     target: VirtualMachine,
 
-    /// The outcome of performing this check.
+    /// The outcome of performing this check. Either we were able to reach the
+    /// sled-agent that owns this instance and it told us the instance's state
+    /// and VMM, or we the health check failed in a way that suggests a
+    /// potential issue with the sled-agent or instance.
+    ///
+    /// If we were not able to perform the request at all due to an error on
+    /// *our* end, this will be `None`.
     outcome: Option<CheckOutcome>,
 
     /// `Some` if the instance check was unsuccessful.
@@ -280,6 +286,14 @@ impl BackgroundTask for InstanceWatcher {
         async {
             let mut tasks = tokio::task::JoinSet::new();
             let mut paginator = Paginator::new(MAX_SLED_AGENTS);
+            let mk_client = |sled: &Sled| {
+                nexus_networking::sled_client_from_address(
+                    sled.id(),
+                    sled.address(),
+                    &opctx.log,
+                )
+            };
+
             while let Some(p) = paginator.next() {
                 let maybe_batch = self
                     .datastore
@@ -299,17 +313,17 @@ impl BackgroundTask for InstanceWatcher {
                     }
                 };
                 paginator = p.found_batch(&batch, &|(sled, _)| sled.id());
+
+                // When we iterate over the batch of sled instances, we pop the
+                // first sled from the batch before looping over the rest, to
+                // insure that the initial sled-agent client is created first,
+                // as we need the address of the first sled to construct it.
+                // We could, alternatively, make the sled-agent client an
+                // `Option`, but then every subsequent iteration would have to
+                // handle the case where it's `None`, and I thought this was a
+                // bit neater...
                 let mut batch = batch.into_iter();
-
                 if let Some((mut curr_sled, sled_instance)) = batch.next() {
-                    let mk_client = |sled: &Sled| {
-                        nexus_networking::sled_client_from_address(
-                            sled.id(),
-                            sled.address(),
-                            &opctx.log,
-                        )
-                    };
-
                     let mut client = mk_client(&curr_sled);
                     tasks.spawn(self.check_instance(
                         opctx,
@@ -436,15 +450,11 @@ mod metrics {
         }
 
         pub(super) fn prune(&mut self) -> usize {
-            let mut pruned = 0;
+            let len = self.instances.len();
             self.instances.retain(|_, instance| {
-                let touched = std::mem::replace(&mut instance.touched, false);
-                if !touched {
-                    pruned += 1;
-                }
-                touched
+                std::mem::replace(&mut instance.touched, false)
             });
-            pruned
+            len - self.instances.len()
         }
 
         fn len(&self) -> usize {
@@ -542,6 +552,8 @@ mod metrics {
     #[derive(Clone, Debug, Metric)]
     struct FailedCheck {
         /// The reason why the check failed.
+        ///
+        /// This is generated from the [`Failure`] enum's `Display` implementation.
         reason: String,
         /// The number of failed checks for this instance and sled agent.
         datum: Cumulative<u64>,
@@ -551,6 +563,8 @@ mod metrics {
     #[derive(Clone, Debug, Metric)]
     struct IncompleteCheck {
         /// The reason why the check was unsuccessful.
+        ///
+        /// This is generated from the [`Incomplete`] enum's `Display` implementation.
         reason: String,
         /// The number of failed checks for this instance and sled agent.
         datum: Cumulative<u64>,
