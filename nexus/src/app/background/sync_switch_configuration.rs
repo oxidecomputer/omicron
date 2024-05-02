@@ -1527,6 +1527,7 @@ fn static_routes_to_del(
     routes_to_del
 }
 
+#[allow(clippy::type_complexity)]
 fn static_routes_to_add(
     desired_static_routes: &HashMap<
         SwitchLocation,
