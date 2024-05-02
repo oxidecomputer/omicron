@@ -132,7 +132,7 @@ impl CurrentRssConfig {
                 );
                 let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
                 Some(BootstrapSledDescription {
-                    id: sp.id.into(),
+                    id: sp.id,
                     baseboard,
                     bootstrap_ip,
                 })
