@@ -895,30 +895,17 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// total number of instances checked
             total_instances: usize,
 
-            /// number of instances whose check succeeded without a state
-            /// change
-            no_change: usize,
-
-            /// number of instances whose state has changed
-            instances_updated: usize,
-
-            /// number of instances whose VMM state has changed
-            vmms_updated: usize,
-
-            /// number of instances which the sled-agent indicated no longer exists
-            not_found: usize,
-
-            /// number of unexpected errors returned by sled-agent
-            sled_agent_errors: usize,
-
-            /// number of instances for which the sled agent was unreachable
-            unreachable_instances: usize,
-
-            /// number of checks that could not be completed successfully
-            check_errors: usize,
-
-            /// number of stale instance metrics that were deleted.
+            /// number of stale instance metrics that were deleted
             pruned_instances: usize,
+
+            /// instance states from completed checks
+            instance_states: BTreeMap<String, usize>,
+
+            /// instance check failures
+            failed_checks: BTreeMap<String, usize>,
+
+            /// checks that could not be completed
+            incomplete_checks: BTreeMap<String, usize>,
         }
 
         match serde_json::from_value::<TaskSuccess>(details.clone()) {
@@ -926,44 +913,40 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(success) => {
+            Ok(TaskSuccess {
+                total_instances,
+                pruned_instances,
+                instance_states,
+                failed_checks,
+                incomplete_checks,
+            }) => {
+                println!("    total instances checked: {total_instances}",);
                 println!(
-                    "    total instances checked: {}",
-                    success.total_instances
+                    "    checks completed: {}",
+                    instance_states.len() + failed_checks.len()
                 );
                 println!(
-                    "    checks completed successfully: {}",
-                    success.total_instances - success.check_errors
+                    "     -> successful checks: {}",
+                    instance_states.len()
                 );
-                println!("      -> {} instances unchanged", success.no_change);
+                for (state, count) in &instance_states {
+                    println!("        {state} instances: {count}")
+                }
+
+                println!("     -> failed checks: {}", failed_checks.len());
+                for (failure, count) in &failed_checks {
+                    println!("        {failure}: {count}")
+                }
                 println!(
-                    "      -> {} instance states updated",
-                    success.instances_updated
+                    "    checks that could not be completed: {}",
+                    incomplete_checks.len()
                 );
+                for (error, count) in &incomplete_checks {
+                    println!("     -> {error}: {count}")
+                }
                 println!(
-                    "      -> {} VMM states updated",
-                    success.vmms_updated
+                    "    stale instance metrics pruned: {pruned_instances}"
                 );
-                println!(
-                    "      -> {} instances no longer exist",
-                    success.not_found
-                );
-                println!(
-                    "      -> {} sled-agent errors",
-                    success.sled_agent_errors
-                );
-                println!(
-                    "      -> {} instances with unreachable sled-agents",
-                    success.unreachable_instances
-                );
-                println!(
-                    "    checks that could not be completed successfully: {}",
-                    success.check_errors
-                );
-                println!(
-                    "    stale instance metrics removed: {}",
-                    success.pruned_instances
-                )
             }
         };
     } else {

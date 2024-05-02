@@ -401,15 +401,11 @@ task: "instance_watcher"
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
-    checks completed successfully: 0
-      -> 0 instances unchanged
-      -> 0 instance states updated
-      -> 0 VMM states updated
-      -> 0 instances no longer exist
-      -> 0 sled-agent errors
-      -> 0 instances with unreachable sled-agents
-    checks that could not be completed successfully: 0
-    stale instance metrics removed: 0
+    checks completed: 0
+     -> successful checks: 0
+     -> failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
 
 task: "inventory_collection"
   configured period: every 10m
