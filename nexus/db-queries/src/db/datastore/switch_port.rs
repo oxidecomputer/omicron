@@ -31,6 +31,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, ResourceType, UpdateResult,
 };
+use omicron_common::api::internal::shared::ImportExportPolicy;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -345,6 +346,15 @@ impl DataStore {
                                 p.multi_exit_discriminator.map(|x| x.into()),
                                 p.local_pref.map(|x| x.into()),
                                 p.enforce_first_as,
+                                match &p.allowed_import {
+                                    ImportExportPolicy::NoFiltering => false,
+                                    _ => true,
+                                },
+                                match &p.allowed_export {
+                                    ImportExportPolicy::NoFiltering => false,
+                                    _ => true,
+                                },
+                                p.vlan_id.map(|x| u32::from(x).into()),
                             ));
 
                         }
@@ -1205,8 +1215,9 @@ mod test {
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
-    use omicron_common::api::external::{
-        IdentityMetadataCreateParams, Name, NameOrId,
+    use omicron_common::api::{
+        external::{IdentityMetadataCreateParams, Name, NameOrId},
+        internal::shared::ImportExportPolicy,
     };
     use omicron_test_utils::dev;
     use std::collections::HashMap;
@@ -1290,6 +1301,9 @@ mod test {
                         communities: Vec::new(),
                         local_pref: None,
                         enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
                     }],
                 },
             )]),

@@ -34,6 +34,8 @@ progenitor::generate_api!(
         BgpPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        ImportExportPolicy = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
     },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?

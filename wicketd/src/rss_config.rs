@@ -17,6 +17,9 @@ use anyhow::Context;
 use anyhow::Result;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
+use bootstrap_agent_client::types::ImportExportPolicy;
+use bootstrap_agent_client::types::Ipv4Net;
+use bootstrap_agent_client::types::Ipv6Net;
 use bootstrap_agent_client::types::Name;
 use bootstrap_agent_client::types::RackInitializeRequest;
 use bootstrap_agent_client::types::RecoverySiloConfig;
@@ -35,6 +38,7 @@ use std::collections::BTreeSet;
 use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use std::str::FromStr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
@@ -540,6 +544,37 @@ fn validate_rack_network_config(
                         min_ttl: p.min_ttl,
                         multi_exit_discriminator: p.multi_exit_discriminator,
                         remote_asn: p.remote_asn,
+                        allowed_import: match &p.allowed_import {
+                            omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering => {
+                                ImportExportPolicy::NoFiltering
+                            }
+                            omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) => {
+                                ImportExportPolicy::Allow(list.clone().iter().map(|x| {
+                                    match x {
+                                        omicron_common::api::external::IpNet::V4(x) =>
+                                            bootstrap_agent_client::types::IpNet::V4(Ipv4Net::from_str(&x.to_string().as_str()).unwrap()),
+                                        omicron_common::api::external::IpNet::V6(x) =>
+                                            bootstrap_agent_client::types::IpNet::V6(Ipv6Net::from_str(&x.to_string().as_str()).unwrap()),                                  
+                                    }
+                                }).collect())
+                            }
+                        },
+                        allowed_export: match &p.allowed_export {
+                            omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering => {
+                                ImportExportPolicy::NoFiltering
+                            }
+                            omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) => {
+                                ImportExportPolicy::Allow(list.clone().iter().map(|x| {
+                                    match x {
+                                        omicron_common::api::external::IpNet::V4(x) =>
+                                            bootstrap_agent_client::types::IpNet::V4(Ipv4Net::from_str(&x.to_string().as_str()).unwrap()),
+                                        omicron_common::api::external::IpNet::V6(x) =>
+                                            bootstrap_agent_client::types::IpNet::V6(Ipv6Net::from_str(&x.to_string().as_str()).unwrap()),                                  
+                                    }
+                                }).collect())
+                            }
+                        },
+                        vlan_id: p.vlan_id,
                     })
                     .collect(),
                 switch: match config.switch {

@@ -6,7 +6,7 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, Name},
+    api::external::{self, BfdMode, IpNet, Name},
 };
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
@@ -190,6 +190,19 @@ pub struct BgpConfig {
     pub checker: Option<String>,
 }
 
+/// Define policy relating to the import and export of prefixes from a BGP
+/// peer.
+#[derive(
+    Default, Debug, Serialize, Deserialize, Clone, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ImportExportPolicy {
+    /// Do not perform any filtering.
+    #[default]
+    NoFiltering,
+    Allow(Vec<IpNet>),
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpPeerConfig {
     /// The autonomous sysetm number of the router the peer belongs to.
@@ -230,6 +243,15 @@ pub struct BgpPeerConfig {
     /// Enforce that the first AS in paths received from this peer is the peer's AS.
     #[serde(default)]
     pub enforce_first_as: bool,
+    /// Define import policy for a peer.
+    #[serde(default)]
+    pub allowed_import: ImportExportPolicy,
+    /// Define export policy for a peer.
+    #[serde(default)]
+    pub allowed_export: ImportExportPolicy,
+    /// Associate a VLAN ID with a BGP peer session.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -249,6 +271,7 @@ pub struct RouteConfig {
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
     /// The VLAN id associated with this route.
+    #[serde(default)]
     pub vlan_id: Option<u16>,
 }
 

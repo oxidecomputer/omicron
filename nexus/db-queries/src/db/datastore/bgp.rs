@@ -13,7 +13,10 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
-use nexus_db_model::{BgpPeerView, SwitchPortBgpPeerConfigCommunity};
+use nexus_db_model::{
+    BgpPeerView, SwitchPortBgpPeerConfigAllowExport,
+    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+};
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -511,5 +514,79 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(results)
+    }
+
+    pub async fn allow_export_for_peer(
+        &self,
+        opctx: &OpContext,
+        port_settings_id: Uuid,
+        interface_name: &String,
+        addr: IpNetwork,
+    ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
+        use db::schema::switch_port_settings_bgp_peer_config as db_peer;
+        use db::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
+
+        let active = peer_dsl::switch_port_settings_bgp_peer_config
+            .filter(db_peer::port_settings_id.eq(port_settings_id))
+            .select(db_peer::allow_export_list_active)
+            .limit(1)
+            .first_async::<bool>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if !active {
+            return Ok(None);
+        }
+
+        let list = dsl::switch_port_settings_bgp_peer_config_allow_export
+            .filter(db_allow::port_settings_id.eq(port_settings_id))
+            .filter(db_allow::interface_name.eq(interface_name.clone()))
+            .filter(db_allow::addr.eq(addr))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(Some(list))
+    }
+
+    pub async fn allow_import_for_peer(
+        &self,
+        opctx: &OpContext,
+        port_settings_id: Uuid,
+        interface_name: &String,
+        addr: IpNetwork,
+    ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
+        use db::schema::switch_port_settings_bgp_peer_config as db_peer;
+        use db::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
+
+        let active = peer_dsl::switch_port_settings_bgp_peer_config
+            .filter(db_peer::port_settings_id.eq(port_settings_id))
+            .select(db_peer::allow_import_list_active)
+            .limit(1)
+            .first_async::<bool>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if !active {
+            return Ok(None);
+        }
+
+        let list = dsl::switch_port_settings_bgp_peer_config_allow_import
+            .filter(db_allow::port_settings_id.eq(port_settings_id))
+            .filter(db_allow::interface_name.eq(interface_name.clone()))
+            .filter(db_allow::addr.eq(addr))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(Some(list))
     }
 }

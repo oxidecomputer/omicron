@@ -2638,6 +2638,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     multi_exit_discriminator INT8,
     local_pref INT8,
     enforce_first_as BOOLEAN,
+    allow_import_list_active BOOLEAN NOT NULL,
+    allow_export_list_active BOOLEAN NOT NULL,
+    vlan_id INT8,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)
@@ -2650,6 +2653,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_c
     community INT8 NOT NULL,
 
     PRIMARY KEY (port_settings_id, interface_name, addr, community)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_import (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_export (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
@@ -3749,6 +3770,7 @@ SELECT
  bpc.multi_exit_discriminator,
  bpc.local_pref,
  bpc.enforce_first_as,
+ bpc.vlan_id,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc

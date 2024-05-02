@@ -351,7 +351,8 @@ mod tests {
     use super::*;
     use omicron_common::api::external::SwitchLocation;
     use omicron_common::api::internal::shared::{
-        BgpConfig, BgpPeerConfig, PortConfigV1, PortFec, PortSpeed, RouteConfig,
+        BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfigV1, PortFec,
+        PortSpeed, RouteConfig,
     };
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
@@ -454,6 +455,9 @@ mod tests {
                         min_ttl: None,
                         multi_exit_discriminator: None,
                         remote_asn: None,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
                     }],
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,

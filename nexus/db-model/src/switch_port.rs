@@ -5,6 +5,8 @@
 use crate::schema::{
     lldp_config, lldp_service_config, switch_port, switch_port_settings,
     switch_port_settings_address_config, switch_port_settings_bgp_peer_config,
+    switch_port_settings_bgp_peer_config_allow_export,
+    switch_port_settings_bgp_peer_config_allow_import,
     switch_port_settings_bgp_peer_config_communities,
     switch_port_settings_group, switch_port_settings_groups,
     switch_port_settings_interface_config, switch_port_settings_link_config,
@@ -575,6 +577,9 @@ pub struct SwitchPortBgpPeerConfig {
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
+    pub allow_import_list_active: bool,
+    pub allow_export_list_active: bool,
+    pub vlan_id: Option<SqlU32>,
 }
 
 #[derive(
@@ -595,6 +600,42 @@ pub struct SwitchPortBgpPeerConfigCommunity {
     pub community: SqlU32,
 }
 
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_port_settings_bgp_peer_config_allow_export)]
+pub struct SwitchPortBgpPeerConfigAllowExport {
+    pub port_settings_id: Uuid,
+    pub interface_name: String,
+    pub addr: IpNetwork,
+    pub prefix: IpNetwork,
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_port_settings_bgp_peer_config_allow_import)]
+pub struct SwitchPortBgpPeerConfigAllowImport {
+    pub port_settings_id: Uuid,
+    pub interface_name: String,
+    pub addr: IpNetwork,
+    pub prefix: IpNetwork,
+}
+
 impl SwitchPortBgpPeerConfig {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -613,6 +654,9 @@ impl SwitchPortBgpPeerConfig {
         multi_exit_discriminator: Option<SqlU32>,
         local_pref: Option<SqlU32>,
         enforce_first_as: bool,
+        allow_import_list_active: bool,
+        allow_export_list_active: bool,
+        vlan_id: Option<SqlU32>,
     ) -> Self {
         Self {
             port_settings_id,
@@ -630,6 +674,9 @@ impl SwitchPortBgpPeerConfig {
             multi_exit_discriminator,
             local_pref,
             enforce_first_as,
+            allow_import_list_active,
+            allow_export_list_active,
+            vlan_id,
         }
     }
 }

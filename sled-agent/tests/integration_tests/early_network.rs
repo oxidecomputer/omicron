@@ -10,8 +10,8 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::{
     external::SwitchLocation,
     internal::shared::{
-        BgpConfig, BgpPeerConfig, PortConfigV1, PortFec, PortSpeed,
-        RackNetworkConfig, RouteConfig,
+        BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfigV1, PortFec,
+        PortSpeed, RackNetworkConfig, RouteConfig,
     },
 };
 use omicron_sled_agent::bootstrap::early_networking::{
@@ -147,6 +147,9 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                         communities: Vec::new(),
                         local_pref: None,
                         enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
                     }],
                     autoneg: true,
                 }],

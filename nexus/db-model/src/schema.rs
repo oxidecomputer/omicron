@@ -215,6 +215,9 @@ table! {
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
+        allow_import_list_active -> Bool,
+        allow_export_list_active -> Bool,
+        vlan_id -> Nullable<Int8>
     }
 }
 
@@ -224,6 +227,24 @@ table! {
         interface_name -> Text,
         addr -> Inet,
         community -> Int8,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, addr, prefix) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        prefix -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_allow_import (port_settings_id, interface_name, addr, prefix) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        prefix -> Inet,
     }
 }
 
@@ -260,6 +281,7 @@ table! {
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
+        vlan_id -> Nullable<Int8>,
     }
 }
 

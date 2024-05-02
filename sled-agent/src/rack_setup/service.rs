@@ -774,6 +774,9 @@ impl ServiceInner {
                                 local_pref: b.local_pref,
                                 enforce_first_as: b.enforce_first_as,
                                 communities: b.communities.clone(),
+                                allowed_export: b.allowed_export.clone().into(),
+                                allowed_import: b.allowed_import.clone().into(),
+                                vlan_id: b.vlan_id,
                             })
                             .collect(),
                     })

@@ -9594,6 +9594,22 @@
             "type": "string",
             "format": "ip"
           },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
           "bgp_announce_set": {
             "description": "The set of announcements advertised by the peer.",
             "allOf": [
@@ -9689,10 +9705,19 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a peer.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
+          "allowed_export",
+          "allowed_import",
           "bgp_announce_set",
           "bgp_config",
           "communities",
@@ -13456,6 +13481,47 @@
         "required": [
           "base64_encoded_data",
           "offset"
+        ]
+      },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "Instance": {

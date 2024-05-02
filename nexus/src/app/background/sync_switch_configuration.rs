@@ -28,8 +28,8 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, Prefix4, ShaperSource, StaticRoute4,
-    StaticRoute4List,
+    DeleteStaticRoute4Request, ImportExportPolicy, Prefix4, ShaperSource,
+    StaticRoute4, StaticRoute4List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -636,6 +636,106 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                         };
 
+                        let allow_import = match self.datastore.allow_import_for_peer(
+                            opctx,
+                            peer.port_settings_id,
+                            &peer.interface_name,
+                            peer.addr,
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed imports";
+                                    "peer" => ?peer,
+                                    "error" => ?e
+                                );
+                                return json!({
+                                    "error":
+                                        format!(
+                                            "failed to get allowed imports peer {:?}: {:?}",
+                                            peer,
+                                            e
+                                        )
+                                });
+                            }
+                        };
+
+                        let import_policy = match allow_import {
+                            Some(list) => {
+                                ImportExportPolicy::Allow(list
+                                    .into_iter()
+                                    .map(|x| 
+                                        match x.prefix {
+                                            IpNetwork::V4(p) =>  mg_admin_client::types::Prefix::V4(
+                                                mg_admin_client::types::Prefix4{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            ),
+                                            IpNetwork::V6(p) =>  mg_admin_client::types::Prefix::V6(
+                                                mg_admin_client::types::Prefix6{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            )
+                                        }
+                                    )
+                                    .collect()
+                                )
+                            }
+                            None => ImportExportPolicy::NoFiltering,
+                        };
+
+                        let allow_export = match self.datastore.allow_export_for_peer(
+                            opctx,
+                            peer.port_settings_id,
+                            &peer.interface_name,
+                            peer.addr,
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed exportss";
+                                    "peer" => ?peer,
+                                    "error" => ?e
+                                );
+                                return json!({
+                                    "error":
+                                        format!(
+                                            "failed to get allowed exports peer {:?}: {:?}",
+                                            peer,
+                                            e
+                                        )
+                                });
+                            }
+                        };
+
+                        let export_policy = match allow_export {
+                            Some(list) => {
+                                ImportExportPolicy::Allow(list
+                                    .into_iter()
+                                    .map(|x| 
+                                        match x.prefix {
+                                            IpNetwork::V4(p) =>  mg_admin_client::types::Prefix::V4(
+                                                mg_admin_client::types::Prefix4{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            ),
+                                            IpNetwork::V6(p) =>  mg_admin_client::types::Prefix::V6(
+                                                mg_admin_client::types::Prefix6{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            )
+                                        }
+                                    )
+                                    .collect()
+                                )
+                            }
+                            None => ImportExportPolicy::NoFiltering,
+                        };
+
                         // now that the peer passes the above validations, add it to the list for configuration
                         let peer_config = BgpPeerConfig {
                             name: format!("{}", peer.addr.ip()),
@@ -654,6 +754,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             local_pref: peer.local_pref.as_ref().map(|x| x.0),
                             enforce_first_as: peer.enforce_first_as,
                             communities: communities.into_iter().map(|c| c.community.0).collect(),
+                            allow_export: export_policy,
+                            allow_import: import_policy,
+                            vlan_id: peer.vlan_id.map(|x| x.0 as u16),
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -865,6 +968,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     multi_exit_discriminator: c.multi_exit_discriminator.map(|x| x.into()),
                                     remote_asn: c.remote_asn.map(|x| x.into()),
                                     communities: Vec::new(),
+                                    allowed_export: sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                                    allowed_import: sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                                    vlan_id: c.vlan_id.map(|x| x.0 as u16),
                                 }
                         }).collect(),
                         port: port.port_name.clone(),
@@ -911,6 +1017,68 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     continue;
                                 }
                             };
+
+                        let allow_import = match self.datastore.allow_import_for_peer(
+                            opctx,
+                            port.port_settings_id.unwrap(),
+                            &peer.port,
+                            IpNetwork::from(IpAddr::from(peer.addr)),
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed imports";
+                                    "peer" => ?peer,
+                                    "error" => ?e
+                                );
+                                continue;
+                            }
+                        };
+
+                        peer.allowed_import = match allow_import {
+                            Some(list) => {
+                                sled_agent_client::types::ImportExportPolicy::Allow(list.clone().iter().map(|x| {
+                                    match x.prefix {
+                                        IpNetwork::V4(x) =>
+                                            sled_agent_client::types::IpNet::V4(sled_agent_client::types::Ipv4Net::from_str(&x.to_string().as_str()).unwrap()),
+                                        IpNetwork::V6(x) =>
+                                            sled_agent_client::types::IpNet::V6(sled_agent_client::types::Ipv6Net::from_str(&x.to_string().as_str()).unwrap()),                                  
+                                    }
+                                }).collect())
+                            }
+                            None => sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                        };
+
+                        let allow_export = match self.datastore.allow_export_for_peer(
+                            opctx,
+                            port.port_settings_id.unwrap(),
+                            &peer.port,
+                            IpNetwork::from(IpAddr::from(peer.addr)),
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed exportss";
+                                    "peer" => ?peer,
+                                    "error" => ?e
+                                );
+                                continue;
+                            }
+                        };
+
+                        peer.allowed_export = match allow_export {
+                            Some(list) => {
+                                sled_agent_client::types::ImportExportPolicy::Allow(list.clone().iter().map(|x| {
+                                    match x.prefix {
+                                        IpNetwork::V4(x) =>
+                                            sled_agent_client::types::IpNet::V4(sled_agent_client::types::Ipv4Net::from_str(&x.to_string().as_str()).unwrap()),
+                                        IpNetwork::V6(x) =>
+                                            sled_agent_client::types::IpNet::V6(sled_agent_client::types::Ipv6Net::from_str(&x.to_string().as_str()).unwrap()),                                  
+                                    }
+                                }).collect())
+                            }
+                            None => sled_agent_client::types::ImportExportPolicy::NoFiltering,
+                        };
                     }
                     ports.push(port_config);
                 }

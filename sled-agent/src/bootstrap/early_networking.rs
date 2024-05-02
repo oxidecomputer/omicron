@@ -504,6 +504,53 @@ impl<'a> EarlyNetworkSetup<'a> {
                     communities: peer.communities.clone(),
                     local_pref: peer.local_pref,
                     enforce_first_as: peer.enforce_first_as,
+                    allow_export: match &peer.allowed_export {
+                        omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering =>
+                            mg_admin_client::types::ImportExportPolicy::NoFiltering,
+                        omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) =>
+                            mg_admin_client::types::ImportExportPolicy::Allow(
+                            list.clone().iter().map(|x| {
+                                match x {
+                                    omicron_common::api::external::IpNet::V4(p) => mg_admin_client::types::Prefix::V4(
+                                        mg_admin_client::types::Prefix4{
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }
+                                    ),
+                                    omicron_common::api::external::IpNet::V6(p) => mg_admin_client::types::Prefix::V6(
+                                        mg_admin_client::types::Prefix6{
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }
+                                    ),
+                                }
+                            }).collect()
+                        ),
+                    },
+                    allow_import: match &peer.allowed_import {
+                        omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering =>
+                            mg_admin_client::types::ImportExportPolicy::NoFiltering,
+                        omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) =>
+                            mg_admin_client::types::ImportExportPolicy::Allow(
+                            list.clone().iter().map(|x| {
+                                match x {
+                                    omicron_common::api::external::IpNet::V4(p) => mg_admin_client::types::Prefix::V4(
+                                        mg_admin_client::types::Prefix4{
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }
+                                    ),
+                                    omicron_common::api::external::IpNet::V6(p) => mg_admin_client::types::Prefix::V6(
+                                        mg_admin_client::types::Prefix6{
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }
+                                    ),
+                                }
+                            }).collect()
+                        ),
+                    },
+                    vlan_id: peer.vlan_id,
                 };
                 match bgp_peer_configs.get_mut(&port.port) {
                     Some(peers) => {

@@ -20,6 +20,7 @@ use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
     SwitchPortSettingsView,
 };
+use omicron_common::api::internal::shared::ImportExportPolicy;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -272,6 +273,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 communities: Vec::new(),
                 local_pref: None,
                 enforce_first_as: false,
+                allowed_export: ImportExportPolicy::NoFiltering,
+                allowed_import: ImportExportPolicy::NoFiltering,
+                vlan_id: None,
             }],
         },
     );

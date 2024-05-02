@@ -141,4 +141,5 @@ pub struct BgpPeerView {
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
+    pub vlan_id: Option<SqlU32>,
 }

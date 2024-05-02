@@ -558,7 +558,7 @@ impl super::Nexus {
                     interface_name: "phy0".into(),
                     addr: r.addr.into(),
                     hold_time: r.hold_time.unwrap_or(6) as u32,
-                    idle_hold_time: r.idle_hold_time.unwrap_or(3) as u32,
+                    idle_hold_time: r.idle_hold_time.unwrap_or(0) as u32,
                     delay_open: r.delay_open.unwrap_or(0) as u32,
                     connect_retry: r.connect_retry.unwrap_or(3) as u32,
                     keepalive: r.keepalive.unwrap_or(2) as u32,
@@ -569,6 +569,9 @@ impl super::Nexus {
                     local_pref: r.local_pref,
                     enforce_first_as: r.enforce_first_as,
                     communities: r.communities.clone(),
+                    allowed_import: r.allowed_import.clone(),
+                    allowed_export: r.allowed_export.clone(),
+                    vlan_id: r.vlan_id,
                 })
                 .collect();
 

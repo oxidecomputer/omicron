@@ -8,11 +8,14 @@
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::{
-    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
-    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
-    SemverVersion,
+use omicron_common::api::{
+    external::{
+        AddressLotKind, BfdMode, ByteCount, Hostname,
+        IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+        InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net, Name, NameOrId,
+        PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
+    },
+    internal::shared::ImportExportPolicy,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1769,6 +1772,15 @@ pub struct BgpPeer {
 
     /// Enforce that the first AS in paths received from this peer is the peer's AS.
     pub enforce_first_as: bool,
+
+    /// Define import policy for a peer.
+    pub allowed_import: ImportExportPolicy,
+
+    /// Define export policy for a peer.
+    pub allowed_export: ImportExportPolicy,
+
+    /// Associate a VLAN ID with a peer.
+    pub vlan_id: Option<u16>,
 }
 
 /// Parameters for creating a named set of BGP announcements.
