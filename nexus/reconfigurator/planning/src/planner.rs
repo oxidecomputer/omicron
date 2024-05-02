@@ -112,7 +112,12 @@ impl<'a> Planner<'a> {
                 // up when we ask for commissioned sleds? Warn, but don't try to
                 // decommission it again.
                 (SledPolicy::Expunged, SledState::Decommissioned) => {
-                    warn!(self.log, "todo");
+                    warn!(
+                        self.log,
+                        "decommissioned sled returned by \
+                         SledFilter::Commissioned";
+                        "sled_id" => %sled_id,
+                    );
                     continue;
                 }
                 // The sled is expunged but not yet decommissioned; fall through
@@ -1189,5 +1194,94 @@ mod test {
                 zone.zone_after.id
             );
         }
+    }
+
+    #[test]
+    fn planner_decommissions_sleds() {
+        static TEST_NAME: &str = "planner_decommissions_sleds";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // Expunge one of the sleds.
+        let mut builder = input.into_builder();
+        let expunged_sled_id = {
+            let mut iter = builder.sleds_mut().iter_mut();
+            let (sled_id, details) = iter.next().expect("at least one sled");
+            details.policy = SledPolicy::Expunged;
+            *sled_id
+        };
+
+        let input = builder.build();
+        let mut blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        // Define a time_created for consistent output across runs.
+        blueprint2.time_created =
+            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+
+        assert_contents(
+            "tests/output/planner_decommissions_sleds_bp2.txt",
+            &blueprint2.display().to_string(),
+        );
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        println!("1 -> 2 (expunged {expunged_sled_id}):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_decommissions_sleds_1_2.txt",
+            &diff.display().to_string(),
+        );
+
+        // All the zones of the expunged sled should be expunged, and the sled
+        // itself should be decommissioned.
+        assert!(blueprint2.blueprint_zones[&expunged_sled_id]
+            .are_all_zones_expunged());
+        assert_eq!(
+            blueprint2.sled_state[&expunged_sled_id],
+            SledState::Decommissioned
+        );
+
+        // Remove the now-decommissioned sled from the planning input.
+        let mut builder = input.into_builder();
+        builder.sleds_mut().remove(&expunged_sled_id);
+        let input = builder.build();
+
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+
+        // There should be no changes to the blueprint; we don't yet garbage
+        // collect zones, so we should still have the sled's expunged zones
+        // (even though the sled itself is no longer present in the list of
+        // commissioned sleds).
+        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
+        println!(
+            "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.sleds_unchanged().count(), DEFAULT_N_SLEDS);
+
+        logctx.cleanup_successful();
     }
 }
