@@ -2398,6 +2398,7 @@ impl ServiceManager {
                 for service in services {
                     match service {
                         SwitchService::ManagementGatewayService => {
+                            info!(self.inner.log, "Setting up MGS service");
                             let mut mgs_config =
                                 PropertyGroupBuilder::new("config")
                                     // Always tell MGS to listen on localhost so wicketd
@@ -2441,6 +2442,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Wicketd { baseboard } => {
+                            info!(self.inner.log, "Setting up wicketd service");
                             // If we're launching the switch zone, we'll have a
                             // bootstrap_address based on our call to
                             // `self.bootstrap_address_needed` (which always
@@ -2515,6 +2517,10 @@ impl ServiceManager {
                                 );
                         }
                         SwitchService::Dendrite { asic } => {
+                            info!(
+                                self.inner.log,
+                                "Setting up dendrite service"
+                            );
                             let mut dendrite_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
@@ -2558,7 +2564,11 @@ impl ServiceManager {
                                     let dev_cnt = device_names.len();
                                     if dev_cnt == 1 {
                                         dendrite_config = dendrite_config
-                                            .add_property("", "astring", "");
+                                            .add_property(
+                                                "dev_path",
+                                                "astring",
+                                                &device_names[0].clone(),
+                                            );
                                     } else {
                                         return Err(Error::SledLocalZone(
                                             anyhow::anyhow!(
@@ -2646,6 +2656,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
+                            info!(self.inner.log, "Setting up tfport service");
                             let mut tfport_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
@@ -2720,6 +2731,8 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Lldpd { baseboard } => {
+                            info!(self.inner.log, "Setting up lldpd service");
+
                             let mut lldpd_config =
                                 PropertyGroupBuilder::new("config")
                                     // Always tell MGS to listen on localhost so wicketd
@@ -2768,6 +2781,10 @@ impl ServiceManager {
                             // The pumpkin daemon is only needed when running on
                             // with real sidecar.
                             if asic == &DendriteAsic::TofinoAsic {
+                                info!(
+                                    self.inner.log,
+                                    "Setting up pumpkind service"
+                                );
                                 let pumpkind_config =
                                     PropertyGroupBuilder::new("config")
                                         .add_property(
@@ -2795,6 +2812,8 @@ impl ServiceManager {
                             // `ensure_switch_zone_uplinks_configured`
                         }
                         SwitchService::Mgd => {
+                            info!(self.inner.log, "Setting up mgd service");
+
                             let mut mgd_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
@@ -2821,6 +2840,7 @@ impl ServiceManager {
                                             &format!("{addr}"),
                                         );
                                     }
+                                    break;
                                 }
                             }
 
@@ -2830,6 +2850,8 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::MgDdm { mode } => {
+                            info!(self.inner.log, "Setting up mg-ddm service");
+
                             let mut mg_ddm_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property("mode", "astring", mode)
@@ -2859,6 +2881,7 @@ impl ServiceManager {
                                                 &format!("{addr}"),
                                             );
                                     }
+                                    break;
                                 }
                             }
 

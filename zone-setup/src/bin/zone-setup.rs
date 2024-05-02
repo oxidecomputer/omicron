@@ -602,7 +602,7 @@ async fn switch_zone_setup(
     // Clap only checks if a flag is present or not. In this case, an
     // empty list could sneak through if the flag is set without a value
     // like `-l ""`.
-    if links.len() > 0 {
+    if !links.is_empty() {
         return Err(CmdError::Failure(anyhow!(
             "At least one link local link must be provided"
         )));
