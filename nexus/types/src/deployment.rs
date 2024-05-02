@@ -31,6 +31,7 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::OmicronPhysicalDisksConfig;
 use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
@@ -271,6 +272,119 @@ impl Blueprint {
     }
 }
 
+/// The state of the sled in this blueprint, with regards to the parent
+/// blueprint
+enum BpSledTableState {
+    Unchanged,
+    Removed,
+    Modified,
+    Added,
+}
+
+/// A table representing an unmodified, modified, added, or removed sled
+///
+/// This table is meant for printing to the screen, and is generated from
+/// [`Blueprint`]s or [`BlueprintDiff`]s. All subresources are contained under
+/// this as their own [`BpSledSubtable`]s. `BpSledSubtable`s cannot be nested.
+struct BpSledTable {
+    pub state: BpSledTableState,
+    pub sled_id: SledUuid,
+    pub subtables: Vec<BpSledSubtable>,
+}
+
+/// A table specific to a sled resource, such as a zone or disk.
+/// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
+struct BpSledSubtable {
+    pub table_name: &'static str,
+    pub column_names: Vec<&'static str>,
+    pub rows: Vec<Vec<String>>,
+}
+
+impl BpSledSubtable {
+    /// Compute the max column widths based on the contents of `column_names`
+    // and `rows`.
+    pub fn column_widths(&self) -> Vec<usize> {
+        let mut widths: Vec<usize> =
+            self.column_names.iter().map(|s| s.len()).collect();
+
+        for row in &self.rows {
+            assert_eq!(row.len(), widths.len());
+            for (i, s) in row.iter().enumerate() {
+                widths[i] = usize::max(s.len(), widths[i]);
+            }
+        }
+
+        widths
+    }
+}
+
+impl From<&OmicronPhysicalDisksConfig> for BpSledSubtable {
+    fn from(value: &OmicronPhysicalDisksConfig) -> Self {
+        let table_name = "physical disks";
+        let column_names = vec!["vendor", "model", "serial"];
+        let rows = value
+            .disks
+            .iter()
+            .map(|d| {
+                vec![
+                    d.identity.vendor.clone(),
+                    d.identity.model.clone(),
+                    d.identity.serial.clone(),
+                ]
+            })
+            .collect();
+        BpSledSubtable { table_name, column_names, rows }
+    }
+}
+
+const SUBTABLE_INDENT: usize = 4;
+const COLUMN_GAP: usize = 3;
+
+impl<'a> fmt::Display for BpSledSubtable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let widths = self.column_widths();
+        let mut total_width =
+            widths.iter().fold(0, |acc, i| acc + i + COLUMN_GAP);
+        total_width -= COLUMN_GAP;
+
+        // Write the name of the subtable
+        writeln!(f, "{:<SUBTABLE_INDENT$}{}:", "", self.table_name)?;
+
+        // Write the top header border
+        writeln!(f, "{:<SUBTABLE_INDENT$}{:-<total_width$}", "", "")?;
+
+        // Write the column names
+        write!(f, "{:<SUBTABLE_INDENT$}", "")?;
+        for (i, (column, width)) in
+            self.column_names.iter().zip(&widths).enumerate()
+        {
+            if i != 0 {
+                write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
+            } else {
+                write!(f, "{column:<width$}")?;
+            }
+        }
+
+        // Write the bottom header border
+        writeln!(f, "\n{:<SUBTABLE_INDENT$}{:-<total_width$}", "", "")?;
+
+        // Write the rows
+        for row in &self.rows {
+            write!(f, "{:<SUBTABLE_INDENT$}", "")?;
+            for (i, (column, width)) in row.iter().zip(&widths).enumerate() {
+                if i != 0 {
+                    write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
+                } else {
+                    write!(f, "{column:<width$}")?;
+                }
+            }
+            write!(f, "\n")?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Wrapper to allow a [`Blueprint`] to be displayed with information.
 ///
 /// Returned by [`Blueprint::display()`].
@@ -294,6 +408,10 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         )?;
 
         writeln!(f, "\n{}", self.make_zone_table())?;
+
+        for (sled, disks) in &self.blueprint.blueprint_disks {
+            writeln!(f, "\n\n{}\n\n", BpSledSubtable::from(disks))?;
+        }
         writeln!(f, "\n{}", self.make_physical_disk_table())?;
 
         writeln!(f, "\n{}", table_display::metadata_heading())?;

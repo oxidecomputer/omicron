@@ -71,52 +71,52 @@ to:   blueprint f432fcd5-1284-4058-8b4a-9286a3de6163
   UNCHANGED DISKS:                                                                                                      
                                                                                                                         
    sled 41f45d9f-766e-4ca6-a881-61ee45c80f57: blueprint disks: old gen Some(Generation(1)), new gen Some(Generation(1)) 
-                 fake-vendor         fake-model         serial-138ab7c9-83cf-4983-bfb2-d1dab36e2675                     
-                 fake-vendor         fake-model         serial-31a4279e-1404-42df-9704-b56c7047a552                     
-                 fake-vendor         fake-model         serial-32d83abe-c39e-4900-bbf7-2f7b2923cd05                     
-                 fake-vendor         fake-model         serial-4e533a0f-cbf4-4a3e-8ef8-8fcf94433e05                     
-                 fake-vendor         fake-model         serial-53d2e2a1-3ea8-4035-b8ed-c5e434b5133f                     
-                 fake-vendor         fake-model         serial-6101afa7-496a-4ddf-a8c1-fa7085db7a01                     
-                 fake-vendor         fake-model         serial-67c82f8c-9736-4c72-a827-81e44292b235                     
-                 fake-vendor         fake-model         serial-72014fc8-d8df-450b-9dc7-154cfa4442b5                     
-                 fake-vendor         fake-model         serial-7dd8afb5-997c-4a5c-955c-f7c62d1eaffe                     
-                 fake-vendor         fake-model         serial-ff7563be-bf2c-40bc-a297-3f37465045ed                     
+                 fake-vendor         fake-model         serial-08f5fd7e-68a4-457a-9a36-d3abd013d4f1                     
+                 fake-vendor         fake-model         serial-1e3228d5-8d9e-4f95-b39c-0298c5d78209                     
+                 fake-vendor         fake-model         serial-2b05bcc4-ff26-4885-8634-21f2aca05d84                     
+                 fake-vendor         fake-model         serial-3ae9c0f8-587c-4078-b3be-4257e5a9dd6f                     
+                 fake-vendor         fake-model         serial-4450991b-cf8a-4c87-a302-e14898c088c7                     
+                 fake-vendor         fake-model         serial-53dfc0f7-ed3e-4856-9f4b-55e0d61bd962                     
+                 fake-vendor         fake-model         serial-9c4112b9-d67e-4614-bbf1-32023d315f8a                     
+                 fake-vendor         fake-model         serial-cf20394c-fb0d-40f4-9467-a94e255859c5                     
+                 fake-vendor         fake-model         serial-d7f9c615-2f9b-4cdf-8582-efa95f053426                     
+                 fake-vendor         fake-model         serial-f9a9e63b-ddc9-4fa6-852d-87bd44e63f71                     
                                                                                                                         
    sled 43677374-8d2f-4deb-8a41-eeea506db8e0: blueprint disks: old gen Some(Generation(1)), new gen Some(Generation(1)) 
-                 fake-vendor         fake-model         serial-1cf4508e-9197-4edf-92f1-5c7cf10554a3                     
-                 fake-vendor         fake-model         serial-2561782e-737b-4d7f-8218-f22aab16d9e0                     
-                 fake-vendor         fake-model         serial-318dd026-13c4-42a9-8c0d-19e066a023ab                     
-                 fake-vendor         fake-model         serial-3ff074a7-0654-45c9-974d-2cc8fcc84f53                     
-                 fake-vendor         fake-model         serial-4218accf-770e-4c8f-b25c-723ee759b6b8                     
-                 fake-vendor         fake-model         serial-879192fd-06a3-46d2-88c8-97218dde0c03                     
-                 fake-vendor         fake-model         serial-9306c572-a557-4e72-9758-b5c621c807e0                     
-                 fake-vendor         fake-model         serial-b6a8faea-bbf0-4b31-95c7-9733646c1e44                     
-                 fake-vendor         fake-model         serial-ca4a5ae9-4c43-4cb8-a733-b98e5edc24f5                     
-                 fake-vendor         fake-model         serial-d54d1fd9-cf93-4c6a-b230-71afdfcbd92a                     
+                 fake-vendor         fake-model         serial-120fc695-b9bf-4e67-8e5d-d54145129f0f                     
+                 fake-vendor         fake-model         serial-1a68cf95-05a1-4278-868b-96b94e202de9                     
+                 fake-vendor         fake-model         serial-1c9c5514-fd4f-4b85-8f01-3f520dd5891f                     
+                 fake-vendor         fake-model         serial-3426ec5e-3b3d-4095-af34-1d8b8aa1e67a                     
+                 fake-vendor         fake-model         serial-770cde2e-49ab-4677-8fe3-482d80a6baae                     
+                 fake-vendor         fake-model         serial-b553a478-1756-4ef6-8873-40a1657bcbc4                     
+                 fake-vendor         fake-model         serial-bd4b5e69-66ec-4014-83b6-18de90e598c1                     
+                 fake-vendor         fake-model         serial-c0ecf600-8ce0-42c5-b578-036421c7e57a                     
+                 fake-vendor         fake-model         serial-cac88870-8f39-4f7f-9548-1a853d0c7fa7                     
+                 fake-vendor         fake-model         serial-fdda1a42-31a1-4896-bbf8-2b3332f1fe0d                     
                                                                                                                         
    sled 590e3034-d946-4166-b0e5-2d0034197a07: blueprint disks: old gen Some(Generation(1)), new gen Some(Generation(1)) 
-                 fake-vendor         fake-model         serial-02847aec-0b4d-46aa-bf7c-056d8945285f                     
-                 fake-vendor         fake-model         serial-2bdae70c-4891-4e9d-908e-97edbf310809                     
-                 fake-vendor         fake-model         serial-4fca5082-b314-4b2d-acc6-1b78028aa7d8                     
-                 fake-vendor         fake-model         serial-62cb5e5a-51e7-4134-92d0-f0df3593992e                     
-                 fake-vendor         fake-model         serial-68ef4931-4f52-46cc-a024-c4558d52c1f7                     
-                 fake-vendor         fake-model         serial-91818b8b-823e-435b-b58e-72722c7599ac                     
-                 fake-vendor         fake-model         serial-bac212c0-7ad2-455c-8663-3870b3621d53                     
-                 fake-vendor         fake-model         serial-c387aa96-2f2c-441c-88f9-37e1153d2708                     
-                 fake-vendor         fake-model         serial-e3d7ce11-b4f4-4bdf-947e-a7c665ffe273                     
-                 fake-vendor         fake-model         serial-f9103362-2da7-4f78-bf10-0c008e3d78be                     
+                 fake-vendor         fake-model         serial-1ce31bbb-5529-447f-b93e-e7598b588c4f                     
+                 fake-vendor         fake-model         serial-23518569-6775-4cf7-878b-0f06e12adfc8                     
+                 fake-vendor         fake-model         serial-8f0d54b2-6e27-4a3e-9f7d-8a0b7562f3ac                     
+                 fake-vendor         fake-model         serial-999f9812-4de5-41a7-806f-8fef6b55de66                     
+                 fake-vendor         fake-model         serial-9bef02e0-5c61-4981-a090-3dbca43feddb                     
+                 fake-vendor         fake-model         serial-9c093079-10f9-405f-8503-45c70b3021b9                     
+                 fake-vendor         fake-model         serial-a5639b0a-d154-4c0f-a721-2799b4e33130                     
+                 fake-vendor         fake-model         serial-b8ebe08e-c8c2-47eb-8fdc-02f90db7c8ac                     
+                 fake-vendor         fake-model         serial-d1959d64-c100-4188-9197-eb33a5f8e7ef                     
+                 fake-vendor         fake-model         serial-f26b3ccd-e53b-4a94-893e-3ffe140a89ef                     
                                                                                                                         
    sled b59ec570-2abb-4017-80ce-129d94e7a025: blueprint disks: old gen Some(Generation(1)), new gen Some(Generation(1)) 
-                 fake-vendor         fake-model         serial-03eddaa7-cbbc-4be6-b515-554f69b82eb6                     
-                 fake-vendor         fake-model         serial-11f8582b-17cb-459e-a6e6-ea727e475bef                     
-                 fake-vendor         fake-model         serial-1e315dd7-89b0-4880-9ba7-52701423a7fc                     
-                 fake-vendor         fake-model         serial-34d18fe7-5662-4857-a3c9-b364de551154                     
-                 fake-vendor         fake-model         serial-703e3a5c-7603-44ad-b4b9-ac0093ac491f                     
-                 fake-vendor         fake-model         serial-98fe4c8b-5f71-4d09-a00c-bccabf136fce                     
-                 fake-vendor         fake-model         serial-bee0943d-96ed-41b2-8e2d-772ee4aa7674                     
-                 fake-vendor         fake-model         serial-c3745558-b8a5-4778-8d34-1ba15bb063cc                     
-                 fake-vendor         fake-model         serial-c58e4588-7a35-4f97-8615-921102cb70d1                     
-                 fake-vendor         fake-model         serial-c73747cc-d14d-4779-8fc5-50b5d8bde837                     
+                 fake-vendor         fake-model         serial-00656f6d-378b-4bde-8b39-332590bfdfb8                     
+                 fake-vendor         fake-model         serial-61c34f1c-4f85-424e-b0d0-337f1aa3a354                     
+                 fake-vendor         fake-model         serial-7ab5a84a-5df5-4a92-804f-26017339955f                     
+                 fake-vendor         fake-model         serial-8bd9ebba-026d-47a2-b1f3-6cf3f817a83f                     
+                 fake-vendor         fake-model         serial-9a99aeea-5108-43e2-b9e9-1e6e18bbac17                     
+                 fake-vendor         fake-model         serial-9ab924d1-d3e1-456b-9b9d-d2df66749c84                     
+                 fake-vendor         fake-model         serial-ae127c18-1016-4366-8cff-c01de8b588f0                     
+                 fake-vendor         fake-model         serial-ce02d850-71cf-4fb4-9b53-4d280a7eb547                     
+                 fake-vendor         fake-model         serial-f90a88ba-f30b-4bf6-9612-fd808fc96f9e                     
+                 fake-vendor         fake-model         serial-feef8315-abf2-4692-8872-2a77e43e7b2d                     
 
   METADATA:
     internal DNS version:  1 (unchanged)
