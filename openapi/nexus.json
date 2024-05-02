@@ -4326,8 +4326,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -16203,6 +16210,18 @@
           "usable_physical_ram"
         ]
       },
+      "SledId": {
+        "description": "The unique ID of a sled.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "SledInstance": {
         "description": "An operator's view of an instance running on a given sled",
         "type": "object",
@@ -17555,6 +17574,10 @@
         "required": [
           "items"
         ]
+      },
+      "TypedUuidForSledKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",

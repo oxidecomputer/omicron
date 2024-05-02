@@ -60,9 +60,22 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
+        // resolve NameOrId into authz::IpPool
+        let pool = match &new_probe_params.ip_pool {
+            Some(pool) => Some(
+                self.ip_pool_lookup(opctx, &pool)?
+                    .lookup_for(authz::Action::CreateChild)
+                    .await?
+                    .0,
+            ),
+            None => None,
+        };
+
+        let new_probe =
+            Probe::from_create(new_probe_params, authz_project.id());
         let probe = self
             .db_datastore
-            .probe_create(opctx, &authz_project, new_probe_params)
+            .probe_create(opctx, &authz_project, &new_probe, pool)
             .await?;
 
         let (.., sled) =

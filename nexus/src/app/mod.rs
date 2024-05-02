@@ -441,12 +441,6 @@ impl Nexus {
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
-        let bootstore_opctx = OpContext::for_background(
-            log.new(o!("component" => "Bootstore")),
-            Arc::clone(&authz),
-            authn::Context::internal_api(),
-            Arc::clone(&db_datastore),
-        );
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -485,12 +479,6 @@ impl Nexus {
                     );
                     for task in task_nexus.background_tasks.driver.tasks() {
                         task_nexus.background_tasks.driver.activate(task);
-                    }
-                    if let Err(e) = task_nexus
-                        .initial_bootstore_sync(&bootstore_opctx)
-                        .await
-                    {
-                        error!(task_log, "failed to run bootstore sync: {e}");
                     }
                 }
                 Err(_) => {

@@ -4,9 +4,9 @@
 
 //! Handler functions (entrypoints) for HTTP APIs internal to the control plane
 
-use crate::ServerContext;
-
 use super::params::{OximeterInfo, RackInitializationRequest};
+use crate::external_api::http_entrypoints::SledId;
+use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
@@ -1043,13 +1043,13 @@ async fn sled_list_uninitialized(
 async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
     sled: TypedBody<UninitializedSledId>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<SledId>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.sled_add(&opctx, sled.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
+        Ok(HttpResponseCreated(SledId { id }))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
