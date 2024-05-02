@@ -28,8 +28,9 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy, Prefix4, ShaperSource,
-    StaticRoute4, StaticRoute4List, Prefix as MgPrefix, Prefix6
+    DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy,
+    Prefix as MgPrefix, Prefix4, Prefix6, ShaperSource, StaticRoute4,
+    StaticRoute4List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -42,8 +43,8 @@ use omicron_common::{
     address::{get_sled_address, Ipv6Subnet},
     api::{
         external::{DataPageParams, SwitchLocation},
-        internal::shared::ParseSwitchLocationError,
         internal::shared::ImportExportPolicy,
+        internal::shared::ParseSwitchLocationError,
     },
 };
 use serde_json::json;
@@ -665,7 +666,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             Some(list) => {
                                 MgImportExportPolicy::Allow(list
                                     .into_iter()
-                                    .map(|x| 
+                                    .map(|x|
                                         match x.prefix {
                                             IpNetwork::V4(p) =>  MgPrefix::V4(
                                                 Prefix4{
@@ -715,7 +716,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             Some(list) => {
                                 MgImportExportPolicy::Allow(list
                                     .into_iter()
-                                    .map(|x| 
+                                    .map(|x|
                                         match x.prefix {
                                             IpNetwork::V4(p) =>  MgPrefix::V4(
                                                 Prefix4{
