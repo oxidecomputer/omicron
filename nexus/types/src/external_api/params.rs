@@ -1748,6 +1748,27 @@ pub struct BgpPeer {
 
     /// How often to send keepalive requests (seconds).
     pub keepalive: u32,
+
+    /// Require that a peer has a specified ASN.
+    pub remote_asn: Option<u32>,
+
+    /// Require messages from a peer have a minimum IP time to live field.
+    pub min_ttl: Option<u8>,
+
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    pub md5_auth_key: Option<String>,
+
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    pub multi_exit_discriminator: Option<u32>,
+
+    /// Include the provided communities in updates sent to the peer.
+    pub communities: Vec<u32>,
+
+    /// Apply a local preference to routes received from this peer.
+    pub local_pref: Option<u32>,
+
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    pub enforce_first_as: bool,
 }
 
 /// Parameters for creating a named set of BGP announcements.
@@ -1806,6 +1827,12 @@ pub struct BgpConfigCreate {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<Name>,
+
+    /// A shaper program to apply to outgoing open and update messages.
+    pub shaper: Option<String>,
+
+    /// A checker program to apply to incoming open and update messages.
+    pub checker: Option<String>,
 }
 
 /// Select a BGP status information by BGP config id.

@@ -339,6 +339,12 @@ impl DataStore {
                                 p.delay_open.into(),
                                 p.connect_retry.into(),
                                 p.keepalive.into(),
+                                p.remote_asn.map(|x| x.into()),
+                                p.min_ttl.map(|x| u32::from(x).into()),
+                                p.md5_auth_key.clone(),
+                                p.multi_exit_discriminator.map(|x| x.into()),
+                                p.local_pref.map(|x| x.into()),
+                                p.enforce_first_as,
                             ));
 
                         }
@@ -1242,6 +1248,8 @@ mod test {
                 "test-announce-set".parse().unwrap(),
             ),
             vrf: None,
+            checker: None,
+            shaper: None,
         };
 
         datastore.bgp_config_set(&opctx, &bgp_config).await.unwrap();
@@ -1275,6 +1283,13 @@ mod test {
                         delay_open: 0,
                         connect_retry: 0,
                         keepalive: 0,
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
                     }],
                 },
             )]),

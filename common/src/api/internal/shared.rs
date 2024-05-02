@@ -180,6 +180,14 @@ pub struct BgpConfig {
     pub asn: u32,
     /// The set of prefixes for the BGP router to originate.
     pub originate: Vec<Ipv4Network>,
+
+    /// Shaper to apply to outgoing messages.
+    #[serde(default)]
+    pub shaper: Option<String>,
+
+    /// Checker to apply to incoming messages.
+    #[serde(default)]
+    pub checker: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -201,6 +209,64 @@ pub struct BgpPeerConfig {
     pub connect_retry: Option<u64>,
     /// The interval to send keepalive messages at.
     pub keepalive: Option<u64>,
+    /// Require that a peer has a specified ASN.
+    #[serde(default)]
+    pub remote_asn: Option<u32>,
+    /// Require messages from a peer have a minimum IP time to live field.
+    #[serde(default)]
+    pub min_ttl: Option<u8>,
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    #[serde(default)]
+    pub md5_auth_key: Option<String>,
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    #[serde(default)]
+    pub multi_exit_discriminator: Option<u32>,
+    /// Include the provided communities in updates sent to the peer.
+    #[serde(default)]
+    pub communities: Vec<u32>,
+    /// Apply a local preference to routes received from this peer.
+    #[serde(default)]
+    pub local_pref: Option<u32>,
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    #[serde(default)]
+    pub enforce_first_as: bool,
+}
+
+impl BgpPeerConfig {
+    /// The default hold time for a BGP peer in seconds.
+    pub const DEFAULT_HOLD_TIME: u64 = 6;
+
+    /// The default idle hold time for a BGP peer in seconds.
+    pub const DEFAULT_IDLE_HOLD_TIME: u64 = 3;
+
+    /// The default delay open time for a BGP peer in seconds.
+    pub const DEFAULT_DELAY_OPEN: u64 = 0;
+
+    /// The default connect retry time for a BGP peer in seconds.
+    pub const DEFAULT_CONNECT_RETRY: u64 = 3;
+
+    /// The default keepalive time for a BGP peer in seconds.
+    pub const DEFAULT_KEEPALIVE: u64 = 2;
+
+    pub fn hold_time(&self) -> u64 {
+        self.hold_time.unwrap_or(Self::DEFAULT_HOLD_TIME)
+    }
+
+    pub fn idle_hold_time(&self) -> u64 {
+        self.idle_hold_time.unwrap_or(Self::DEFAULT_IDLE_HOLD_TIME)
+    }
+
+    pub fn delay_open(&self) -> u64 {
+        self.delay_open.unwrap_or(Self::DEFAULT_DELAY_OPEN)
+    }
+
+    pub fn connect_retry(&self) -> u64 {
+        self.connect_retry.unwrap_or(Self::DEFAULT_CONNECT_RETRY)
+    }
+
+    pub fn keepalive(&self) -> u64 {
+        self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -219,6 +285,8 @@ pub struct RouteConfig {
     pub destination: IpNetwork,
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
+    /// The VLAN id associated with this route.
+    pub vlan_id: Option<u16>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -248,6 +316,7 @@ impl From<UplinkConfig> for PortConfigV1 {
             routes: vec![RouteConfig {
                 destination: "0.0.0.0/0".parse().unwrap(),
                 nexthop: value.gateway_ip.into(),
+                vlan_id: None,
             }],
             addresses: vec![value.uplink_cidr.into()],
             switch: value.switch,

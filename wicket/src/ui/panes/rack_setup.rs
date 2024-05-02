@@ -17,6 +17,8 @@ use crate::Action;
 use crate::Cmd;
 use crate::Control;
 use crate::State;
+use itertools::Itertools;
+use omicron_common::address::IpRange;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
@@ -29,10 +31,11 @@ use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
-use wicketd_client::types::Baseboard;
+use wicket_common::rack_setup::BgpAuthKeyInfo;
+use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicketd_client::types::CurrentRssUserConfig;
-use wicketd_client::types::IpRange;
 use wicketd_client::types::RackOperationStatus;
 
 #[derive(Debug)]
@@ -695,7 +698,7 @@ fn rss_config_text<'a>(
     };
 
     if let Some(cfg) = insensitive.rack_network_config.as_ref() {
-        for (i, uplink) in cfg.ports.iter().enumerate() {
+        for (i, (_port, uplink)) in cfg.ports.iter().enumerate() {
             let mut items = vec![
                 vec![
                     Span::styled("  • Switch    : ", label_style),
@@ -731,11 +734,142 @@ fn rss_config_text<'a>(
                 ]
             });
 
-            let peers = uplink.bgp_peers.iter().map(|p| {
-                vec![
-                    Span::styled("  • BGP peer  : ", label_style),
-                    Span::styled(format!("{} ASN={}", p.addr, p.asn), ok_style),
-                ]
+            let peers = uplink.bgp_peers.iter().flat_map(|p| {
+                let mut lines = vec![
+                    vec![
+                        Span::styled("  • BGP peer  : ", label_style),
+                        Span::styled(p.addr.to_string(), ok_style),
+                        Span::styled(" ASN=", label_style),
+                        Span::styled(p.asn.to_string(), ok_style),
+                        Span::styled(" Port=", label_style),
+                        Span::styled(p.port.clone(), ok_style),
+                    ],
+                    vec![
+                        Span::styled("    Intervals :", label_style),
+                        Span::styled(" Hold=", label_style),
+                        Span::styled(format!("{}s", p.hold_time()), ok_style),
+                        Span::styled(" Idle hold=", label_style),
+                        Span::styled(
+                            format!("{}s", p.idle_hold_time()),
+                            ok_style,
+                        ),
+                        Span::styled(" Delay open=", label_style),
+                        Span::styled(format!("{}s", p.delay_open()), ok_style),
+                        Span::styled(" Connect retry=", label_style),
+                        Span::styled(
+                            format!("{}s", p.connect_retry()),
+                            ok_style,
+                        ),
+                        Span::styled(" Keepalive=", label_style),
+                        Span::styled(format!("{}s", p.keepalive()), ok_style),
+                    ],
+                ];
+                {
+                    // These are all optional settings.
+                    let mut settings =
+                        vec![Span::styled("    Settings  :", label_style)];
+
+                    if let Some(remote_asn) = &p.remote_asn {
+                        settings.extend([
+                            Span::styled(" Remote ASN=", label_style),
+                            Span::styled(remote_asn.to_string(), ok_style),
+                        ]);
+                    }
+                    if let Some(min_ttl) = &p.min_ttl {
+                        settings.extend([
+                            Span::styled(" Min TTL=", label_style),
+                            Span::styled(min_ttl.to_string(), ok_style),
+                        ]);
+                    }
+                    if let Some(multi_exit_discriminator) =
+                        &p.multi_exit_discriminator
+                    {
+                        settings.extend([
+                            Span::styled(" MED=", label_style),
+                            Span::styled(
+                                multi_exit_discriminator.to_string(),
+                                ok_style,
+                            ),
+                        ]);
+                    }
+                    if let Some(local_pref) = &p.local_pref {
+                        settings.extend([
+                            Span::styled(" Local pref=", label_style),
+                            Span::styled(local_pref.to_string(), ok_style),
+                        ]);
+                    }
+                    if p.enforce_first_as {
+                        settings.extend([
+                            Span::styled(" Enforce first AS=", label_style),
+                            Span::styled("true", ok_style),
+                        ]);
+                    }
+                    if !p.communities.is_empty() {
+                        settings.extend([
+                            Span::styled(" Communities=", label_style),
+                            Span::styled(
+                                p.communities.iter().join(" "),
+                                ok_style,
+                            ),
+                        ]);
+                    }
+
+                    // We always push one element in -- check if any other
+                    // elements were pushed.
+                    if settings.len() > 1 {
+                        lines.push(settings);
+                    }
+                }
+
+                if let Some(auth_key_id) = &p.auth_key_id {
+                    let mut auth_key_line =
+                        vec![Span::styled("    Auth key  : ", label_style)];
+                    match sensitive.bgp_auth_keys.data.get(auth_key_id) {
+                        Some(BgpAuthKeyStatus::Unset) => {
+                            auth_key_line.extend([
+                                Span::styled(
+                                    auth_key_id.to_string(),
+                                    bad_style,
+                                ),
+                                Span::styled(": ", label_style),
+                                Span::styled("unset", bad_style),
+                            ]);
+                        }
+
+                        // This matches the format defined in
+                        // BgpAuthKeyInfo::to_string_styled.
+                        Some(BgpAuthKeyStatus::Set {
+                            info: BgpAuthKeyInfo::TcpMd5 { sha256 },
+                        }) => {
+                            auth_key_line.extend([
+                                Span::styled(auth_key_id.to_string(), ok_style),
+                                Span::styled(": ", label_style),
+                                Span::styled("TCP-MD5", ok_style),
+                                Span::styled(" (SHA-256: ", label_style),
+                                Span::styled(sha256.to_string(), ok_style),
+                                Span::styled(")", label_style),
+                            ]);
+                        }
+
+                        None => {
+                            // This shouldn't happen -- all auth keys should be
+                            // known.
+                            auth_key_line.extend([
+                                Span::styled(
+                                    auth_key_id.to_string(),
+                                    bad_style,
+                                ),
+                                Span::styled(
+                                    "Unknown (internal error)",
+                                    bad_style,
+                                ),
+                            ]);
+                        }
+                    }
+                    lines.push(auth_key_line);
+                }
+
+                lines
             });
 
             items.extend(routes);

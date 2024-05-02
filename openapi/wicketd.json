@@ -457,6 +457,85 @@
         }
       }
     },
+    "/rack-setup/config/bgp/auth-key": {
+      "get": {
+        "summary": "Return information about BGP authentication keys, including checking",
+        "description": "validity of keys.\nProduces an error if the rack setup config wasn't set, or if any of the requested key IDs weren't found.",
+        "operationId": "get_bgp_auth_key_info",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetBgpAuthKeyParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/bgp/auth-key/{key_id}": {
+      "put": {
+        "summary": "Set the BGP authentication key for a particular key ID.",
+        "operationId": "put_bgp_auth_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/BgpAuthKeyId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutBgpAuthKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PutBgpAuthKeyResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup/config/cert": {
       "post": {
         "summary": "Add an external certificate.",
@@ -813,6 +892,109 @@
           }
         ]
       },
+      "BgpAuthKey": {
+        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
+        "oneOf": [
+          {
+            "description": "TCP-MD5 authentication.",
+            "type": "object",
+            "properties": {
+              "key": {
+                "description": "The pre-shared key.",
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tcp_md5"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKeyId": {
+        "description": "The key identifier for authentication to use with a BGP peer.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Name"
+          }
+        ]
+      },
+      "BgpAuthKeyInfo": {
+        "description": "Describes insensitive information about a BGP authentication key.\n\nThis information is considered okay to display in the UI.",
+        "oneOf": [
+          {
+            "description": "TCP-MD5 authentication.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tcp_md5"
+                ]
+              },
+              "sha256": {
+                "description": "A SHA-256 digest of the key.",
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              }
+            },
+            "required": [
+              "kind",
+              "sha256"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKeyStatus": {
+        "description": "The status of a BGP authentication key.\n\nThis is part of a wicketd response, but is returned here because our tooling turns BTreeMaps into HashMaps. So we use a `replace` directive instead.",
+        "oneOf": [
+          {
+            "description": "The key was specified but hasn't been set yet.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unset"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The key has been set.",
+            "type": "object",
+            "properties": {
+              "info": {
+                "description": "Information about the key.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BgpAuthKeyInfo"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "set"
+                ]
+              }
+            },
+            "required": [
+              "info",
+              "status"
+            ]
+          }
+        ]
+      },
       "BgpConfig": {
         "type": "object",
         "properties": {
@@ -822,77 +1004,29 @@
             "format": "uint32",
             "minimum": 0
           },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Ipv4Network"
             }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
           }
         },
         "required": [
           "asn",
           "originate"
-        ]
-      },
-      "BgpPeerConfig": {
-        "type": "object",
-        "properties": {
-          "addr": {
-            "description": "Address of the peer.",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "asn": {
-            "description": "The autonomous sysetm number of the router the peer belongs to.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "connect_retry": {
-            "nullable": true,
-            "description": "The interval in seconds between peer connection retry attempts.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "delay_open": {
-            "nullable": true,
-            "description": "How long to delay sending open messages to a peer. In seconds.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "hold_time": {
-            "nullable": true,
-            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "idle_hold_time": {
-            "nullable": true,
-            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "keepalive": {
-            "nullable": true,
-            "description": "The interval to send keepalive messages at.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "port": {
-            "description": "Switch port the peer is reachable on.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "addr",
-          "asn",
-          "port"
         ]
       },
       "BootstrapSledDescription": {
@@ -1149,6 +1283,9 @@
       "CurrentRssUserConfigSensitive": {
         "type": "object",
         "properties": {
+          "bgp_auth_keys": {
+            "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+          },
           "num_external_certificates": {
             "type": "integer",
             "format": "uint",
@@ -1159,6 +1296,7 @@
           }
         },
         "required": [
+          "bgp_auth_keys",
           "num_external_certificates",
           "recovery_silo_password_set"
         ]
@@ -1321,6 +1459,38 @@
             ]
           }
         }
+      },
+      "GetBgpAuthKeyInfoResponse": {
+        "description": "Returns information about BGP keys for rack network setup.\n\nThis is part of a wicketd response, but is returned here because our tooling turns BTreeMaps into HashMaps. So we use a `replace` directive instead.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "Information about the requested keys.\n\nNone indicates that the key ID has not been set yet. An error indicates that the key was not specified in the rack setup config.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpAuthKeyStatus"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "GetBgpAuthKeyParams": {
+        "type": "object",
+        "properties": {
+          "check_valid": {
+            "description": "Checks that these keys are valid.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpAuthKeyId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "check_valid"
+        ]
       },
       "GetInventoryParams": {
         "type": "object",
@@ -1530,78 +1700,18 @@
           "last"
         ]
       },
+      "Name": {
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
+        "minLength": 1,
+        "maxLength": 63
+      },
       "NewPasswordHash": {
         "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
-      },
-      "PortConfigV1": {
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "This port's addresses.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpNetwork"
-            }
-          },
-          "autoneg": {
-            "description": "Whether or not to set autonegotiation",
-            "default": false,
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "description": "BGP peers on this port",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpPeerConfig"
-            }
-          },
-          "port": {
-            "description": "Nmae of the port this config applies to.",
-            "type": "string"
-          },
-          "routes": {
-            "description": "The set of routes associated with this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "switch": {
-            "description": "Switch the port belongs to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchLocation"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "description": "Port forward error correction type.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "Port speed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortSpeed"
-              }
-            ]
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "port",
-          "routes",
-          "switch",
-          "uplink_port_fec",
-          "uplink_port_speed"
-        ]
       },
       "PortFec": {
         "description": "Switchport FEC options",
@@ -2118,6 +2228,28 @@
           }
         ]
       },
+      "PutBgpAuthKeyBody": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/BgpAuthKey"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "PutBgpAuthKeyResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "PutRssRecoveryUserPasswordHash": {
         "type": "object",
         "properties": {
@@ -2522,6 +2654,13 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -2532,6 +2671,31 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SetBgpAuthKeyStatus": {
+        "oneOf": [
+          {
+            "description": "The key was accepted and replaced an old key.",
+            "type": "string",
+            "enum": [
+              "replaced"
+            ]
+          },
+          {
+            "description": "The key was accepted, and is the same as the existing key.",
+            "type": "string",
+            "enum": [
+              "unchanged"
+            ]
+          },
+          {
+            "description": "The key was accepted and is new.",
+            "type": "string",
+            "enum": [
+              "added"
+            ]
+          }
+        ]
       },
       "SpComponentCaboose": {
         "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"version\": { \"type\": \"string\" } } } ``` </details>",
@@ -4658,6 +4822,171 @@
           }
         ]
       },
+      "UserSpecifiedBgpPeerConfig": {
+        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.\n\n[`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "auth_key_id": {
+            "nullable": true,
+            "description": "The key identifier for authentication to use with the peer.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BgpAuthKeyId"
+              }
+            ]
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts. Defaults to 3 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer in seconds. Defaults to 0.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds. Defaults to 3 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at, in seconds. Defaults to 2 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedPortConfig": {
+        "description": "User-specified version of [`PortConfigV1`].\n\nAll of [`PortConfigV1`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV1`]. So this has all of the fields other than the port name.\n\n[`PortConfigV1`]: omicron_common::api::internal::shared::PortConfigV1",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "autoneg": {
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchLocation"
+          },
+          "uplink_port_fec": {
+            "$ref": "#/components/schemas/PortFec"
+          },
+          "uplink_port_speed": {
+            "$ref": "#/components/schemas/PortSpeed"
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "switch",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
       "UserSpecifiedRackNetworkConfig": {
         "description": "User-specified parts of [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).",
         "type": "object",
@@ -4676,10 +5005,10 @@
             "type": "string",
             "format": "ipv4"
           },
-          "ports": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+          "port": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedPortConfig"
             }
           }
         },
@@ -4687,7 +5016,7 @@
           "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "ports"
+          "port"
         ]
       },
       "IgnitionCommand": {
