@@ -5,6 +5,7 @@
 use crate::schema::{
     lldp_config, lldp_service_config, switch_port, switch_port_settings,
     switch_port_settings_address_config, switch_port_settings_bgp_peer_config,
+    switch_port_settings_bgp_peer_config_communities,
     switch_port_settings_group, switch_port_settings_groups,
     switch_port_settings_interface_config, switch_port_settings_link_config,
     switch_port_settings_port_config, switch_port_settings_route_config,
@@ -568,6 +569,30 @@ pub struct SwitchPortBgpPeerConfig {
     pub delay_open: SqlU32,
     pub connect_retry: SqlU32,
     pub keepalive: SqlU32,
+    pub remote_asn: Option<SqlU32>,
+    pub min_ttl: Option<SqlU32>,
+    pub md5_auth_key: Option<String>,
+    pub multi_exit_discriminator: Option<SqlU32>,
+    pub local_pref: Option<SqlU32>,
+    pub enforce_first_as: bool,
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_port_settings_bgp_peer_config_communities)]
+pub struct SwitchPortBgpPeerConfigCommunity {
+    pub port_settings_id: Uuid,
+    pub interface_name: String,
+    pub addr: IpNetwork,
+    pub community: SqlU32,
 }
 
 impl SwitchPortBgpPeerConfig {
@@ -582,6 +607,12 @@ impl SwitchPortBgpPeerConfig {
         delay_open: SqlU32,
         connect_retry: SqlU32,
         keepalive: SqlU32,
+        remote_asn: Option<SqlU32>,
+        min_ttl: Option<SqlU32>,
+        md5_auth_key: Option<String>,
+        multi_exit_discriminator: Option<SqlU32>,
+        local_pref: Option<SqlU32>,
+        enforce_first_as: bool,
     ) -> Self {
         Self {
             port_settings_id,
@@ -593,6 +624,12 @@ impl SwitchPortBgpPeerConfig {
             delay_open,
             connect_retry,
             keepalive,
+            remote_asn,
+            min_ttl,
+            md5_auth_key,
+            multi_exit_discriminator,
+            local_pref,
+            enforce_first_as,
         }
     }
 }

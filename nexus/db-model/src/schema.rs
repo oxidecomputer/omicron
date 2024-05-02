@@ -209,6 +209,21 @@ table! {
         delay_open -> Int8,
         connect_retry -> Int8,
         keepalive -> Int8,
+        remote_asn -> Nullable<Int8>,
+        min_ttl -> Nullable<Int8>,
+        md5_auth_key -> Nullable<Text>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        local_pref -> Nullable<Int8>,
+        enforce_first_as -> Bool,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, addr, community) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        community -> Int8,
     }
 }
 
@@ -223,6 +238,8 @@ table! {
         asn -> Int8,
         bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+        shaper -> Nullable<Text>,
+        checker -> Nullable<Text>,
     }
 }
 
@@ -237,6 +254,12 @@ table! {
         hold_time -> Int8,
         idle_hold_time -> Int8,
         keepalive -> Int8,
+        remote_asn -> Nullable<Int8>,
+        min_ttl -> Nullable<Int8>,
+        md5_auth_key -> Nullable<Text>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        local_pref -> Nullable<Int8>,
+        enforce_first_as -> Bool,
     }
 }
 

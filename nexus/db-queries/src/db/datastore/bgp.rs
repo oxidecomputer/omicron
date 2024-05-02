@@ -13,7 +13,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
-use nexus_db_model::BgpPeerView;
+use nexus_db_model::{BgpPeerView, SwitchPortBgpPeerConfigCommunity};
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -486,6 +486,26 @@ impl DataStore {
             .filter(dsl::switch_location.eq(switch.to_string()))
             .filter(dsl::port_name.eq(port))
             .select(BgpPeerView::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(results)
+    }
+
+    pub async fn communities_for_peer(
+        &self,
+        opctx: &OpContext,
+        port_settings_id: Uuid,
+        interface_name: &String,
+        addr: IpNetwork,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
+        use db::schema::switch_port_settings_bgp_peer_config_communities::dsl;
+
+        let results = dsl::switch_port_settings_bgp_peer_config_communities
+            .filter(dsl::port_settings_id.eq(port_settings_id))
+            .filter(dsl::interface_name.eq(interface_name.clone()))
+            .filter(dsl::addr.eq(addr))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

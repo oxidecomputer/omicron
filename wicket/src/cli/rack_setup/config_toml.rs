@@ -436,6 +436,7 @@ mod tests {
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
+                        vlan_id: None,
                     }],
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 47,
@@ -446,6 +447,13 @@ mod tests {
                         delay_open: Some(0),
                         idle_hold_time: Some(3),
                         keepalive: Some(2),
+                        communities: Vec::new(),
+                        enforce_first_as: false,
+                        local_pref: None,
+                        md5_auth_key: None,
+                        min_ttl: None,
+                        multi_exit_discriminator: None,
+                        remote_asn: None,
                     }],
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
@@ -456,6 +464,8 @@ mod tests {
                 bgp: vec![BgpConfig {
                     asn: 47,
                     originate: vec!["10.0.0.0/16".parse().unwrap()],
+                    shaper: None,
+                    checker: None,
                 }],
             }),
         };

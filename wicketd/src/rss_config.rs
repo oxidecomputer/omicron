@@ -517,6 +517,7 @@ fn validate_rack_network_config(
                     .map(|r| BaRouteConfig {
                         destination: r.destination,
                         nexthop: r.nexthop,
+                        vlan_id: r.vlan_id,
                     })
                     .collect(),
                 addresses: config.addresses.clone(),
@@ -532,6 +533,13 @@ fn validate_rack_network_config(
                         delay_open: p.delay_open,
                         idle_hold_time: p.idle_hold_time,
                         keepalive: p.keepalive,
+                        communities: Vec::new(),
+                        enforce_first_as: p.enforce_first_as,
+                        local_pref: p.local_pref,
+                        md5_auth_key: p.md5_auth_key.clone(),
+                        min_ttl: p.min_ttl,
+                        multi_exit_discriminator: p.multi_exit_discriminator,
+                        remote_asn: p.remote_asn,
                     })
                     .collect(),
                 switch: match config.switch {
@@ -563,9 +571,11 @@ fn validate_rack_network_config(
             .map(|config| BaBgpConfig {
                 asn: config.asn,
                 originate: config.originate.clone(),
+                checker: config.checker.clone(),
+                shaper: config.shaper.clone(),
             })
             .collect(),
-        //TODO(ry) bfd config in wicket
+        //TODO bfd config in wicket
         bfd: vec![],
     })
 }
