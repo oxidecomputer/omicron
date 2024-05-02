@@ -436,6 +436,7 @@ mod tests {
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
+                        vlan_id: None,
                     }],
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 47,

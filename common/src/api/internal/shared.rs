@@ -248,6 +248,8 @@ pub struct RouteConfig {
     pub destination: IpNetwork,
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
+    /// The VLAN id associated with this route.
+    pub vlan_id: Option<u16>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -277,6 +279,7 @@ impl From<UplinkConfig> for PortConfigV1 {
             routes: vec![RouteConfig {
                 destination: "0.0.0.0/0".parse().unwrap(),
                 nexthop: value.gateway_ip.into(),
+                vlan_id: None,
             }],
             addresses: vec![value.uplink_cidr.into()],
             switch: value.switch,

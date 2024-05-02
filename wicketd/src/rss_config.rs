@@ -517,6 +517,7 @@ fn validate_rack_network_config(
                     .map(|r| BaRouteConfig {
                         destination: r.destination,
                         nexthop: r.nexthop,
+                        vlan_id: r.vlan_id,
                     })
                     .collect(),
                 addresses: config.addresses.clone(),

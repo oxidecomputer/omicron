@@ -560,7 +560,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                     IpAddr::V6(_) => continue,
                 };
-                let sr = StaticRoute4 { nexthop, prefix };
+                let vlan_id = r.vlan_id;
+                let sr = StaticRoute4 { nexthop, prefix, vlan_id };
                 rq.routes.list.push(sr);
             }
         }
@@ -932,6 +933,7 @@ mod tests {
                         routes: vec![RouteConfig {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: uplink.gateway_ip.into(),
+                            vlan_id: None,
                         }],
                         addresses: vec![uplink.uplink_cidr.into()],
                         switch: uplink.switch,

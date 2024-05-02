@@ -760,6 +760,15 @@
           "description": "The nexthop/gateway address.",
           "type": "string",
           "format": "ip"
+        },
+        "vlan_id": {
+          "description": "The VLAN id associated with this route.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
         }
       }
     },

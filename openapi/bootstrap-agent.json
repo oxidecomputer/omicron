@@ -1051,6 +1051,13 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [

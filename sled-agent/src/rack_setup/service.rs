@@ -747,6 +747,7 @@ impl ServiceInner {
                             .map(|r| NexusTypes::RouteConfig {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
+                                vlan_id: r.vlan_id,
                             })
                             .collect(),
                         addresses: config.addresses.clone(),
