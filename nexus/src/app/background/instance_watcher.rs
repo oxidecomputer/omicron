@@ -139,7 +139,8 @@ impl InstanceWatcher {
                 Some(CheckOutcome::Success(new_runtime_state.vmm_state.state));
             slog::debug!(
                 opctx.log,
-                "updating instance state: {new_runtime_state:?}"
+                "updating instance state";
+                "state" => ?new_runtime_state.vmm_state.state,
             );
             check.result = crate::app::instance::notify_instance_updated(
                 &datastore,
@@ -152,14 +153,32 @@ impl InstanceWatcher {
             )
             .await
             .map_err(|e| {
-                slog::warn!(opctx.log, "error updating instance"; "error" => ?e);
+                slog::warn!(
+                    opctx.log,
+                    "error updating instance";
+                    "error" => ?e,
+                    "state" => ?new_runtime_state.vmm_state.state,
+                );
                 Incomplete::UpdateFailed
             })
-            .and_then(|updated| updated.ok_or_else(|| {
-                slog::warn!(opctx.log, "error updating instance: not found in database");
-                Incomplete::InstanceNotFound
-            })).map(|updated| {
-                slog::debug!(opctx.log, "update successful"; "instance_updated" => updated.instance_updated, "vmm_updated" => updated.vmm_updated);
+            .and_then(|updated| {
+                updated.ok_or_else(|| {
+                    slog::warn!(
+                        opctx.log,
+                        "error updating instance: not found in database";
+                        "state" => ?new_runtime_state.vmm_state.state,
+                    );
+                    Incomplete::InstanceNotFound
+                })
+            })
+            .map(|updated| {
+                slog::debug!(
+                    opctx.log,
+                    "update successful";
+                    "instance_updated" => updated.instance_updated,
+                    "vmm_updated" => updated.vmm_updated,
+                    "state" => ?new_runtime_state.vmm_state.state,
+                );
             });
 
             check
