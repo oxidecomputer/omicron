@@ -87,11 +87,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     let (sender, mut receiver) = mpsc::channel(128);
     let mut engine = UpdateEngine::new(log, sender);
 
-    for (port, uplink) in network_config
-        .ports
-        .iter()
-        .filter(|(_, uplink)| uplink.switch == our_switch_location)
-    {
+    for (port, uplink) in network_config.port_map(our_switch_location) {
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,

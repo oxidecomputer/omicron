@@ -28,6 +28,7 @@ use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX;
+use omicron_common::api::external::SwitchLocation;
 use once_cell::sync::Lazy;
 use sled_hardware_types::Baseboard;
 use slog::warn;
@@ -522,20 +523,21 @@ impl CurrentRssConfig {
         self.external_dns_ips = value.external_dns_ips;
         self.external_dns_zone_name = value.external_dns_zone_name;
 
-        // Build a new auth key map. This drops all old keys from the map.
-        let mut new_bgp_auth_keys = BTreeMap::new();
-        for p in value.rack_network_config.ports.values() {
-            for peer in &p.bgp_peers {
-                if let Some(key_id) = &peer.auth_key_id {
-                    if let Some(key) = self.bgp_auth_keys.remove(key_id) {
-                        new_bgp_auth_keys.insert(key_id.clone(), key);
-                    } else {
-                        // This is a new key; we don't have it yet.
-                        new_bgp_auth_keys.insert(key_id.clone(), None);
-                    }
-                }
-            }
-        }
+        // Build a new auth key map, dropping all old keys from the map.
+        let new_bgp_auth_key_ids =
+            value.rack_network_config.get_bgp_auth_key_ids();
+        let mut old_bgp_auth_keys = std::mem::take(&mut self.bgp_auth_keys);
+        let new_bgp_auth_keys = new_bgp_auth_key_ids
+            .into_iter()
+            .map(|key_id| {
+                (
+                    key_id.clone(),
+                    // For each new key, either grab the corresponding old key,
+                    // or initialize to None.
+                    old_bgp_auth_keys.remove(&key_id).unwrap_or_else(|| None),
+                )
+            })
+            .collect();
         self.bgp_auth_keys = new_bgp_auth_keys;
 
         self.rack_network_config = Some(value.rack_network_config);
@@ -604,7 +606,7 @@ fn validate_rack_network_config(
     use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
 
     // Ensure that there is at least one uplink
-    if config.ports.is_empty() {
+    if !config.has_any_uplinks() {
         return Err(anyhow!("Must have at least one port configured"));
     }
 
@@ -619,7 +621,7 @@ fn validate_rack_network_config(
     // TODO this implies a single contiguous range for port IPs which is over
     // constraining
     // iterate through each port config
-    for port_config in config.ports.values() {
+    for (_, _, port_config) in config.iter_ports() {
         for addr in &port_config.addresses {
             // ... and check that it contains `uplink_ip`.
             if addr.ip() < infra_ip_range.first
@@ -647,10 +649,9 @@ fn validate_rack_network_config(
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config
-            .ports
-            .iter()
-            .map(|(port, config)| {
-                build_port_config(port, config, bgp_auth_keys)
+            .iter_ports()
+            .map(|(switch, port, config)| {
+                build_port_config(switch, port, config, bgp_auth_keys)
             })
             .collect(),
         bgp: config
@@ -672,6 +673,7 @@ fn validate_rack_network_config(
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
+    switch: SwitchLocation,
     port: &str,
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
@@ -683,7 +685,6 @@ fn build_port_config(
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
-    use omicron_common::api::internal::shared::SwitchLocation;
 
     BaPortConfigV1 {
         port: port.to_owned(),
@@ -742,7 +743,7 @@ fn build_port_config(
                 }
             })
             .collect(),
-        switch: match config.switch {
+        switch: match switch {
             SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
             SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
         },

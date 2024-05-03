@@ -95,9 +95,74 @@ pub struct BootstrapSledDescription {
 pub struct UserSpecifiedRackNetworkConfig {
     pub infra_ip_first: Ipv4Addr,
     pub infra_ip_last: Ipv4Addr,
-    #[serde(rename = "port")]
-    pub ports: BTreeMap<String, UserSpecifiedPortConfig>,
+    // Map of switch -> port -> configuration, under the assumption that
+    // (switch, port) is unique.
+    pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,
+    pub switch1: BTreeMap<String, UserSpecifiedPortConfig>,
     pub bgp: Vec<BgpConfig>,
+}
+
+impl UserSpecifiedRackNetworkConfig {
+    /// Returns all BGP auth key IDs in the rack network config.
+    pub fn get_bgp_auth_key_ids(&self) -> BTreeSet<BgpAuthKeyId> {
+        self.iter_ports()
+            .flat_map(|(_, _, cfg)| cfg.bgp_peers.iter())
+            .filter_map(|peer| peer.auth_key_id.as_ref())
+            .cloned()
+            .collect()
+    }
+
+    /// Returns the port map for a particular switch location.
+    pub fn port_map(
+        &self,
+        switch: SwitchLocation,
+    ) -> &BTreeMap<String, UserSpecifiedPortConfig> {
+        match switch {
+            SwitchLocation::Switch0 => &self.switch0,
+            SwitchLocation::Switch1 => &self.switch1,
+        }
+    }
+
+    /// Returns true if there is at least one uplink configured.
+    pub fn has_any_uplinks(&self) -> bool {
+        !self.switch0.is_empty() || !self.switch1.is_empty()
+    }
+
+    /// Returns an iterator over all ports.
+    pub fn iter_ports(
+        &self,
+    ) -> impl Iterator<Item = (SwitchLocation, &str, &UserSpecifiedPortConfig)>
+    {
+        let iter0 = self
+            .switch0
+            .iter()
+            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+
+        let iter1 = self
+            .switch1
+            .iter()
+            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+
+        iter0.chain(iter1)
+    }
+
+    /// Returns a mutable iterator over all (switch, port, config) triples.
+    pub fn iter_ports_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (SwitchLocation, &str, &mut UserSpecifiedPortConfig)>
+    {
+        let iter0 = self
+            .switch0
+            .iter_mut()
+            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+
+        let iter1 = self
+            .switch1
+            .iter_mut()
+            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+
+        iter0.chain(iter1)
+    }
 }
 
 /// User-specified version of [`PortConfigV1`].
@@ -112,7 +177,6 @@ pub struct UserSpecifiedRackNetworkConfig {
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
     pub addresses: Vec<IpNetwork>,
-    pub switch: SwitchLocation,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: PortFec,
     pub autoneg: bool,

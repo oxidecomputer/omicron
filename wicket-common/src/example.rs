@@ -10,12 +10,9 @@ use gateway_client::types::{SpIdentifier, SpType};
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::{
-        external::SwitchLocation,
-        internal::shared::{
-            BgpConfig, BgpPeerConfig, ImportExportPolicy, PortFec, PortSpeed,
-            RouteConfig,
-        },
+    api::internal::shared::{
+        BgpConfig, BgpPeerConfig, ImportExportPolicy, PortFec, PortSpeed,
+        RouteConfig,
     },
 };
 use sled_hardware_types::Baseboard;
@@ -95,7 +92,7 @@ impl ExampleRackSetupData {
         let rack_network_config = UserSpecifiedRackNetworkConfig {
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
-            ports: btreemap! {
+            switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
                     addresses: vec!["172.30.0.1/24".parse().unwrap()],
                     routes: vec![RouteConfig {
@@ -148,7 +145,43 @@ impl ExampleRackSetupData {
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
                     autoneg: true,
-                    switch: SwitchLocation::Switch0,
+                },
+            },
+            switch1: btreemap! {
+                // Use the same port name as in switch0 to test that it doesn't
+                // collide.
+                "port0".to_owned() => UserSpecifiedPortConfig {
+                    addresses: vec!["172.32.0.1/24".parse().unwrap()],
+                    routes: vec![RouteConfig {
+                        destination: "0.0.0.0/0".parse().unwrap(),
+                        nexthop: "172.33.0.10".parse().unwrap(),
+                        vlan_id: Some(1),
+                    }],
+                    bgp_peers: vec![
+                        UserSpecifiedBgpPeerConfig {
+                            asn: 47,
+                            addr: "10.2.3.4".parse().unwrap(),
+                            port: "port0".into(),
+                            hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                            idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                            connect_retry: Some(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                            delay_open: Some(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                            keepalive: Some(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                            communities: Vec::new(),
+                            enforce_first_as: false,
+                            local_pref: None,
+                            min_ttl: None,
+                            auth_key_id: Some(bgp_key_1_id.clone()),
+                            multi_exit_discriminator: None,
+                            remote_asn: None,
+                            allowed_import: ImportExportPolicy::NoFiltering,
+                            allowed_export: ImportExportPolicy::NoFiltering,
+                            vlan_id: None,
+                        },
+                    ],
+                    uplink_port_speed: PortSpeed::Speed400G,
+                    uplink_port_fec: PortFec::Firecode,
+                    autoneg: true,
                 },
             },
             bgp: vec![BgpConfig {
@@ -174,20 +207,11 @@ impl ExampleRackSetupData {
         }
 
         // Build the list of BGP auth keys from the tweaked data.
-        let mut bgp_auth_keys = BTreeSet::new();
-        for port in current_insensitive
+        let bgp_auth_keys = current_insensitive
             .rack_network_config
             .as_ref()
             .unwrap()
-            .ports
-            .values()
-        {
-            for peer in &port.bgp_peers {
-                if let Some(auth_key_id) = peer.auth_key_id.clone() {
-                    bgp_auth_keys.insert(auth_key_id);
-                }
-            }
-        }
+            .get_bgp_auth_key_ids();
 
         // Build the PutRssUserConfigInsensitive from the tweaked data.
         let put_insensitive = PutRssUserConfigInsensitive {
@@ -234,13 +258,8 @@ fn apply_tweak(
 ) {
     match tweak {
         ExampleRackSetupDataTweak::OneBgpPeerPerPort => {
-            let ports = &mut current_insensitive
-                .rack_network_config
-                .as_mut()
-                .unwrap()
-                .ports;
-
-            for port in ports.values_mut() {
+            let rnc = current_insensitive.rack_network_config.as_mut().unwrap();
+            for (_, _, port) in rnc.iter_ports_mut() {
                 // Remove all but the first BGP peer.
                 port.bgp_peers.drain(1..);
             }

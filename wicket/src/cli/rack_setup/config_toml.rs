@@ -197,17 +197,33 @@ fn populate_network_table(
             Value::String(Formatted::new(value));
     }
 
-    if !config.ports.is_empty() {
-        let port_table = table
-            .get_mut("port")
-            .expect("[rack_network_config.port] table exists in template")
+    if !config.switch0.is_empty() {
+        let switch_table = table
+            .get_mut("switch0")
+            .expect("[rack_network_config.switch0] table exists in template")
             .as_table_mut()
-            .expect("[rack_network_config.port] is a table");
-        port_table.clear();
+            .expect("[rack_network_config.switch0] is a table");
+        switch_table.clear();
+        switch_table.set_implicit(true);
 
-        for (port, cfg) in &config.ports {
+        for (port, cfg) in &config.switch0 {
             let uplink = populate_uplink_table(cfg);
-            port_table.insert(port, Item::Table(uplink));
+            switch_table.insert(port, Item::Table(uplink));
+        }
+    }
+
+    if !config.switch1.is_empty() {
+        let switch_table = table
+            .get_mut("switch1")
+            .expect("[rack_network_config.switch1] table exists in template")
+            .as_table_mut()
+            .expect("[rack_network_config.switch1] is a table");
+        switch_table.clear();
+        switch_table.set_implicit(true);
+
+        for (port, cfg) in &config.switch1 {
+            let uplink = populate_uplink_table(cfg);
+            switch_table.insert(port, Item::Table(uplink));
         }
     }
 
@@ -246,7 +262,6 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     let UserSpecifiedPortConfig {
         routes,
         addresses,
-        switch,
         uplink_port_speed,
         uplink_port_fec,
         autoneg,
@@ -278,7 +293,6 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
 
     // General properties
     for (property, value) in [
-        ("switch", switch.to_string()),
         ("uplink_port_speed", enum_to_toml_string(&uplink_port_speed)),
         ("uplink_port_fec", enum_to_toml_string(&uplink_port_fec)),
     ] {

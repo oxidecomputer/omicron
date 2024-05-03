@@ -43,10 +43,11 @@ bootstrap_sleds = []
 infra_ip_first = ""
 infra_ip_last = ""
 
-# A table of ports to initialize on the rack. The key is the port name (qsfp0,
-# qsfp1, etc). Copy and paste this section for each port.
+# A table of ports to initialize on the rack. The keys are the switch (switch0,
+# switch1) and the port name (qsfp0, qsfp1, etc). Copy and paste this section
+# for each port.
 
-[rack_network_config.port.qsfp0]
+[rack_network_config.switch0.qsfp0]
 
     # Routes associated with this port.
     # { nexthop = "1.2.3.4", destination = "0.0.0.0/0" }
@@ -55,9 +56,6 @@ infra_ip_last = ""
     # Addresses associated with this port.
     # "1.2.3.4/24"
     addresses = []
-
-    # Either `switch0` or `switch1`, matching the hardware.
-    switch = ""
 
     # `speed40_g`, `speed100_g`, ...
     uplink_port_speed = ""
@@ -70,7 +68,7 @@ infra_ip_last = ""
 
     # A list of BGP peers for this port. Copy this section, changing the port name
     # as desired. Remove if not needed.
-    [[rack_network_config.port.qsfp0.bgp_peers]]
+    [[rack_network_config.switch0.qsfp0.bgp_peers]]
 
         # The autonomous system number (required). This must match one of the `asn`
         # values in the `[[rack_network_config.bgp]]` section.
@@ -123,6 +121,7 @@ infra_ip_last = ""
         # Enforce that the first AS in paths received from the peer is the peer's AS.
         enforce_first_as = false
 
+[rack_network_config.switch1]
 
 # Optional BGP configuration, as a list of entries. Duplicate or remove this
 # section as needed.

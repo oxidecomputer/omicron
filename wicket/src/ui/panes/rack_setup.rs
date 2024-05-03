@@ -698,11 +698,12 @@ fn rss_config_text<'a>(
     };
 
     if let Some(cfg) = insensitive.rack_network_config.as_ref() {
-        for (i, (_port, uplink)) in cfg.ports.iter().enumerate() {
+        for (i, (switch, _port, uplink)) in cfg.iter_ports().enumerate() {
+            // TODO: show port, use exhaustive destructure
             let mut items = vec![
                 vec![
                     Span::styled("  • Switch    : ", label_style),
-                    Span::styled(uplink.switch.to_string(), ok_style),
+                    Span::styled(switch.to_string(), ok_style),
                 ],
                 vec![
                     Span::styled("  • Speed     : ", label_style),
