@@ -19,3 +19,6 @@ sled-hardware-types.workspace = true
 thiserror.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+toml.workspace = true

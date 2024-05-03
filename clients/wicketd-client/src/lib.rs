@@ -81,6 +81,7 @@ progenitor::generate_api!(
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
         SwitchLocation = omicron_common::api::internal::shared::SwitchLocation,
         UserSpecifiedBgpPeerConfig = wicket_common::rack_setup::UserSpecifiedBgpPeerConfig,
+        UserSpecifiedImportExportPolicy = wicket_common::rack_setup::UserSpecifiedImportExportPolicy,
         UserSpecifiedPortConfig = wicket_common::rack_setup::UserSpecifiedPortConfig,
         UserSpecifiedRackNetworkConfig = wicket_common::rack_setup::UserSpecifiedRackNetworkConfig,
         ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,

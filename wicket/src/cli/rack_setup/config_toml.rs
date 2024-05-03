@@ -6,7 +6,6 @@
 //! (most of) the rack setup configuration.
 
 use omicron_common::address::IpRange;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use serde::Serialize;
@@ -26,6 +25,7 @@ use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GatewaySpType;
 use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
@@ -393,7 +393,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         }
 
         // allowed import policy
-        if let ImportExportPolicy::Allow(list) = allowed_import {
+        if let UserSpecifiedImportExportPolicy::Allow(list) = allowed_import {
             let mut out = Array::new();
             for x in list.iter() {
                 out.push(string_value(x.to_string()));
@@ -402,7 +402,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         }
 
         // allowed export policy
-        if let ImportExportPolicy::Allow(list) = allowed_export {
+        if let UserSpecifiedImportExportPolicy::Allow(list) = allowed_export {
             let mut out = Array::new();
             for x in list.iter() {
                 out.push(string_value(x.to_string()));

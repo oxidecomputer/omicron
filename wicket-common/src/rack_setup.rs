@@ -9,6 +9,7 @@ pub use gateway_client::types::SpType as GatewaySpType;
 use ipnetwork::IpNetwork;
 use omicron_common::address;
 use omicron_common::api::external::ImportExportPolicy;
+use omicron_common::api::external::IpNet;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::BgpConfig;
@@ -22,6 +23,7 @@ use owo_colors::Style;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::Serializer;
 use sha2::Digest;
 use sha2::Sha256;
 use sled_hardware_types::Baseboard;
@@ -92,6 +94,7 @@ pub struct BootstrapSledDescription {
 /// User-specified parts of
 /// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
     pub infra_ip_first: Ipv4Addr,
     pub infra_ip_last: Ipv4Addr,
@@ -105,7 +108,7 @@ pub struct UserSpecifiedRackNetworkConfig {
 impl UserSpecifiedRackNetworkConfig {
     /// Returns all BGP auth key IDs in the rack network config.
     pub fn get_bgp_auth_key_ids(&self) -> BTreeSet<BgpAuthKeyId> {
-        self.iter_ports()
+        self.iter_uplinks()
             .flat_map(|(_, _, cfg)| cfg.bgp_peers.iter())
             .filter_map(|peer| peer.auth_key_id.as_ref())
             .cloned()
@@ -128,8 +131,8 @@ impl UserSpecifiedRackNetworkConfig {
         !self.switch0.is_empty() || !self.switch1.is_empty()
     }
 
-    /// Returns an iterator over all ports.
-    pub fn iter_ports(
+    /// Returns an iterator over all uplinks -- (switch, port, config) triples.
+    pub fn iter_uplinks(
         &self,
     ) -> impl Iterator<Item = (SwitchLocation, &str, &UserSpecifiedPortConfig)>
     {
@@ -146,8 +149,8 @@ impl UserSpecifiedRackNetworkConfig {
         iter0.chain(iter1)
     }
 
-    /// Returns a mutable iterator over all (switch, port, config) triples.
-    pub fn iter_ports_mut(
+    /// Returns a mutable iterator over all uplinks -- (switch, port, config) triples.
+    pub fn iter_uplinks_mut(
         &mut self,
     ) -> impl Iterator<Item = (SwitchLocation, &str, &mut UserSpecifiedPortConfig)>
     {
@@ -236,12 +239,12 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Enforce that the first AS in paths received from this peer is the peer's AS.
     #[serde(default)]
     pub enforce_first_as: bool,
-    /// Apply export policy to this peer with an allow list.
-    #[serde(default)]
-    pub allowed_import: ImportExportPolicy,
     /// Apply import policy to this peer with an allow list.
     #[serde(default)]
-    pub allowed_export: ImportExportPolicy,
+    pub allowed_import: UserSpecifiedImportExportPolicy,
+    /// Apply export policy to this peer with an allow list.
+    #[serde(default)]
+    pub allowed_export: UserSpecifiedImportExportPolicy,
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
@@ -427,5 +430,139 @@ impl BgpAuthKeyStatus {
     #[inline]
     pub fn is_unset(&self) -> bool {
         matches!(self, BgpAuthKeyStatus::Unset)
+    }
+}
+
+/// User-friendly serializer and deserializer for `ImportExportPolicy`.
+///
+/// This serializes the "NoFiltering" variant as `null`, and the "Allow"
+/// variant as a list.
+///
+/// This would ordinarily just be a module used with `#[serde(with)]`, but
+/// schemars requires that it be a type since it needs to know the JSON schema
+/// corresponding to it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum UserSpecifiedImportExportPolicy {
+    #[default]
+    NoFiltering,
+    Allow(Vec<IpNet>),
+}
+
+impl From<UserSpecifiedImportExportPolicy> for ImportExportPolicy {
+    fn from(policy: UserSpecifiedImportExportPolicy) -> Self {
+        match policy {
+            UserSpecifiedImportExportPolicy::NoFiltering => {
+                ImportExportPolicy::NoFiltering
+            }
+            UserSpecifiedImportExportPolicy::Allow(list) => {
+                ImportExportPolicy::Allow(list)
+            }
+        }
+    }
+}
+
+impl Serialize for UserSpecifiedImportExportPolicy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            UserSpecifiedImportExportPolicy::NoFiltering => {
+                serializer.serialize_none()
+            }
+            UserSpecifiedImportExportPolicy::Allow(list) => {
+                list.serialize(serializer)
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UserSpecifiedImportExportPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct V;
+
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = UserSpecifiedImportExportPolicy;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of IP prefixes, or null")
+            }
+
+            // Note: null is represented by visit_unit, not visit_none.
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(UserSpecifiedImportExportPolicy::NoFiltering)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut list = Vec::new();
+                while let Some(ipnet) = seq.next_element::<IpNet>()? {
+                    list.push(ipnet);
+                }
+                Ok(UserSpecifiedImportExportPolicy::Allow(list))
+            }
+        }
+
+        deserializer.deserialize_any(V)
+    }
+}
+
+impl JsonSchema for UserSpecifiedImportExportPolicy {
+    fn schema_name() -> String {
+        "UserSpecifiedImportExportPolicy".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        // The above is equivalent to an Option<Vec<IpNet>>.
+        Option::<Vec<IpNet>>::json_schema(gen)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_import_export_policy() {
+        let inputs = [
+            UserSpecifiedImportExportPolicy::Allow(vec![
+                "64:ff9b::/96".parse().unwrap(),
+                "255.255.0.0/16".parse().unwrap(),
+            ]),
+            UserSpecifiedImportExportPolicy::NoFiltering,
+            UserSpecifiedImportExportPolicy::Allow(vec![]),
+        ];
+
+        for input in &inputs {
+            let input = Wrapper { policy: input.clone() };
+
+            eprintln!("** input: {:?}, testing JSON", input);
+            // Check that serialization to JSON and back works.
+            let serialized = serde_json::to_string(&input).unwrap();
+            eprintln!("serialized JSON: {serialized}");
+            let deserialized: Wrapper =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            eprintln!("** input: {:?}, testing TOML", input);
+            // Check that serialization to TOML and back works.
+            let serialized = toml::to_string(&input).unwrap();
+            eprintln!("serialized TOML: {serialized}");
+            let deserialized: Wrapper = toml::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+        }
+    }
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+    struct Wrapper {
+        #[serde(default)]
+        policy: UserSpecifiedImportExportPolicy,
     }
 }

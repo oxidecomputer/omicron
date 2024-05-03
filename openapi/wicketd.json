@@ -1599,47 +1599,6 @@
           }
         }
       },
-      "ImportExportPolicy": {
-        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
-        "oneOf": [
-          {
-            "description": "Do not perform any filtering.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "no_filtering"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "allow"
-                ]
-              },
-              "value": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/IpNet"
-                }
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
       "InstallableArtifacts": {
         "type": "object",
         "properties": {
@@ -4891,24 +4850,20 @@
             "format": "ipv4"
           },
           "allowed_export": {
-            "description": "Apply import policy to this peer with an allow list.",
-            "default": {
-              "type": "no_filtering"
-            },
+            "description": "Apply export policy to this peer with an allow list.",
+            "default": null,
             "allOf": [
               {
-                "$ref": "#/components/schemas/ImportExportPolicy"
+                "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
               }
             ]
           },
           "allowed_import": {
-            "description": "Apply export policy to this peer with an allow list.",
-            "default": {
-              "type": "no_filtering"
-            },
+            "description": "Apply import policy to this peer with an allow list.",
+            "default": null,
             "allOf": [
               {
-                "$ref": "#/components/schemas/ImportExportPolicy"
+                "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
               }
             ]
           },
@@ -5030,6 +4985,13 @@
         ],
         "additionalProperties": false
       },
+      "UserSpecifiedImportExportPolicy": {
+        "nullable": true,
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/IpNet"
+        }
+      },
       "UserSpecifiedPortConfig": {
         "description": "User-specified version of [`PortConfigV1`].\n\nAll of [`PortConfigV1`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV1`]. So this has all of the fields other than the port name.\n\n[`PortConfigV1`]: omicron_common::api::internal::shared::PortConfigV1",
         "type": "object",
@@ -5109,7 +5071,8 @@
           "infra_ip_last",
           "switch0",
           "switch1"
-        ]
+        ],
+        "additionalProperties": false
       },
       "IgnitionCommand": {
         "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",

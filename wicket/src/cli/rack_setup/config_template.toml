@@ -118,8 +118,22 @@ infra_ip_last = ""
         # Apply a local preference to routes sent to the peer (optional).
         # local_pref = 0
 
-        # Enforce that the first AS in paths received from the peer is the peer's AS.
+        # Enforce that the first AS in paths received from the peer is the
+        # peer's AS.
         enforce_first_as = false
+
+        # Apply import policy to this peer with an allowlist of prefixes
+        # (optional). Defaults to allowing all prefixes. Use an empty list to
+        # indicate that no prefixes are allowed.
+        # allowed_import = ["224.0.0.0/8"]
+
+        # Apply export policy to this peer with an allowlist of prefixes
+        # (optional). Defaults to allowing all prefixes. Use an empty list to
+        # indicate that no prefixes are allowed.
+        # allowed_export = []
+
+        # Associate a VLAN ID with this BGP session (optional).
+        # vlan_id = 0
 
 [rack_network_config.switch1]
 

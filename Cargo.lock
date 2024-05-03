@@ -10919,6 +10919,7 @@ dependencies = [
  "sha2",
  "sled-hardware-types",
  "thiserror",
+ "toml 0.8.12",
  "update-engine",
 ]
 

@@ -10,11 +10,8 @@ use gateway_client::types::{SpIdentifier, SpType};
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::{
-        external::ImportExportPolicy,
-        internal::shared::{
-            BgpConfig, BgpPeerConfig, PortFec, PortSpeed, RouteConfig,
-        },
+    api::internal::shared::{
+        BgpConfig, BgpPeerConfig, PortFec, PortSpeed, RouteConfig,
     },
 };
 use sled_hardware_types::Baseboard;
@@ -22,7 +19,8 @@ use sled_hardware_types::Baseboard;
 use crate::rack_setup::{
     BgpAuthKeyId, BootstrapSledDescription, CurrentRssUserConfigInsensitive,
     PutRssUserConfigInsensitive, UserSpecifiedBgpPeerConfig,
-    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+    UserSpecifiedRackNetworkConfig,
 };
 
 /// A collection of example data structures.
@@ -91,6 +89,78 @@ impl ExampleRackSetupData {
         })];
         let external_dns_ips = vec!["10.0.0.1".parse().unwrap()];
         let ntp_servers = vec!["ntp1.com".into(), "ntp2.com".into()];
+
+        let switch0_port0_bgp_peers = vec![
+            UserSpecifiedBgpPeerConfig {
+                asn: 47,
+                addr: "10.2.3.4".parse().unwrap(),
+                port: "port0".into(),
+                hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                connect_retry: Some(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                delay_open: Some(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                keepalive: Some(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                communities: Vec::new(),
+                enforce_first_as: false,
+                local_pref: None,
+                min_ttl: None,
+                auth_key_id: Some(bgp_key_1_id.clone()),
+                multi_exit_discriminator: None,
+                remote_asn: None,
+                allowed_import: UserSpecifiedImportExportPolicy::NoFiltering,
+                allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![
+                    "127.0.0.1/8".parse().unwrap(),
+                ]),
+                vlan_id: None,
+            },
+            UserSpecifiedBgpPeerConfig {
+                asn: 28,
+                addr: "10.2.3.5".parse().unwrap(),
+                port: "port0".into(),
+                remote_asn: Some(200),
+                hold_time: Some(10),
+                idle_hold_time: Some(20),
+                connect_retry: Some(30),
+                delay_open: Some(40),
+                keepalive: Some(50),
+                communities: vec![60, 70],
+                enforce_first_as: true,
+                local_pref: Some(80),
+                min_ttl: Some(90),
+                auth_key_id: Some(bgp_key_2_id.clone()),
+                multi_exit_discriminator: Some(100),
+                allowed_import: UserSpecifiedImportExportPolicy::Allow(vec![
+                    "64:ff9b::/96".parse().unwrap(),
+                    "255.255.0.0/16".parse().unwrap(),
+                ]),
+                allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![]),
+                vlan_id: None,
+            },
+        ];
+
+        let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
+            asn: 47,
+            addr: "10.2.3.4".parse().unwrap(),
+            port: "port0".into(),
+            hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
+            idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+            connect_retry: Some(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+            delay_open: Some(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+            keepalive: Some(BgpPeerConfig::DEFAULT_KEEPALIVE),
+            communities: Vec::new(),
+            enforce_first_as: false,
+            local_pref: None,
+            min_ttl: None,
+            auth_key_id: Some(bgp_key_1_id.clone()),
+            multi_exit_discriminator: None,
+            remote_asn: None,
+            allowed_import: UserSpecifiedImportExportPolicy::Allow(vec![
+                "224.0.0.0/4".parse().unwrap(),
+            ]),
+            allowed_export: UserSpecifiedImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        }];
+
         let rack_network_config = UserSpecifiedRackNetworkConfig {
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
@@ -102,48 +172,7 @@ impl ExampleRackSetupData {
                         nexthop: "172.30.0.10".parse().unwrap(),
                         vlan_id: Some(1),
                     }],
-                    bgp_peers: vec![
-                        UserSpecifiedBgpPeerConfig {
-                            asn: 47,
-                            addr: "10.2.3.4".parse().unwrap(),
-                            port: "port0".into(),
-                            hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
-                            idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
-                            connect_retry: Some(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
-                            delay_open: Some(BgpPeerConfig::DEFAULT_DELAY_OPEN),
-                            keepalive: Some(BgpPeerConfig::DEFAULT_KEEPALIVE),
-                            communities: Vec::new(),
-                            enforce_first_as: false,
-                            local_pref: None,
-                            min_ttl: None,
-                            auth_key_id: Some(bgp_key_1_id.clone()),
-                            multi_exit_discriminator: None,
-                            remote_asn: None,
-                            allowed_import: ImportExportPolicy::NoFiltering,
-                            allowed_export: ImportExportPolicy::NoFiltering,
-                            vlan_id: None,
-                        },
-                        UserSpecifiedBgpPeerConfig {
-                            asn: 28,
-                            addr: "10.2.3.5".parse().unwrap(),
-                            port: "port0".into(),
-                            remote_asn: Some(200),
-                            hold_time: Some(10),
-                            idle_hold_time: Some(20),
-                            connect_retry: Some(30),
-                            delay_open: Some(40),
-                            keepalive: Some(50),
-                            communities: vec![60, 70],
-                            enforce_first_as: true,
-                            local_pref: Some(80),
-                            min_ttl: Some(90),
-                            auth_key_id: Some(bgp_key_2_id.clone()),
-                            multi_exit_discriminator: Some(100),
-                            allowed_import: ImportExportPolicy::NoFiltering,
-                            allowed_export: ImportExportPolicy::NoFiltering,
-                            vlan_id: None,
-                        },
-                    ],
+                    bgp_peers: switch0_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
                     autoneg: true,
@@ -159,28 +188,7 @@ impl ExampleRackSetupData {
                         nexthop: "172.33.0.10".parse().unwrap(),
                         vlan_id: Some(1),
                     }],
-                    bgp_peers: vec![
-                        UserSpecifiedBgpPeerConfig {
-                            asn: 47,
-                            addr: "10.2.3.4".parse().unwrap(),
-                            port: "port0".into(),
-                            hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
-                            idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
-                            connect_retry: Some(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
-                            delay_open: Some(BgpPeerConfig::DEFAULT_DELAY_OPEN),
-                            keepalive: Some(BgpPeerConfig::DEFAULT_KEEPALIVE),
-                            communities: Vec::new(),
-                            enforce_first_as: false,
-                            local_pref: None,
-                            min_ttl: None,
-                            auth_key_id: Some(bgp_key_1_id.clone()),
-                            multi_exit_discriminator: None,
-                            remote_asn: None,
-                            allowed_import: ImportExportPolicy::NoFiltering,
-                            allowed_export: ImportExportPolicy::NoFiltering,
-                            vlan_id: None,
-                        },
-                    ],
+                    bgp_peers: switch1_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
                     autoneg: true,
@@ -261,7 +269,7 @@ fn apply_tweak(
     match tweak {
         ExampleRackSetupDataTweak::OneBgpPeerPerPort => {
             let rnc = current_insensitive.rack_network_config.as_mut().unwrap();
-            for (_, _, port) in rnc.iter_ports_mut() {
+            for (_, _, port) in rnc.iter_uplinks_mut() {
                 // Remove all but the first BGP peer.
                 port.bgp_peers.drain(1..);
             }

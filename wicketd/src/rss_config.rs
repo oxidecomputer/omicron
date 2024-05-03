@@ -621,7 +621,7 @@ fn validate_rack_network_config(
     // TODO this implies a single contiguous range for port IPs which is over
     // constraining
     // iterate through each port config
-    for (_, _, port_config) in config.iter_ports() {
+    for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
             // ... and check that it contains `uplink_ip`.
             if addr.ip() < infra_ip_range.first
@@ -649,7 +649,7 @@ fn validate_rack_network_config(
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config
-            .iter_ports()
+            .iter_uplinks()
             .map(|(switch, port, config)| {
                 build_port_config(switch, port, config, bgp_auth_keys)
             })
@@ -737,8 +737,8 @@ fn build_port_config(
                     min_ttl: p.min_ttl,
                     multi_exit_discriminator: p.multi_exit_discriminator,
                     remote_asn: p.remote_asn,
-                    allowed_export: p.allowed_export.clone(),
-                    allowed_import: p.allowed_import.clone(),
+                    allowed_export: p.allowed_export.clone().into(),
+                    allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
                 }
             })

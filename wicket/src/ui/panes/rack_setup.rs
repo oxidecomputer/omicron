@@ -19,6 +19,8 @@ use crate::Control;
 use crate::State;
 use itertools::Itertools;
 use omicron_common::address::IpRange;
+use omicron_common::api::internal::shared::BgpConfig;
+use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
@@ -35,7 +37,13 @@ use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
+use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
+use wicket_common::rack_setup::UserSpecifiedPortConfig;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicketd_client::types::CurrentRssUserConfig;
+use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
 
 #[derive(Debug)]
@@ -632,40 +640,52 @@ fn rss_config_text<'a>(
         return Text::styled("Rack Setup Unavailable", label_style);
     };
 
-    let sensitive = &config.sensitive;
-    let insensitive = &config.insensitive;
+    let CurrentRssUserConfigSensitive {
+        bgp_auth_keys,
+        num_external_certificates,
+        recovery_silo_password_set,
+    } = &config.sensitive;
+    let CurrentRssUserConfigInsensitive {
+        bootstrap_sleds,
+        ntp_servers,
+        dns_servers,
+        internal_services_ip_pool_ranges,
+        external_dns_ips,
+        external_dns_zone_name,
+        rack_network_config,
+    } = &config.insensitive;
 
     // Special single-line values, where we convert some kind of condition into
     // a user-appropriate string.
     spans.push(Line::from(vec![
         Span::styled("Uploaded cert/key pairs: ", label_style),
         Span::styled(
-            sensitive.num_external_certificates.to_string(),
-            dyn_style(sensitive.num_external_certificates > 0),
+            num_external_certificates.to_string(),
+            dyn_style(*num_external_certificates > 0),
         ),
     ]));
     spans.push(Line::from(vec![
         Span::styled("Recovery password set: ", label_style),
-        dyn_span(sensitive.recovery_silo_password_set, "Yes", "No"),
+        dyn_span(*recovery_silo_password_set, "Yes", "No"),
     ]));
-
-    let net_config = insensitive.rack_network_config.as_ref();
 
     // List of single-line values, each of which may or may not be set; if it's
     // set we show its value, and if not we show "Not set" in bad_style.
     for (label, contents) in [
         (
             "External DNS zone name: ",
-            Cow::from(insensitive.external_dns_zone_name.as_str()),
+            Cow::from(external_dns_zone_name.as_str()),
         ),
         (
             "Infrastructure first IP: ",
-            net_config
+            rack_network_config
+                .as_ref()
                 .map_or("".into(), |c| c.infra_ip_first.to_string().into()),
         ),
         (
             "Infrastructure last IP: ",
-            net_config
+            rack_network_config
+                .as_ref()
                 .map_or("".into(), |c| c.infra_ip_last.to_string().into()),
         ),
     ] {
@@ -697,121 +717,193 @@ fn rss_config_text<'a>(
         vec![Span::styled("  • ", label_style), Span::styled(item, ok_style)]
     };
 
-    if let Some(cfg) = insensitive.rack_network_config.as_ref() {
-        for (i, (switch, _port, uplink)) in cfg.iter_ports().enumerate() {
-            // TODO: show port, use exhaustive destructure
+    if let Some(cfg) = rack_network_config.as_ref() {
+        // This style ensures that if a new field is added to the struct, it
+        // fails to compile.
+        let UserSpecifiedRackNetworkConfig {
+            // infra_ip_first and infra_ip_last have already been handled above.
+            infra_ip_first: _,
+            infra_ip_last: _,
+            // switch0 and switch1 re handled via the iter_uplinks iterator.
+            switch0: _,
+            switch1: _,
+            bgp,
+        } = cfg;
+
+        for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
+            let UserSpecifiedPortConfig {
+                routes,
+                addresses,
+                uplink_port_speed,
+                uplink_port_fec,
+                autoneg,
+                bgp_peers,
+            } = uplink;
+
             let mut items = vec![
                 vec![
-                    Span::styled("  • Switch    : ", label_style),
+                    Span::styled("  • Port          : ", label_style),
+                    Span::styled(port.to_string(), ok_style),
+                    Span::styled(" on switch ", label_style),
                     Span::styled(switch.to_string(), ok_style),
                 ],
                 vec![
-                    Span::styled("  • Speed     : ", label_style),
-                    Span::styled(
-                        uplink.uplink_port_speed.to_string(),
-                        ok_style,
-                    ),
+                    Span::styled("  • Speed         : ", label_style),
+                    Span::styled(uplink_port_speed.to_string(), ok_style),
                 ],
                 vec![
-                    Span::styled("  • FEC       : ", label_style),
-                    Span::styled(uplink.uplink_port_fec.to_string(), ok_style),
+                    Span::styled("  • FEC           : ", label_style),
+                    Span::styled(uplink_port_fec.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • Autoneg       : ", label_style),
+                    if *autoneg {
+                        Span::styled("enabled", ok_style)
+                    } else {
+                        // bad_style isn't right here because there's no
+                        // necessary action item, but green/ok isn't also
+                        // right. So use warn_style.
+                        Span::styled("disabled", warn_style)
+                    },
                 ],
             ];
 
-            let routes = uplink.routes.iter().map(|r| {
-                vec![
-                    Span::styled("  • Route     : ", label_style),
+            let routes = routes.iter().map(|r| {
+                let RouteConfig { destination, nexthop, vlan_id } = r;
+
+                let mut items = vec![
+                    Span::styled("  • Route         : ", label_style),
                     Span::styled(
-                        format!("{} -> {}", r.destination, r.nexthop),
+                        format!("{} -> {}", destination, nexthop),
                         ok_style,
                     ),
-                ]
+                ];
+                if let Some(vlan_id) = vlan_id {
+                    items.extend([
+                        Span::styled(" (vlan_id=", label_style),
+                        Span::styled(vlan_id.to_string(), ok_style),
+                        Span::styled(")", label_style),
+                    ]);
+                }
+
+                items
             });
 
-            let addresses = uplink.addresses.iter().map(|a| {
+            let addresses = addresses.iter().map(|a| {
                 vec![
-                    Span::styled("  • Address   : ", label_style),
+                    Span::styled("  • Address       : ", label_style),
                     Span::styled(a.to_string(), ok_style),
                 ]
             });
 
-            let peers = uplink.bgp_peers.iter().flat_map(|p| {
+            let peers = bgp_peers.iter().flat_map(|p| {
+                let UserSpecifiedBgpPeerConfig {
+                    asn,
+                    port,
+                    addr,
+
+                    // These values are accessed via methods, since they have
+                    // defaults defined by the methods.
+                    hold_time: _,
+                    idle_hold_time: _,
+                    delay_open: _,
+                    connect_retry: _,
+                    keepalive: _,
+
+                    remote_asn,
+                    min_ttl,
+                    auth_key_id,
+                    multi_exit_discriminator,
+                    communities,
+                    local_pref,
+                    enforce_first_as,
+                    allowed_import,
+                    allowed_export,
+                    vlan_id,
+                } = p;
+
                 let mut lines = vec![
                     vec![
-                        Span::styled("  • BGP peer  : ", label_style),
-                        Span::styled(p.addr.to_string(), ok_style),
-                        Span::styled(" ASN=", label_style),
-                        Span::styled(p.asn.to_string(), ok_style),
-                        Span::styled(" Port=", label_style),
-                        Span::styled(p.port.clone(), ok_style),
+                        Span::styled("  • BGP peer      : ", label_style),
+                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(" asn=", label_style),
+                        Span::styled(asn.to_string(), ok_style),
+                        Span::styled(" port=", label_style),
+                        Span::styled(port.clone(), ok_style),
                     ],
                     vec![
-                        Span::styled("    Intervals :", label_style),
-                        Span::styled(" Hold=", label_style),
+                        Span::styled("    Intervals     :", label_style),
+                        Span::styled(" hold=", label_style),
                         Span::styled(format!("{}s", p.hold_time()), ok_style),
-                        Span::styled(" Idle hold=", label_style),
+                        Span::styled(" idle_hold=", label_style),
                         Span::styled(
                             format!("{}s", p.idle_hold_time()),
                             ok_style,
                         ),
-                        Span::styled(" Delay open=", label_style),
+                        Span::styled(" delay_open=", label_style),
                         Span::styled(format!("{}s", p.delay_open()), ok_style),
-                        Span::styled(" Connect retry=", label_style),
+                        Span::styled(" connect_retry=", label_style),
                         Span::styled(
                             format!("{}s", p.connect_retry()),
                             ok_style,
                         ),
-                        Span::styled(" Keepalive=", label_style),
+                        Span::styled(" keepalive=", label_style),
                         Span::styled(format!("{}s", p.keepalive()), ok_style),
                     ],
                 ];
                 {
                     // These are all optional settings.
                     let mut settings =
-                        vec![Span::styled("    Settings  :", label_style)];
+                        vec![Span::styled("    Settings      :", label_style)];
 
-                    if let Some(remote_asn) = &p.remote_asn {
+                    if let Some(remote_asn) = remote_asn {
                         settings.extend([
-                            Span::styled(" Remote ASN=", label_style),
+                            Span::styled(" remote_asn=", label_style),
                             Span::styled(remote_asn.to_string(), ok_style),
                         ]);
                     }
-                    if let Some(min_ttl) = &p.min_ttl {
+                    if let Some(min_ttl) = min_ttl {
                         settings.extend([
-                            Span::styled(" Min TTL=", label_style),
+                            Span::styled(" min_ttl=", label_style),
                             Span::styled(min_ttl.to_string(), ok_style),
                         ]);
                     }
                     if let Some(multi_exit_discriminator) =
-                        &p.multi_exit_discriminator
+                        multi_exit_discriminator
                     {
                         settings.extend([
-                            Span::styled(" MED=", label_style),
+                            Span::styled(" med=", label_style),
                             Span::styled(
                                 multi_exit_discriminator.to_string(),
                                 ok_style,
                             ),
                         ]);
                     }
-                    if let Some(local_pref) = &p.local_pref {
+                    if let Some(local_pref) = local_pref {
                         settings.extend([
-                            Span::styled(" Local pref=", label_style),
+                            Span::styled(" local_pref=", label_style),
                             Span::styled(local_pref.to_string(), ok_style),
                         ]);
                     }
-                    if p.enforce_first_as {
+                    if *enforce_first_as {
                         settings.extend([
-                            Span::styled(" Enforce first AS=", label_style),
+                            Span::styled(" enforce_first_as=", label_style),
                             Span::styled("true", ok_style),
                         ]);
                     }
-                    if !p.communities.is_empty() {
+                    if !communities.is_empty() {
                         settings.extend([
-                            Span::styled(" Communities=", label_style),
+                            Span::styled(" communities=", label_style),
                             Span::styled(
-                                p.communities.iter().join(" "),
+                                communities.iter().join(","),
                                 ok_style,
                             ),
+                        ]);
+                    }
+                    if let Some(vlan_id) = vlan_id {
+                        settings.extend([
+                            Span::styled(" vlan_id=", label_style),
+                            Span::styled(vlan_id.to_string(), ok_style),
                         ]);
                     }
 
@@ -822,10 +914,10 @@ fn rss_config_text<'a>(
                     }
                 }
 
-                if let Some(auth_key_id) = &p.auth_key_id {
+                if let Some(auth_key_id) = auth_key_id {
                     let mut auth_key_line =
-                        vec![Span::styled("    Auth key  : ", label_style)];
-                    match sensitive.bgp_auth_keys.data.get(auth_key_id) {
+                        vec![Span::styled("    Auth key      : ", label_style)];
+                    match bgp_auth_keys.data.get(auth_key_id) {
                         Some(BgpAuthKeyStatus::Unset) => {
                             auth_key_line.extend([
                                 Span::styled(
@@ -861,13 +953,60 @@ fn rss_config_text<'a>(
                                     bad_style,
                                 ),
                                 Span::styled(
-                                    "Unknown (internal error)",
+                                    "unknown (internal error)",
                                     bad_style,
                                 ),
                             ]);
                         }
                     }
                     lines.push(auth_key_line);
+                }
+
+                let import_export_policy_line =
+                    |label: &'static str,
+                     policy: &UserSpecifiedImportExportPolicy|
+                     -> Option<Vec<Span<'static>>> {
+                        match policy {
+                            UserSpecifiedImportExportPolicy::NoFiltering => {
+                                None
+                            }
+                            UserSpecifiedImportExportPolicy::Allow(
+                                prefixes,
+                            ) => {
+                                let mut line =
+                                    vec![Span::styled(label, label_style)];
+                                if prefixes.is_empty() {
+                                    line.push(Span::styled(
+                                        "no prefixes allowed",
+                                        warn_style,
+                                    ));
+                                } else {
+                                    line.push(Span::styled(
+                                        "allowed=",
+                                        label_style,
+                                    ));
+                                    line.push(Span::styled(
+                                        prefixes.iter().join(","),
+                                        ok_style,
+                                    ));
+                                }
+
+                                Some(line)
+                            }
+                        }
+                    };
+
+                if let Some(allowed_import) = import_export_policy_line(
+                    "    Import policy : ",
+                    allowed_import,
+                ) {
+                    lines.push(allowed_import);
+                }
+                if let Some(allowed_export) = import_export_policy_line(
+                    "    Export policy : ",
+                    allowed_export,
+                ) {
+                    lines.push(allowed_export);
                 }
 
                 lines
@@ -879,33 +1018,51 @@ fn rss_config_text<'a>(
 
             append_list(
                 &mut spans,
-                Cow::from(format!("Port {}: ", i + 1)),
+                Cow::from(format!("Uplink {}: ", i + 1)),
                 items,
             );
         }
+
+        // Show BGP configuration.
+        for cfg in bgp {
+            let BgpConfig {
+                asn,
+                originate,
+                // The shaper and checker are not currently used.
+                shaper: _,
+                checker: _,
+            } = cfg;
+            let mut items = vec![
+                Span::styled("  • BGP config    :", label_style),
+                Span::styled(" asn=", label_style),
+                Span::styled(asn.to_string(), ok_style),
+                Span::styled(" originate=", label_style),
+            ];
+            if originate.is_empty() {
+                items.push(Span::styled("None", warn_style));
+            } else {
+                items.push(Span::styled(originate.iter().join(","), ok_style));
+            }
+            spans.push(Line::from(items));
+        }
     } else {
-        append_list(&mut spans, "Ports: ".into(), vec![]);
+        append_list(&mut spans, "Uplinks: ".into(), vec![]);
     }
 
     append_list(
         &mut spans,
         "NTP servers: ".into(),
-        insensitive.ntp_servers.iter().cloned().map(plain_list_item).collect(),
+        ntp_servers.iter().cloned().map(plain_list_item).collect(),
     );
     append_list(
         &mut spans,
         "DNS servers: ".into(),
-        insensitive
-            .dns_servers
-            .iter()
-            .map(|s| plain_list_item(s.to_string()))
-            .collect(),
+        dns_servers.iter().map(|s| plain_list_item(s.to_string())).collect(),
     );
     append_list(
         &mut spans,
         "Internal services IP pool ranges: ".into(),
-        insensitive
-            .internal_services_ip_pool_ranges
+        internal_services_ip_pool_ranges
             .iter()
             .map(|r| {
                 let s = match r {
@@ -919,8 +1076,7 @@ fn rss_config_text<'a>(
     append_list(
         &mut spans,
         "External DNS IPs: ".into(),
-        insensitive
-            .external_dns_ips
+        external_dns_ips
             .iter()
             .cloned()
             .map(|ip| plain_list_item(ip.to_string()))
@@ -929,8 +1085,7 @@ fn rss_config_text<'a>(
     append_list(
         &mut spans,
         "Sleds: ".into(),
-        insensitive
-            .bootstrap_sleds
+        bootstrap_sleds
             .iter()
             .map(|desc| {
                 let identifier = match &desc.baseboard {
