@@ -71,13 +71,13 @@ pub struct Pxa {
     /// The first IP address your Oxide cluster can use.
     ///
     /// Requires `pxa-end`.
-    #[clap(long = "pxa-start", requires = "end")]
+    #[clap(long = "pxa-start", requires = "end", env = "PXA_START")]
     start: Option<String>,
 
     /// The last IP address your Oxide cluster can use
     ///
     /// Requires `pxa-start`.
-    #[clap(long = "pxa-end", requires = "start")]
+    #[clap(long = "pxa-end", requires = "start", env = "PXA_END")]
     end: Option<String>,
 }
 
