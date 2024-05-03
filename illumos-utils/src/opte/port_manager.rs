@@ -582,16 +582,18 @@ impl PortManager {
         let mut mappings: Vec<_> = vec![];
 
         for mapping in v2p.mappings {
+            let vni = mapping
+                .vni
+                .as_u32()
+                .try_into()
+                .expect("opte VNI should be 24 bits");
+
             for entry in mapping.ip4 {
                 mappings.push(VirtualNetworkInterfaceHost {
                     virtual_ip: IpAddr::V4(entry.0.into()),
                     virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
                     physical_host_ip: entry.1.ip.into(),
-                    vni: mapping
-                        .vni
-                        .as_u32()
-                        .try_into()
-                        .expect("opte VNI should be 24 bits"),
+                    vni,
                 });
             }
 
@@ -600,11 +602,7 @@ impl PortManager {
                     virtual_ip: IpAddr::V6(entry.0.into()),
                     virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
                     physical_host_ip: entry.1.ip.into(),
-                    vni: mapping
-                        .vni
-                        .as_u32()
-                        .try_into()
-                        .expect("opte VNI should be 24 bits"),
+                    vni,
                 });
             }
         }
@@ -694,9 +692,13 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &VirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
+        info!(
+            self.inner.log,
+            "Ignoring unset of virtual NIC mapping";
+            "mapping" => ?&mapping,
+        );
         Ok(())
     }
 }

@@ -98,8 +98,13 @@ impl BackgroundTask for V2PManager {
                 .collect();
 
             for (sled, client) in sled_clients {
+                //
                 // Get the current mappings on each sled
-                // Ignore vopte interfaces that are used for services
+                // Ignore vopte interfaces that are used for services. Service zones only need
+                // an opte interface for external communication. For services zones, intra-sled
+                // communication is facilitated via zone underlay interfaces / addresses,
+                // not opte interfaces / v2p mappings.
+                //
                 let found_v2p: HashSet<VirtualNetworkInterfaceHost> = match client.list_v2p().await {
                     Ok(v) => v.into_inner(),
                     Err(e) => {
@@ -119,6 +124,12 @@ impl BackgroundTask for V2PManager {
 
                 let v2p_to_del: Vec<_> = found_v2p.difference(&desired_v2p).collect();
 
+                //
+                // Generally, we delete stale entries before adding new entries in RPWs to prevent stale entries
+                // from causing a conflict with an incoming entry. In the case of opte it doesn't matter which
+                // order we perform the next two steps in, since conflicting stale entries are overwritten by the
+                // incoming entries.
+                //
                 info!(&log, "v2p mappings to delete"; "sled" => sled.serial_number(), "mappings" => ?v2p_to_del);
                 for mapping in v2p_to_del {
                     if let Err(e) = client.del_v2p(&mapping).await {
@@ -126,7 +137,7 @@ impl BackgroundTask for V2PManager {
                             &log,
                             "failed to delete v2p mapping from sled";
                             "sled" => sled.serial_number(),
-                            "mappng" => ?mapping,
+                            "mapping" => ?mapping,
                             "error" => ?e,
                         );
                     }
@@ -139,7 +150,7 @@ impl BackgroundTask for V2PManager {
                             &log,
                             "failed to add v2p mapping to sled";
                             "sled" => sled.serial_number(),
-                            "mappng" => ?mapping,
+                            "mapping" => ?mapping,
                             "error" => ?e,
                         );
                     }

@@ -792,7 +792,7 @@ impl DataStore {
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
     ///
-    /// This particular method was add for propagating v2p mappings via RPWs
+    /// This particular method was added for propagating v2p mappings via RPWs
     pub async fn instance_network_interfaces_all_list_batched(
         &self,
         opctx: &OpContext,

@@ -47,7 +47,7 @@ struct FilterArgs {
     #[arg(short, long)]
     archived: bool,
 
-    // Print only the extra log files
+    /// Print only the extra log files
     #[arg(short, long)]
     extra: bool,
 
