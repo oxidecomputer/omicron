@@ -8,6 +8,9 @@
 use crate::app::sagas;
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
+use dpd_client::types::LinkId;
+use dpd_client::types::PortId;
+use dpd_client::types::Qsfp;
 use dropshot::HttpError;
 use http::StatusCode;
 use ipnetwork::IpNetwork;
@@ -21,8 +24,10 @@ use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::SwitchLinkState;
+use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, ListResultVec,
+    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
 use sled_agent_client::types::BgpConfig;
@@ -30,6 +35,8 @@ use sled_agent_client::types::BgpPeerConfig;
 use sled_agent_client::types::{
     EarlyNetworkConfig, PortConfigV1, RackNetworkConfigV1, RouteConfig,
 };
+use std::ops::Deref;
+use std::sync::mpsc::RecvError;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -288,6 +295,48 @@ impl super::Nexus {
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn switch_port_status(
+        &self,
+        opctx: &OpContext,
+        switch: Name,
+        port: Name,
+    ) -> Result<SwitchLinkState, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
+            Error::invalid_request(&format!(
+                "invalid switch name {switch}: {e:?}"
+            ))
+        })?;
+
+        let dpd_clients = self.dpd_clients().await.map_err(|e| {
+            Error::internal_error(&format!("dpd clients get: {e}"))
+        })?;
+
+        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
+            &format!("no client for switch {switch}"),
+        ))?;
+
+        let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
+            Error::invalid_request(&format!("invalid port name: {port} {e}"))
+        })?);
+
+        // no breakout support yet, link id always 0
+        let link_id = LinkId(0);
+
+        let status = dpd
+            .link_get(&port_id, &link_id)
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to get port status for {port} {e}"
+                ))
+            })?
+            .into_inner();
+
+        Ok(SwitchLinkState::new(status))
     }
 }
 

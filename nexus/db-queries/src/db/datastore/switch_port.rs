@@ -143,7 +143,6 @@ impl DataStore {
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         use db::schema::{
             address_lot::dsl as address_lot_dsl,
-            //XXX ANNOUNCE bgp_announce_set::dsl as bgp_announce_set_dsl,
             bgp_config::dsl as bgp_config_dsl,
             lldp_service_config::dsl as lldp_config_dsl,
             switch_port_settings::dsl as port_settings_dsl,
@@ -159,7 +158,6 @@ impl DataStore {
         #[derive(Debug)]
         enum SwitchPortSettingsCreateError {
             AddressLotNotFound,
-            //XXX ANNOUNCE BgpAnnounceSetNotFound,
             BgpConfigNotFound,
             ReserveBlock(ReserveBlockError),
         }

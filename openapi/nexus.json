@@ -4800,6 +4800,63 @@
         }
       }
     },
+    "/v1/system/hardware/switch-port/{port}/status": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get switch port status",
+        "operationId": "networking_switch_port_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchLinkState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/switches": {
       "get": {
         "tags": [
@@ -16976,6 +17033,7 @@
           }
         ]
       },
+      "SwitchLinkState": {},
       "SwitchLocation": {
         "description": "Identifies switch physical location",
         "oneOf": [

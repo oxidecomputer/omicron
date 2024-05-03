@@ -2638,8 +2638,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     multi_exit_discriminator INT8,
     local_pref INT8,
     enforce_first_as BOOLEAN,
-    allow_import_list_active BOOLEAN NOT NULL,
-    allow_export_list_active BOOLEAN NOT NULL,
+    allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
+    allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT8,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
