@@ -37,7 +37,7 @@ function ensure_vdevs {
             echo "Device: [$VDEV]"
             VDEV_PATH="${VDEV_DIR:-/var/tmp}/$VDEV"
             if ! [[ -f "$VDEV_PATH" ]]; then
-                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=20G
+                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=60G
             fi
             success "vdev $VDEV_PATH exists"
         done
