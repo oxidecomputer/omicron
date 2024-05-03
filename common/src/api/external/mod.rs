@@ -2694,11 +2694,17 @@ pub struct SwitchPortAddressConfig {
 /// Opaque object representing link state. The contents of this object are not
 /// yet stable.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SwitchLinkState(dpd_client::types::Link);
+pub struct SwitchLinkState {
+    link: dpd_client::types::Link,
+    monitors: Option<dpd_client::types::Monitors>,
+}
 
 impl SwitchLinkState {
-    pub fn new(arg: dpd_client::types::Link) -> Self {
-        Self(arg)
+    pub fn new(
+        link: dpd_client::types::Link,
+        monitors: Option<dpd_client::types::Monitors>,
+    ) -> Self {
+        Self { link, monitors }
     }
 }
 

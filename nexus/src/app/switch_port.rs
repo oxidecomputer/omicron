@@ -2,27 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//XXX
-#![allow(unused_imports)]
-
-use crate::app::sagas;
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
-use dpd_client::types::Qsfp;
-use dropshot::HttpError;
 use http::StatusCode;
-use ipnetwork::IpNetwork;
-use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
-use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::SwitchLinkState;
 use omicron_common::api::external::SwitchLocation;
@@ -30,13 +20,6 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
-use sled_agent_client::types::BgpConfig;
-use sled_agent_client::types::BgpPeerConfig;
-use sled_agent_client::types::{
-    EarlyNetworkConfig, PortConfigV1, RackNetworkConfigV1, RouteConfig,
-};
-use std::ops::Deref;
-use std::sync::mpsc::RecvError;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -336,7 +319,20 @@ impl super::Nexus {
             })?
             .into_inner();
 
-        Ok(SwitchLinkState::new(status))
+        let monitors = match dpd.transceiver_monitors_get(&port_id).await {
+            Ok(resp) => Some(resp.into_inner()),
+            Err(e) => {
+                if let Some(StatusCode::NOT_FOUND) = e.status() {
+                    None
+                } else {
+                    return Err(Error::internal_error(&format!(
+                        "failed to get txr monitors for {port} {e}"
+                    )));
+                }
+            }
+        };
+
+        Ok(SwitchLinkState::new(status, monitors))
     }
 }
 
