@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240327.0"
+    "version": "20240502.0"
   },
   "paths": {
     "/device/auth": {
@@ -16386,7 +16386,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -17746,10 +17747,6 @@
         "required": [
           "items"
         ]
-      },
-      "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
