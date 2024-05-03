@@ -196,7 +196,7 @@ where
         String::from(nexus_label),
         blueprint,
         &sleds_by_id,
-        &overrides,
+        overrides,
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
