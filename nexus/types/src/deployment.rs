@@ -296,6 +296,10 @@ struct BpSledTable {
 /// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
 struct BpSledSubtable {
     pub table_name: &'static str,
+    // A string that gets printed immediately after the table name.
+    // This is useful for things like generation numbers.
+    // Multiline strings can be utilized with embedded newlines.
+    pub table_meta: String,
     pub column_names: Vec<&'static str>,
     pub rows: Vec<Vec<String>>,
 }
@@ -321,6 +325,7 @@ impl BpSledSubtable {
 impl From<&OmicronPhysicalDisksConfig> for BpSledSubtable {
     fn from(value: &OmicronPhysicalDisksConfig) -> Self {
         let table_name = "physical disks";
+        let table_meta = format!("at generation {}", value.generation);
         let column_names = vec!["vendor", "model", "serial"];
         let rows = value
             .disks
@@ -333,7 +338,28 @@ impl From<&OmicronPhysicalDisksConfig> for BpSledSubtable {
                 ]
             })
             .collect();
-        BpSledSubtable { table_name, column_names, rows }
+        BpSledSubtable { table_name, table_meta, column_names, rows }
+    }
+}
+
+impl From<&BlueprintOrCollectionZonesConfig> for BpSledSubtable {
+    fn from(value: &BlueprintOrCollectionZonesConfig) -> Self {
+        let table_name = "omicron zones";
+        let table_meta = format!("at generation {}", value.generation());
+        let column_names =
+            vec!["zone type", "zone id", "disposition", "underlay IP"];
+        let rows = value
+            .zones()
+            .map(|zone| {
+                vec![
+                    zone.kind().to_string(),
+                    zone.id().to_string(),
+                    zone.disposition().to_string(),
+                    zone.underlay_address().to_string(),
+                ]
+            })
+            .collect();
+        BpSledSubtable { table_name, table_meta, column_names, rows }
     }
 }
 
@@ -348,7 +374,11 @@ impl<'a> fmt::Display for BpSledSubtable {
         total_width -= COLUMN_GAP;
 
         // Write the name of the subtable
-        writeln!(f, "{:<SUBTABLE_INDENT$}{}:", "", self.table_name)?;
+        writeln!(
+            f,
+            "{:<SUBTABLE_INDENT$}{} {}:",
+            "", self.table_name, self.table_meta
+        )?;
 
         // Write the top header border
         writeln!(f, "{:<SUBTABLE_INDENT$}{:-<total_width$}", "", "")?;
@@ -409,8 +439,29 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 
         writeln!(f, "\n{}", self.make_zone_table())?;
 
-        for (sled, disks) in &self.blueprint.blueprint_disks {
-            writeln!(f, "\n\n{}\n\n", BpSledSubtable::from(disks))?;
+        let mut seen_sleds = BTreeSet::new();
+
+        for (sled_id, zones) in &self.blueprint.blueprint_zones {
+            let zones_table = BpSledSubtable::from(
+                &BlueprintOrCollectionZonesConfig::from(zones.clone()),
+            );
+            let disks_table = match self.blueprint.blueprint_disks.get(sled_id)
+            {
+                Some(disks) => BpSledSubtable::from(disks).to_string(),
+                None => "".to_string(),
+            };
+            writeln!(f, "\n  sled: {sled_id}\n{zones_table}\n{disks_table}\n")?;
+            seen_sleds.insert(sled_id);
+        }
+
+        for (sled_id, disks) in &self.blueprint.blueprint_disks {
+            if !seen_sleds.contains(sled_id) {
+                writeln!(
+                    f,
+                    "\n{sled_id}\n{}\n\n",
+                    BpSledSubtable::from(disks)
+                )?;
+            }
         }
         writeln!(f, "\n{}", self.make_physical_disk_table())?;
 
