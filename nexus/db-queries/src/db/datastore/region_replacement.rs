@@ -685,7 +685,9 @@ impl DataStore {
     }
 
     /// Nexus has been notified by an Upstairs (or has otherwised determined)
-    /// that a region replacement is done, so update the record.
+    /// that a region replacement is done, so update the record. This may arrive
+    /// in the middle of a drive saga invocation, so do not filter on state or
+    /// operating saga id!
     pub async fn mark_region_replacement_as_done(
         &self,
         opctx: &OpContext,
@@ -694,12 +696,11 @@ impl DataStore {
         use db::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
-            .filter(dsl::operating_saga_id.is_null())
-            .filter(dsl::replacement_state.eq(RegionReplacementState::Running))
-            .set(
+            .set((
                 dsl::replacement_state
                     .eq(RegionReplacementState::ReplacementDone),
-            )
+                dsl::operating_saga_id.eq(Option::<Uuid>::None),
+            ))
             .check_if_exists::<RegionReplacement>(region_replacement_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await;
@@ -759,6 +760,75 @@ mod test {
             .unwrap();
         datastore
             .insert_region_replacement_request(&opctx, request_2)
+            .await
+            .unwrap_err();
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_replacement_done_in_middle_of_drive_saga() {
+        // If Nexus receives a notification that a repair has finished in the
+        // middle of a drive saga, then make sure the replacement request state
+        // ends up as `ReplacementDone`.
+
+        let logctx = dev::test_setup_log(
+            "test_replacement_done_in_middle_of_drive_saga",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let region_id = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
+
+        let request = {
+            let mut request = RegionReplacement::new(region_id, volume_id);
+            request.replacement_state = RegionReplacementState::Running;
+            request
+        };
+
+        datastore
+            .insert_region_replacement_request(&opctx, request.clone())
+            .await
+            .unwrap();
+
+        // Transition to Driving
+
+        let saga_id = Uuid::new_v4();
+
+        datastore
+            .set_region_replacement_driving(&opctx, request.id, saga_id)
+            .await
+            .unwrap();
+
+        // Now, Nexus receives a notification that the repair has finished
+        // successfully
+
+        datastore
+            .mark_region_replacement_as_done(&opctx, request.id)
+            .await
+            .unwrap();
+
+        // Ensure that the state is ReplacementDone, and the operating saga id
+        // is cleared.
+
+        let actual_request = datastore
+            .get_region_replacement_request(&opctx, request.id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            actual_request.replacement_state,
+            RegionReplacementState::ReplacementDone
+        );
+        assert_eq!(actual_request.operating_saga_id, None);
+
+        // The Drive saga will unwind when it tries to set the state back to
+        // Running.
+
+        datastore
+            .undo_set_region_replacement_driving(&opctx, request.id, saga_id)
             .await
             .unwrap_err();
 
