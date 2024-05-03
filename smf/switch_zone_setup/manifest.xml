@@ -11,11 +11,6 @@
     <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
-  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/oxide/zone-network-setup:default' />
-  </dependency>
-
   <exec_method type='method' name='start' 
     exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i %{config/baseboard_info} -l %{config/link_local_links} -z %{config/zone_name} -a %{config/bootstrap_addr} -n %{config/bootstrap_name} -v %{config/bootstrap_vnic} -g %{config/gz_local_link_addr}'
     timeout_seconds='300'>

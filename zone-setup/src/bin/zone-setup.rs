@@ -940,9 +940,11 @@ async fn common_nw_set_up(
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     for addr in &static_addrs {
-        info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
-        Ipadm::create_static_and_autoconfigured_addrs(&datalink, addr)
-            .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        if **addr != Ipv6Addr::LOCALHOST {
+            info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
+            Ipadm::create_static_and_autoconfigured_addrs(&datalink, addr)
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        }
     }
 
     info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
