@@ -17,15 +17,16 @@ use internal_dns::ServiceName;
 use ipnetwork::Ipv6Network;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
-    CheckerSource, Prefix4, ShaperSource, StaticRoute4, StaticRoute4List,
+    CheckerSource, ImportExportPolicy as MgImportExportPolicy, Prefix, Prefix4,
+    Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
 };
 use mg_admin_client::Client as MgdClient;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
-use omicron_common::api::external::BfdMode;
+use omicron_common::api::external::{BfdMode, IpNet};
 use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
-    RackNetworkConfigV1, SwitchLocation, UplinkConfig,
+    BgpConfig, ImportExportPolicy, PortConfigV1, PortFec, PortSpeed,
+    RackNetworkConfig, RackNetworkConfigV1, SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -505,50 +506,48 @@ impl<'a> EarlyNetworkSetup<'a> {
                     local_pref: peer.local_pref,
                     enforce_first_as: peer.enforce_first_as,
                     allow_export: match &peer.allowed_export {
-                        omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering =>
-                            mg_admin_client::types::ImportExportPolicy::NoFiltering,
-                        omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) =>
-                            mg_admin_client::types::ImportExportPolicy::Allow(
-                            list.clone().iter().map(|x| {
-                                match x {
-                                    omicron_common::api::external::IpNet::V4(p) => mg_admin_client::types::Prefix::V4(
-                                        mg_admin_client::types::Prefix4{
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy::Allow(
+                                list.clone()
+                                    .iter()
+                                    .map(|x| match x {
+                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
                                             length: p.prefix(),
                                             value: p.ip(),
-                                        }
-                                    ),
-                                    omicron_common::api::external::IpNet::V6(p) => mg_admin_client::types::Prefix::V6(
-                                        mg_admin_client::types::Prefix6{
+                                        }),
+                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
                                             length: p.prefix(),
                                             value: p.ip(),
-                                        }
-                                    ),
-                                }
-                            }).collect()
-                        ),
+                                        }),
+                                    })
+                                    .collect(),
+                            )
+                        }
                     },
                     allow_import: match &peer.allowed_import {
-                        omicron_common::api::internal::shared::ImportExportPolicy::NoFiltering =>
-                            mg_admin_client::types::ImportExportPolicy::NoFiltering,
-                        omicron_common::api::internal::shared::ImportExportPolicy::Allow(list) =>
-                            mg_admin_client::types::ImportExportPolicy::Allow(
-                            list.clone().iter().map(|x| {
-                                match x {
-                                    omicron_common::api::external::IpNet::V4(p) => mg_admin_client::types::Prefix::V4(
-                                        mg_admin_client::types::Prefix4{
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy::Allow(
+                                list.clone()
+                                    .iter()
+                                    .map(|x| match x {
+                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
                                             length: p.prefix(),
                                             value: p.ip(),
-                                        }
-                                    ),
-                                    omicron_common::api::external::IpNet::V6(p) => mg_admin_client::types::Prefix::V6(
-                                        mg_admin_client::types::Prefix6{
+                                        }),
+                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
                                             length: p.prefix(),
                                             value: p.ip(),
-                                        }
-                                    ),
-                                }
-                            }).collect()
-                        ),
+                                        }),
+                                    })
+                                    .collect(),
+                            )
+                        }
                     },
                     vlan_id: peer.vlan_id,
                 };

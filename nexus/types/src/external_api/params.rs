@@ -1840,10 +1840,12 @@ pub struct BgpConfigCreate {
     /// configuration.
     pub vrf: Option<Name>,
 
+    // Dynamic BGP policy is not yet available so we skip adding it to the API
     /// A shaper program to apply to outgoing open and update messages.
+    #[serde(skip)]
     pub shaper: Option<String>,
-
     /// A checker program to apply to incoming open and update messages.
+    #[serde(skip)]
     pub checker: Option<String>,
 }
 
