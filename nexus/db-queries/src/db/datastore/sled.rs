@@ -534,7 +534,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_sled: &authz::Sled,
-    ) -> Result<SledState, external::Error> {
+    ) -> Result<SledState, TransitionError> {
         self.sled_set_state_impl(
             opctx,
             authz_sled,
@@ -542,7 +542,6 @@ impl DataStore {
             ValidateTransition::Yes,
         )
         .await
-        .map_err(|error| error.into_external_error())
     }
 
     pub(super) async fn sled_set_state_impl(
@@ -682,7 +681,7 @@ impl DataStore {
 // valid for a new policy or state, except idempotent transitions.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SledTransition {
+pub enum SledTransition {
     Policy(SledPolicy),
     State(SledState),
 }
@@ -773,7 +772,7 @@ impl IntoEnumIterator for SledTransition {
 /// An error that occurred while setting a policy or state.
 #[derive(Debug, Error)]
 #[must_use]
-pub(super) enum TransitionError {
+pub enum TransitionError {
     /// The state transition check failed.
     ///
     /// The sled is returned.
