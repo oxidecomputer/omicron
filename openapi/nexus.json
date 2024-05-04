@@ -4800,6 +4800,63 @@
         }
       }
     },
+    "/v1/system/hardware/switch-port/{port}/status": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get switch port status",
+        "operationId": "networking_switch_port_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchLinkState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/switches": {
       "get": {
         "tags": [
@@ -9584,6 +9641,22 @@
             "type": "string",
             "format": "ip"
           },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
           "bgp_announce_set": {
             "description": "The set of announcements advertised by the peer.",
             "allOf": [
@@ -9600,6 +9673,15 @@
               }
             ]
           },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
           "connect_retry": {
             "description": "How long to to wait between TCP connection retries (seconds).",
             "type": "integer",
@@ -9611,6 +9693,10 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "type": "boolean"
           },
           "hold_time": {
             "description": "How long to hold peer connections between keppalives (seconds).",
@@ -9633,14 +9719,58 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a peer.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
+          "allowed_export",
+          "allowed_import",
           "bgp_announce_set",
           "bgp_config",
+          "communities",
           "connect_retry",
           "delay_open",
+          "enforce_first_as",
           "hold_time",
           "idle_hold_time",
           "interface_name",
@@ -13400,6 +13530,47 @@
           "offset"
         ]
       },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Instance": {
         "description": "View of an Instance",
         "type": "object",
@@ -16863,6 +17034,7 @@
           }
         ]
       },
+      "SwitchLinkState": {},
       "SwitchLocation": {
         "description": "Identifies switch physical location",
         "oneOf": [

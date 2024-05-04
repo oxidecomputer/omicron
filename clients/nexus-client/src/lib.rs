@@ -27,6 +27,7 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         Generation = omicron_common::api::external::Generation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,

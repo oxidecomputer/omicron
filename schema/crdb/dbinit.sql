@@ -2632,9 +2632,45 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     delay_open INT8,
     connect_retry INT8,
     keepalive INT8,
+    remote_asn INT8,
+    min_ttl INT2,
+    md5_auth_key TEXT,
+    multi_exit_discriminator INT8,
+    local_pref INT8,
+    enforce_first_as BOOLEAN,
+    allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
+    allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    community INT8 NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, community)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_import (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_export (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
@@ -2646,7 +2682,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     time_deleted TIMESTAMPTZ,
     asn INT8 NOT NULL,
     vrf TEXT,
-    bgp_announce_set_id UUID NOT NULL
+    bgp_announce_set_id UUID NOT NULL,
+    shaper TEXT,
+    checker TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -3726,6 +3764,13 @@ SELECT
  bpc.delay_open,
  bpc.connect_retry,
  bpc.keepalive,
+ bpc.remote_asn,
+ bpc.min_ttl,
+ bpc.md5_auth_key,
+ bpc.multi_exit_discriminator,
+ bpc.local_pref,
+ bpc.enforce_first_as,
+ bpc.vlan_id,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
@@ -3771,7 +3816,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '55.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '56.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

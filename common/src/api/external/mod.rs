@@ -2691,6 +2691,39 @@ pub struct SwitchPortAddressConfig {
     pub interface_name: String,
 }
 
+/// Opaque object representing link state. The contents of this object are not
+/// yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SwitchLinkState {
+    link: dpd_client::types::Link,
+    monitors: Option<dpd_client::types::Monitors>,
+}
+
+impl SwitchLinkState {
+    pub fn new(
+        link: dpd_client::types::Link,
+        monitors: Option<dpd_client::types::Monitors>,
+    ) -> Self {
+        Self { link, monitors }
+    }
+}
+
+impl JsonSchema for SwitchLinkState {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "SwitchLinkState".to_owned()
+    }
+}
+
 /// The current state of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -2943,6 +2976,27 @@ pub struct Probe {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub sled: Uuid,
+}
+
+/// Define policy relating to the import and export of prefixes from a BGP
+/// peer.
+#[derive(
+    Default,
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    JsonSchema,
+    Eq,
+    PartialEq,
+    Hash,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ImportExportPolicy {
+    /// Do not perform any filtering.
+    #[default]
+    NoFiltering,
+    Allow(Vec<IpNet>),
 }
 
 #[cfg(test)]

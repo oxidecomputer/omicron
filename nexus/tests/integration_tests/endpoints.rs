@@ -497,6 +497,15 @@ pub static DEMO_SWITCH_PORT_SETTINGS: Lazy<params::SwitchPortApplySettings> =
     Lazy::new(|| params::SwitchPortApplySettings {
         port_settings: NameOrId::Name("portofino".parse().unwrap()),
     });
+/* TODO requires dpd access
+pub static DEMO_SWITCH_PORT_STATUS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/system/hardware/switch-port/qsfp7/status?rack_id={}&switch_location={}",
+        uuid::Uuid::new_v4(),
+        "switch0",
+    )
+});
+*/
 
 pub static DEMO_LOOPBACK_CREATE_URL: Lazy<String> =
     Lazy::new(|| "/v1/system/networking/loopback-address".into());
@@ -561,6 +570,8 @@ pub static DEMO_BGP_CONFIG: Lazy<params::BgpConfigCreate> =
         bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
         asn: 47,
         vrf: None,
+        checker: None,
+        shaper: None,
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs";
@@ -2160,6 +2171,17 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::Get,
             ],
         },
+
+        /* TODO requires dpd access
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        */
 
 
         VerifyEndpoint {

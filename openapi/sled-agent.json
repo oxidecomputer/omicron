@@ -1430,12 +1430,24 @@
             "format": "uint32",
             "minimum": 0
           },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Ipv4Network"
             }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
           }
         },
         "required": [
@@ -1451,11 +1463,43 @@
             "type": "string",
             "format": "ipv4"
           },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
           "asn": {
             "description": "The autonomous sysetm number of the router the peer belongs to.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
           },
           "connect_retry": {
             "nullable": true,
@@ -1470,6 +1514,11 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
           },
           "hold_time": {
             "nullable": true,
@@ -1492,9 +1541,55 @@
             "format": "uint64",
             "minimum": 0
           },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "port": {
             "description": "Switch port the peer is reachable on.",
             "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -2630,6 +2725,47 @@
         "pattern": "^([a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))(\\.[a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))*$",
         "minLength": 1,
         "maxLength": 253
+      },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
       },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
@@ -4104,6 +4240,14 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [

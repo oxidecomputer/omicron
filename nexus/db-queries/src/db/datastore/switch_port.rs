@@ -142,7 +142,6 @@ impl DataStore {
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         use db::schema::{
             address_lot::dsl as address_lot_dsl,
-            //XXX ANNOUNCE bgp_announce_set::dsl as bgp_announce_set_dsl,
             bgp_config::dsl as bgp_config_dsl,
             lldp_service_config::dsl as lldp_config_dsl,
             switch_port_settings::dsl as port_settings_dsl,
@@ -158,7 +157,6 @@ impl DataStore {
         #[derive(Debug)]
         enum SwitchPortSettingsCreateError {
             AddressLotNotFound,
-            //XXX ANNOUNCE BgpAnnounceSetNotFound,
             BgpConfigNotFound,
             ReserveBlock(ReserveBlockError),
         }
@@ -333,12 +331,7 @@ impl DataStore {
                                 psid,
                                 bgp_config_id,
                                 interface_name.clone(),
-                                p.addr.into(),
-                                p.hold_time.into(),
-                                p.idle_hold_time.into(),
-                                p.delay_open.into(),
-                                p.connect_retry.into(),
-                                p.keepalive.into(),
+                                p,
                             ));
 
                         }
@@ -1200,7 +1193,7 @@ mod test {
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, Name, NameOrId,
+        IdentityMetadataCreateParams, ImportExportPolicy, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use std::collections::HashMap;
@@ -1242,6 +1235,8 @@ mod test {
                 "test-announce-set".parse().unwrap(),
             ),
             vrf: None,
+            checker: None,
+            shaper: None,
         };
 
         datastore.bgp_config_set(&opctx, &bgp_config).await.unwrap();
@@ -1275,6 +1270,16 @@ mod test {
                         delay_open: 0,
                         connect_retry: 0,
                         keepalive: 0,
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
                     }],
                 },
             )]),
