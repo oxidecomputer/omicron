@@ -335,7 +335,7 @@ impl<T: fmt::Display> fmt::Display for DisplaySlice<'_, T> {
 /// Describes the actual authentication key to use with a BGP peer.
 ///
 /// Currently, only TCP-MD5 authentication is supported.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BgpAuthKey {
     /// TCP-MD5 authentication.
@@ -353,6 +353,17 @@ impl BgpAuthKey {
                 let sha256 =
                     ArtifactHash(Sha256::digest(key.as_bytes()).into());
                 BgpAuthKeyInfo::TcpMd5 { sha256 }
+            }
+        }
+    }
+}
+
+// Ensure that the key is not displayed in debug output.
+impl fmt::Debug for BgpAuthKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BgpAuthKey::TcpMd5 { key: _ } => {
+                f.debug_struct("TcpMd5").field("key", &"********").finish()
             }
         }
     }

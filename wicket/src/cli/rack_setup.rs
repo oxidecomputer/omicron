@@ -351,8 +351,7 @@ impl SetBgpAuthKeyArgs {
         };
 
         eprintln!(
-            "\nsetting {} {} to use {} authentication \
-             (press Ctrl-C to cancel)",
+            "\nsetting {} {} to use {} authentication",
             display_count.style(styles.bold),
             keys_str(len),
             self.auth_method.style(styles.bold),
