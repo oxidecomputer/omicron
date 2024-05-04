@@ -5,13 +5,14 @@
 //! Implementation of a standalone fake Nexus, simply for registering producers
 //! and collectors with one another.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::Error;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
+use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::HttpServer;
 use dropshot::HttpServerStarter;
@@ -19,6 +20,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use nexus_types::internal_api::params::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::FileKv;
 use oximeter_client::Client;
 use rand::seq::IteratorRandom;
@@ -32,6 +34,7 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -60,6 +63,16 @@ impl Inner {
     }
 }
 
+// The period on which producers must renew their lease.
+//
+// This is different from the one we actually use in Nexus (and shorter). That's
+// fine, since this is really a testing interface more than anything.
+const PRODUCER_RENEWAL_INTERVAL: Duration = Duration::from_secs(60);
+
+const fn default_producer_response() -> ProducerRegistrationResponse {
+    ProducerRegistrationResponse { lease_duration: PRODUCER_RENEWAL_INTERVAL }
+}
+
 // A stripped-down Nexus server, with only the APIs for registering metric
 // producers and collectors.
 #[derive(Debug)]
@@ -79,10 +92,11 @@ impl StandaloneNexus {
         }
     }
 
+    /// Register an oximeter producer, returning the lease period.
     async fn register_producer(
         &self,
         info: &ProducerEndpoint,
-    ) -> Result<(), HttpError> {
+    ) -> Result<ProducerRegistrationResponse, HttpError> {
         let mut inner = self.inner.lock().await;
         let assignment = match inner.producers.get_mut(&info.id) {
             None => {
@@ -113,7 +127,7 @@ impl StandaloneNexus {
                 // We have a record, first check if it matches the assignment we
                 // have.
                 if &existing_assignment.producer == info {
-                    return Ok(());
+                    return Ok(default_producer_response());
                 }
 
                 // This appears to be a re-registration, e.g., the producer
@@ -133,7 +147,7 @@ impl StandaloneNexus {
             }
         };
         inner.producers.insert(info.id, assignment);
-        Ok(())
+        Ok(default_producer_response())
     }
 
     async fn register_collector(
@@ -183,13 +197,13 @@ pub fn standalone_nexus_api() -> ApiDescription<Arc<StandaloneNexus>> {
 async fn cpapi_producers_post(
     request_context: RequestContext<Arc<StandaloneNexus>>,
     producer_info: TypedBody<ProducerEndpoint>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError> {
     let context = request_context.context();
     let producer_info = producer_info.into_inner();
     context
         .register_producer(&producer_info)
         .await
-        .map(|_| HttpResponseUpdatedNoContent())
+        .map(HttpResponseCreated)
         .map_err(|e| HttpError::for_internal_error(e.to_string()))
 }
 

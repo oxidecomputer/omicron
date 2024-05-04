@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240327.0"
+    "version": "20240502.0"
   },
   "paths": {
     "/device/auth": {
@@ -4326,8 +4326,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -16201,6 +16208,19 @@
           "time_modified",
           "usable_hardware_threads",
           "usable_physical_ram"
+        ]
+      },
+      "SledId": {
+        "description": "The unique ID of a sled.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "SledInstance": {

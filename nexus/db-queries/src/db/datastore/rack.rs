@@ -64,6 +64,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -170,6 +171,15 @@ impl From<RackInitError> for Error {
             )),
         }
     }
+}
+
+/// Possible results of attempting a new sled underlay allocation
+#[derive(Debug, Clone)]
+pub enum SledUnderlayAllocationResult {
+    /// A new allocation was created
+    New(SledUnderlaySubnetAllocation),
+    /// A prior allocation was found
+    Existing(SledUnderlaySubnetAllocation),
 }
 
 impl DataStore {
@@ -295,7 +305,7 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
         hw_baseboard_id: Uuid,
-    ) -> Result<SledUnderlaySubnetAllocation, Error> {
+    ) -> Result<SledUnderlayAllocationResult, Error> {
         // Fetch all the existing allocations via self.rack_id
         let allocations = self.rack_subnet_allocations(opctx, rack_id).await?;
 
@@ -306,17 +316,14 @@ impl DataStore {
         const MIN_SUBNET_OCTET: i16 = 33;
         let mut new_allocation = SledUnderlaySubnetAllocation {
             rack_id,
-            sled_id: Uuid::new_v4(),
+            sled_id: SledUuid::new_v4().into(),
             subnet_octet: MIN_SUBNET_OCTET,
             hw_baseboard_id,
         };
-        let mut allocation_already_exists = false;
         for allocation in allocations {
             if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
                 // We already have an allocation for this sled.
-                new_allocation = allocation;
-                allocation_already_exists = true;
-                break;
+                return Ok(SledUnderlayAllocationResult::Existing(allocation));
             }
             if allocation.subnet_octet == new_allocation.subnet_octet {
                 bail_unless!(
@@ -332,11 +339,8 @@ impl DataStore {
         // allocations when sleds are being added. We will need another
         // mechanism ala generation numbers when we must interleave additions
         // and removals of sleds.
-        if !allocation_already_exists {
-            self.sled_subnet_allocation_insert(opctx, &new_allocation).await?;
-        }
-
-        Ok(new_allocation)
+        self.sled_subnet_allocation_insert(opctx, &new_allocation).await?;
+        Ok(SledUnderlayAllocationResult::New(new_allocation))
     }
 
     /// Return all current underlay allocations for the rack.
@@ -2121,7 +2125,7 @@ mod test {
         for i in 0..5i16 {
             let allocation = SledUnderlaySubnetAllocation {
                 rack_id,
-                sled_id: Uuid::new_v4(),
+                sled_id: SledUuid::new_v4().into(),
                 subnet_octet: 33 + i,
                 hw_baseboard_id: Uuid::new_v4(),
             };
@@ -2141,7 +2145,7 @@ mod test {
         // sled_id. Ensure we get an error due to a unique constraint.
         let mut should_fail_allocation = SledUnderlaySubnetAllocation {
             rack_id,
-            sled_id: Uuid::new_v4(),
+            sled_id: SledUuid::new_v4().into(),
             subnet_octet: 37,
             hw_baseboard_id: Uuid::new_v4(),
         };
@@ -2169,7 +2173,7 @@ mod test {
         // Allocations outside our expected range fail
         let mut should_fail_allocation = SledUnderlaySubnetAllocation {
             rack_id,
-            sled_id: Uuid::new_v4(),
+            sled_id: SledUuid::new_v4().into(),
             subnet_octet: 32,
             hw_baseboard_id: Uuid::new_v4(),
         };
@@ -2205,18 +2209,28 @@ mod test {
 
         let rack_id = Uuid::new_v4();
 
+        let mut hw_baseboard_ids = vec![];
         let mut allocated_octets = vec![];
         for _ in 0..5 {
+            let hw_baseboard_id = Uuid::new_v4();
+            hw_baseboard_ids.push(hw_baseboard_id);
             allocated_octets.push(
-                datastore
+                match datastore
                     .allocate_sled_underlay_subnet_octets(
                         &opctx,
                         rack_id,
-                        Uuid::new_v4(),
+                        hw_baseboard_id,
                     )
                     .await
                     .unwrap()
-                    .subnet_octet,
+                {
+                    SledUnderlayAllocationResult::New(allocation) => {
+                        allocation.subnet_octet
+                    }
+                    SledUnderlayAllocationResult::Existing(allocation) => {
+                        panic!("unexpected allocation {allocation:?}");
+                    }
+                },
             );
         }
 
@@ -2231,6 +2245,32 @@ mod test {
             expected,
             allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
         );
+
+        // If we attempt to insert the same baseboards again, we should get the
+        // existing allocations back.
+        for (hw_baseboard_id, expected_octet) in
+            hw_baseboard_ids.into_iter().zip(expected)
+        {
+            match datastore
+                .allocate_sled_underlay_subnet_octets(
+                    &opctx,
+                    rack_id,
+                    hw_baseboard_id,
+                )
+                .await
+                .unwrap()
+            {
+                SledUnderlayAllocationResult::New(allocation) => {
+                    panic!("unexpected allocation {allocation:?}");
+                }
+                SledUnderlayAllocationResult::Existing(allocation) => {
+                    assert_eq!(
+                        allocation.subnet_octet, expected_octet,
+                        "unexpected octet for {allocation:?}"
+                    );
+                }
+            }
+        }
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

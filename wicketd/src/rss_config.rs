@@ -26,6 +26,9 @@ use gateway_client::types::SpType;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX;
+use once_cell::sync::Lazy;
 use sled_hardware_types::Baseboard;
 use slog::warn;
 use std::collections::BTreeSet;
@@ -38,8 +41,10 @@ use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 // TODO-correctness For now, we always use the same rack subnet when running
 // RSS. When we get to multirack, this will be wrong, but there are many other
 // RSS-related things that need to change then too.
-const RACK_SUBNET: Ipv6Addr =
-    Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
+const RACK_SUBNET: Lazy<Ipv6Subnet<RACK_PREFIX>> = Lazy::new(|| {
+    let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
+    Ipv6Subnet::new(ip)
+});
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -498,7 +503,7 @@ fn validate_rack_network_config(
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
-        rack_subnet: RACK_SUBNET.into(),
+        rack_subnet: RACK_SUBNET.net(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config

@@ -83,6 +83,7 @@ use omicron_common::api::external::{
     http_pagination::data_page_params_for, AggregateBgpMessageHistory,
 };
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -5210,6 +5211,12 @@ async fn sled_list_uninitialized(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// The unique ID of a sled.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct SledId {
+    pub id: Uuid,
+}
+
 /// Add sled to initialized rack
 //
 // TODO: In the future this should really be a PUT request, once we resolve
@@ -5218,19 +5225,22 @@ async fn sled_list_uninitialized(
 // we are only operating on single rack systems.
 #[endpoint {
     method = POST,
-    path = "/v1/system/hardware/sleds/",
+    path = "/v1/system/hardware/sleds",
     tags = ["system/hardware"]
 }]
 async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
     sled: TypedBody<params::UninitializedSledId>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<SledId>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.sled_add(&opctx, sled.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let id = nexus
+            .sled_add(&opctx, sled.into_inner())
+            .await?
+            .into_untyped_uuid();
+        Ok(HttpResponseCreated(SledId { id }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5514,13 +5524,13 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    /// A silo ID. If unspecified, get aggregrate metrics across all silos.
+    /// A silo ID. If unspecified, get aggregate metrics across all silos.
     pub silo_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SiloMetricParams {
-    /// A project ID. If unspecified, get aggregrate metrics across all projects
+    /// A project ID. If unspecified, get aggregate metrics across all projects
     /// in current silo.
     pub project_id: Option<Uuid>,
 }

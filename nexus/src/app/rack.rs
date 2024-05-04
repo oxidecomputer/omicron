@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
+use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::deployment::blueprint_zone_type;
@@ -56,7 +57,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
@@ -249,6 +253,12 @@ impl super::Nexus {
         };
 
         let rack_network_config = &request.rack_network_config;
+
+        // The `rack` row is created with the rack ID we know when Nexus starts,
+        // but we didn't know the rack subnet until now. Set it.
+        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
+        rack.rack_subnet = Some(rack_network_config.rack_subnet.into());
+        self.datastore().update_rack_subnet(opctx, &rack).await?;
 
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
         // register all switches found during rack initialization
@@ -608,8 +618,6 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
           // record port speed
 
-        self.initial_bootstore_sync(&opctx).await?;
-
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -685,31 +693,6 @@ impl super::Nexus {
         }
     }
 
-    pub(crate) async fn initial_bootstore_sync(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(), Error> {
-        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        if rack.rack_subnet.is_some() {
-            return Ok(());
-        }
-        let sa = self.get_any_sled_agent_client(opctx).await?;
-        let result = sa
-            .read_network_bootstore_config_cache()
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: format!("read bootstore network config: {e}"),
-            })?
-            .into_inner();
-
-        rack.rack_subnet =
-            result.body.rack_network_config.map(|x| x.rack_subnet.into());
-
-        self.datastore().update_rack_subnet(opctx, &rack).await?;
-
-        Ok(())
-    }
-
     /// Return the list of sleds that are inserted into an initialized rack
     /// but not yet initialized as part of a rack.
     //
@@ -776,7 +759,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         sled: UninitializedSledId,
-    ) -> Result<(), Error> {
+    ) -> Result<SledUuid, Error> {
         let baseboard_id = sled.clone().into();
         let hw_baseboard_id = self
             .db_datastore
@@ -787,14 +770,26 @@ impl super::Nexus {
         let rack_subnet =
             Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
-        let allocation = self
+        let allocation = match self
             .db_datastore
             .allocate_sled_underlay_subnet_octets(
                 opctx,
                 self.rack_id,
                 hw_baseboard_id,
             )
-            .await?;
+            .await?
+        {
+            SledUnderlayAllocationResult::New(allocation) => allocation,
+            SledUnderlayAllocationResult::Existing(allocation) => {
+                return Err(Error::ObjectAlreadyExists {
+                    type_name: ResourceType::Sled,
+                    object_name: format!(
+                        "{} / {} ({})",
+                        sled.serial, sled.part, allocation.sled_id
+                    ),
+                });
+            }
+        };
 
         // Convert `UninitializedSledId` to the sled-agent type
         let baseboard_id = sled_agent_client::types::BaseboardId {
@@ -809,7 +804,7 @@ impl super::Nexus {
                 generation: 0,
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
-                    id: allocation.sled_id,
+                    id: allocation.sled_id.into_untyped_uuid(),
                     rack_id: allocation.rack_id,
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
@@ -852,7 +847,7 @@ impl super::Nexus {
             ),
         })?;
 
-        Ok(())
+        Ok(allocation.sled_id.into())
     }
 
     async fn get_any_sled_agent_url(
@@ -868,14 +863,6 @@ impl super::Nexus {
             })?
             .address();
         Ok(format!("http://{}", addr))
-    }
-
-    async fn get_any_sled_agent_client(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<sled_agent_client::Client, Error> {
-        let url = self.get_any_sled_agent_url(opctx).await?;
-        Ok(sled_agent_client::Client::new(&url, self.log.clone()))
     }
 }
 
