@@ -4614,25 +4614,6 @@
           }
         ]
       },
-      "SwitchLocation": {
-        "description": "Identifies switch physical location",
-        "oneOf": [
-          {
-            "description": "Switch in upper slot",
-            "type": "string",
-            "enum": [
-              "switch0"
-            ]
-          },
-          {
-            "description": "Switch in lower slot",
-            "type": "string",
-            "enum": [
-              "switch1"
-            ]
-          }
-        ]
-      },
       "UpdateComponent": {
         "oneOf": [
           {
@@ -5075,9 +5056,6 @@
               "$ref": "#/components/schemas/RouteConfig"
             }
           },
-          "switch": {
-            "$ref": "#/components/schemas/SwitchLocation"
-          },
           "uplink_port_fec": {
             "$ref": "#/components/schemas/PortFec"
           },
@@ -5089,7 +5067,6 @@
           "addresses",
           "autoneg",
           "routes",
-          "switch",
           "uplink_port_fec",
           "uplink_port_speed"
         ],
@@ -5113,7 +5090,13 @@
             "type": "string",
             "format": "ipv4"
           },
-          "port": {
+          "switch0": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedPortConfig"
+            }
+          },
+          "switch1": {
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/UserSpecifiedPortConfig"
@@ -5124,7 +5107,8 @@
           "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "port"
+          "switch0",
+          "switch1"
         ]
       },
       "IgnitionCommand": {

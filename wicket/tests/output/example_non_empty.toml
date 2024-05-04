@@ -55,15 +55,14 @@ bootstrap_sleds = [
 infra_ip_first = "172.30.0.1"
 infra_ip_last = "172.30.0.10"
 
-[rack_network_config.port.port0]
+[rack_network_config.switch0.port0]
 routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
 addresses = ["172.30.0.1/24"]
-switch = "switch0"
 uplink_port_speed = "speed400_g"
 uplink_port_fec = "firecode"
 autoneg = true
 
-[[rack_network_config.port.port0.bgp_peers]]
+[[rack_network_config.switch0.port0.bgp_peers]]
 asn = 47
 port = "port0"
 addr = "10.2.3.4"
@@ -75,7 +74,7 @@ keepalive = 2
 auth_key_id = "bgp-key-1"
 enforce_first_as = false
 
-[[rack_network_config.port.port0.bgp_peers]]
+[[rack_network_config.switch0.port0.bgp_peers]]
 asn = 28
 port = "port0"
 addr = "10.2.3.5"
@@ -91,6 +90,25 @@ multi_exit_discriminator = 100
 communities = [60, 70]
 local_pref = 80
 enforce_first_as = true
+
+[rack_network_config.switch1.port0]
+routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
+addresses = ["172.32.0.1/24"]
+uplink_port_speed = "speed400_g"
+uplink_port_fec = "firecode"
+autoneg = true
+
+[[rack_network_config.switch1.port0.bgp_peers]]
+asn = 47
+port = "port0"
+addr = "10.2.3.4"
+hold_time = 6
+idle_hold_time = 3
+delay_open = 0
+connect_retry = 3
+keepalive = 2
+auth_key_id = "bgp-key-1"
+enforce_first_as = false
 
 [[rack_network_config.bgp]]
 asn = 47
