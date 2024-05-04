@@ -45,6 +45,7 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
@@ -55,7 +56,6 @@ progenitor::generate_api!(
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
-        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
     }
 );
 

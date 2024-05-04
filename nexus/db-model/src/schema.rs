@@ -210,14 +210,14 @@ table! {
         connect_retry -> Int8,
         keepalive -> Int8,
         remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
         md5_auth_key -> Nullable<Text>,
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
         allow_import_list_active -> Bool,
         allow_export_list_active -> Bool,
-        vlan_id -> Nullable<Int8>
+        vlan_id -> Nullable<Int4>
     }
 }
 

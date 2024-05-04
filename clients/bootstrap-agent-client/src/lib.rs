@@ -19,10 +19,10 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     replace = {
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
-        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
     }
 );
 

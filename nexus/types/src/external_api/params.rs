@@ -8,14 +8,11 @@
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use omicron_common::api::{
-    external::{
-        AddressLotKind, BfdMode, ByteCount, Hostname,
-        IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-        InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net, Name, NameOrId,
-        PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
-    },
-    internal::shared::ImportExportPolicy,
+use omicron_common::api::external::{
+    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, ImportExportPolicy, InstanceCpuCount, IpNet,
+    Ipv4Net, Ipv6Net, Name, NameOrId, PaginationOrder, RouteDestination,
+    RouteTarget, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{

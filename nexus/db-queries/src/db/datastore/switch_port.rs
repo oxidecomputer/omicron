@@ -31,7 +31,6 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, ResourceType, UpdateResult,
 };
-use omicron_common::api::internal::shared::ImportExportPolicy;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -332,27 +331,7 @@ impl DataStore {
                                 psid,
                                 bgp_config_id,
                                 interface_name.clone(),
-                                p.addr.into(),
-                                p.hold_time.into(),
-                                p.idle_hold_time.into(),
-                                p.delay_open.into(),
-                                p.connect_retry.into(),
-                                p.keepalive.into(),
-                                p.remote_asn.map(|x| x.into()),
-                                p.min_ttl.map(|x| u32::from(x).into()),
-                                p.md5_auth_key.clone(),
-                                p.multi_exit_discriminator.map(|x| x.into()),
-                                p.local_pref.map(|x| x.into()),
-                                p.enforce_first_as,
-                                match &p.allowed_import {
-                                    ImportExportPolicy::NoFiltering => false,
-                                    _ => true,
-                                },
-                                match &p.allowed_export {
-                                    ImportExportPolicy::NoFiltering => false,
-                                    _ => true,
-                                },
-                                p.vlan_id.map(|x| u32::from(x).into()),
+                                p,
                             ));
 
                         }
@@ -1213,9 +1192,8 @@ mod test {
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
-    use omicron_common::api::{
-        external::{IdentityMetadataCreateParams, Name, NameOrId},
-        internal::shared::ImportExportPolicy,
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, ImportExportPolicy, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use std::collections::HashMap;

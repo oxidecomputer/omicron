@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.bgp_config ADD COLUMN IF NOT EXISTS checker TEXT;
+DROP VIEW IF EXISTS omicron.public.bgp_peer_view;

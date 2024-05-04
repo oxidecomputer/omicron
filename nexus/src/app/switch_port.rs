@@ -290,9 +290,16 @@ impl super::Nexus {
 
         let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e:?}"
+                "invalid switch name {switch}: {e}"
             ))
         })?;
+
+        let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
+            Error::invalid_request(&format!("invalid port name: {port} {e}"))
+        })?);
+
+        // no breakout support yet, link id always 0
+        let link_id = LinkId(0);
 
         let dpd_clients = self.dpd_clients().await.map_err(|e| {
             Error::internal_error(&format!("dpd clients get: {e}"))
@@ -301,13 +308,6 @@ impl super::Nexus {
         let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
             &format!("no client for switch {switch}"),
         ))?;
-
-        let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!("invalid port name: {port} {e}"))
-        })?);
-
-        // no breakout support yet, link id always 0
-        let link_id = LinkId(0);
 
         let status = dpd
             .link_get(&port_id, &link_id)

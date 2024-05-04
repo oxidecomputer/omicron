@@ -12,14 +12,15 @@ use crate::schema::{
     switch_port_settings_interface_config, switch_port_settings_link_config,
     switch_port_settings_port_config, switch_port_settings_route_config,
 };
-use crate::SqlU16;
 use crate::{impl_enum_type, SqlU32};
+use crate::{SqlU16, SqlU8};
 use db_macros::Resource;
 use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::params;
+use nexus_types::external_api::params::{self, BgpPeer};
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -572,14 +573,14 @@ pub struct SwitchPortBgpPeerConfig {
     pub connect_retry: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
     pub md5_auth_key: Option<String>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub allow_import_list_active: bool,
     pub allow_export_list_active: bool,
-    pub vlan_id: Option<SqlU32>,
+    pub vlan_id: Option<SqlU16>,
 }
 
 #[derive(
@@ -642,41 +643,35 @@ impl SwitchPortBgpPeerConfig {
         port_settings_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: String,
-        addr: IpNetwork,
-        hold_time: SqlU32,
-        idle_hold_time: SqlU32,
-        delay_open: SqlU32,
-        connect_retry: SqlU32,
-        keepalive: SqlU32,
-        remote_asn: Option<SqlU32>,
-        min_ttl: Option<SqlU32>,
-        md5_auth_key: Option<String>,
-        multi_exit_discriminator: Option<SqlU32>,
-        local_pref: Option<SqlU32>,
-        enforce_first_as: bool,
-        allow_import_list_active: bool,
-        allow_export_list_active: bool,
-        vlan_id: Option<SqlU32>,
+        p: &BgpPeer,
     ) -> Self {
         Self {
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr,
-            hold_time,
-            idle_hold_time,
-            delay_open,
-            connect_retry,
-            keepalive,
-            remote_asn,
-            min_ttl,
-            md5_auth_key,
-            multi_exit_discriminator,
-            local_pref,
-            enforce_first_as,
-            allow_import_list_active,
-            allow_export_list_active,
-            vlan_id,
+            addr: p.addr.into(),
+            hold_time: p.hold_time.into(),
+            idle_hold_time: p.delay_open.into(),
+            delay_open: p.connect_retry.into(),
+            connect_retry: p.connect_retry.into(),
+            keepalive: p.keepalive.into(),
+            remote_asn: p.remote_asn.map(|x| x.into()),
+            min_ttl: p.min_ttl.map(|x| x.into()),
+            md5_auth_key: p.md5_auth_key.clone(),
+            multi_exit_discriminator: p
+                .multi_exit_discriminator
+                .map(|x| x.into()),
+            local_pref: p.local_pref.map(|x| x.into()),
+            enforce_first_as: p.enforce_first_as,
+            allow_import_list_active: match &p.allowed_import {
+                ImportExportPolicy::NoFiltering => false,
+                _ => true,
+            },
+            allow_export_list_active: match &p.allowed_export {
+                ImportExportPolicy::NoFiltering => false,
+                _ => true,
+            },
+            vlan_id: p.vlan_id.map(|x| x.into()),
         }
     }
 }

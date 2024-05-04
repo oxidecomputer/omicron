@@ -6,8 +6,8 @@
 //! (most of) the rack setup configuration.
 
 use omicron_common::address::IpRange;
+use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::ImportExportPolicy;
 use omicron_common::api::internal::shared::RouteConfig;
 use serde::Serialize;
 use sled_hardware_types::Baseboard;

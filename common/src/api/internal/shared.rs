@@ -6,7 +6,7 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, IpNet, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, Name},
 };
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
@@ -188,27 +188,6 @@ pub struct BgpConfig {
     /// Checker to apply to incoming messages.
     #[serde(default)]
     pub checker: Option<String>,
-}
-
-/// Define policy relating to the import and export of prefixes from a BGP
-/// peer.
-#[derive(
-    Default,
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    JsonSchema,
-    Eq,
-    PartialEq,
-    Hash,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum ImportExportPolicy {
-    /// Do not perform any filtering.
-    #[default]
-    NoFiltering,
-    Allow(Vec<IpNet>),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -436,6 +415,12 @@ impl fmt::Display for SwitchLocation {
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ParseSwitchLocationError(String);
+
+impl std::fmt::Display for ParseSwitchLocationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse switch location error: {}", self.0)
+    }
+}
 
 impl FromStr for SwitchLocation {
     type Err = ParseSwitchLocationError;

@@ -8,10 +8,10 @@ use std::net::Ipv4Addr;
 
 use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::{
-    external::SwitchLocation,
+    external::{ImportExportPolicy, SwitchLocation},
     internal::shared::{
-        BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfigV1, PortFec,
-        PortSpeed, RackNetworkConfig, RouteConfig,
+        BgpConfig, BgpPeerConfig, PortConfigV1, PortFec, PortSpeed,
+        RackNetworkConfig, RouteConfig,
     },
 };
 use omicron_sled_agent::bootstrap::early_networking::{

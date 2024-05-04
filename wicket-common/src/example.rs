@@ -10,9 +10,11 @@ use gateway_client::types::{SpIdentifier, SpType};
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::internal::shared::{
-        BgpConfig, BgpPeerConfig, ImportExportPolicy, PortFec, PortSpeed,
-        RouteConfig,
+    api::{
+        external::ImportExportPolicy,
+        internal::shared::{
+            BgpConfig, BgpPeerConfig, PortFec, PortSpeed, RouteConfig,
+        },
     },
 };
 use sled_hardware_types::Baseboard;

@@ -5368,6 +5368,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-pantry-client",
  "diesel",
+ "display-error-chain",
  "dns-server",
  "dns-service-client",
  "dpd-client",

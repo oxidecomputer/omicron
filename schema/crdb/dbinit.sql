@@ -2633,14 +2633,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     connect_retry INT8,
     keepalive INT8,
     remote_asn INT8,
-    min_ttl INT,
+    min_ttl INT2,
     md5_auth_key TEXT,
     multi_exit_discriminator INT8,
     local_pref INT8,
     enforce_first_as BOOLEAN,
     allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
-    vlan_id INT8,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)

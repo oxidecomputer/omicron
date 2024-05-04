@@ -23,6 +23,7 @@ use nexus_db_model::{
 use uuid::Uuid;
 
 use super::common::BackgroundTask;
+use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -42,8 +43,7 @@ use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{get_sled_address, Ipv6Subnet},
     api::{
-        external::{DataPageParams, SwitchLocation},
-        internal::shared::ImportExportPolicy,
+        external::{DataPageParams, ImportExportPolicy, SwitchLocation},
         internal::shared::ParseSwitchLocationError,
     },
 };
@@ -285,13 +285,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
             let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
-                    error!(log, "failed to retrieve racks from database"; "error" => ?e);
+                    error!(log, "failed to retrieve racks from database"; 
+                        "error" => %DisplayErrorChain::new(&e)
+                    );
                     return json!({
                         "error":
                             format!(
-                                "failed to retrieve racks from database : \
-                                    {:#}",
-                                e
+                                "failed to retrieve racks from database : {}",
+                                DisplayErrorChain::new(&e)
                             )
                     });
                 },
@@ -314,7 +315,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 {
                     Ok(addrs) => addrs,
                     Err(e) => {
-                        error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                        error!(log, "failed to resolve addresses for Dendrite services"; 
+                            "error" => %DisplayErrorChain::new(&e));
                         continue;
                     },
                 };
@@ -431,7 +433,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(
                             log,
                             "error fetching loopback addresses from db, skipping loopback config";
-                            "error" => %e
+                            "error" => %DisplayErrorChain::new(&e)
                         );
                     },
                 };
@@ -468,7 +470,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             log,
                             "error while applying smf updates to switch zone";
                             "location" => %location,
-                            "error" => %e,
+                            "error" => %DisplayErrorChain::new(&e)
                         );
                     }
                 }
@@ -533,7 +535,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                             "error while fetching bgp peer config from db";
                                             "location" => %location,
                                             "port_name" => %port.port_name,
-                                            "error" => %e,
+                                            "error" => %DisplayErrorChain::new(&e)
                                         );
                                         continue;
                                     },
@@ -569,7 +571,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         "error while fetching bgp announcements from db";
                                         "location" => %location,
                                         "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
-                                        "error" => %e,
+                                        "error" => %DisplayErrorChain::new(&e)
                                     );
                                     continue;
                                 },
@@ -590,30 +592,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
-                        let ttl: Option<u8> = match peer.min_ttl.as_ref() {
-                            Some(x) => {
-                                match x.0.try_into() {
-                                    Ok(ttl) => Some(ttl),
-                                    Err(e) => {
-                                        error!(log,
-                                            "peer ttl out of range {} > 255",
-                                            x;
-                                            "error" => ?e
-                                        );
-                                        return json!({
-                                            "error":
-                                                format!(
-                                                    "peer ttl out of range: \
-                                                        {:#}",
-                                                    e
-                                                )
-                                        });
-                                    }
-                                }
-                            }
-                            None => None,
-                        };
+                        let ttl = peer.min_ttl.map(|x| x.0);
 
+                        //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
                             peer.port_settings_id,
@@ -625,14 +606,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 error!(log,
                                     "failed to get communities for peer";
                                     "peer" => ?peer,
-                                    "error" => ?e
+                                    "error" => %DisplayErrorChain::new(&e)
                                 );
                                 return json!({
                                     "error":
                                         format!(
-                                            "failed to get port settings for peer {:?}: {:?}",
+                                            "failed to get port settings for peer {:?}: {}",
                                             peer,
-                                            e
+                                            DisplayErrorChain::new(&e)
                                         )
                                 });
                             }
@@ -649,14 +630,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 error!(log,
                                     "failed to get peer allowed imports";
                                     "peer" => ?peer,
-                                    "error" => ?e
+                                    "error" => %DisplayErrorChain::new(&e)
                                 );
                                 return json!({
                                     "error":
                                         format!(
-                                            "failed to get allowed imports peer {:?}: {:?}",
+                                            "failed to get allowed imports peer {:?}: {}",
                                             peer,
-                                            e
+                                            DisplayErrorChain::new(&e)
                                         )
                                 });
                             }
@@ -699,14 +680,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 error!(log,
                                     "failed to get peer allowed exportss";
                                     "peer" => ?peer,
-                                    "error" => ?e
+                                    "error" => %DisplayErrorChain::new(&e),
                                 );
                                 return json!({
                                     "error":
                                         format!(
-                                            "failed to get allowed exports peer {:?}: {:?}",
+                                            "failed to get allowed exports peer {:?}: {}",
                                             peer,
-                                            e
+                                            DisplayErrorChain::new(&e)
                                         )
                                 });
                             }
@@ -758,7 +739,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             communities: communities.into_iter().map(|c| c.community.0).collect(),
                             allow_export: export_policy,
                             allow_import: import_policy,
-                            vlan_id: peer.vlan_id.map(|x| x.0 as u16),
+                            vlan_id: peer.vlan_id.map(|x| x.0),
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -934,7 +915,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 "failed to fetch bgp peer config for switch port";
                                 "switch_location" => ?location,
                                 "port" => &port.port_name,
-                                "error" => %e,
+                                "error" => %DisplayErrorChain::new(&e)
                             );
                             continue;
                         },
@@ -1014,12 +995,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     error!(log,
                                         "failed to get communities for peer";
                                         "peer" => ?peer,
-                                        "error" => ?e,
+                                        "error" => %DisplayErrorChain::new(&e)
                                     );
                                     continue;
                                 }
                             };
 
+                        //TODO consider awaiting in parallel and joining
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
@@ -1031,7 +1013,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 error!(log,
                                     "failed to get peer allowed imports";
                                     "peer" => ?peer,
-                                    "error" => ?e
+                                    "error" => %DisplayErrorChain::new(&e)
                                 );
                                 continue;
                             }
@@ -1053,9 +1035,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             Ok(cs) => cs,
                             Err(e) => {
                                 error!(log,
-                                    "failed to get peer allowed exportss";
+                                    "failed to get peer allowed exports";
                                     "peer" => ?peer,
-                                    "error" => ?e
+                                    "error" => %DisplayErrorChain::new(&e)
                                 );
                                 continue;
                             }

@@ -16,11 +16,11 @@ use nexus_types::external_api::params::{
     SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
+use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
     SwitchPortSettingsView,
 };
-use omicron_common::api::internal::shared::ImportExportPolicy;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
