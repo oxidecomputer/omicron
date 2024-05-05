@@ -118,6 +118,18 @@ switch = "switch0"
 # Neighbors we expect to peer with over BGP on this port.
 bgp_peers = []
 
+# An allowlist of source IPs that can make requests to user-facing services can
+# be specified here. It can be written as the string "any" ...
+[allowed_source_ips]
+allow = "any"
+
+# ... or as a list of IP subnets, like so:
+# allow = "list"
+# ips = ["10.0.0.1/32", "192.168.1.0/24"]
+#
+# Note that single IP addresses must include the netmask as well, so `/32` or
+# `/128`.
+
 # Configuration for the initial Silo, user, and password.
 #
 # You don't need to change the silo or user names.

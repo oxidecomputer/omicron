@@ -13,6 +13,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -243,6 +244,8 @@ pub struct RackInitializationRequest {
     pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
+    /// IPs or subnets allowed to make requests to user-facing services
+    pub allowed_source_ips: AllowedSourceIps,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;

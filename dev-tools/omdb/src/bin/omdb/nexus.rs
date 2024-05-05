@@ -889,6 +889,25 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "service_firewall_rule_propagation" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// Elapsed duration of the propagation
+            elapsed: std::time::Duration,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!(
+                    "    successfully propagated rules in {:?}",
+                    success.elapsed,
+                );
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \

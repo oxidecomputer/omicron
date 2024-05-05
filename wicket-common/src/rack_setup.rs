@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 pub use gateway_client::types::SpIdentifier as GatewaySpIdentifier;
 pub use gateway_client::types::SpType as GatewaySpType;
@@ -12,6 +12,7 @@ use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SwitchLocation;
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::BgpPeerConfig;
 use omicron_common::api::internal::shared::PortFec;
@@ -46,6 +47,7 @@ pub struct CurrentRssUserConfigInsensitive {
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
+    pub allowed_source_ips: Option<AllowedSourceIps>,
 }
 
 /// The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
@@ -67,6 +69,7 @@ pub struct PutRssUserConfigInsensitive {
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
+    pub allowed_source_ips: AllowedSourceIps,
 }
 
 #[derive(
@@ -372,7 +375,17 @@ impl fmt::Debug for BgpAuthKey {
 /// Describes insensitive information about a BGP authentication key.
 ///
 /// This information is considered okay to display in the UI.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BgpAuthKeyInfo {
     /// TCP-MD5 authentication.
@@ -403,7 +416,17 @@ impl BgpAuthKeyInfo {
 /// This is part of a wicketd response, but is returned here because our
 /// tooling turns BTreeMaps into HashMaps. So we use a `replace` directive
 /// instead.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+)]
 pub struct GetBgpAuthKeyInfoResponse {
     /// Information about the requested keys.
     ///
@@ -417,7 +440,17 @@ pub struct GetBgpAuthKeyInfoResponse {
 /// This is part of a wicketd response, but is returned here because our
 /// tooling turns BTreeMaps into HashMaps. So we use a `replace` directive
 /// instead.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum BgpAuthKeyStatus {
     /// The key was specified but hasn't been set yet.

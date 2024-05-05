@@ -94,6 +94,7 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -129,6 +130,7 @@ mod test {
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         assert_eq!(

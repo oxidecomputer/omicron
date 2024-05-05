@@ -25,6 +25,7 @@ use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -876,6 +877,13 @@ pub static DEMO_USER_CREATE: Lazy<params::UserCreate> =
         external_id: params::UserId::from_str("dummy-user").unwrap(),
         password: params::UserPassword::LoginDisallowed,
     });
+
+// Allowlist for user-facing services.
+pub static ALLOW_LIST_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/system/networking/allow-list"));
+pub static ALLOW_LIST_UPDATE: Lazy<params::AllowListUpdate> = Lazy::new(|| {
+    params::AllowListUpdate { allowed_ips: AllowedSourceIps::Any }
+});
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
@@ -2397,6 +2405,19 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(&()).unwrap(),
+                ),
+            ],
+        },
+
+        // User-facing services IP allowlist
+        VerifyEndpoint {
+            url: &ALLOW_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*ALLOW_LIST_UPDATE).unwrap(),
                 ),
             ],
         },

@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
@@ -847,6 +848,7 @@ impl JsonSchema for Hostname {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AllowList,
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
@@ -1334,6 +1336,60 @@ impl From<ipnetwork::Ipv6Network> for Ipv6Net {
     }
 }
 
+const IPV6_NET_REGEX: &str = concat!(
+    r#"^("#,
+    r#"([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,7}:|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"#,
+    r#"[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"#,
+    r#":((:[0-9a-fA-F]{1,4}){1,7}|:)|"#,
+    r#"fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|"#,
+    r#"::(ffff(:0{1,4}){0,1}:){0,1}"#,
+    r#"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"#,
+    r#"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,4}:"#,
+    r#"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"#,
+    r#"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"#,
+    r#")\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
+);
+
+#[cfg(test)]
+#[test]
+fn test_ipv6_regex() {
+    let re = regress::Regex::new(IPV6_NET_REGEX).unwrap();
+    for case in [
+        "1:2:3:4:5:6:7:8",
+        "1:a:2:b:3:c:4:d",
+        "1::",
+        "::1",
+        "::",
+        "1::3:4:5:6:7:8",
+        "1:2::4:5:6:7:8",
+        "1:2:3::5:6:7:8",
+        "1:2:3:4::6:7:8",
+        "1:2:3:4:5::7:8",
+        "1:2:3:4:5:6::8",
+        "1:2:3:4:5:6:7::",
+        "2001::",
+        "fd00::",
+        "::100:1",
+        "fd12:3456::",
+    ] {
+        for prefix in 0..=128 {
+            let net = format!("{case}/{prefix}");
+            assert!(
+                re.find(&net).is_some(),
+                "Expected to match IPv6 case: {}",
+                prefix,
+            );
+        }
+    }
+}
+
 impl JsonSchema for Ipv6Net {
     fn schema_name() -> String {
         "Ipv6Net".to_string()
@@ -1354,18 +1410,7 @@ impl JsonSchema for Ipv6Net {
             })),
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(
-                    // Conforming to unique local addressing scheme,
-                    // `fd00::/8`.
-                    concat!(
-                        r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
-                        r#"([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}"#,
-                        r#"|([0-9a-fA-F]{1,4}:){1,6}:)"#,
-                        r#"([0-9a-fA-F]{1,4})?"#,
-                        r#"\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
-                    )
-                    .to_string(),
-                ),
+                pattern: Some(IPV6_NET_REGEX.to_string()),
                 ..Default::default()
             })),
             ..Default::default()
@@ -1429,6 +1474,18 @@ impl IpNet {
                 let size = inner.size() - 1;
                 std::net::IpAddr::V6(std::net::Ipv6Addr::from(base + size))
             }
+        }
+    }
+
+    /// Return true if the provided address is contained in self.
+    ///
+    /// This returns false if the address and the network are of different IP
+    /// families.
+    pub fn contains(&self, addr: IpAddr) -> bool {
+        match (self, addr) {
+            (IpNet::V4(net), IpAddr::V4(ip)) => net.contains(ip),
+            (IpNet::V6(net), IpAddr::V6(ip)) => net.contains(ip),
+            (_, _) => false,
         }
     }
 }

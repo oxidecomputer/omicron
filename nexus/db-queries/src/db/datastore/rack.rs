@@ -55,6 +55,7 @@ use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -86,6 +87,7 @@ pub struct RackInit {
     pub recovery_user_id: external_params::UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
+    pub allowed_source_ips: AllowedSourceIps,
 }
 
 /// Possible errors while trying to initialize rack
@@ -106,6 +108,8 @@ enum RackInitError {
     Retryable(DieselError),
     // Other non-retryable database error
     Database(DieselError),
+    // Error adding initial allowed source IP list
+    AllowedSourceIpError(Error),
 }
 
 // Catch-all for Diesel error conversion into RackInitError, which
@@ -169,6 +173,7 @@ impl From<RackInitError> for Error {
                 "failed operation due to database error: {:#}",
                 err
             )),
+            RackInitError::AllowedSourceIpError(err) => err,
         }
     }
 }
@@ -859,6 +864,17 @@ impl DataStore {
                         }
                     })?;
 
+                    // Insert the initial source IP allowlist for requests to
+                    // user-facing services.
+                    Self::allow_list_upsert_on_connection(
+                        opctx,
+                        &conn,
+                        rack_init.allowed_source_ips,
+                    ).await.map_err(|e| {
+                        err.set(RackInitError::AllowedSourceIpError(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
                     let rack = diesel::update(rack_dsl::rack)
                         .filter(rack_dsl::id.eq(rack_id))
                         .set((
@@ -1054,6 +1070,7 @@ mod test {
                     "test suite".to_string(),
                     "test suite".to_string(),
                 ),
+                allowed_source_ips: AllowedSourceIps::Any,
             }
         }
     }

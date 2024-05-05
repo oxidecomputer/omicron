@@ -1670,6 +1670,15 @@ table! {
 }
 
 table! {
+    allow_list (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        allowed_ips -> Nullable<Array<Inet>>,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
