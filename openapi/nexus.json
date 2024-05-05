@@ -9807,14 +9807,6 @@
               }
             ]
           },
-          "bgp_announce_set": {
-            "description": "The set of announcements advertised by the peer.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
-          },
           "bgp_config": {
             "description": "The global BGP configuration used for establishing a session with this peer.",
             "allOf": [
@@ -9915,7 +9907,6 @@
           "addr",
           "allowed_export",
           "allowed_import",
-          "bgp_announce_set",
           "bgp_config",
           "communities",
           "connect_retry",
@@ -17291,37 +17282,6 @@
           "port_settings"
         ]
       },
-      "SwitchPortBgpPeerConfig": {
-        "description": "A BGP peer configuration for a port settings object.",
-        "type": "object",
-        "properties": {
-          "addr": {
-            "description": "The address of the peer.",
-            "type": "string",
-            "format": "ip"
-          },
-          "bgp_config_id": {
-            "description": "The id of the global BGP configuration referenced by this peer configuration.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "interface_name": {
-            "description": "The interface name used to establish a peer session.",
-            "type": "string"
-          },
-          "port_settings_id": {
-            "description": "The port settings object this BGP configuration belongs to.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "addr",
-          "bgp_config_id",
-          "interface_name",
-          "port_settings_id"
-        ]
-      },
       "SwitchPortConfig": {
         "description": "A physical port configuration for a port settings object.",
         "type": "object",
@@ -17418,6 +17378,18 @@
         "description": "A link configuration for a port settings object.",
         "type": "object",
         "properties": {
+          "autoneg": {
+            "description": "Whether or not the link has autonegotiation enabled.",
+            "type": "boolean"
+          },
+          "fec": {
+            "description": "The forward error correction mode of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
           "link_name": {
             "description": "The name of this link.",
             "type": "string"
@@ -17437,13 +17409,24 @@
             "description": "The port settings this link configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "speed": {
+            "description": "The configured speed of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
           }
         },
         "required": [
+          "autoneg",
+          "fec",
           "link_name",
           "lldp_service_config_id",
           "mtu",
-          "port_settings_id"
+          "port_settings_id",
+          "speed"
         ]
       },
       "SwitchPortResultsPage": {
@@ -17674,7 +17657,7 @@
             "description": "BGP peer settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortBgpPeerConfig"
+              "$ref": "#/components/schemas/BgpPeer"
             }
           },
           "groups": {
