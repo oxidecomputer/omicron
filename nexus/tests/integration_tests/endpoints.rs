@@ -25,6 +25,7 @@ use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -497,6 +498,15 @@ pub static DEMO_SWITCH_PORT_SETTINGS: Lazy<params::SwitchPortApplySettings> =
     Lazy::new(|| params::SwitchPortApplySettings {
         port_settings: NameOrId::Name("portofino".parse().unwrap()),
     });
+/* TODO requires dpd access
+pub static DEMO_SWITCH_PORT_STATUS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/system/hardware/switch-port/qsfp7/status?rack_id={}&switch_location={}",
+        uuid::Uuid::new_v4(),
+        "switch0",
+    )
+});
+*/
 
 pub static DEMO_LOOPBACK_CREATE_URL: Lazy<String> =
     Lazy::new(|| "/v1/system/networking/loopback-address".into());
@@ -561,6 +571,8 @@ pub static DEMO_BGP_CONFIG: Lazy<params::BgpConfigCreate> =
         bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
         asn: 47,
         vrf: None,
+        checker: None,
+        shaper: None,
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs";
@@ -865,6 +877,13 @@ pub static DEMO_USER_CREATE: Lazy<params::UserCreate> =
         external_id: params::UserId::from_str("dummy-user").unwrap(),
         password: params::UserPassword::LoginDisallowed,
     });
+
+// Allowlist for user-facing services.
+pub static ALLOW_LIST_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/system/networking/allow-list"));
+pub static ALLOW_LIST_UPDATE: Lazy<params::AllowListUpdate> = Lazy::new(|| {
+    params::AllowListUpdate { allowed_ips: AllowedSourceIps::Any }
+});
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
@@ -2161,6 +2180,17 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             ],
         },
 
+        /* TODO requires dpd access
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        */
+
 
         VerifyEndpoint {
             url: &DEMO_SWITCH_PORT_SETTINGS_APPLY_URL,
@@ -2375,6 +2405,19 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(&()).unwrap(),
+                ),
+            ],
+        },
+
+        // User-facing services IP allowlist
+        VerifyEndpoint {
+            url: &ALLOW_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*ALLOW_LIST_UPDATE).unwrap(),
                 ),
             ],
         },
