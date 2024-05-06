@@ -41,6 +41,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(instance_put_external_ip)?;
@@ -139,7 +140,7 @@ async fn instance_put_state(
     path = "/instances/{instance_id}/state",
 }]
 async fn instance_get_state(
-    rqctx: RequestContext<SledAgent>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
