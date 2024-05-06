@@ -410,16 +410,24 @@ impl DataStore {
         let result = paginated(sled_dsl::sled, sled_dsl::id, pagparams)
             .filter(sled_dsl::time_deleted.is_null())
             .sled_filter(SledFilter::InService)
-            .inner_join(vmm_dsl::vmm.on(vmm_dsl::sled_id.eq(sled_dsl::id)))
             .inner_join(
-                instance_dsl::instance.on(instance_dsl::active_propolis_id
-                    .eq(vmm_dsl::id.nullable())
-                    .and(vmm_dsl::time_deleted.is_null())),
+                vmm_dsl::vmm
+                    .on(vmm_dsl::sled_id
+                        .eq(sled_dsl::id)
+                        .and(vmm_dsl::time_deleted.is_null()))
+                    .inner_join(
+                        instance_dsl::instance
+                            .on(instance_dsl::id
+                                .eq(vmm_dsl::instance_id)
+                                .and(instance_dsl::time_deleted.is_null()))
+                            .inner_join(
+                                project_dsl::project.on(project_dsl::id
+                                    .eq(instance_dsl::project_id)
+                                    .and(project_dsl::time_deleted.is_null())),
+                            ),
+                    ),
             )
-            .inner_join(
-                project_dsl::project
-                    .on(instance_dsl::project_id.eq(project_dsl::id)),
-            )
+            .sled_filter(SledFilter::InService)
             .select((
                 Sled::as_select(),
                 Instance::as_select(),
