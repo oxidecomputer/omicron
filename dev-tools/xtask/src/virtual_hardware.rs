@@ -270,7 +270,12 @@ fn remove_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
         "--ports",
         "sc0_1,tfportqsfp0_0",
     ]);
-    execute(cmd)?;
+    if let Err(output) = execute(cmd) {
+        // Don't throw an error if the zone was already removed
+        if output.to_string().contains("No such zone configured") {
+            return Ok(());
+        }
+    }
     Ok(())
 }
 
