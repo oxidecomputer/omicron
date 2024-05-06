@@ -944,26 +944,25 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 failed_checks,
                 incomplete_checks,
             }) => {
+                let total_successes: usize = instance_states.values().sum();
+                let total_failures: usize = failed_checks.values().sum();
+                let total_incomplete: usize = incomplete_checks.values().sum();
                 println!("    total instances checked: {total_instances}",);
                 println!(
                     "    checks completed: {}",
-                    instance_states.len() + failed_checks.len()
+                    total_successes + total_failures
                 );
-                println!(
-                    "     -> successful checks: {}",
-                    instance_states.len()
-                );
+                println!("     -> successful checks: {total_successes}",);
                 for (state, count) in &instance_states {
                     println!("        {state} instances: {count}")
                 }
 
-                println!("     -> failed checks: {}", failed_checks.len());
+                println!("     -> failed checks: {total_failures}");
                 for (failure, count) in &failed_checks {
                     println!("        {failure}: {count}")
                 }
                 println!(
-                    "    checks that could not be completed: {}",
-                    incomplete_checks.len()
+                    "    checks that could not be completed: {total_incomplete}",
                 );
                 for (error, count) in &incomplete_checks {
                     println!("     -> {error}: {count}")
