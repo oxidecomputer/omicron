@@ -898,13 +898,37 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// number of stale instance metrics that were deleted
             pruned_instances: usize,
 
-            /// instance states from completed checks
+            /// instance states from completed checks.
+            ///
+            /// this is a mapping of stringified instance states to the number
+            /// of instances in that state. these stringified states correspond
+            /// to the `state` field recorded by the instance watcher's
+            /// `virtual_machine:check` timeseries with the `healthy` field set
+            /// to `true`. any changes to the instance state type which cause it
+            /// to print differently will be counted as a distinct state.
             instance_states: BTreeMap<String, usize>,
 
-            /// instance check failures
+            /// instance check failures.
+            ///
+            /// this is a mapping of stringified instance check failure reasons
+            /// to the number of instances with checks that failed for that
+            /// reason. these stringified  failure reasons correspond to the
+            /// `state` field recorded by the instance watcher's
+            /// `virtual_machine:check` timeseries with the `healthy` field set
+            /// to `false`. any changes to the instance state type which cause
+            /// it to print differently will be counted as a distinct failure
+            /// reason.
             failed_checks: BTreeMap<String, usize>,
 
-            /// checks that could not be completed
+            /// instance checks that could not be completed successfully.
+            ///
+            /// this is a mapping of stringified instance check errors
+            /// to the number of instance checks that were not completed due to
+            /// that error. these stringified errors correspond to the `reason `
+            /// field recorded by the instance watcher's
+            /// `virtual_machine:incomplete_check` timeseries. any changes to
+            /// the check error type which cause it to print
+            /// differently will be counted as a distinct check error.
             incomplete_checks: BTreeMap<String, usize>,
         }
 

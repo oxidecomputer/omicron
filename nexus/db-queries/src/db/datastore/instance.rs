@@ -389,6 +389,12 @@ impl DataStore {
         Ok((instance_updated, vmm_updated))
     }
 
+    /// Lists all instances on in-service sleds with active Propolis VMM
+    /// processes, returning the instance along with the VMM on which it's
+    /// running, the sled on which the VMM is running, and the project that owns
+    /// the instance.
+    ///
+    /// The query performed by this function is paginated by the sled's UUID.
     pub async fn instance_and_vmm_list_by_sled_agent(
         &self,
         opctx: &OpContext,
