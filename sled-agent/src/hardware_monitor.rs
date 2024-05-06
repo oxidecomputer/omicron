@@ -199,6 +199,15 @@ impl HardwareMonitor {
                         .detected_raw_disk_removal(disk.into())
                         .await;
                 }
+                HardwareUpdate::DiskUpdated(disk) => {
+                    // We notify the storage manager of the hardware, but do not need to
+                    // wait for the result to be fully processed.
+                    #[allow(clippy::let_underscore_future)]
+                    let _ = self
+                        .storage_manager
+                        .detected_raw_disk_update(disk.into())
+                        .await;
+                }
             },
             Err(broadcast::error::RecvError::Lagged(count)) => {
                 warn!(self.log, "Hardware monitor missed {count} messages");
@@ -277,7 +286,10 @@ impl HardwareMonitor {
         let _ = self
             .storage_manager
             .ensure_using_exactly_these_disks(
-                self.hardware_manager.disks().into_iter().map(RawDisk::from),
+                self.hardware_manager
+                    .disks()
+                    .into_iter()
+                    .map(|(_, disk)| RawDisk::from(disk)),
             )
             .await;
     }

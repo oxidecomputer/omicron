@@ -132,6 +132,46 @@ impl DiskPaths {
     }
 }
 
+// XXX MTZ: Make this an enum with DiskFirmware::Nvme?
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
+pub struct DiskFirmware {
+    active_slot: u8,
+    next_active_slot: Option<u8>,
+    slot1_read_only: bool,
+    slots: Vec<Option<String>>,
+}
+
+impl DiskFirmware {
+    pub fn active_slot(&self) -> u8 {
+        self.active_slot
+    }
+
+    pub fn next_active_slot(&self) -> Option<u8> {
+        self.next_active_slot
+    }
+
+    pub fn slot1_read_only(&self) -> bool {
+        self.slot1_read_only
+    }
+
+    pub fn slots(&self) -> &[Option<String>] {
+        self.slots.as_slice()
+    }
+}
+
+impl DiskFirmware {
+    pub fn new(
+        active_slot: u8,
+        next_active_slot: Option<u8>,
+        slot1_read_only: bool,
+        slots: Vec<Option<String>>,
+    ) -> Self {
+        Self { active_slot, next_active_slot, slot1_read_only, slots }
+    }
+}
+
 /// A disk which has been observed by monitoring hardware.
 ///
 /// No guarantees are made about the partitions which exist within this disk.
@@ -147,6 +187,7 @@ pub struct UnparsedDisk {
     variant: DiskVariant,
     identity: DiskIdentity,
     is_boot_disk: bool,
+    firmware: DiskFirmware,
 }
 
 impl UnparsedDisk {
@@ -157,6 +198,7 @@ impl UnparsedDisk {
         variant: DiskVariant,
         identity: DiskIdentity,
         is_boot_disk: bool,
+        firmware: DiskFirmware,
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
@@ -164,6 +206,7 @@ impl UnparsedDisk {
             variant,
             identity,
             is_boot_disk,
+            firmware,
         }
     }
 
@@ -190,6 +233,10 @@ impl UnparsedDisk {
     pub fn slot(&self) -> i64 {
         self.slot
     }
+
+    pub fn firmware(&self) -> &DiskFirmware {
+        &self.firmware
+    }
 }
 
 /// A physical disk that is partitioned to contain exactly one zpool
@@ -212,6 +259,7 @@ pub struct PooledDisk {
     // This embeds the assumtion that there is exactly one parsed zpool per
     // disk.
     pub zpool_name: ZpoolName,
+    pub firmware: DiskFirmware,
 }
 
 impl PooledDisk {
@@ -252,6 +300,7 @@ impl PooledDisk {
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
             zpool_name,
+            firmware: unparsed_disk.firmware,
         })
     }
 }

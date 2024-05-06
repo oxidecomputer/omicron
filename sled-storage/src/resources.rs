@@ -478,7 +478,7 @@ impl StorageResources {
         Ok(ManagedDisk::ExplicitlyManaged(disk))
     }
 
-    /// Tracks a new disk.
+    /// Tracks a new disk, or updates an existing disk.
     ///
     /// For U.2s: Does not automatically attempt to manage disks -- for this,
     /// the caller will need to also invoke
@@ -486,18 +486,45 @@ impl StorageResources {
     ///
     /// For M.2s: As no additional control plane guidance is necessary to adopt
     /// M.2s, these are automatically managed.
-    pub(crate) async fn insert_disk(
+    pub(crate) async fn insert_or_update_disk(
         &mut self,
         disk: RawDisk,
     ) -> Result<(), Error> {
         let disk_identity = disk.identity().clone();
         info!(self.log, "Inserting disk"; "identity" => ?disk_identity);
-        if self.disks.values.contains_key(&disk_identity) {
-            info!(self.log, "Disk already exists"; "identity" => ?disk_identity);
+
+        // XXX MTZ: Is this okay to do if we find an existing disk with no updates to apply?
+        let disks = Arc::make_mut(&mut self.disks.values);
+
+        // First check if there are any updates we need to apply to existing managed disks.
+        if let Some(managed) = disks.get_mut(&disk_identity) {
+            let mut updated = false;
+            match managed {
+                ManagedDisk::ExplicitlyManaged(mdisk)
+                | ManagedDisk::ImplicitlyManaged(mdisk) => {
+                    let old = RawDisk::from(mdisk.clone());
+                    if old != disk {
+                        mdisk.update_disk(&disk);
+                        updated = true;
+                    }
+                }
+                ManagedDisk::Unmanaged(raw) => {
+                    if raw != &disk {
+                        *raw = disk;
+                        updated = true;
+                    }
+                }
+            };
+
+            if updated {
+                self.disk_updates.send_replace(self.disks.clone());
+            } else {
+                info!(self.log, "Disk already exists and has no updates"; "identity" => ?disk_identity);
+            }
+
             return Ok(());
         }
 
-        let disks = Arc::make_mut(&mut self.disks.values);
         match disk.variant() {
             DiskVariant::U2 => {
                 disks.insert(disk_identity, ManagedDisk::Unmanaged(disk));

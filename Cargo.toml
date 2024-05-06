@@ -327,7 +327,7 @@ key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.155"
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
-libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe" }
+libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "0eed4e4929fc2311326646e818e065823ac9a695" }
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"

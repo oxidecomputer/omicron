@@ -16,7 +16,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::{
-    DiskVariant, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
+    DiskFirmware, DiskVariant, Partition, PooledDisk, PooledDiskError,
+    UnparsedDisk,
 };
 use slog::{info, Logger};
 use uuid::Uuid;
@@ -103,6 +104,11 @@ pub struct SyntheticDisk {
 // system.
 const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
 
+// A generic name for the firmware in slot1 of an NVMe device.
+//
+// bhyve for example uses "1.0" and marks slot1 as read-only.
+const SYNTHETIC_FIRMWARE_SLOT1: &str = "synthetic 1.0";
+
 impl SyntheticDisk {
     // "Manages" a SyntheticDisk by ensuring that it has a Zpool and importing
     // it. If the zpool already exists, it is imported, but not re-created.
@@ -151,6 +157,7 @@ pub struct RawSyntheticDisk {
     pub identity: DiskIdentity,
     pub variant: DiskVariant,
     pub slot: i64,
+    pub firmware: DiskFirmware,
 }
 
 impl RawSyntheticDisk {
@@ -195,11 +202,19 @@ impl RawSyntheticDisk {
             model: format!("synthetic-model-{variant:?}"),
         };
 
+        let firmware = DiskFirmware::new(
+            1,
+            None,
+            true,
+            vec![Some(SYNTHETIC_FIRMWARE_SLOT1.to_string())],
+        );
+
         Ok(Self {
             path: path.into(),
             identity,
             variant,
             slot: slot + SYNTHETIC_SLOT_OFFSET,
+            firmware,
         })
     }
 }
@@ -276,6 +291,13 @@ impl RawDisk {
         match self {
             Self::Real(disk) => disk.slot(),
             Self::Synthetic(disk) => disk.slot,
+        }
+    }
+
+    pub fn firmware(&self) -> &DiskFirmware {
+        match self {
+            RawDisk::Real(unparsed) => unparsed.firmware(),
+            RawDisk::Synthetic(synthetic) => &synthetic.firmware,
         }
     }
 }
@@ -413,6 +435,26 @@ impl Disk {
             Self::Synthetic(disk) => disk.raw.slot,
         }
     }
+
+    // Today the only update we expect to be able to apply to
+    // a `Disk` is firmware.
+    pub(crate) fn update_disk(&mut self, raw_disk: &RawDisk) {
+        match self {
+            Disk::Real(pooled_disk) => {
+                pooled_disk.firmware = raw_disk.firmware().clone();
+            }
+            Disk::Synthetic(synthetic_disk) => {
+                synthetic_disk.raw.firmware = raw_disk.firmware().clone();
+            }
+        }
+    }
+
+    pub fn firmware(&self) -> &DiskFirmware {
+        match self {
+            Disk::Real(disk) => &disk.firmware,
+            Disk::Synthetic(disk) => &disk.raw.firmware,
+        }
+    }
 }
 
 impl From<Disk> for RawDisk {
@@ -425,6 +467,7 @@ impl From<Disk> for RawDisk {
                 pooled_disk.variant,
                 pooled_disk.identity,
                 pooled_disk.is_boot_disk,
+                pooled_disk.firmware,
             )),
             Disk::Synthetic(synthetic_disk) => {
                 RawDisk::Synthetic(synthetic_disk.raw)

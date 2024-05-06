@@ -300,6 +300,15 @@ impl StorageManagerTestHarness {
             .expect("Failed to remove vdev");
     }
 
+    // XXX MTZ: Provide a vdev update aka new firmware.
+    pub async fn update_vdev(&mut self, raw: &RawDisk) {
+        self.handle
+            .detected_raw_disk_update(raw.clone())
+            .await
+            .await
+            .expect("Failed to update vdev");
+    }
+
     // Adds a vdev to the set of "tracked" devices.
     pub async fn add_vdev_as(&mut self, raw_disk: RawDisk) {
         self.handle
