@@ -19,6 +19,7 @@ use super::nat_cleanup;
 use super::phantom_disks;
 use super::physical_disk_adoption;
 use super::region_replacement;
+use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
@@ -95,6 +96,10 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that polls sled agents for instance states.
     pub task_instance_watcher: common::TaskHandle,
+
+    /// task handle for propagation of VPC firewall rules for Omicron services
+    /// with external network connectivity,
+    pub task_service_firewall_propagation: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -349,7 +354,7 @@ impl BackgroundTasks {
 
         let task_instance_watcher = {
             let watcher = instance_watcher::InstanceWatcher::new(
-                datastore,
+                datastore.clone(),
                 resolver.clone(),
                 producer_registry,
             );
@@ -362,6 +367,20 @@ impl BackgroundTasks {
                 vec![],
             )
         };
+        // Background task: service firewall rule propagation
+        let task_service_firewall_propagation = driver.register(
+            String::from("service_firewall_rule_propagation"),
+            String::from(
+                "propagates VPC firewall rules for Omicron \
+                services with external network connectivity",
+            ),
+            config.service_firewall_propagation.period_secs,
+            Box::new(service_firewall_rules::ServiceRulePropagator::new(
+                datastore,
+            )),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
 
         BackgroundTasks {
             driver,
@@ -383,6 +402,7 @@ impl BackgroundTasks {
             task_switch_port_settings_manager,
             task_region_replacement,
             task_instance_watcher,
+            task_service_firewall_propagation,
         }
     }
 

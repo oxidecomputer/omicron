@@ -973,6 +973,24 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "service_firewall_rule_propagation" {
+        match serde_json::from_value::<serde_json::Value>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(serde_json::Value::Object(map)) => {
+                if !map.is_empty() {
+                    eprintln!(
+                        "    unexpected return value from task: {:?}",
+                        map
+                    )
+                }
+            }
+            Ok(val) => {
+                eprintln!("    unexpected return value from task: {:?}", val)
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \
