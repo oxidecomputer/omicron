@@ -398,7 +398,7 @@ impl DataStore {
             instance::dsl as instance_dsl, project::dsl as project_dsl,
             sled::dsl as sled_dsl, vmm::dsl as vmm_dsl,
         };
-        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let result = paginated(sled_dsl::sled, sled_dsl::id, pagparams)
