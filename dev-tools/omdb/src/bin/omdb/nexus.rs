@@ -952,20 +952,20 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "    checks completed: {}",
                     total_successes + total_failures
                 );
-                println!("     -> successful checks: {total_successes}",);
+                println!("       successful checks: {total_successes}",);
                 for (state, count) in &instance_states {
-                    println!("        {state} instances: {count}")
+                    println!("       -> {count} instances {state}")
                 }
 
-                println!("     -> failed checks: {total_failures}");
+                println!("       failed checks: {total_failures}");
                 for (failure, count) in &failed_checks {
-                    println!("        {failure}: {count}")
+                    println!("       -> {count} {failure}")
                 }
                 println!(
                     "    checks that could not be completed: {total_incomplete}",
                 );
                 for (error, count) in &incomplete_checks {
-                    println!("     -> {error}: {count}")
+                    println!("       -> {count} {error} errors")
                 }
                 println!(
                     "    stale instance metrics pruned: {pruned_instances}"
