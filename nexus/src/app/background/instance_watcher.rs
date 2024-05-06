@@ -460,7 +460,7 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
-    use super::{CheckOutcome, Incomplete, VirtualMachine};
+    use super::{CheckOutcome, Incomplete, InstanceState, VirtualMachine};
     use oximeter::types::Cumulative;
     use oximeter::Metric;
     use oximeter::MetricsError;
@@ -522,10 +522,17 @@ mod metrics {
         pub(super) fn completed(&mut self, outcome: CheckOutcome) {
             self.checks
                 .entry(outcome)
-                .or_insert_with(|| Check {
-                    state: outcome.to_string(),
-                    healthy: outcome.is_healthy(),
-                    datum: Cumulative::default(),
+                .or_insert_with(|| match outcome {
+                    CheckOutcome::Failure(failure) => Check {
+                        state: InstanceState::Failed.to_string(),
+                        reason: failure.to_string(),
+                        datum: Cumulative::default(),
+                    },
+                    CheckOutcome::Success(state) => Check {
+                        state: state.to_string(),
+                        reason: "success".to_string(),
+                        datum: Cumulative::default(),
+                    },
                 })
                 .datum += 1;
 
@@ -566,12 +573,20 @@ mod metrics {
     #[derive(Clone, Debug, Metric)]
     struct Check {
         /// The string representation of the instance's state as understood by
-        /// the VMM, or the cause of the check failure, if the check failed.
+        /// the VMM. If the check failed, this will generally be "failed".
         state: String,
-        /// `true` if the instance is considered healthy, false if the instance
-        /// is not considered healthy.
-        healthy: bool,
-        /// The number of successful checks for this instance and sled agent.
+        /// `Why the instance was marked as being in this state.
+        ///
+        /// If an instance was marked as "failed" due to a check failure, this
+        /// will be a string representation of the failure reason. Otherwise, if
+        /// the check was successful, this will be "success". Note that this may
+        /// be "success" even if the instance's state is "failed", which
+        /// indicates that we successfully queried the instance's state from the
+        /// sled-agent, and the *sled-agent* reported that the instance has
+        /// failed --- which is distinct from the instance watcher marking an
+        /// instance as failed due to a failed check.
+        reason: String,
+        /// this will be a string representation of the failure reason.
         datum: Cumulative<u64>,
     }
 
