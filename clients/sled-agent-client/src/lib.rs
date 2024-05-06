@@ -12,7 +12,6 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use types::VirtualNetworkInterfaceHost;
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -36,6 +35,7 @@ progenitor::generate_api!(
         PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        VirtualNetworkInterfaceHost = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
     },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?

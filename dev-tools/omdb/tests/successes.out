@@ -462,7 +462,7 @@ warning: unknown background task: "switch_port_config_manager" (don't know how t
 task: "v2p_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 

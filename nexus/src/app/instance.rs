@@ -4,6 +4,7 @@
 
 //! Virtual Machine Instances
 
+use super::background::BackgroundTasks;
 use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
@@ -1522,6 +1523,7 @@ impl super::Nexus {
             &self.log,
             instance_id,
             new_runtime_state,
+            &self.background_tasks,
         )
         .await
     }
@@ -1962,6 +1964,7 @@ pub(crate) async fn notify_instance_updated(
     log: &slog::Logger,
     instance_id: &Uuid,
     new_runtime_state: &nexus::SledInstanceState,
+    background_tasks: &BackgroundTasks,
 ) -> Result<(), Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
@@ -2000,6 +2003,7 @@ pub(crate) async fn notify_instance_updated(
         &authz_instance,
         db_instance.runtime(),
         &new_runtime_state.instance_state,
+        background_tasks,
     )
     .await?;
 

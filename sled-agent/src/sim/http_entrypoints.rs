@@ -21,7 +21,6 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
-use ipnetwork::Ipv6Network;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;

@@ -5,7 +5,9 @@ use futures::FutureExt;
 use nexus_db_model::{Sled, SledState};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;
-use nexus_types::{external_api::views::SledPolicy, identity::Asset};
+use nexus_types::{
+    deployment::SledFilter, external_api::views::SledPolicy, identity::Asset,
+};
 use omicron_common::api::external::Vni;
 use serde_json::json;
 use sled_agent_client::types::VirtualNetworkInterfaceHost;
@@ -42,7 +44,7 @@ impl BackgroundTask for V2PManager {
 
             // Get sleds
             // we only care about sleds that are active && inservice
-            let sleds = match self.datastore.sled_list_all_batched(opctx).await
+            let sleds = match self.datastore.sled_list_all_batched(opctx, SledFilter::InService).await
             {
                 Ok(v) => v,
                 Err(e) => {

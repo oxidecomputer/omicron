@@ -66,6 +66,7 @@ use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
@@ -4541,8 +4542,21 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
-        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-        assert!(v2p_mappings.is_empty());
+        let condition = || async {
+            let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+            if v2p_mappings.is_empty() {
+                Ok(())
+            } else {
+                Err(CondCheckError::Failed("v2p mappings are still present"))
+            }
+        };
+        wait_for_condition(
+            condition,
+            &Duration::from_secs(1),
+            &Duration::from_secs(3),
+        )
+        .await
+        .expect("v2p mappings should be empty");
     }
 }
 
@@ -4639,14 +4653,30 @@ async fn assert_sled_v2p_mappings(
     nic: &InstanceNetworkInterface,
     vni: Vni,
 ) {
-    let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-    let mapping = v2p_mappings.iter().find(|mapping| {
-        mapping.virtual_ip == nic.ip
-            && mapping.virtual_mac == nic.mac
-            && mapping.physical_host_ip == sled_agent.ip
-            && mapping.vni == vni
-    });
-    assert!(mapping.is_some())
+    let condition = || async {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        let mapping = v2p_mappings.iter().find(|mapping| {
+            mapping.virtual_ip == nic.ip
+                && mapping.virtual_mac == nic.mac
+                && mapping.physical_host_ip == sled_agent.ip
+                && mapping.vni == vni
+        });
+
+        if mapping.is_some() {
+            Ok(())
+        } else {
+            Err(CondCheckError::Failed(
+                "matching v2p mapping should be present",
+            ))
+        }
+    };
+    wait_for_condition(
+        condition,
+        &Duration::from_secs(1),
+        &Duration::from_secs(3),
+    )
+    .await
+    .expect("matching v2p mapping should be present");
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we
