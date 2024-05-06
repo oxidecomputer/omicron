@@ -140,7 +140,7 @@ impl PortManager {
                             );
                             return Err(Error::InvalidPortIpConfig);
                         };
-                        let ports = snat.first_port..=snat.last_port;
+                        let ports = snat.port_range();
                         Some($snat_t { external_ip: snat_ip.into(), ports })
                     }
                     None => None,
@@ -427,7 +427,7 @@ impl PortManager {
                             );
                             return Err(Error::InvalidPortIpConfig);
                         };
-                        let ports = snat.first_port..=snat.last_port;
+                        let ports = snat.port_range();
                         Some($snat_t { external_ip: snat_ip.into(), ports })
                     }
                     None => None,

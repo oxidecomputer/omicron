@@ -27,6 +27,7 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         Generation = omicron_common::api::external::Generation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
@@ -35,7 +36,9 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
+        TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
@@ -255,7 +258,9 @@ impl From<std::time::Duration> for types::Duration {
 
 impl From<types::Duration> for std::time::Duration {
     fn from(s: types::Duration) -> Self {
-        std::time::Duration::from_nanos(s.secs * 1000000000 + s.nanos as u64)
+        std::time::Duration::from_nanos(
+            s.secs * 1000000000 + u64::from(s.nanos),
+        )
     }
 }
 
@@ -287,7 +292,8 @@ impl From<&omicron_common::api::internal::shared::SourceNatConfig>
     fn from(
         r: &omicron_common::api::internal::shared::SourceNatConfig,
     ) -> Self {
-        Self { ip: r.ip, first_port: r.first_port, last_port: r.last_port }
+        let (first_port, last_port) = r.port_range_raw();
+        Self { ip: r.ip, first_port, last_port }
     }
 }
 
@@ -412,5 +418,59 @@ impl TryFrom<types::ProducerEndpoint>
             base_route: ep.base_route,
             interval: ep.interval.into(),
         })
+    }
+}
+
+impl TryFrom<&omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
+    type Error = String;
+
+    fn try_from(
+        net: &omicron_common::api::external::Ipv4Net,
+    ) -> Result<Self, Self::Error> {
+        types::Ipv4Net::try_from(net.to_string()).map_err(|e| e.to_string())
+    }
+}
+
+impl TryFrom<&omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
+    type Error = String;
+
+    fn try_from(
+        net: &omicron_common::api::external::Ipv6Net,
+    ) -> Result<Self, Self::Error> {
+        types::Ipv6Net::try_from(net.to_string()).map_err(|e| e.to_string())
+    }
+}
+
+impl TryFrom<&omicron_common::api::external::IpNet> for types::IpNet {
+    type Error = String;
+
+    fn try_from(
+        net: &omicron_common::api::external::IpNet,
+    ) -> Result<Self, Self::Error> {
+        use omicron_common::api::external::IpNet;
+        match net {
+            IpNet::V4(v4) => types::Ipv4Net::try_from(v4).map(types::IpNet::V4),
+            IpNet::V6(v6) => types::Ipv6Net::try_from(v6).map(types::IpNet::V6),
+        }
+    }
+}
+
+impl TryFrom<&omicron_common::api::external::AllowedSourceIps>
+    for types::AllowedSourceIps
+{
+    type Error = String;
+
+    fn try_from(
+        ips: &omicron_common::api::external::AllowedSourceIps,
+    ) -> Result<Self, Self::Error> {
+        use omicron_common::api::external::AllowedSourceIps;
+        match ips {
+            AllowedSourceIps::Any => Ok(types::AllowedSourceIps::Any),
+            AllowedSourceIps::List(list) => list
+                .iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()
+                .map(types::AllowedSourceIps::List),
+        }
     }
 }

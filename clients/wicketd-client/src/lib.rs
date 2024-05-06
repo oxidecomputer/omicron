@@ -34,71 +34,61 @@ progenitor::generate_api!(
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         StartUpdateOptions = { derives = [ Serialize, Deserialize, Default ]},
-        Ipv4Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        Ipv6Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        IpRange = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         Baseboard = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        BootstrapSledDescription = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackInitId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackResetId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackOperationStatus = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackNetworkConfigV1 = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         UplinkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        PortConfigV1 = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        BgpPeerConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        BgpConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        RouteConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Serialize, Deserialize ] },
         CurrentRssUserConfigSensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        CurrentRssUserConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        UserSpecifiedRackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfig = { derives = [ PartialEq, Serialize, Deserialize ] },
         GetLocationResponse = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
     },
     replace = {
+        AllowedSourceIps = omicron_common::api::internal::shared::AllowedSourceIps,
+        Baseboard = sled_hardware_types::Baseboard,
+        BgpAuthKey = wicket_common::rack_setup::BgpAuthKey,
+        BgpAuthKeyId = wicket_common::rack_setup::BgpAuthKeyId,
+        BgpAuthKeyInfo = wicket_common::rack_setup::BgpAuthKeyInfo,
+        BgpAuthKeyStatus = wicket_common::rack_setup::BgpAuthKeyStatus,
+        BgpConfig = omicron_common::api::internal::shared::BgpConfig,
+        BgpPeerAuthKind = wicket_common::rack_setup::BgpPeerAuthKind,
+        BgpPeerConfig = omicron_common::api::internal::shared::BgpPeerConfig,
+        BootstrapSledDescription = wicket_common::rack_setup::BootstrapSledDescription,
+        ClearUpdateStateResponse = wicket_common::rack_update::ClearUpdateStateResponse,
+        CurrentRssUserConfigInsensitive = wicket_common::rack_setup::CurrentRssUserConfigInsensitive,
         Duration = std::time::Duration,
+        EventReportForWicketdEngineSpec = wicket_common::update_events::EventReport,
+        GetBgpAuthKeyInfoResponse = wicket_common::rack_setup::GetBgpAuthKeyInfoResponse,
+        IpNetwork = ipnetwork::IpNetwork,
+        IpRange = omicron_common::address::IpRange,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        Ipv4Range = omicron_common::address::Ipv4Range,
+        Ipv6Range = omicron_common::address::Ipv6Range,
+        M2Slot = installinator_common::M2Slot,
+        PortConfigV1 = omicron_common::api::internal::shared::PortConfigV1,
+        PortFec = omicron_common::api::internal::shared::PortFec,
+        PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
+        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
+        ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,
         PutRssUserConfigInsensitive = wicket_common::rack_setup::PutRssUserConfigInsensitive,
-        ClearUpdateStateResponse = wicket_common::rack_update::ClearUpdateStateResponse,
+        RouteConfig = omicron_common::api::internal::shared::RouteConfig,
         SpIdentifier = wicket_common::rack_update::SpIdentifier,
         SpType = wicket_common::rack_update::SpType,
-        EventReportForWicketdEngineSpec = wicket_common::update_events::EventReport,
-        StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
-        ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,
         StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
-        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
-        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
-        M2Slot = installinator_common::M2Slot,
+        StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
+        SwitchLocation = omicron_common::api::internal::shared::SwitchLocation,
+        UserSpecifiedBgpPeerConfig = wicket_common::rack_setup::UserSpecifiedBgpPeerConfig,
+        UserSpecifiedImportExportPolicy = wicket_common::rack_setup::UserSpecifiedImportExportPolicy,
+        UserSpecifiedPortConfig = wicket_common::rack_setup::UserSpecifiedPortConfig,
+        UserSpecifiedRackNetworkConfig = wicket_common::rack_setup::UserSpecifiedRackNetworkConfig,
+        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
     }
 );
 
 /// A type alias for errors returned by this crate.
 pub type ClientError = crate::Error<crate::types::Error>;
-
-impl types::Baseboard {
-    pub fn identifier(&self) -> &str {
-        match &self {
-            Self::Gimlet { identifier, .. } => &identifier,
-            Self::Pc { identifier, .. } => &identifier,
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub fn model(&self) -> &str {
-        match self {
-            Self::Gimlet { model, .. } => &model,
-            Self::Pc { model, .. } => &model,
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub fn revision(&self) -> i64 {
-        match self {
-            Self::Gimlet { revision, .. } => *revision,
-            Self::Pc { .. } => 0,
-            Self::Unknown => 0,
-        }
-    }
-}

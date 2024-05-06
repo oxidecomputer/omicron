@@ -18,7 +18,6 @@ use illumos_utils::zone::SVCCFG;
 use illumos_utils::PFEXEC;
 use ipnetwork::IpNetwork;
 use omicron_common::address::DENDRITE_PORT;
-use omicron_common::api::internal::shared::PortConfigV1;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -47,6 +46,7 @@ use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use update_engine::StepSpec;
+use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 const DNS_PORT: u16 = 53;
@@ -87,14 +87,11 @@ pub(super) async fn run_local_uplink_preflight_check(
     let (sender, mut receiver) = mpsc::channel(128);
     let mut engine = UpdateEngine::new(log, sender);
 
-    for uplink in network_config
-        .ports
-        .iter()
-        .filter(|uplink| uplink.switch == our_switch_location)
-    {
+    for (port, uplink) in network_config.port_map(our_switch_location) {
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
+            port,
             uplink,
             &dns_servers,
             &ntp_servers,
@@ -129,7 +126,8 @@ pub(super) async fn run_local_uplink_preflight_check(
 fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
-    uplink: &'a PortConfigV1,
+    port: &'a str,
+    uplink: &'a UserSpecifiedPortConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -151,7 +149,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     // Timeout we give to chronyd during the NTP check, in seconds.
     const CHRONYD_CHECK_TIMEOUT_SECS: &str = "30";
 
-    let registrar = engine.for_component(uplink.port.clone());
+    let registrar = engine.for_component(port.to_owned());
 
     let prev_step = registrar
         .new_step(
@@ -160,9 +158,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
             |_cx| async {
                 // Check that the port name is valid and that it has no links
                 // configured already.
-                let port_id = PortId::from_str(&uplink.port).map_err(|_| {
+                let port_id = PortId::from_str(port).map_err(|_| {
                     UplinkPreflightTerminalError::InvalidPortName(
-                        uplink.port.clone(),
+                        port.to_owned(),
                     )
                 })?;
                 let links = dpd_client
@@ -300,7 +298,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 // Tell the `uplink` service about the IP address we created on
                 // the switch when configuring the uplink.
                 let uplink_property =
-                    UplinkProperty(format!("uplinks/{}_0", uplink.port));
+                    UplinkProperty(format!("uplinks/{}_0", port));
 
                 for addr in &uplink.addresses {
                     let uplink_cidr = addr.to_string();
@@ -739,7 +737,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &PortConfigV1,
+    uplink: &UserSpecifiedPortConfig,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types

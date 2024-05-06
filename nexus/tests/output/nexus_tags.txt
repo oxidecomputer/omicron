@@ -132,6 +132,7 @@ OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
+networking_switch_port_status            GET      /v1/system/hardware/switch-port/{port}/status
 physical_disk_list                       GET      /v1/system/hardware/disks
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
@@ -173,6 +174,8 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_allow_list_update             PUT      /v1/system/networking/allow-list
+networking_allow_list_view               GET      /v1/system/networking/allow-list
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
 networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
 networking_bfd_status                    GET      /v1/system/networking/bfd-status

@@ -7,7 +7,6 @@
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
@@ -74,7 +73,7 @@ impl super::Nexus {
     pub async fn blueprint_target_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<BlueprintTarget>, Error> {
+    ) -> Result<BlueprintTarget, Error> {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
@@ -131,7 +130,8 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let sled_rows = datastore.sled_list_all_batched(opctx).await?;
+        let sled_rows =
+            datastore.sled_list_all_batched(opctx, SledFilter::All).await?;
         let zpool_rows =
             datastore.zpool_list_all_external_batched(opctx).await?;
         let ip_pool_range_rows = {
@@ -204,46 +204,12 @@ impl super::Nexus {
         self.db_datastore.blueprint_insert(opctx, blueprint).await
     }
 
-    pub async fn blueprint_generate_from_collection(
-        &self,
-        opctx: &OpContext,
-        collection_id: Uuid,
-    ) -> CreateResult<Blueprint> {
-        let collection = self
-            .datastore()
-            .inventory_collection_read(opctx, collection_id)
-            .await?;
-        let planning_context = self.blueprint_planning_context(opctx).await?;
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            planning_context.planning_input.internal_dns_version(),
-            planning_context.planning_input.external_dns_version(),
-            planning_context.planning_input.all_sled_ids(SledFilter::All),
-            &planning_context.creator,
-        )
-        .map_err(|error| {
-            Error::internal_error(&format!(
-                "error generating initial blueprint from collection {}: {}",
-                collection_id,
-                InlineErrorChain::new(&error)
-            ))
-        })?;
-
-        self.blueprint_add(&opctx, &blueprint).await?;
-        Ok(blueprint)
-    }
-
     pub async fn blueprint_create_regenerate(
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let maybe_target =
+        let (_, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
-        let Some((_, parent_blueprint)) = maybe_target else {
-            return Err(Error::conflict(
-                "cannot regenerate blueprint without existing target",
-            ));
-        };
 
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {

@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
@@ -69,7 +70,17 @@ impl super::Nexus {
             self.rack_id,
             info.generation.into(),
         );
-        self.db_datastore.sled_upsert(sled).await?;
+        let (_, was_modified) = self.db_datastore.sled_upsert(sled).await?;
+
+        // If a new sled-agent just came online we want to trigger inventory
+        // collection.
+        //
+        // This will allow us to learn about disks so that they can be added to
+        // the control plane.
+        if was_modified {
+            self.activate_inventory_collection();
+        }
+
         Ok(())
     }
 
@@ -105,7 +116,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore.sled_list(&opctx, pagparams).await
+        self.db_datastore
+            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .await
     }
 
     pub async fn sled_client(
@@ -222,7 +235,7 @@ impl super::Nexus {
             request.variant.into(),
             request.sled_id,
         );
-        self.db_datastore.physical_disk_upsert(&opctx, disk).await?;
+        self.db_datastore.physical_disk_insert(&opctx, disk).await?;
         Ok(())
     }
 
@@ -246,7 +259,7 @@ impl super::Nexus {
             request.sled_id,
             request.physical_disk_id,
         );
-        self.db_datastore.zpool_upsert(&opctx, zpool).await?;
+        self.db_datastore.zpool_insert(&opctx, zpool).await?;
         Ok(())
     }
 
@@ -260,7 +273,13 @@ impl super::Nexus {
         address: SocketAddrV6,
         kind: DatasetKind,
     ) -> Result<(), Error> {
-        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
+        info!(
+            self.log,
+            "upserting dataset";
+            "zpool_id" => zpool_id.to_string(),
+            "dataset_id" => id.to_string(),
+            "address" => address.to_string()
+        );
         let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())

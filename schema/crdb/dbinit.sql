@@ -163,30 +163,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
     id
 ) WHERE time_deleted IS NULL;
 
+/* Add an index which lets us look up sleds based on policy and state */
+CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sled (
+    sled_policy,
+    sled_state
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.dataset
-    'dataset',
-    -- omicron.public.service
-    'service',
     -- omicron.public.instance
-    'instance',
-    -- omicron.public.sled
-    --
-    -- reserved as an approximation of sled internal usage, such as "by the OS
-    -- and all unaccounted services".
-    'reserved'
+    'instance'
+    -- We expect to other resource kinds here in the future; e.g., to track
+    -- resources used by control plane services. For now, we only track
+    -- instances.
 );
 
 -- Accounting for programs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
-    -- Should match the UUID of the corresponding service
+    -- Should match the UUID of the corresponding resource
     id UUID PRIMARY KEY,
 
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
-
-    -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL,
 
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
@@ -195,7 +192,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     rss_ram INT8 NOT NULL,
 
     -- The maximum amount of Reservoir RAM provisioned to this resource
-    reservoir_ram INT8 NOT NULL
+    reservoir_ram INT8 NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL
 );
 
 -- Allow looking up all resources which reside on a sled
@@ -296,36 +296,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'mgd'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.service (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    /* FK into the Sled table */
-    sled_id UUID NOT NULL,
-    /* For services in illumos zones, the zone's unique id (for debugging) */
-    zone_id UUID,
-    /* The IP address of the service. */
-    ip INET NOT NULL,
-    /* The UDP or TCP port on which the service listens. */
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
-    /* Indicates the type of service. */
-    kind omicron.public.service_kind NOT NULL
-);
-
-/* Add an index which lets us look up the services on a sled */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_sled ON omicron.public.service (
-    sled_id,
-    id
-);
-
-/* Look up (and paginate) services of a given kind. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_kind ON omicron.public.service (
-    kind,
-    id
-);
-
 CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'm2',
   'u2'
@@ -383,14 +353,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT vendor_serial_model_unique UNIQUE (
-      vendor, serial, model
-    )
+    disk_state omicron.public.physical_disk_state NOT NULL
 );
+
+-- This constraint only needs to be upheld for disks that are not deleted
+-- nor decommissioned.
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_serial_model_unique on omicron.public.physical_disk (
+  vendor, serial, model
+) WHERE time_deleted IS NULL AND disk_state != 'decommissioned';
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.public.physical_disk (
     variant,
@@ -401,7 +371,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.pub
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public.physical_disk (
     sled_id,
     id
-) WHERE time_deleted IS NULL;
+);
 
 -- x509 certificates which may be used by services
 CREATE TABLE IF NOT EXISTS omicron.public.certificate (
@@ -1300,7 +1270,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
     -- A sled agent for an entry in the sled table.
     'sled_agent',
-    -- A service in the omicron.public.service table
+    -- A service in a blueprint (typically the current target blueprint, but it
+    -- may reference a prior blueprint if the service is in the process of being
+    -- removed).
     'service',
     -- A Propolis VMM for an instance in the omicron.public.instance table
     'instance'
@@ -2660,9 +2632,45 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     delay_open INT8,
     connect_retry INT8,
     keepalive INT8,
+    remote_asn INT8,
+    min_ttl INT2,
+    md5_auth_key TEXT,
+    multi_exit_discriminator INT8,
+    local_pref INT8,
+    enforce_first_as BOOLEAN NOT NULL DEFAULT false,
+    allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
+    allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    community INT8 NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, community)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_import (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_export (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
@@ -2674,7 +2682,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     time_deleted TIMESTAMPTZ,
     asn INT8 NOT NULL,
     vrf TEXT,
-    bgp_announce_set_id UUID NOT NULL
+    bgp_announce_set_id UUID NOT NULL,
+    shaper TEXT,
+    checker TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -3252,6 +3262,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+-- description of a collection of omicron physical disks stored in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of omicron physical disks specified in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a blueprint could refer to a sled that no longer exists,
+    -- particularly if the blueprint is older than the current target)
+    sled_id UUID NOT NULL,
+
+    vendor TEXT NOT NULL,
+    serial TEXT NOT NULL,
+    model TEXT NOT NULL,
+
+    id UUID NOT NULL,
+    pool_id UUID NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
 -- see inv_sled_omicron_zones, which is identical except it references a
 -- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
@@ -3335,6 +3375,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
 
     -- Zone disposition
     disposition omicron.public.bp_zone_disposition NOT NULL,
+
+    -- For some zones, either primary_service_ip or second_service_ip (but not
+    -- both!) is an external IP address. For such zones, this is the ID of that
+    -- external IP. In general this is a foreign key into
+    -- omicron.public.external_ip, though the row many not exist: if this
+    -- blueprint is old, it's possible the IP has been deleted, and if this
+    -- blueprint has not yet been realized, it's possible the IP hasn't been
+    -- created yet.
+    external_ip_id UUID,
 
     PRIMARY KEY (blueprint_id, id)
 );
@@ -3715,6 +3764,13 @@ SELECT
  bpc.delay_open,
  bpc.connect_retry,
  bpc.keepalive,
+ bpc.remote_asn,
+ bpc.min_ttl,
+ bpc.md5_auth_key,
+ bpc.multi_exit_discriminator,
+ bpc.local_pref,
+ bpc.enforce_first_as,
+ bpc.vlan_id,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
@@ -3816,6 +3872,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
+-- An allowlist of IP addresses that can make requests to user-facing services.
+CREATE TABLE IF NOT EXISTS omicron.public.allow_list (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- A nullable list of allowed source IPs.
+    --
+    -- NULL is used to indicate _any_ source IP is allowed. A _non-empty_ list
+    -- represents an explicit allow list of IPs or IP subnets. Note that the
+    -- list itself may never be empty.
+    allowed_ips INET[] CHECK (array_length(allowed_ips, 1) > 0)
+);
+
+-- Insert default allowlist, allowing all traffic.
+-- See `schema/crdb/insert-default-allowlist/up.sql` for details.
+INSERT INTO omicron.public.allow_list (id, time_created, time_modified, allowed_ips)
+VALUES (
+    '001de000-a110-4000-8000-000000000000',
+    NOW(),
+    NOW(),
+    NULL
+)
+ON CONFLICT (id)
+DO NOTHING;
+
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -3827,7 +3909,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '52.0.0', NULL)
+    (TRUE, NOW(), NOW(), '60.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

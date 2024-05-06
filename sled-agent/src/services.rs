@@ -481,6 +481,7 @@ enum SwitchService {
     Wicketd { baseboard: Baseboard },
     Dendrite { asic: DendriteAsic },
     Lldpd { baseboard: Baseboard },
+    Pumpkind { asic: DendriteAsic },
     Tfport { pkt_source: String, asic: DendriteAsic },
     Uplink,
     MgDdm { mode: String },
@@ -495,6 +496,7 @@ impl crate::smf_helper::Service for SwitchService {
             SwitchService::Wicketd { .. } => "wicketd",
             SwitchService::Dendrite { .. } => "dendrite",
             SwitchService::Lldpd { .. } => "lldpd",
+            SwitchService::Pumpkind { .. } => "pumpkind",
             SwitchService::Tfport { .. } => "tfport",
             SwitchService::Uplink { .. } => "uplink",
             SwitchService::MgDdm { .. } => "mg-ddm",
@@ -1274,7 +1276,10 @@ impl ServiceManager {
         // XXX: need to revisit iff. any services get more than one
         //      address.
         let (target_ip, first_port, last_port) = match snat {
-            Some(s) => (s.ip, s.first_port, s.last_port),
+            Some(s) => {
+                let (first_port, last_port) = s.port_range_raw();
+                (s.ip, first_port, last_port)
+            }
             None => (floating_ips[0], 0, u16::MAX),
         };
 
@@ -2003,7 +2008,7 @@ impl ServiceManager {
                     Self::dns_install(info, Some(dns_servers.to_vec()), domain)
                         .await?;
 
-                let mut ntp_config = PropertyGroupBuilder::new("config")
+                let mut chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
                     .add_property(
                         "boundary",
@@ -2012,7 +2017,7 @@ impl ServiceManager {
                     );
 
                 for s in ntp_servers {
-                    ntp_config = ntp_config.add_property(
+                    chrony_config = chrony_config.add_property(
                         "server",
                         "astring",
                         &s.to_string(),
@@ -2027,13 +2032,17 @@ impl ServiceManager {
                 }
 
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
-                    .add_instance(
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
+                let chrony_setup_service =
+                    ServiceBuilder::new("oxide/chrony-setup").add_instance(
                         ServiceInstanceBuilder::new("default")
-                            .add_property_group(ntp_config),
+                            .add_property_group(chrony_config),
                     );
 
                 let mut profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
+                    .add_service(chrony_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)
@@ -2756,6 +2765,18 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
+                        }
+                        SwitchService::Pumpkind { asic } => {
+                            // The pumpkin daemon is only needed when running on
+                            // with real sidecar.
+                            if asic == &DendriteAsic::TofinoAsic {
+                                info!(
+                                    self.inner.log,
+                                    "Setting up pumpkind service"
+                                );
+                                smfh.setprop("config/mode", "switch")?;
+                                smfh.refresh()?;
+                            }
                         }
                         SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
@@ -3613,6 +3634,7 @@ impl ServiceManager {
                     SwitchService::Dendrite { asic: DendriteAsic::TofinoAsic },
                     SwitchService::Lldpd { baseboard: baseboard.clone() },
                     SwitchService::ManagementGatewayService,
+                    SwitchService::Pumpkind { asic: DendriteAsic::TofinoAsic },
                     SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic: DendriteAsic::TofinoAsic,
@@ -4004,6 +4026,11 @@ impl ServiceManager {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be
                             // restarted.
+                        }
+                        SwitchService::Pumpkind { .. } => {
+                            // Unless we want to plumb through the "only log
+                            // errors, don't react" option, there are no user
+                            // serviceable parts for this daemon.
                         }
                         SwitchService::Uplink { .. } => {
                             // Only configured in

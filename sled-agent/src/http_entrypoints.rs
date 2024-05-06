@@ -32,9 +32,6 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::SwitchPorts;
-use oximeter::types::ProducerResults;
-use oximeter_producer::collect;
-use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -82,7 +79,6 @@ pub fn api() -> SledApiDescription {
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
         api.register(sled_add)?;
-        api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
@@ -818,20 +814,6 @@ async fn sled_add(
         }
     })?;
     Ok(HttpResponseUpdatedNoContent())
-}
-
-/// Collect oximeter samples from the sled agent.
-#[endpoint {
-    method = GET,
-    path = "/metrics/collect/{producer_id}",
-}]
-async fn metrics_collect(
-    request_context: RequestContext<SledAgent>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let sa = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    collect(&sa.metrics_registry(), producer_id).await
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]

@@ -40,6 +40,7 @@ use diesel::prelude::*;
 use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
+use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -49,10 +50,11 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
+use sled_agent_client::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -81,33 +83,14 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         probe_id: Uuid,
-        pool_name: Option<NameOrId>,
+        pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
-        let pool = match pool_name {
-            Some(NameOrId::Name(name)) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_name(&name.into())
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-                pool
-            }
-            Some(NameOrId::Id(id)) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(id)
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-                pool
-            }
-            // If no name given, use the default pool
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.identity.id;
-        let data =
-            IncompleteExternalIp::for_ephemeral_probe(ip_id, probe_id, pool_id);
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let data = IncompleteExternalIp::for_ephemeral_probe(
+            ip_id,
+            probe_id,
+            authz_pool.id(),
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -137,33 +120,9 @@ impl DataStore {
         // - At most MAX external IPs per instance
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
-        let pool = match pool {
-            Some(authz_pool) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(authz_pool.id())
-                    // any authenticated user can CreateChild on an IP pool. this is
-                    // meant to represent allocating an IP
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
 
-                // If this pool is not linked to the current silo, 404
-                // As name resolution happens one layer up, we need to use the *original*
-                // authz Pool.
-                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
-                    return Err(authz_pool.not_found());
-                }
-
-                pool
-            }
-            // If no name given, use the default logic
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.identity.id;
-        let data = IncompleteExternalIp::for_ephemeral(ip_id, pool_id);
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
         // idempotent or double attach this failure is allowed.
@@ -225,42 +184,31 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Allocates an IP address for internal service usage.
-    pub async fn external_ip_allocate_service(
+    /// If a pool is specified, make sure it's linked to this silo. If a pool is
+    /// not specified, fetch the default pool for this silo. Once the pool is
+    /// resolved (by either method) do an auth check. Then return the pool.
+    async fn resolve_pool_for_allocation(
         &self,
         opctx: &OpContext,
-        ip_id: Uuid,
-        name: &Name,
-        description: &str,
-        service_id: Uuid,
-    ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        pool: Option<authz::IpPool>,
+    ) -> LookupResult<authz::IpPool> {
+        let authz_pool = match pool {
+            Some(authz_pool) => {
+                self.ip_pool_fetch_link(opctx, authz_pool.id())
+                    .await
+                    .map_err(|_| authz_pool.not_found())?;
 
-        let data = IncompleteExternalIp::for_service(
-            ip_id,
-            name,
-            description,
-            service_id,
-            pool.id(),
-        );
-        self.allocate_external_ip(opctx, data).await
-    }
-
-    /// Allocates an SNAT IP address for internal service usage.
-    pub async fn external_ip_allocate_service_snat(
-        &self,
-        opctx: &OpContext,
-        ip_id: Uuid,
-        service_id: Uuid,
-    ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
-
-        let data = IncompleteExternalIp::for_service_snat(
-            ip_id,
-            service_id,
-            pool.id(),
-        );
-        self.allocate_external_ip(opctx, data).await
+                authz_pool
+            }
+            // If no pool specified, use the default logic
+            None => {
+                let (authz_pool, ..) =
+                    self.ip_pools_fetch_default(&opctx).await?;
+                authz_pool
+            }
+        };
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+        Ok(authz_pool)
     }
 
     /// Allocates a floating IP address for instance usage.
@@ -274,29 +222,7 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        // This implements the same pattern as in `allocate_instance_ephemeral_ip` to
-        // check that a chosen pool is valid from within the current silo.
-        let pool = match pool {
-            Some(authz_pool) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(authz_pool.id())
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-
-                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
-                    return Err(authz_pool.not_found());
-                }
-
-                pool
-            }
-            // If no name given, use the default logic
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.id();
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
 
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
@@ -305,7 +231,7 @@ impl DataStore {
                 &identity.description,
                 project_id,
                 ip,
-                pool_id,
+                authz_pool.id(),
             )
         } else {
             IncompleteExternalIp::for_floating(
@@ -313,7 +239,7 @@ impl DataStore {
                 &Name(identity.name),
                 &identity.description,
                 project_id,
-                pool_id,
+                authz_pool.id(),
             )
         };
 
@@ -383,52 +309,21 @@ impl DataStore {
         })
     }
 
-    /// Allocates an explicit Floating IP address for an internal service.
-    ///
-    /// Unlike the other IP allocation requests, this does not search for an
-    /// available IP address, it asks for one explicitly.
-    pub async fn external_ip_allocate_service_explicit(
+    /// Allocates an explicit IP address for an Omicron zone.
+    pub async fn external_ip_allocate_omicron_zone(
         &self,
         opctx: &OpContext,
-        ip_id: Uuid,
-        name: &Name,
-        description: &str,
-        service_id: Uuid,
-        ip: IpAddr,
+        zone_id: OmicronZoneUuid,
+        zone_kind: ZoneKind,
+        external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
         let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        let data = IncompleteExternalIp::for_service_explicit(
-            ip_id,
-            name,
-            description,
-            service_id,
+        let data = IncompleteExternalIp::for_omicron_zone(
             pool.id(),
-            ip,
-        );
-        self.allocate_external_ip(opctx, data).await
-    }
-
-    /// Allocates an explicit SNAT IP address for an internal service.
-    ///
-    /// Unlike the other IP allocation requests, this does not search for an
-    /// available IP address, it asks for one explicitly.
-    pub async fn external_ip_allocate_service_explicit_snat(
-        &self,
-        opctx: &OpContext,
-        ip_id: Uuid,
-        service_id: Uuid,
-        ip: IpAddr,
-        port_range: (u16, u16),
-    ) -> CreateResult<ExternalIp> {
-        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        let data = IncompleteExternalIp::for_service_explicit_snat(
-            ip_id,
-            service_id,
-            pool.id(),
-            ip,
-            port_range,
+            external_ip,
+            zone_id,
+            zone_kind,
         );
         self.allocate_external_ip(opctx, data).await
     }
@@ -590,7 +485,7 @@ impl DataStore {
                          attach will be safe to retry once start/stop completes"
                     )),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
+                        if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
                             Error::invalid_request(&format!(
                                 "an instance may not have more than \
                                 {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
@@ -1216,9 +1111,13 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;
+    use nexus_types::inventory::SourceNatConfig;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
 
@@ -1267,32 +1166,32 @@ mod tests {
         // Allocate a bunch of fake service IPs.
         let mut external_ips = Vec::new();
         let mut allocate_snat = false; // flip-flop between regular and snat
-        for (i, ip) in ip_range.iter().enumerate() {
-            let name = format!("service-ip-{i}");
+        for ip in ip_range.iter() {
             let external_ip = if allocate_snat {
-                datastore
-                    .external_ip_allocate_service_explicit_snat(
-                        &opctx,
-                        Uuid::new_v4(),
-                        Uuid::new_v4(),
+                OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                    id: ExternalIpUuid::new_v4(),
+                    snat_cfg: SourceNatConfig::new(
                         ip,
-                        (0, NUM_SOURCE_NAT_PORTS - 1),
+                        0,
+                        NUM_SOURCE_NAT_PORTS - 1,
                     )
-                    .await
-                    .expect("failed to allocate service IP")
+                    .unwrap(),
+                })
             } else {
-                datastore
-                    .external_ip_allocate_service_explicit(
-                        &opctx,
-                        Uuid::new_v4(),
-                        &Name(name.parse().unwrap()),
-                        &name,
-                        Uuid::new_v4(),
-                        ip,
-                    )
-                    .await
-                    .expect("failed to allocate service IP")
+                OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip,
+                })
             };
+            let external_ip = datastore
+                .external_ip_allocate_omicron_zone(
+                    &opctx,
+                    OmicronZoneUuid::new_v4(),
+                    ZoneKind::Nexus,
+                    external_ip,
+                )
+                .await
+                .expect("failed to allocate service IP");
             external_ips.push(external_ip);
             allocate_snat = !allocate_snat;
         }

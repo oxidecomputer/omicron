@@ -941,8 +941,28 @@ async fn dbinit_equals_sum_of_all_up() {
 
     let all_versions = read_all_schema_versions();
 
-    // Go from the first version to the latest version.
-    for version in all_versions.iter_versions() {
+    // Apply the very first schema migration. In particular, this creates the
+    // `omicron` database, which allows us to construct a `db::Pool` below.
+    for version in all_versions.iter_versions().take(1) {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+    }
+
+    // Create a connection pool after we apply the first schema version but
+    // before applying the rest, and grab a connection from that pool. We'll use
+    // it for an extra check later.
+    let pool = nexus_db_queries::db::Pool::new(
+        log,
+        &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
+    );
+    let conn_from_pool =
+        pool.pool().get().await.expect("failed to get pooled connection");
+
+    // Go from the second version to the latest version.
+    for version in all_versions.iter_versions().skip(1) {
         apply_update(log, &crdb, version, 1).await;
         assert_eq!(
             version.semver().to_string(),
@@ -957,6 +977,38 @@ async fn dbinit_equals_sum_of_all_up() {
     // Query the newly constructed DB for information about its schema
     let observed_schema = InformationSchema::new(&crdb).await;
     let observed_data = observed_schema.query_all_tables(log, &crdb).await;
+
+    // Using the connection we got from the connection pool prior to applying
+    // the schema migrations, attempt to insert a sled resource. This involves
+    // the `sled_resource_kind` enum, whose OID was changed by the schema
+    // migration in version 53.0.0 (by virtue of the enum being dropped and
+    // added back with a different set of variants). If the diesel OID cache was
+    // populated when we acquired the connection from the pool, this will fail
+    // with a `type with ID $NUM does not exist` error.
+    {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use nexus_db_model::schema::sled_resource::dsl;
+        use nexus_db_model::Resources;
+        use nexus_db_model::SledResource;
+        use nexus_db_model::SledResourceKind;
+
+        diesel::insert_into(dsl::sled_resource)
+            .values(SledResource {
+                id: Uuid::new_v4(),
+                sled_id: Uuid::new_v4(),
+                kind: SledResourceKind::Instance,
+                resources: Resources {
+                    hardware_threads: 8_u32.into(),
+                    rss_ram: 1024_i64.try_into().unwrap(),
+                    reservoir_ram: 1024_i64.try_into().unwrap(),
+                },
+            })
+            .execute_async(&*conn_from_pool)
+            .await
+            .expect("failed to insert - did we poison the OID cache?");
+    }
+    std::mem::drop(conn_from_pool);
+    std::mem::drop(pool);
     crdb.cleanup().await.unwrap();
 
     // Create a new DB with data populated from dbinit.sql for comparison

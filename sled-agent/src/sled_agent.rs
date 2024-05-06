@@ -45,8 +45,6 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
@@ -58,8 +56,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service,
-    retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use oximeter::types::ProducerRegistry;
@@ -415,6 +412,7 @@ impl SledAgent {
             request.body.id,
             request.body.rack_id,
             long_running_task_handles.hardware_manager.baseboard(),
+            *sled_address.ip(),
             log.new(o!("component" => "MetricsManager")),
         )?;
 
@@ -436,21 +434,6 @@ impl SledAgent {
                 );
             }
         }
-
-        // Spawn a task in the background to register our metric producer with
-        // Nexus. This should not block progress here.
-        let endpoint = ProducerEndpoint {
-            id: request.body.id,
-            kind: ProducerKind::SledAgent,
-            address: sled_address.into(),
-            base_route: String::from("/metrics/collect"),
-            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
-        };
-        tokio::task::spawn(register_metric_producer_with_nexus(
-            log.clone(),
-            nexus_client.clone(),
-            endpoint,
-        ));
 
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
@@ -1174,33 +1157,6 @@ impl SledAgent {
             zpools,
         })
     }
-}
-
-async fn register_metric_producer_with_nexus(
-    log: Logger,
-    client: NexusClientWithResolver,
-    endpoint: ProducerEndpoint,
-) {
-    let endpoint = nexus_client::types::ProducerEndpoint::from(&endpoint);
-    let register_with_nexus = || async {
-        client.client().cpapi_producers_post(&endpoint).await.map_err(|e| {
-            BackoffError::transient(format!("Metric registration error: {e}"))
-        })
-    };
-    retry_notify(
-        retry_policy_internal_service(),
-        register_with_nexus,
-        |error, delay| {
-            warn!(
-                log,
-                "failed to register as a metric producer with Nexus";
-                "error" => ?error,
-                "retry_after" => ?delay,
-            );
-        },
-    )
-    .await
-    .expect("Expected an infinite retry loop registering with Nexus");
 }
 
 #[derive(From, thiserror::Error, Debug)]

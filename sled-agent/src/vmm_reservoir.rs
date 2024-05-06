@@ -240,7 +240,8 @@ impl VmmReservoirManager {
                         percent
                     )));
                 };
-                (hardware_physical_ram_bytes as f64 * (percent as f64 / 100.0))
+                (hardware_physical_ram_bytes as f64
+                    * (f64::from(percent) / 100.0))
                     .floor() as u64
             }
         };

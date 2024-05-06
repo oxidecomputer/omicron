@@ -132,7 +132,7 @@ async fn sis_alloc_server(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         propolis_id,
-        hardware_threads.0 as u32,
+        u32::from(hardware_threads.0),
         reservoir_ram,
         db::model::SledReservationConstraints::none(),
     )

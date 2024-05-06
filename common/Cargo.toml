@@ -24,6 +24,7 @@ http.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
+dpd-client.workspace = true
 omicron-uuid-kinds.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
@@ -55,6 +56,7 @@ libc.workspace = true
 regress.workspace = true
 serde_urlencoded.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+toml.workspace = true
 
 [features]
 testing = ["proptest", "test-strategy"]

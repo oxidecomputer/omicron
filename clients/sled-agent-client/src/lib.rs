@@ -12,10 +12,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use types::{
-    BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig,
-    VirtualNetworkInterfaceHost,
-};
+use types::VirtualNetworkInterfaceHost;
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -32,6 +29,14 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    patch = {
+        BfdPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        BgpConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        BgpPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+    },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
     replace = {
@@ -41,6 +46,7 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
@@ -48,12 +54,17 @@ progenitor::generate_api!(
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         Vni = omicron_common::api::external::Vni,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
+        ZpoolKind = omicron_common::zpool_name::ZpoolKind,
+        ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
 );
 
 // We cannot easily configure progenitor to derive `Eq` on all the client-
 // generated types because some have floats and other types that can't impl
 // `Eq`.  We impl it explicitly for a few types on which we need it.
+impl Eq for types::OmicronPhysicalDiskConfig {}
+impl Eq for types::OmicronPhysicalDisksConfig {}
 impl Eq for types::OmicronZonesConfig {}
 impl Eq for types::OmicronZoneConfig {}
 impl Eq for types::OmicronZoneType {}
@@ -658,73 +669,5 @@ impl TestInterfaces for Client {
             .send()
             .await
             .expect("disk_finish_transition() failed unexpectedly");
-    }
-}
-
-impl Eq for BgpConfig {}
-
-impl Hash for BgpConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.asn.hash(state);
-        self.originate.hash(state);
-    }
-}
-
-impl Hash for BgpPeerConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.addr.hash(state);
-        self.asn.hash(state);
-        self.port.hash(state);
-        self.hold_time.hash(state);
-        self.connect_retry.hash(state);
-        self.delay_open.hash(state);
-        self.idle_hold_time.hash(state);
-        self.keepalive.hash(state);
-    }
-}
-
-impl Hash for RouteConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.destination.hash(state);
-        self.nexthop.hash(state);
-    }
-}
-
-impl Eq for PortConfigV1 {}
-
-impl Hash for PortConfigV1 {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.addresses.hash(state);
-        self.autoneg.hash(state);
-        self.bgp_peers.hash(state);
-        self.port.hash(state);
-        self.routes.hash(state);
-        self.switch.hash(state);
-        self.uplink_port_fec.hash(state);
-        self.uplink_port_speed.hash(state);
-    }
-}
-
-impl Eq for BfdPeerConfig {}
-
-impl Hash for BfdPeerConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.local.hash(state);
-        self.remote.hash(state);
-        self.detection_threshold.hash(state);
-        self.required_rx.hash(state);
-        self.mode.hash(state);
-        self.switch.hash(state);
-    }
-}
-
-impl Eq for VirtualNetworkInterfaceHost {}
-
-impl Hash for VirtualNetworkInterfaceHost {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.physical_host_ip.hash(state);
-        self.virtual_ip.hash(state);
-        self.virtual_mac.hash(state);
-        self.vni.hash(state);
     }
 }

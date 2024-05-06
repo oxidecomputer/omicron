@@ -11,11 +11,13 @@ pub mod filter;
 pub mod get;
 pub mod group_by;
 pub mod join;
+pub mod limit;
 
 use self::align::Align;
 use self::filter::Filter;
 use self::group_by::GroupBy;
 use self::join::Join;
+use self::limit::Limit;
 use crate::oxql::ast::Query;
 use crate::oxql::Error;
 use crate::oxql::Table;
@@ -31,6 +33,7 @@ pub enum BasicTableOp {
     GroupBy(GroupBy),
     Join(Join),
     Align(Align),
+    Limit(Limit),
 }
 
 impl BasicTableOp {
@@ -45,6 +48,7 @@ impl BasicTableOp {
             BasicTableOp::GroupBy(g) => g.apply(tables),
             BasicTableOp::Join(j) => j.apply(tables),
             BasicTableOp::Align(a) => a.apply(tables, query_end),
+            BasicTableOp::Limit(l) => l.apply(tables),
         }
     }
 }

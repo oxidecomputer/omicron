@@ -54,12 +54,15 @@ impl BackgroundTask for TargetBlueprintLoader {
             };
 
             // Retrieve the latest target blueprint
-            let result =
-                self.datastore.blueprint_target_get_current_full(opctx).await;
-
-            // Decide what to do with the result
-            match (&mut self.last, result) {
-                (_, Err(error)) => {
+            let (new_bp_target, new_blueprint) = match self
+                .datastore
+                .blueprint_target_get_current_full(opctx)
+                .await
+            {
+                Ok((new_bp_target, new_blueprint)) => {
+                    (new_bp_target, new_blueprint)
+                }
+                Err(error) => {
                     // We failed to read the blueprint. There's nothing to do
                     // but log an error. We'll retry when we're activated again.
                     let message = format!("{:#}", error);
@@ -70,40 +73,84 @@ impl BackgroundTask for TargetBlueprintLoader {
                     );
                     let e =
                         format!("failed to read target blueprint: {message}");
-                    json!({"error": e})
+                    return json!({"error": e});
                 }
-                (None, Ok(None)) => {
-                    // We haven't found a blueprint yet. Do nothing.
-                    json!({"status": "no target blueprint"})
-                }
-                (Some(old), Ok(None)) => {
-                    // We have transitioned from having a blueprint to not
-                    // having one. This should not happen.
+            };
+
+            // Decide what to do with the new blueprint
+            let Some((old_bp_target, old_blueprint)) = self.last.as_deref()
+            else {
+                // We've found a target blueprint for the first time.
+                // Save it and notify any watchers.
+                let target_id = new_blueprint.id;
+                let time_created = new_blueprint.time_created;
+                info!(
+                    log,
+                    "found new target blueprint (first find)";
+                    "target_id" => %target_id,
+                    "time_created" => %time_created
+                );
+                self.last = Some(Arc::new((new_bp_target, new_blueprint)));
+                self.tx.send_replace(self.last.clone());
+                return json!({
+                    "target_id": target_id,
+                    "time_created": time_created,
+                    "time_found": chrono::Utc::now(),
+                    "status": "first target blueprint",
+                });
+            };
+
+            let target_id = new_blueprint.id;
+            let time_created = new_blueprint.time_created;
+            if old_blueprint.id != new_blueprint.id {
+                // The current target blueprint has been updated
+                info!(
+                    log,
+                    "found new target blueprint";
+                    "target_id" => %target_id,
+                    "time_created" => %time_created
+                );
+                self.last = Some(Arc::new((new_bp_target, new_blueprint)));
+                self.tx.send_replace(self.last.clone());
+                json!({
+                    "target_id": target_id,
+                    "time_created": time_created,
+                    "time_found": chrono::Utc::now(),
+                    "status": "target blueprint updated"
+                })
+            } else {
+                // The new target id matches the old target id
+                //
+                // Let's see if the blueprints hold the same contents.
+                // It should not be possible for the contents of a
+                // blueprint to change, but we check to catch possible
+                // bugs further up the stack.
+                if *old_blueprint != new_blueprint {
                     let message = format!(
-                        "target blueprint with id {} was removed. There is no \
-                        longer any target blueprint",
-                        old.1.id
+                        "blueprint for id {} changed. \
+                             Blueprints are supposed to be immutable.",
+                        target_id
                     );
-                    let old_id = old.1.id;
-                    self.last = None;
-                    self.tx.send_replace(self.last.clone());
-                    error!(&log, "{message:?}");
+                    error!(&log, "{}", message);
                     json!({
-                        "removed_target_id": old_id,
-                        "status": "no target blueprint (removed)",
+                        "target_id": target_id,
+                        "status": "target blueprint unchanged (error)",
                         "error": message
                     })
-                }
-                (None, Ok(Some((new_bp_target, new_blueprint)))) => {
-                    // We've found a target blueprint for the first time.
-                    // Save it and notify any watchers.
-                    let target_id = new_blueprint.id;
-                    let time_created = new_blueprint.time_created;
+                } else if old_bp_target.enabled != new_bp_target.enabled {
+                    // The blueprints have the same contents, but its
+                    // enabled bit has flipped.
+                    let status = if new_bp_target.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
                     info!(
                         log,
-                        "found new target blueprint (first find)";
+                        "target blueprint enabled state changed";
                         "target_id" => %target_id,
-                        "time_created" => %time_created
+                        "time_created" => %time_created,
+                        "state" => status,
                     );
                     self.last = Some(Arc::new((new_bp_target, new_blueprint)));
                     self.tx.send_replace(self.last.clone());
@@ -111,89 +158,23 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "target_id": target_id,
                         "time_created": time_created,
                         "time_found": chrono::Utc::now(),
-                        "status": "first target blueprint",
+                        "status": format!("target blueprint {status}"),
                     })
-                }
-                (Some(old), Ok(Some((new_bp_target, new_blueprint)))) => {
-                    let target_id = new_blueprint.id;
-                    let time_created = new_blueprint.time_created;
-                    if old.1.id != new_blueprint.id {
-                        // The current target blueprint has been updated
-                        info!(
-                            log,
-                            "found new target blueprint";
-                            "target_id" => %target_id,
-                            "time_created" => %time_created
-                        );
-                        self.last =
-                            Some(Arc::new((new_bp_target, new_blueprint)));
-                        self.tx.send_replace(self.last.clone());
-                        json!({
-                            "target_id": target_id,
-                            "time_created": time_created,
-                            "time_found": chrono::Utc::now(),
-                            "status": "target blueprint updated"
-                        })
-                    } else {
-                        // The new target id matches the old target id
-                        //
-                        // Let's see if the blueprints hold the same contents.
-                        // It should not be possible for the contents of a
-                        // blueprint to change, but we check to catch possible
-                        // bugs further up the stack.
-                        if old.1 != new_blueprint {
-                            let message = format!(
-                                "blueprint for id {} changed. \
-                                Blueprints are supposed to be immutable.",
-                                target_id
-                            );
-                            error!(&log, "{}", message);
-                            json!({
-                                "target_id": target_id,
-                                "status": "target blueprint unchanged (error)",
-                                "error": message
-                            })
-                        } else if old.0.enabled != new_bp_target.enabled {
-                            // The blueprints have the same contents, but its
-                            // enabled bit has flipped.
-                            let status = if new_bp_target.enabled {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            };
-                            info!(
-                                log,
-                                "target blueprint enabled state changed";
-                                "target_id" => %target_id,
-                                "time_created" => %time_created,
-                                "state" => status,
-                            );
-                            self.last =
-                                Some(Arc::new((new_bp_target, new_blueprint)));
-                            self.tx.send_replace(self.last.clone());
-                            json!({
-                                "target_id": target_id,
-                                "time_created": time_created,
-                                "time_found": chrono::Utc::now(),
-                                "status": format!("target blueprint {status}"),
-                            })
-                        } else {
-                            // We found a new target blueprint that exactly
-                            // matches the old target blueprint. This is the
-                            // common case when we're activated by a timeout.
-                            debug!(
-                               log,
-                                "found latest target blueprint (unchanged)";
-                                "target_id" => %target_id,
-                                "time_created" => %time_created.clone()
-                            );
-                            json!({
-                                "target_id": target_id,
-                                "time_created": time_created,
-                                "status": "target blueprint unchanged"
-                            })
-                        }
-                    }
+                } else {
+                    // We found a new target blueprint that exactly
+                    // matches the old target blueprint. This is the
+                    // common case when we're activated by a timeout.
+                    debug!(
+                       log,
+                        "found latest target blueprint (unchanged)";
+                        "target_id" => %target_id,
+                        "time_created" => %time_created.clone()
+                    );
+                    json!({
+                        "target_id": target_id,
+                        "time_created": time_created,
+                        "status": "target blueprint unchanged"
+                    })
                 }
             }
         }
@@ -229,6 +210,7 @@ mod test {
             Blueprint {
                 id,
                 blueprint_zones: BTreeMap::new(),
+                blueprint_disks: BTreeMap::new(),
                 parent_blueprint_id: Some(parent_blueprint_id),
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),

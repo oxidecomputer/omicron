@@ -5,35 +5,114 @@
 //! Types describing inputs the Reconfigurator needs to plan and produce new
 //! blueprints.
 
+use crate::external_api::views::PhysicalDiskPolicy;
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use crate::inventory::ZpoolName;
-use ipnetwork::IpNetwork;
+use clap::ValueEnum;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::OmicronZoneKind;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigError;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::net::IpAddr;
+use std::net::SocketAddr;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
+
+/// Describes a single disk already managed by the sled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SledDisk {
+    pub disk_identity: DiskIdentity,
+    pub disk_id: PhysicalDiskUuid,
+    pub policy: PhysicalDiskPolicy,
+    pub state: PhysicalDiskState,
+}
+
+impl SledDisk {
+    fn provisionable(&self) -> bool {
+        DiskFilter::InService.matches_policy_and_state(self.policy, self.state)
+    }
+}
+
+/// Filters that apply to disks.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DiskFilter {
+    /// All disks
+    All,
+
+    /// All disks which are in-service.
+    InService,
+}
+
+impl DiskFilter {
+    fn matches_policy_and_state(
+        self,
+        policy: PhysicalDiskPolicy,
+        state: PhysicalDiskState,
+    ) -> bool {
+        match self {
+            DiskFilter::All => true,
+            DiskFilter::InService => match (policy, state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+}
+
+/// Filters that apply to zpools.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ZpoolFilter {
+    /// All zpools
+    All,
+
+    /// All zpools which are in-service.
+    InService,
+}
+
+impl ZpoolFilter {
+    fn matches_policy_and_state(
+        self,
+        policy: PhysicalDiskPolicy,
+        state: PhysicalDiskState,
+    ) -> bool {
+        match self {
+            ZpoolFilter::All => true,
+            ZpoolFilter::InService => match (policy, state) {
+                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+}
 
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    /// zpools on this sled
+    /// zpools (and their backing disks) on this sled
     ///
     /// (used to allocate storage for control plane zones with persistent
     /// storage)
-    pub zpools: BTreeSet<ZpoolName>,
+    pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
 
     /// the IPv6 subnet of this sled on the underlay network
     ///
@@ -42,25 +121,112 @@ pub struct SledResources {
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
-/// External IP allocated to a service
-///
-/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
-/// necessary for blueprint planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExternalIp {
-    pub id: Uuid,
-    pub ip: IpNetwork,
+impl SledResources {
+    /// Returns if the zpool is provisionable (known, in-service, and active).
+    pub fn zpool_is_provisionable(&self, zpool: &ZpoolUuid) -> bool {
+        let Some(disk) = self.zpools.get(zpool) else { return false };
+        disk.provisionable()
+    }
+
+    /// Returns all zpools matching the given filter.
+    pub fn all_zpools(
+        &self,
+        filter: ZpoolFilter,
+    ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some(zpool)
+        })
+    }
+
+    pub fn all_disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = (&ZpoolUuid, &SledDisk)> + '_ {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some((zpool, disk))
+        })
+    }
 }
 
-/// Network interface allocated to a service
+/// External IP variants possible for Omicron-managed zones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OmicronZoneExternalIp {
+    Floating(OmicronZoneExternalFloatingIp),
+    Snat(OmicronZoneExternalSnatIp),
+    // We may eventually want `Ephemeral(_)` too (arguably Nexus could be
+    // ephemeral?), but for now we only have Floating and Snat uses.
+}
+
+impl OmicronZoneExternalIp {
+    pub fn id(&self) -> ExternalIpUuid {
+        match self {
+            OmicronZoneExternalIp::Floating(ext) => ext.id,
+            OmicronZoneExternalIp::Snat(ext) => ext.id,
+        }
+    }
+
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            OmicronZoneExternalIp::Floating(ext) => ext.ip,
+            OmicronZoneExternalIp::Snat(ext) => ext.snat_cfg.ip,
+        }
+    }
+}
+
+/// Floating external IP allocated to an Omicron-managed zone.
+///
+/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
+/// necessary for blueprint planning, and requires that the zone have a single
+/// IP.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalFloatingIp {
+    pub id: ExternalIpUuid,
+    pub ip: IpAddr,
+}
+
+/// Floating external address with port allocated to an Omicron-managed zone.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalFloatingAddr {
+    pub id: ExternalIpUuid,
+    pub addr: SocketAddr,
+}
+
+impl OmicronZoneExternalFloatingAddr {
+    pub fn into_ip(self) -> OmicronZoneExternalFloatingIp {
+        OmicronZoneExternalFloatingIp { id: self.id, ip: self.addr.ip() }
+    }
+}
+
+/// SNAT (outbound) external IP allocated to an Omicron-managed zone.
+///
+/// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
+/// necessary for blueprint planning, and requires that the zone have a single
+/// IP.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct OmicronZoneExternalSnatIp {
+    pub id: ExternalIpUuid,
+    pub snat_cfg: SourceNatConfig,
+}
+
+/// Network interface allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceNetworkInterface {
+pub struct OmicronZoneNic {
     pub id: Uuid,
     pub mac: MacAddr,
-    pub ip: IpNetwork,
+    pub ip: IpAddr,
     pub slot: u8,
     pub primary: bool,
 }
@@ -73,7 +239,7 @@ pub struct ServiceNetworkInterface {
 /// The meaning of a particular filter should not be overloaded -- each time a
 /// new use case wants to make a decision based on the zone disposition, a new
 /// variant should be added to this enum.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, ValueEnum)]
 pub enum SledFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
@@ -82,11 +248,14 @@ pub enum SledFilter {
     All,
 
     /// Sleds that are eligible for discretionary services.
-    EligibleForDiscretionaryServices,
+    Discretionary,
 
     /// Sleds that are in service (even if they might not be eligible for
     /// discretionary services).
     InService,
+
+    /// Sleds whose sled agents should be queried for inventory
+    QueryDuringInventory,
 
     /// Sleds on which reservations can be created.
     ReservationCreate,
@@ -140,8 +309,9 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::Discretionary => true,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
@@ -149,15 +319,17 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
             },
@@ -185,15 +357,17 @@ impl SledState {
         match self {
             SledState::Active => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => true,
+                SledFilter::Discretionary => true,
                 SledFilter::InService => true,
+                SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
-                SledFilter::EligibleForDiscretionaryServices => false,
+                SledFilter::Discretionary => false,
                 SledFilter::InService => false,
+                SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcFirewall => false,
             },
@@ -258,14 +432,13 @@ pub struct PlanningInput {
     external_dns_version: Generation,
 
     /// per-sled policy and resources
-    sleds: BTreeMap<TypedUuid<SledKind>, SledDetails>,
+    sleds: BTreeMap<SledUuid, SledDetails>,
 
     /// external IPs allocated to Omicron zones
-    omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
 
     /// vNICs allocated to Omicron zones
-    omicron_zone_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,7 +471,7 @@ impl PlanningInput {
     pub fn all_sleds(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledDetails)> + '_ {
+    ) -> impl Iterator<Item = (SledUuid, &SledDetails)> + '_ {
         self.sleds.iter().filter_map(move |(&sled_id, details)| {
             filter
                 .matches_policy_and_state(details.policy, details.state)
@@ -309,29 +482,23 @@ impl PlanningInput {
     pub fn all_sled_ids(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = TypedUuid<SledKind>> + '_ {
+    ) -> impl Iterator<Item = SledUuid> + '_ {
         self.all_sleds(filter).map(|(sled_id, _)| sled_id)
     }
 
     pub fn all_sled_resources(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = (TypedUuid<SledKind>, &SledResources)> + '_ {
+    ) -> impl Iterator<Item = (SledUuid, &SledResources)> + '_ {
         self.all_sleds(filter)
             .map(|(sled_id, details)| (sled_id, &details.resources))
     }
 
-    pub fn sled_policy(
-        &self,
-        sled_id: &TypedUuid<SledKind>,
-    ) -> Option<SledPolicy> {
+    pub fn sled_policy(&self, sled_id: &SledUuid) -> Option<SledPolicy> {
         self.sleds.get(sled_id).map(|details| details.policy)
     }
 
-    pub fn sled_resources(
-        &self,
-        sled_id: &TypedUuid<SledKind>,
-    ) -> Option<&SledResources> {
+    pub fn sled_resources(&self, sled_id: &SledUuid) -> Option<&SledResources> {
         self.sleds.get(sled_id).map(|details| &details.resources)
     }
 
@@ -354,17 +521,22 @@ impl PlanningInput {
 #[derive(Debug, thiserror::Error)]
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
-    DuplicateSledId(TypedUuid<SledKind>),
+    DuplicateSledId(SledUuid),
     #[error("Omicron zone {zone_id} already has an external IP ({ip:?})")]
     DuplicateOmicronZoneExternalIp {
-        zone_id: TypedUuid<OmicronZoneKind>,
-        ip: ExternalIp,
+        zone_id: OmicronZoneUuid,
+        ip: OmicronZoneExternalIp,
+    },
+    #[error("Omicron zone {0} has an ephemeral IP (unsupported)")]
+    EphemeralIpUnsupported(OmicronZoneUuid),
+    #[error("Omicron zone {zone_id} has a bad SNAT config")]
+    BadSnatConfig {
+        zone_id: OmicronZoneUuid,
+        #[source]
+        err: SourceNatConfigError,
     },
     #[error("Omicron zone {zone_id} already has a NIC ({nic:?})")]
-    DuplicateOmicronZoneNic {
-        zone_id: TypedUuid<OmicronZoneKind>,
-        nic: ServiceNetworkInterface,
-    },
+    DuplicateOmicronZoneNic { zone_id: OmicronZoneUuid, nic: OmicronZoneNic },
 }
 
 /// Constructor for [`PlanningInput`].
@@ -373,10 +545,9 @@ pub struct PlanningInputBuilder {
     policy: Policy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
-    sleds: BTreeMap<TypedUuid<SledKind>, SledDetails>,
-    omicron_zone_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
-    omicron_zone_nics:
-        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
+    sleds: BTreeMap<SledUuid, SledDetails>,
+    omicron_zone_external_ips: BTreeMap<OmicronZoneUuid, OmicronZoneExternalIp>,
+    omicron_zone_nics: BTreeMap<OmicronZoneUuid, OmicronZoneNic>,
 }
 
 impl PlanningInputBuilder {
@@ -411,7 +582,7 @@ impl PlanningInputBuilder {
 
     pub fn add_sled(
         &mut self,
-        sled_id: TypedUuid<SledKind>,
+        sled_id: SledUuid,
         details: SledDetails,
     ) -> Result<(), PlanningInputBuildError> {
         match self.sleds.entry(sled_id) {
@@ -427,8 +598,8 @@ impl PlanningInputBuilder {
 
     pub fn add_omicron_zone_external_ip(
         &mut self,
-        zone_id: TypedUuid<OmicronZoneKind>,
-        ip: ExternalIp,
+        zone_id: OmicronZoneUuid,
+        ip: OmicronZoneExternalIp,
     ) -> Result<(), PlanningInputBuildError> {
         match self.omicron_zone_external_ips.entry(zone_id) {
             Entry::Vacant(slot) => {
@@ -438,7 +609,7 @@ impl PlanningInputBuilder {
             Entry::Occupied(prev) => {
                 Err(PlanningInputBuildError::DuplicateOmicronZoneExternalIp {
                     zone_id,
-                    ip: prev.get().clone(),
+                    ip: *prev.get(),
                 })
             }
         }
@@ -446,8 +617,8 @@ impl PlanningInputBuilder {
 
     pub fn add_omicron_zone_nic(
         &mut self,
-        zone_id: TypedUuid<OmicronZoneKind>,
-        nic: ServiceNetworkInterface,
+        zone_id: OmicronZoneUuid,
+        nic: OmicronZoneNic,
     ) -> Result<(), PlanningInputBuildError> {
         match self.omicron_zone_nics.entry(zone_id) {
             Entry::Vacant(slot) => {
@@ -467,13 +638,11 @@ impl PlanningInputBuilder {
         &mut self.policy
     }
 
-    pub fn sleds(&mut self) -> &BTreeMap<TypedUuid<SledKind>, SledDetails> {
+    pub fn sleds(&mut self) -> &BTreeMap<SledUuid, SledDetails> {
         &self.sleds
     }
 
-    pub fn sleds_mut(
-        &mut self,
-    ) -> &mut BTreeMap<TypedUuid<SledKind>, SledDetails> {
+    pub fn sleds_mut(&mut self) -> &mut BTreeMap<SledUuid, SledDetails> {
         &mut self.sleds
     }
 

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+debug-ignore.workspace = true
 gateway-client.workspace = true
 indexmap.workspace = true
 internal-dns.workspace = true
@@ -27,4 +28,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+maplit.workspace = true
 omicron-test-utils.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true

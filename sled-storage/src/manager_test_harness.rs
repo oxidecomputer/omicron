@@ -9,6 +9,7 @@ use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
 use crate::manager::{StorageHandle, StorageManager};
 use camino::Utf8PathBuf;
 use key_manager::StorageKeyRequester;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Logger};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -87,11 +88,11 @@ impl Drop for StorageManagerTestHarness {
 
             let pools = [
                 (
-                    illumos_utils::zpool::ZPOOL_INTERNAL_PREFIX,
+                    omicron_common::zpool_name::ZPOOL_INTERNAL_PREFIX,
                     vdev_dir.path().join("pool/int"),
                 ),
                 (
-                    illumos_utils::zpool::ZPOOL_EXTERNAL_PREFIX,
+                    omicron_common::zpool_name::ZPOOL_EXTERNAL_PREFIX,
                     vdev_dir.path().join("pool/ext"),
                 ),
             ];
@@ -322,7 +323,7 @@ impl StorageManagerTestHarness {
                 crate::disk::OmicronPhysicalDiskConfig {
                     identity: identity.clone(),
                     id: Uuid::new_v4(),
-                    pool_id: Uuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
                 }
             })
             .collect();

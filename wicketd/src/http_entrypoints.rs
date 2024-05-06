@@ -30,7 +30,6 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use http::StatusCode;
 use internal_dns::resolver::Resolver;
-use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::update::ArtifactHashId;
@@ -42,11 +41,13 @@ use sled_hardware_types::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
+use wicket_common::rack_setup::BgpAuthKey;
+use wicket_common::rack_setup::BgpAuthKeyId;
+use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicket_common::update_events::EventReport;
 use wicket_common::WICKETD_TIMEOUT;
 
@@ -65,6 +66,8 @@ pub fn api() -> WicketdApiDescription {
         api.register(put_rss_config_recovery_user_password_hash)?;
         api.register(post_rss_config_cert)?;
         api.register(post_rss_config_key)?;
+        api.register(get_bgp_auth_key_info)?;
+        api.register(put_bgp_auth_key)?;
         api.register(delete_rss_config)?;
         api.register(get_rack_setup_state)?;
         api.register(post_run_rack_setup)?;
@@ -143,44 +146,17 @@ async fn get_bootstrap_sleds(
     Ok(HttpResponseOk(BootstrapSledIps { sleds }))
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
-pub struct BootstrapSledDescription {
-    pub id: SpIdentifier,
-    pub baseboard: Baseboard,
-    /// The sled's bootstrap address, if the host is on and we've discovered it
-    /// on the bootstrap network.
-    pub bootstrap_ip: Option<Ipv6Addr>,
-}
-
-// This is the subset of `RackInitializeRequest` that the user fills in in clear
-// text (e.g., via an uploaded config file).
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct CurrentRssUserConfigInsensitive {
-    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
-    pub ntp_servers: Vec<String>,
-    pub dns_servers: Vec<IpAddr>,
-    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
-    pub external_dns_ips: Vec<IpAddr>,
-    pub external_dns_zone_name: String,
-    pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
-}
-
 // This is a summary of the subset of `RackInitializeRequest` that is sensitive;
 // we only report a summary instead of returning actual data.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CurrentRssUserConfigSensitive {
     pub num_external_certificates: usize,
     pub recovery_silo_password_set: bool,
+    // We define GetBgpAuthKeyInfoResponse in wicket-common and use a
+    // progenitor replace directive for it, because we don't want typify to
+    // turn the BTreeMap into a HashMap. Use the same struct here to piggyback
+    // on that.
+    pub bgp_auth_keys: GetBgpAuthKeyInfoResponse,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -316,6 +292,90 @@ async fn post_rss_config_key(
         .map_err(|err| HttpError::for_bad_request(None, err))?;
 
     Ok(HttpResponseOk(response))
+}
+
+// -- BGP authentication key management
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+pub(crate) struct GetBgpAuthKeyParams {
+    /// Checks that these keys are valid.
+    check_valid: BTreeSet<BgpAuthKeyId>,
+}
+
+/// Return information about BGP authentication keys, including checking
+/// validity of keys.
+///
+/// Produces an error if the rack setup config wasn't set, or if any of the
+/// requested key IDs weren't found.
+#[endpoint(
+    method = GET,
+    path = "/rack-setup/config/bgp/auth-key"
+)]
+async fn get_bgp_auth_key_info(
+    rqctx: RequestContext<ServerContext>,
+    // A bit weird for a GET request to have a TypedBody, but there's no other
+    // nice way to transmit this information as a batch.
+    params: TypedBody<GetBgpAuthKeyParams>,
+) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError> {
+    let ctx = rqctx.context();
+    let params = params.into_inner();
+
+    let config = ctx.rss_config.lock().unwrap();
+    config
+        .check_bgp_auth_keys_valid(&params.check_valid)
+        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+    let data = config.get_bgp_auth_key_data();
+
+    Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+struct PutBgpAuthKeyParams {
+    key_id: BgpAuthKeyId,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+struct PutBgpAuthKeyBody {
+    key: BgpAuthKey,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
+struct PutBgpAuthKeyResponse {
+    status: SetBgpAuthKeyStatus,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SetBgpAuthKeyStatus {
+    /// The key was accepted and replaced an old key.
+    Replaced,
+
+    /// The key was accepted, and is the same as the existing key.
+    Unchanged,
+
+    /// The key was accepted and is new.
+    Added,
+}
+
+/// Set the BGP authentication key for a particular key ID.
+#[endpoint {
+    method = PUT,
+    path = "/rack-setup/config/bgp/auth-key/{key_id}"
+}]
+async fn put_bgp_auth_key(
+    rqctx: RequestContext<ServerContext>,
+    params: Path<PutBgpAuthKeyParams>,
+    body: TypedBody<PutBgpAuthKeyBody>,
+) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError> {
+    let ctx = rqctx.context();
+    let params = params.into_inner();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let status = config
+        .set_bgp_auth_key(params.key_id, body.into_inner().key)
+        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+
+    Ok(HttpResponseOk(PutBgpAuthKeyResponse { status }))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

@@ -10,6 +10,9 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
@@ -24,6 +27,7 @@ use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
+use ipnetwork::Ipv6Network;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -33,7 +37,9 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
@@ -41,7 +47,7 @@ use propolis_mock_server::Context as PropolisContext;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,6 +80,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
     pub log: Logger,
 }
 
@@ -141,6 +148,23 @@ impl SledAgent {
         let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
+        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
+            generation: 0,
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: Vec::new(),
+                rack_network_config: Some(RackNetworkConfig {
+                    rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    ports: Vec::new(),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                }),
+            },
+        });
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -173,6 +197,7 @@ impl SledAgent {
             }),
             instance_ensure_state_error: Mutex::new(None),
             log,
+            bootstore_network_config,
         })
     }
 
@@ -545,7 +570,7 @@ impl SledAgent {
 
     pub async fn get_datasets(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
     ) -> Vec<(Uuid, SocketAddr)> {
         self.storage.lock().await.get_all_datasets(zpool_id)
     }
@@ -553,7 +578,7 @@ impl SledAgent {
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(
         &self,
-        id: Uuid,
+        id: ZpoolUuid,
         physical_disk_id: Uuid,
         size: u64,
     ) {
@@ -567,7 +592,7 @@ impl SledAgent {
     /// Adds a Crucible Dataset within a zpool.
     pub async fn create_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
@@ -576,7 +601,7 @@ impl SledAgent {
     /// Returns a crucible dataset within a particular zpool.
     pub async fn get_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await

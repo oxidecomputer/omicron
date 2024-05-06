@@ -16,7 +16,9 @@ use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::physical_disk_adoption;
 use super::region_replacement;
+use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
 use super::v2p_mappings::V2PManager;
@@ -69,6 +71,9 @@ pub struct BackgroundTasks {
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
 
+    /// task handle for the task that collects inventory
+    pub task_physical_disk_adoption: common::TaskHandle,
+
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
 
@@ -90,6 +95,10 @@ pub struct BackgroundTasks {
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
+
+    /// task handle for propagation of VPC firewall rules for Omicron services
+    /// with external network connectivity,
+    pub task_service_firewall_propagation: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -99,6 +108,7 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
+        rack_id: Uuid,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
@@ -249,7 +259,7 @@ impl BackgroundTasks {
         // because the blueprint executor might also depend indirectly on the
         // inventory collector.  In that case, we may need to do something more
         // complicated.  But for now, this works.
-        let task_inventory_collection = {
+        let (task_inventory_collection, inventory_watcher) = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
                 resolver.clone(),
@@ -257,6 +267,7 @@ impl BackgroundTasks {
                 config.inventory.nkeep,
                 config.inventory.disable,
             );
+            let inventory_watcher = collector.watcher();
             let task = driver.register(
                 String::from("inventory_collection"),
                 String::from(
@@ -269,7 +280,24 @@ impl BackgroundTasks {
                 vec![Box::new(rx_blueprint_exec)],
             );
 
-            task
+            (task, inventory_watcher)
+        };
+
+        let task_physical_disk_adoption = {
+            driver.register(
+                "physical_disk_adoption".to_string(),
+                "ensure new physical disks are automatically marked in-service"
+                    .to_string(),
+                config.physical_disk_adoption.period_secs,
+                Box::new(physical_disk_adoption::PhysicalDiskAdoption::new(
+                    datastore.clone(),
+                    inventory_watcher.clone(),
+                    config.physical_disk_adoption.disable,
+                    rack_id,
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(inventory_watcher)],
+            )
         };
 
         let task_service_zone_nat_tracker = {
@@ -320,7 +348,7 @@ impl BackgroundTasks {
         // process
         let task_region_replacement = {
             let detector = region_replacement::RegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
                 saga_request.clone(),
             );
 
@@ -336,6 +364,21 @@ impl BackgroundTasks {
             task
         };
 
+        // Background task: service firewall rule propagation
+        let task_service_firewall_propagation = driver.register(
+            String::from("service_firewall_rule_propagation"),
+            String::from(
+                "propagates VPC firewall rules for Omicron \
+                services with external network connectivity",
+            ),
+            config.service_firewall_propagation.period_secs,
+            Box::new(service_firewall_rules::ServiceRulePropagator::new(
+                datastore.clone(),
+            )),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -348,6 +391,7 @@ impl BackgroundTasks {
             nat_cleanup,
             bfd_manager,
             task_inventory_collection,
+            task_physical_disk_adoption,
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
@@ -355,6 +399,7 @@ impl BackgroundTasks {
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
+            task_service_firewall_propagation,
         }
     }
 
