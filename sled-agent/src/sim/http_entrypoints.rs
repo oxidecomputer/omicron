@@ -135,6 +135,19 @@ async fn instance_put_state(
 }
 
 #[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
+}
+
+#[endpoint {
     method = PUT,
     path = "/instances/{instance_id}/migration-ids",
 }]
