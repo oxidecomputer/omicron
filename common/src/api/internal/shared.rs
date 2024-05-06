@@ -6,7 +6,7 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name},
 };
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
@@ -180,11 +180,19 @@ pub struct BgpConfig {
     pub asn: u32,
     /// The set of prefixes for the BGP router to originate.
     pub originate: Vec<Ipv4Network>,
+
+    /// Shaper to apply to outgoing messages.
+    #[serde(default)]
+    pub shaper: Option<String>,
+
+    /// Checker to apply to incoming messages.
+    #[serde(default)]
+    pub checker: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpPeerConfig {
-    /// The autonomous sysetm number of the router the peer belongs to.
+    /// The autonomous system number of the router the peer belongs to.
     pub asn: u32,
     /// Switch port the peer is reachable on.
     pub port: String,
@@ -201,6 +209,73 @@ pub struct BgpPeerConfig {
     pub connect_retry: Option<u64>,
     /// The interval to send keepalive messages at.
     pub keepalive: Option<u64>,
+    /// Require that a peer has a specified ASN.
+    #[serde(default)]
+    pub remote_asn: Option<u32>,
+    /// Require messages from a peer have a minimum IP time to live field.
+    #[serde(default)]
+    pub min_ttl: Option<u8>,
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    #[serde(default)]
+    pub md5_auth_key: Option<String>,
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    #[serde(default)]
+    pub multi_exit_discriminator: Option<u32>,
+    /// Include the provided communities in updates sent to the peer.
+    #[serde(default)]
+    pub communities: Vec<u32>,
+    /// Apply a local preference to routes received from this peer.
+    #[serde(default)]
+    pub local_pref: Option<u32>,
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    #[serde(default)]
+    pub enforce_first_as: bool,
+    /// Define import policy for a peer.
+    #[serde(default)]
+    pub allowed_import: ImportExportPolicy,
+    /// Define export policy for a peer.
+    #[serde(default)]
+    pub allowed_export: ImportExportPolicy,
+    /// Associate a VLAN ID with a BGP peer session.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+impl BgpPeerConfig {
+    /// The default hold time for a BGP peer in seconds.
+    pub const DEFAULT_HOLD_TIME: u64 = 6;
+
+    /// The default idle hold time for a BGP peer in seconds.
+    pub const DEFAULT_IDLE_HOLD_TIME: u64 = 3;
+
+    /// The default delay open time for a BGP peer in seconds.
+    pub const DEFAULT_DELAY_OPEN: u64 = 0;
+
+    /// The default connect retry time for a BGP peer in seconds.
+    pub const DEFAULT_CONNECT_RETRY: u64 = 3;
+
+    /// The default keepalive time for a BGP peer in seconds.
+    pub const DEFAULT_KEEPALIVE: u64 = 2;
+
+    pub fn hold_time(&self) -> u64 {
+        self.hold_time.unwrap_or(Self::DEFAULT_HOLD_TIME)
+    }
+
+    pub fn idle_hold_time(&self) -> u64 {
+        self.idle_hold_time.unwrap_or(Self::DEFAULT_IDLE_HOLD_TIME)
+    }
+
+    pub fn delay_open(&self) -> u64 {
+        self.delay_open.unwrap_or(Self::DEFAULT_DELAY_OPEN)
+    }
+
+    pub fn connect_retry(&self) -> u64 {
+        self.connect_retry.unwrap_or(Self::DEFAULT_CONNECT_RETRY)
+    }
+
+    pub fn keepalive(&self) -> u64 {
+        self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -219,6 +294,9 @@ pub struct RouteConfig {
     pub destination: IpNetwork,
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
+    /// The VLAN id associated with this route.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -248,6 +326,7 @@ impl From<UplinkConfig> for PortConfigV1 {
             routes: vec![RouteConfig {
                 destination: "0.0.0.0/0".parse().unwrap(),
                 nexthop: value.gateway_ip.into(),
+                vlan_id: None,
             }],
             addresses: vec![value.uplink_cidr.into()],
             switch: value.switch,
@@ -337,6 +416,12 @@ impl fmt::Display for SwitchLocation {
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ParseSwitchLocationError(String);
 
+impl std::fmt::Display for ParseSwitchLocationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse switch location error: {}", self.0)
+    }
+}
+
 impl FromStr for SwitchLocation {
     type Err = ParseSwitchLocationError;
 
@@ -420,5 +505,138 @@ impl fmt::Display for PortFec {
             PortFec::None => write!(f, "None"),
             PortFec::Rs => write!(f, "RS-FEC"),
         }
+    }
+}
+
+/// Description of source IPs allowed to reach rack services.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "allow", content = "ips")]
+pub enum AllowedSourceIps {
+    /// Allow traffic from any external IP address.
+    Any,
+    /// Restrict access to a specific set of source IP addresses or subnets.
+    ///
+    /// All others are prevented from reaching rack services.
+    List(IpAllowList),
+}
+
+impl TryFrom<Vec<IpNet>> for AllowedSourceIps {
+    type Error = &'static str;
+    fn try_from(list: Vec<IpNet>) -> Result<Self, Self::Error> {
+        IpAllowList::try_from(list).map(Self::List)
+    }
+}
+
+impl TryFrom<&[IpNetwork]> for AllowedSourceIps {
+    type Error = &'static str;
+    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+        IpAllowList::try_from(list).map(Self::List)
+    }
+}
+
+/// A non-empty allowlist of IP subnets.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(try_from = "Vec<IpNet>", into = "Vec<IpNet>")]
+#[schemars(transparent)]
+pub struct IpAllowList(Vec<IpNet>);
+
+impl IpAllowList {
+    /// Return the entries of the list as a slice.
+    pub fn as_slice(&self) -> &[IpNet] {
+        &self.0
+    }
+
+    /// Return an iterator over the entries of the list.
+    pub fn iter(&self) -> impl Iterator<Item = &IpNet> {
+        self.0.iter()
+    }
+
+    /// Consume the list into an iterator.
+    pub fn into_iter(self) -> impl Iterator<Item = IpNet> {
+        self.0.into_iter()
+    }
+
+    /// Return the number of entries in the allowlist.
+    ///
+    /// Note that this is always >= 1, though we return a usize for simplicity.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl From<IpAllowList> for Vec<IpNet> {
+    fn from(list: IpAllowList) -> Self {
+        list.0
+    }
+}
+
+impl TryFrom<Vec<IpNet>> for IpAllowList {
+    type Error = &'static str;
+    fn try_from(list: Vec<IpNet>) -> Result<Self, Self::Error> {
+        if list.is_empty() {
+            return Err("IP allowlist must not be empty");
+        }
+        Ok(Self(list))
+    }
+}
+
+impl TryFrom<&[IpNetwork]> for IpAllowList {
+    type Error = &'static str;
+    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+        if list.is_empty() {
+            return Err("IP allowlist must not be empty");
+        }
+        Ok(Self(list.iter().copied().map(Into::into).collect()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::api::{
+        external::{IpNet, Ipv4Net, Ipv6Net},
+        internal::shared::AllowedSourceIps,
+    };
+    use ipnetwork::{Ipv4Network, Ipv6Network};
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn test_deserialize_allowed_source_ips() {
+        let parsed: AllowedSourceIps = serde_json::from_str(
+            r#"{"allow":"list","ips":["127.0.0.1","10.0.0.0/24","fd00::1/64"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed,
+            AllowedSourceIps::try_from(vec![
+                IpNet::from(Ipv4Addr::LOCALHOST),
+                IpNet::V4(Ipv4Net(
+                    Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
+                )),
+                IpNet::V6(Ipv6Net(
+                    Ipv6Network::new(
+                        Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                        64
+                    )
+                    .unwrap()
+                )),
+            ])
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_deserialize_unknown_string() {
+        serde_json::from_str::<AllowedSourceIps>(r#"{"allow":"wat"}"#)
+            .expect_err(
+                "Should not be able to deserialize from unknown variant name",
+            );
+    }
+
+    #[test]
+    fn test_deserialize_any_into_allowed_external_ips() {
+        assert_eq!(
+            AllowedSourceIps::Any,
+            serde_json::from_str(r#"{"allow":"any"}"#).unwrap(),
+        );
     }
 }
