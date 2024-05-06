@@ -34,6 +34,7 @@ progenitor::generate_api!(
         BgpPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
     },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
@@ -44,6 +45,7 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
