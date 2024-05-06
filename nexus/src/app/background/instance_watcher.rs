@@ -277,16 +277,6 @@ enum Incomplete {
     UpdateFailed,
 }
 
-impl CheckOutcome {
-    fn is_healthy(&self) -> bool {
-        match self {
-            Self::Success(InstanceState::Failed) => false,
-            Self::Failure(_) => false,
-            _ => true,
-        }
-    }
-}
-
 impl fmt::Display for CheckOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
