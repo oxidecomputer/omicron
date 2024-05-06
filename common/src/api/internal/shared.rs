@@ -608,7 +608,7 @@ mod tests {
         assert_eq!(
             parsed,
             AllowedSourceIps::try_from(vec![
-                IpNet::from(Ipv4Addr::LOCALHOST),
+                IpNet::V4(Ipv4Net::single(Ipv4Addr::LOCALHOST)),
                 IpNet::V4(Ipv4Net(
                     Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
                 )),

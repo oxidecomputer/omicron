@@ -353,7 +353,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                                 .unwrap_or(&no_interfaces)
                             {
                                 host_addrs.push(
-                                    HostIdentifier::Ip(IpNet::from(
+                                    HostIdentifier::Ip(IpNet::single(
                                         interface.ip,
                                     ))
                                     .into(),
@@ -373,7 +373,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         }
                         external::VpcFirewallRuleHostFilter::Ip(addr) => {
                             host_addrs.push(
-                                HostIdentifier::Ip(IpNet::from(*addr)).into(),
+                                HostIdentifier::Ip(IpNet::single(*addr)).into(),
                             )
                         }
                         external::VpcFirewallRuleHostFilter::IpNet(net) => {
