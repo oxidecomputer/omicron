@@ -286,10 +286,7 @@ impl HardwareMonitor {
         let _ = self
             .storage_manager
             .ensure_using_exactly_these_disks(
-                self.hardware_manager
-                    .disks()
-                    .into_iter()
-                    .map(|(_, disk)| RawDisk::from(disk)),
+                self.hardware_manager.disks().into_values().map(RawDisk::from),
             )
             .await;
     }
