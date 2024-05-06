@@ -274,6 +274,7 @@ impl Blueprint {
 
 /// The state of the sled in this blueprint, with regards to the parent
 /// blueprint
+#[derive(Debug, Clone, Copy)]
 enum BpResourceState {
     Unchanged,
     Removed,
@@ -292,6 +293,7 @@ struct BpSledTable {
     pub subtables: Vec<BpSledSubtable>,
 }
 
+#[derive(Debug, Clone, Copy)]
 enum BpGeneration {
     // A value in a single blueprintg
     Value(Generation),
@@ -317,13 +319,27 @@ impl fmt::Display for BpGeneration {
     }
 }
 
+/// A row in a [`BpSledSubtable`]
+struct BpSledSubtableRow {
+    state: BpResourceState,
+    columns: Vec<String>,
+}
+
+/// A set of subtable rows without metadata such as table and column names
+///
+/// This can be used as an intermediate step to generate a `BpSledSubtable`
+struct BpSledSubtableRows {
+    generation: BpGeneration,
+    rows: Vec<BpSledSubtableRow>,
+}
+
 /// A table specific to a sled resource, such as a zone or disk.
 /// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
 struct BpSledSubtable {
     pub table_name: &'static str,
     pub generation: BpGeneration,
     pub column_names: Vec<&'static str>,
-    pub rows: Vec<Vec<String>>,
+    pub rows: Vec<BpSledSubtableRow>,
 }
 
 impl BpSledSubtable {
@@ -334,8 +350,8 @@ impl BpSledSubtable {
             self.column_names.iter().map(|s| s.len()).collect();
 
         for row in &self.rows {
-            assert_eq!(row.len(), widths.len());
-            for (i, s) in row.iter().enumerate() {
+            assert_eq!(row.columns.len(), widths.len());
+            for (i, s) in row.columns.iter().enumerate() {
                 widths[i] = usize::max(s.len(), widths[i]);
             }
         }
@@ -351,12 +367,13 @@ impl From<&OmicronPhysicalDisksConfig> for BpSledSubtable {
         let rows = value
             .disks
             .iter()
-            .map(|d| {
-                vec![
+            .map(|d| BpSledSubtableRow {
+                state: BpResourceState::Unchanged,
+                columns: vec![
                     d.identity.vendor.clone(),
                     d.identity.model.clone(),
                     d.identity.serial.clone(),
-                ]
+                ],
             })
             .collect();
         BpSledSubtable {
@@ -375,13 +392,14 @@ impl From<&BlueprintOrCollectionZonesConfig> for BpSledSubtable {
             vec!["zone type", "zone id", "disposition", "underlay IP"];
         let rows = value
             .zones()
-            .map(|zone| {
-                vec![
+            .map(|zone| BpSledSubtableRow {
+                state: BpResourceState::Unchanged,
+                columns: vec![
                     zone.kind().to_string(),
                     zone.id().to_string(),
                     zone.disposition().to_string(),
                     zone.underlay_address().to_string(),
-                ]
+                ],
             })
             .collect();
         BpSledSubtable {
@@ -430,8 +448,16 @@ impl<'a> fmt::Display for BpSledSubtable {
 
         // Write the rows
         for row in &self.rows {
-            write!(f, "{:<SUBTABLE_INDENT$}", "")?;
-            for (i, (column, width)) in row.iter().zip(&widths).enumerate() {
+            let prefix = match row.state {
+                BpResourceState::Unchanged => table_display::UNCHANGED_PREFIX,
+                BpResourceState::Removed => table_display::REMOVED_PREFIX,
+                BpResourceState::Modified => table_display::MODIFIED_PREFIX,
+                BpResourceState::Added => table_display::ADDED_PREFIX,
+            };
+            write!(f, "{prefix:<SUBTABLE_INDENT$}")?;
+            for (i, (column, width)) in
+                row.columns.iter().zip(&widths).enumerate()
+            {
                 if i != 0 {
                     write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
                 } else {
@@ -1231,8 +1257,77 @@ pub struct DiffBlueprintPhysicalDiskConfig {
     // Disks that are removed don't have "after" generation numbers
     pub after_generation: Option<Generation>,
 
-    // Sleds added, removed, or unmodified
+    // Disks added, removed, or unmodified
     pub disks: BTreeSet<DiskIdentity>,
+}
+
+impl DiffBlueprintPhysicalDiskConfig {
+    fn to_bp_sled_subtable_rows(
+        &self,
+        state: BpResourceState,
+    ) -> BpSledSubtableRows {
+        let generation = BpGeneration::Diff {
+            before: self.before_generation,
+            after: self.after_generation,
+        };
+        let rows: Vec<_> = self
+            .disks
+            .iter()
+            .map(|d| BpSledSubtableRow {
+                state,
+                columns: vec![
+                    d.vendor.clone(),
+                    d.model.clone(),
+                    d.serial.clone(),
+                ],
+            })
+            .collect();
+
+        BpSledSubtableRows { generation, rows }
+    }
+}
+
+impl From<&DiffPhysicalDisks> for BTreeMap<SledUuid, BpSledSubtable> {
+    fn from(value: &DiffPhysicalDisks) -> Self {
+        let mut subtables = BTreeMap::new();
+        let rows_to_subtable = |rows: BpSledSubtableRows| BpSledSubtable {
+            table_name: "physical disks",
+            column_names: vec!["vendor", "model", "serial"],
+            generation: rows.generation,
+            rows: rows.rows,
+        };
+
+        let disk_subtable_default = |generation: BpGeneration| BpSledSubtable {
+            table_name: "physical disks",
+            generation,
+            column_names: vec!["vendor", "model", "serial"],
+            rows: vec![],
+        };
+
+        for (sled_id, diff) in &value.unchanged {
+            let rows =
+                diff.to_bp_sled_subtable_rows(BpResourceState::Unchanged);
+            subtables.insert(*sled_id, rows_to_subtable(rows));
+        }
+
+        for (sled_id, diff) in &value.removed {
+            let rows = diff.to_bp_sled_subtable_rows(BpResourceState::Removed);
+            let entry = subtables
+                .entry(*sled_id)
+                .or_insert_with(|| disk_subtable_default(rows.generation));
+            entry.rows.extend(rows.rows);
+        }
+
+        for (sled_id, diff) in &value.added {
+            let rows = diff.to_bp_sled_subtable_rows(BpResourceState::Added);
+            let entry = subtables
+                .entry(*sled_id)
+                .or_insert_with(|| disk_subtable_default(rows.generation));
+            entry.rows.extend(rows.rows);
+        }
+
+        subtables
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1369,7 +1464,13 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         }
 
         writeln!(f, "\n{}", self.make_zone_diff_table())?;
-        writeln!(f, "\n{}", self.make_disk_diff_table())?;
+
+        writeln!(f, "\nNEW STUFF\n")?;
+        for (sled_id, disks_table) in BTreeMap::<SledUuid, BpSledSubtable>::from(
+            self.diff.physical_disks(),
+        ) {
+            writeln!(f, "\n  sled: {sled_id}\n\n{disks_table}\n\n")?;
+        }
 
         writeln!(f, "\n{}", table_display::metadata_diff_heading())?;
         writeln!(f, "{}", self.make_metadata_diff_table())?;
@@ -1942,81 +2043,6 @@ mod table_display {
             builder.build()
         }
 
-        pub(super) fn make_disk_diff_table(&self) -> Table {
-            let diff = self.diff;
-
-            // Add the unchanged prefix to the indent since the first
-            // column will be used as the prefix.
-            let mut builder = StBuilder::new();
-            builder.push_header_row(diff_disk_header_row());
-
-            // Same ordering and rationale as above in `make_zone_disk_table`.
-            // We keep the zones and disks in different tables primarily for
-            // legibility.
-
-            // First, unchanged disks.
-            builder.make_section(
-                SectionSpacing::Always,
-                disks_heading("UNCHANGED DISKS"),
-                |section| {
-                    for (sled_id, disks) in &diff.physical_disks().unchanged {
-                        add_whole_disk_records(
-                            *sled_id,
-                            disks,
-                            WholeSledKind::Unchanged,
-                            section,
-                        );
-                    }
-                },
-            );
-
-            // Then, removed disks.
-            builder.make_section(
-                SectionSpacing::Always,
-                disks_heading("REMOVED DISKS"),
-                |section| {
-                    for (sled_id, disks) in &diff.physical_disks().removed {
-                        let sled_kind = if diff
-                            .physical_disks
-                            .removed_sleds
-                            .contains(sled_id)
-                        {
-                            WholeSledKind::Removed
-                        } else {
-                            WholeSledKind::Unchanged
-                        };
-                        add_whole_disk_records(
-                            *sled_id, disks, sled_kind, section,
-                        );
-                    }
-                },
-            );
-
-            // Finally, added disks.
-            builder.make_section(
-                SectionSpacing::Always,
-                disks_heading("ADDED DISKS"),
-                |section| {
-                    for (sled_id, disks) in &diff.physical_disks.added {
-                        let sled_kind = if diff
-                            .physical_disks
-                            .added_sleds
-                            .contains(sled_id)
-                        {
-                            WholeSledKind::Added
-                        } else {
-                            WholeSledKind::Unchanged
-                        };
-                        add_whole_disk_records(
-                            *sled_id, disks, sled_kind, section,
-                        );
-                    }
-                },
-            );
-
-            builder.build()
-        }
-
         pub(super) fn make_metadata_diff_table(&self) -> Table {
             let diff = self.diff;
             let mut builder = Builder::new();
@@ -2125,44 +2151,6 @@ mod table_display {
                         add_zone_record(
                             format!("{prefix}{ZONE_INDENT}"),
                             &zone,
-                            s2,
-                        );
-                    }
-                }
-            }
-        });
-    }
-
-    fn add_whole_disk_records(
-        sled_id: SledUuid,
-        disks: &DiffBlueprintPhysicalDiskConfig,
-        kind: WholeSledKind,
-        section: &mut StSectionBuilder,
-    ) {
-        let heading = format!(
-            "{}{SLED_INDENT}sled {sled_id}: blueprint disks: old gen {:?}, new gen {:?}",
-            kind.prefix(),
-            disks.before_generation,
-            disks.after_generation
-        );
-        let prefix = kind.prefix();
-        let status = kind.status();
-        section.make_subsection(SectionSpacing::Always, heading, |s2| {
-            // Also add another section for zones.
-            for disk in &disks.disks {
-                match status {
-                    Some(status) => {
-                        add_physical_disk_record_with_status(
-                            format!("{prefix}{DISK_INDENT}"),
-                            disk,
-                            status,
-                            s2,
-                        );
-                    }
-                    None => {
-                        add_physical_disk_record(
-                            format!("{prefix}{DISK_INDENT}"),
-                            disk,
                             s2,
                         );
                     }
@@ -2432,18 +2420,17 @@ mod table_display {
     const SLED_HEAD_INDENT: &str = " ";
     const SLED_INDENT: &str = "  ";
     const ZONE_HEAD_INDENT: &str = "   ";
-    const DISK_HEAD_INDENT: &str = SLED_HEAD_INDENT;
     // Due to somewhat mysterious reasons with how padding works with tabled,
     // this needs to be 3 columns wide rather than 4.
     const ZONE_INDENT: &str = "   ";
-    const DISK_INDENT: &str = SLED_INDENT;
     const METADATA_INDENT: &str = "  ";
     const METADATA_DIFF_INDENT: &str = "   ";
 
-    const ADDED_PREFIX: char = '+';
-    const REMOVED_PREFIX: char = '-';
-    const MODIFIED_PREFIX: char = '*';
-    const UNCHANGED_PREFIX: char = ' ';
+    // TODO: Revert pub
+    pub const ADDED_PREFIX: char = '+';
+    pub const REMOVED_PREFIX: char = '-';
+    pub const MODIFIED_PREFIX: char = '*';
+    pub const UNCHANGED_PREFIX: char = ' ';
     const WARNING_PREFIX: char = '!';
 
     const ARROW: &str = "->";
@@ -2494,28 +2481,12 @@ mod table_display {
         ]
     }
 
-    fn diff_disk_header_row() -> Vec<String> {
-        vec![
-            // First column is so that the header border aligns with the ZONE
-            // TABLE section header.
-            DISK_HEAD_INDENT.to_string(),
-            VENDOR.to_string(),
-            MODEL.to_string(),
-            SERIAL.to_string(),
-            STATUS.to_string(),
-        ]
-    }
-
     pub(super) fn metadata_heading() -> String {
         format!("{METADATA_HEADING}:")
     }
 
     pub(super) fn metadata_diff_heading() -> String {
         format!("{H1_INDENT}{METADATA_HEADING}:")
-    }
-
-    fn disks_heading(heading: &'static str) -> String {
-        format!("{UNCHANGED_PREFIX}{SLED_HEAD_INDENT}{heading}:")
     }
 
     fn sleds_heading(prefix: char, heading: &'static str) -> String {
