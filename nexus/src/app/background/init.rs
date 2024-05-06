@@ -18,6 +18,7 @@ use super::nat_cleanup;
 use super::phantom_disks;
 use super::physical_disk_adoption;
 use super::region_replacement;
+use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
@@ -90,6 +91,10 @@ pub struct BackgroundTasks {
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
+
+    /// task handle for propagation of VPC firewall rules for Omicron services
+    /// with external network connectivity,
+    pub task_service_firewall_propagation: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -325,7 +330,7 @@ impl BackgroundTasks {
         // process
         let task_region_replacement = {
             let detector = region_replacement::RegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
                 saga_request.clone(),
             );
 
@@ -340,6 +345,21 @@ impl BackgroundTasks {
 
             task
         };
+
+        // Background task: service firewall rule propagation
+        let task_service_firewall_propagation = driver.register(
+            String::from("service_firewall_rule_propagation"),
+            String::from(
+                "propagates VPC firewall rules for Omicron \
+                services with external network connectivity",
+            ),
+            config.service_firewall_propagation.period_secs,
+            Box::new(service_firewall_rules::ServiceRulePropagator::new(
+                datastore.clone(),
+            )),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
 
         BackgroundTasks {
             driver,
@@ -360,6 +380,7 @@ impl BackgroundTasks {
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_region_replacement,
+            task_service_firewall_propagation,
         }
     }
 

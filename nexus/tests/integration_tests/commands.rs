@@ -109,7 +109,7 @@ fn test_nexus_openapi() {
         .expect("stdout was not valid OpenAPI");
     assert_eq!(spec.openapi, "3.0.3");
     assert_eq!(spec.info.title, "Oxide Region API");
-    assert_eq!(spec.info.version, "20240327.0");
+    assert_eq!(spec.info.version, "20240502.0");
 
     // Spot check a couple of items.
     assert!(!spec.paths.paths.is_empty());

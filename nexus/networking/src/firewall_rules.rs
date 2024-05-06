@@ -9,6 +9,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -16,12 +17,14 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::NetworkInterface;
 use slog::debug;
+use slog::error;
 use slog::info;
 use slog::warn;
 use slog::Logger;
@@ -186,6 +189,44 @@ pub async fn resolve_firewall_rules_for_sled_agent(
         "subnet_networks" => ?subnet_networks,
     );
 
+    // Lookup an rules implied by the user-facing services IP allowlist.
+    //
+    // These rules are implicit, and not stored in the firewall rule table,
+    // since they're logically a different thing. However, we implement the
+    // allowlist by _modifying_ any existing rules targeting the internal Oxide
+    // services VPC. The point here is to restrict the hosts allowed to make
+    // connections, but otherwise leave the rules unmodified. For example, we
+    // want to make sure that our external DNS server only receives UDP traffic
+    // on port 53. Adding a _new_ firewall rule for the allowlist with higher
+    // priority would remove this port / protocol requirement. Instead, we
+    // modify the rules in-place.
+    let allowed_ips = if allowlist_applies_to_vpc(vpc) {
+        let allowed_ips =
+            lookup_allowed_source_ips(datastore, opctx, log).await?;
+        match &allowed_ips {
+            AllowedSourceIps::Any => {
+                debug!(
+                    log,
+                    "Allowlist for user-facing services is set to \
+                    allow any inbound traffic. Existing VPC firewall \
+                    rules will not be modified."
+                );
+            }
+            AllowedSourceIps::List(list) => {
+                debug!(
+                    log,
+                    "Found allowlist for user-facing services \
+                    with explicit IP list. Existing VPC firewall \
+                    rules will be modified to match.";
+                    "allow_list" => ?list,
+                );
+            }
+        }
+        Some(allowed_ips)
+    } else {
+        None
+    };
+
     // Compile resolved rules for the sled agents.
     let mut sled_agent_rules = Vec::with_capacity(rules.len());
     for rule in rules {
@@ -266,9 +307,43 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             continue;
         }
 
-        let filter_hosts = match &rule.filter_hosts {
-            None => None,
-            Some(hosts) => {
+        // Construct the set of filter hosts from the DB rule.
+        let filter_hosts = match (&rule.filter_hosts, &allowed_ips) {
+            // No host filters, but we need to insert the allowlist entries.
+            //
+            // This is the expected case when applying rules for the built-in
+            // Oxide-services VPCs, which do not contain host filters. (See
+            // `nexus_db_queries::fixed_data::vpc_firewall_rule` for those
+            // rules.) If those rules change to include any filter hosts, this
+            // logic needs to change as well.
+            (None, Some(allowed_ips)) => match allowed_ips {
+                AllowedSourceIps::Any => None,
+                AllowedSourceIps::List(list) => Some(
+                    list.iter()
+                        .copied()
+                        .map(|ip| HostIdentifier::Ip(ip).into())
+                        .collect(),
+                ),
+            },
+
+            // No rules exist, and we don't need to add anything for the
+            // allowlist.
+            (None, None) => None,
+
+            (Some(_), Some(_)) => {
+                return Err(Error::internal_error(
+                    "While trying to apply the user-facing services allowlist, \
+                    we found unexpected host filters already in the rules. These \
+                    are expected to have no built-in rules which filter on \
+                    the hosts, so that we can modify the rules to apply the \
+                    allowlist without worrying about destroying those built-in \
+                    host filters."
+                ));
+            }
+
+            // There are host filters, but we don't need to apply the allowlist
+            // to this VPC either, so insert the rules as-is.
+            (Some(hosts), None) => {
                 let mut host_addrs = Vec::with_capacity(hosts.len());
                 for host in hosts {
                     match &host.0 {
@@ -438,4 +513,27 @@ pub async fn plumb_service_firewall_rules(
     )
     .await?;
     Ok(())
+}
+
+/// Return true if the user-facing services allowlist applies to a VPC.
+fn allowlist_applies_to_vpc(vpc: &db::model::Vpc) -> bool {
+    vpc.id() == *SERVICES_VPC_ID
+}
+
+/// Return the list of allowed IPs from the database.
+async fn lookup_allowed_source_ips(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    log: &Logger,
+) -> Result<AllowedSourceIps, Error> {
+    match datastore.allow_list_view(opctx).await {
+        Ok(allowed) => {
+            slog::trace!(log, "fetched allowlist from DB"; "allowed" => ?allowed);
+            allowed.allowed_source_ips()
+        }
+        Err(e) => {
+            error!(log, "failed to fetch allowlist from DB"; "err" => ?e);
+            Err(e)
+        }
+    }
 }

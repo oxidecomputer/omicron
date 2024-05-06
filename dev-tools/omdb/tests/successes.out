@@ -274,6 +274,11 @@ task: "region_replacement"
     detects if a region requires replacing and begins the process
 
 
+task: "service_firewall_rule_propagation"
+    propagates VPC firewall rules for Omicron services with external network
+    connectivity
+
+
 task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
 
@@ -429,6 +434,12 @@ task: "region_replacement"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
+
+task: "service_firewall_rule_propagation"
+  configured period: every 5m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "service_zone_nat_tracker"
   configured period: every 30s

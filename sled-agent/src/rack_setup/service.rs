@@ -748,6 +748,7 @@ impl ServiceInner {
                             .map(|r| NexusTypes::RouteConfig {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
+                                vlan_id: r.vlan_id,
                             })
                             .collect(),
                         addresses: config.addresses.clone(),
@@ -767,6 +768,16 @@ impl ServiceInner {
                                 delay_open: b.delay_open,
                                 idle_hold_time: b.idle_hold_time,
                                 keepalive: b.keepalive,
+                                remote_asn: b.remote_asn,
+                                min_ttl: b.min_ttl,
+                                md5_auth_key: b.md5_auth_key.clone(),
+                                multi_exit_discriminator: b.multi_exit_discriminator,
+                                local_pref: b.local_pref,
+                                enforce_first_as: b.enforce_first_as,
+                                communities: b.communities.clone(),
+                                allowed_export: b.allowed_export.clone(),
+                                allowed_import: b.allowed_import.clone(),
+                                vlan_id: b.vlan_id,
                             })
                             .collect(),
                     })
@@ -777,6 +788,8 @@ impl ServiceInner {
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
                         originate: config.originate.clone(),
+                        shaper: config.shaper.clone(),
+                        checker: config.checker.clone(),
                     })
                     .collect(),
                 bfd: config
@@ -832,6 +845,15 @@ impl ServiceInner {
             })
             .collect();
 
+        // Convert the IP allowlist into the Nexus types.
+        //
+        // This is really infallible. We have a list of IpNet's here, which
+        // we're converting to Nexus client types through their string
+        // representation.
+        let allowed_source_ips =
+            NexusTypes::AllowedSourceIps::try_from(&config.allowed_source_ips)
+                .expect("Expected valid Nexus IP networks");
+
         let request = NexusTypes::RackInitializationRequest {
             blueprint,
             physical_disks,
@@ -844,6 +866,7 @@ impl ServiceInner {
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
             external_port_count: port_discovery_mode.into(),
+            allowed_source_ips,
         };
 
         let notify_nexus = || async {
