@@ -274,7 +274,7 @@ impl Blueprint {
 
 /// The state of the sled in this blueprint, with regards to the parent
 /// blueprint
-enum BpSledTableState {
+enum BpResourceState {
     Unchanged,
     Removed,
     Modified,
@@ -287,19 +287,41 @@ enum BpSledTableState {
 /// [`Blueprint`]s or [`BlueprintDiff`]s. All subresources are contained under
 /// this as their own [`BpSledSubtable`]s. `BpSledSubtable`s cannot be nested.
 struct BpSledTable {
-    pub state: BpSledTableState,
+    pub state: BpResourceState,
     pub sled_id: SledUuid,
     pub subtables: Vec<BpSledSubtable>,
+}
+
+enum BpGeneration {
+    // A value in a single blueprintg
+    Value(Generation),
+
+    // A diff between two blueprints
+    Diff { before: Option<Generation>, after: Option<Generation> },
+}
+
+impl fmt::Display for BpGeneration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let gen = |val: &Option<Generation>| match val {
+            None => "<none>".to_string(),
+            Some(val) => val.to_string(),
+        };
+        match self {
+            BpGeneration::Value(generation) => {
+                write!(f, "at generation {generation}")
+            }
+            BpGeneration::Diff { before, after } => {
+                write!(f, "generation {} -> {}", gen(before), gen(after))
+            }
+        }
+    }
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
 /// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
 struct BpSledSubtable {
     pub table_name: &'static str,
-    // A string that gets printed immediately after the table name.
-    // This is useful for things like generation numbers.
-    // Multiline strings can be utilized with embedded newlines.
-    pub table_meta: String,
+    pub generation: BpGeneration,
     pub column_names: Vec<&'static str>,
     pub rows: Vec<Vec<String>>,
 }
@@ -325,7 +347,6 @@ impl BpSledSubtable {
 impl From<&OmicronPhysicalDisksConfig> for BpSledSubtable {
     fn from(value: &OmicronPhysicalDisksConfig) -> Self {
         let table_name = "physical disks";
-        let table_meta = format!("at generation {}", value.generation);
         let column_names = vec!["vendor", "model", "serial"];
         let rows = value
             .disks
@@ -338,14 +359,18 @@ impl From<&OmicronPhysicalDisksConfig> for BpSledSubtable {
                 ]
             })
             .collect();
-        BpSledSubtable { table_name, table_meta, column_names, rows }
+        BpSledSubtable {
+            table_name,
+            generation: BpGeneration::Value(value.generation),
+            column_names,
+            rows,
+        }
     }
 }
 
 impl From<&BlueprintOrCollectionZonesConfig> for BpSledSubtable {
     fn from(value: &BlueprintOrCollectionZonesConfig) -> Self {
         let table_name = "omicron zones";
-        let table_meta = format!("at generation {}", value.generation());
         let column_names =
             vec!["zone type", "zone id", "disposition", "underlay IP"];
         let rows = value
@@ -359,7 +384,12 @@ impl From<&BlueprintOrCollectionZonesConfig> for BpSledSubtable {
                 ]
             })
             .collect();
-        BpSledSubtable { table_name, table_meta, column_names, rows }
+        BpSledSubtable {
+            table_name,
+            generation: BpGeneration::Value(value.generation()),
+            column_names,
+            rows,
+        }
     }
 }
 
@@ -377,7 +407,7 @@ impl<'a> fmt::Display for BpSledSubtable {
         writeln!(
             f,
             "{:<SUBTABLE_INDENT$}{} {}:",
-            "", self.table_name, self.table_meta
+            "", self.table_name, self.generation
         )?;
 
         // Write the top header border
@@ -437,8 +467,6 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 .unwrap_or_else(|| String::from("<none>"))
         )?;
 
-        writeln!(f, "\n{}", self.make_zone_table())?;
-
         let mut seen_sleds = BTreeSet::new();
 
         for (sled_id, zones) in &self.blueprint.blueprint_zones {
@@ -450,7 +478,10 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 Some(disks) => BpSledSubtable::from(disks).to_string(),
                 None => "".to_string(),
             };
-            writeln!(f, "\n  sled: {sled_id}\n{zones_table}\n{disks_table}\n")?;
+            writeln!(
+                f,
+                "\n  sled: {sled_id}\n\n{zones_table}\n{disks_table}\n"
+            )?;
             seen_sleds.insert(sled_id);
         }
 
@@ -463,7 +494,6 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 )?;
             }
         }
-        writeln!(f, "\n{}", self.make_physical_disk_table())?;
 
         writeln!(f, "\n{}", table_display::metadata_heading())?;
         writeln!(f, "{}", self.make_metadata_table())?;
@@ -1145,7 +1175,6 @@ impl BlueprintDiff {
     }
 }
 
-// TODO: Rename to `DiffZones`?
 #[derive(Debug)]
 struct DiffSleds {
     added: BTreeMap<SledUuid, BlueprintZonesConfig>,
@@ -1780,75 +1809,6 @@ mod table_display {
     use tabled::Table;
 
     impl<'a> super::BlueprintDisplay<'a> {
-        pub(super) fn make_zone_table(&self) -> Table {
-            let blueprint_zones = &self.blueprint.blueprint_zones;
-            let mut builder = StBuilder::new();
-            builder.push_header_row(zone_header_row());
-
-            for (sled_id, sled_zones) in blueprint_zones {
-                let heading = format!(
-                    "{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
-                    sled_zones.generation
-                );
-                builder.make_section(
-                    SectionSpacing::Always,
-                    heading,
-                    |section| {
-                        for zone in &sled_zones.zones {
-                            add_zone_record(
-                                ZONE_INDENT.to_string(),
-                                &zone.clone().into(),
-                                section,
-                            );
-                        }
-
-                        if section.is_empty() {
-                            section.push_nested_heading(
-                                SectionSpacing::IfNotFirst,
-                                format!("{ZONE_HEAD_INDENT}{NO_ZONES_PARENS}"),
-                            );
-                        }
-                    },
-                );
-            }
-
-            builder.build()
-        }
-
-        pub(super) fn make_physical_disk_table(&self) -> Table {
-            let blueprint_disks = &self.blueprint.blueprint_disks;
-            let mut builder = StBuilder::new();
-            builder.push_header_row(physical_disk_header_row());
-            for (sled_id, config) in blueprint_disks {
-                let heading = format!(
-                    "{SLED_INDENT}sled {sled_id}: blueprint disks at generation {}",
-                    config.generation
-                );
-                builder.make_section(
-                    SectionSpacing::Always,
-                    heading,
-                    |section| {
-                        for disk in &config.disks {
-                            add_physical_disk_record(
-                                DISK_INDENT.to_string(),
-                                &disk.identity,
-                                section,
-                            );
-                        }
-
-                        if section.is_empty() {
-                            section.push_nested_heading(
-                                SectionSpacing::IfNotFirst,
-                                format!("{DISK_HEAD_INDENT}{NO_DISKS_PARENS}"),
-                            );
-                        }
-                    },
-                );
-            }
-
-            builder.build()
-        }
-
         pub(super) fn make_metadata_table(&self) -> Table {
             let mut builder = Builder::new();
 
@@ -2513,7 +2473,6 @@ mod table_display {
 
     const UNCHANGED_PARENS: &str = "(unchanged)";
     const NO_ZONES_PARENS: &str = "(no zones)";
-    const NO_DISKS_PARENS: &str = "(no disks)";
     const NONE_PARENS: &str = "(none)";
     const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
@@ -2521,18 +2480,6 @@ mod table_display {
     const VENDOR: &str = "vendor";
     const MODEL: &str = "model";
     const SERIAL: &str = "serial";
-
-    fn zone_header_row() -> Vec<String> {
-        vec![
-            // First column is so that the header border aligns with the ZONE
-            // TABLE section header.
-            SLED_INDENT.to_string(),
-            ZONE_TYPE.to_string(),
-            ZONE_ID.to_string(),
-            DISPOSITION.to_string(),
-            UNDERLAY_IP.to_string(),
-        ]
-    }
 
     fn diff_zone_header_row() -> Vec<String> {
         vec![
@@ -2556,17 +2503,6 @@ mod table_display {
             MODEL.to_string(),
             SERIAL.to_string(),
             STATUS.to_string(),
-        ]
-    }
-
-    fn physical_disk_header_row() -> Vec<String> {
-        vec![
-            // First column is so that the header border aligns with the ZONE
-            // TABLE section header.
-            SLED_INDENT.to_string(),
-            VENDOR.to_string(),
-            MODEL.to_string(),
-            SERIAL.to_string(),
         ]
     }
 

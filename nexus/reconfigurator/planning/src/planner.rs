@@ -435,8 +435,6 @@ mod test {
 
         println!("{}", blueprint1.display());
 
-        return;
-
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
         // fix.
