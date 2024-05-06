@@ -395,11 +395,11 @@ impl BackgroundTask for InstanceWatcher {
 
             // Now, wait for the check results to come back.
             let mut total: usize = 0;
-            let mut instance_states: BTreeMap<InstanceState, usize> =
+            let mut instance_states: BTreeMap<String, usize> =
                 BTreeMap::new();
-            let mut check_failures: BTreeMap<Failure, usize> =
+            let mut check_failures: BTreeMap<String, usize> =
                 BTreeMap::new();
-            let mut check_errors: BTreeMap<Incomplete, usize> = BTreeMap::new();
+            let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
             while let Some(result) = tasks.join_next().await {
                 total += 1;
                 let Check { target, outcome, result } = result.expect(
@@ -416,17 +416,17 @@ impl BackgroundTask for InstanceWatcher {
                     match outcome {
                         CheckOutcome::Success(state) => {
                             *instance_states
-                                .entry(state)
+                                .entry(state.to_string())
                                 .or_default() += 1;
                         }
                         CheckOutcome::Failure(reason) => {
-                            *check_failures.entry(reason).or_default() += 1;
+                            *check_failures.entry(reason.to_string()).or_default() += 1;
                         }
                     }
                 }
                 if let Err(reason) = result {
                     metric.check_error(reason);
-                    *check_errors.entry(reason).or_default() += 1;
+                    *check_errors.entry(reason.to_string()).or_default() += 1;
                 }
             }
 
