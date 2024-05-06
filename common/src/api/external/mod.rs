@@ -2791,7 +2791,7 @@ pub struct BgpPeer {
     /// The address of the host to peer with.
     pub addr: IpAddr,
 
-    /// How long to hold peer connections between keppalives (seconds).
+    /// How long to hold peer connections between keepalives (seconds).
     pub hold_time: u32,
 
     /// How long to hold a peer in idle before attempting a new session

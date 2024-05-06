@@ -9841,7 +9841,7 @@
             "type": "boolean"
           },
           "hold_time": {
-            "description": "How long to hold peer connections between keppalives (seconds).",
+            "description": "How long to hold peer connections between keepalives (seconds).",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
