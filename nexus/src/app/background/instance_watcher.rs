@@ -338,11 +338,11 @@ impl BackgroundTask for InstanceWatcher {
                 let batch = match maybe_batch {
                     Ok(batch) => batch,
                     Err(e) => {
-                        slog::warn!(
+                        slog::error!(
                             opctx.log,
                             "sled instances by sled agent query failed: {e}"
                         );
-                        break;
+                        return serde_json::json!({ "error": e.to_string() });
                     }
                 };
                 paginator = p.found_batch(&batch, &|(sled, _, _, _)| sled.id());
