@@ -890,23 +890,22 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "service_firewall_rule_propagation" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// Elapsed duration of the propagation
-            elapsed: std::time::Duration,
-        }
-
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<serde_json::Value>(details.clone()) {
+            Ok(serde_json::Value::Object(map)) => {
+                if !map.is_empty() {
+                    eprintln!(
+                        "    unexpected return value from task: {:?}",
+                        map
+                    )
+                }
+            }
+            Ok(val) => {
+                eprintln!("    unexpected return value from task: {:?}", val)
+            }
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(success) => {
-                println!(
-                    "    successfully propagated rules in {:?}",
-                    success.elapsed,
-                );
-            }
         }
     } else {
         println!(

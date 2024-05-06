@@ -88,9 +88,7 @@ mod tests {
         fixed_data::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID,
     };
     use nexus_test_utils::db::test_setup_database;
-    use omicron_common::api::external::{
-        self, Error, LookupType, ResourceType,
-    };
+    use omicron_common::api::external;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -99,20 +97,14 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // There should be nothing to begin with.
-        let result = datastore
+        // Should have the default to start with.
+        let record = datastore
             .allow_list_view(&opctx)
             .await
-            .expect_err("Expected query to fail when there are no records");
-        assert_eq!(
-            result,
-            Error::ObjectNotFound {
-                type_name: ResourceType::AllowList,
-                lookup_type: LookupType::ById(
-                    USER_FACING_SERVICES_ALLOW_LIST_ID
-                )
-            },
-            "Expected an ObjectNotFound error when there is no IP allowlist"
+            .expect("Expected default data populated in dbinit.sql");
+        assert!(
+            record.allowed_ips.is_none(),
+            "Expected default ANY allowlist, represented as NULL in the DB"
         );
 
         // Upsert an allowlist, with some specific IPs.

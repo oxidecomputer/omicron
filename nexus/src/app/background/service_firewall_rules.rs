@@ -58,8 +58,14 @@ impl BackgroundTask for ServiceRulePropagator {
                 );
                 serde_json::json!({"error" : e.to_string()})
             } else {
-                debug!(log, "successfully propagated service firewall rules");
-                serde_json::json!({"elapsed": start.elapsed()})
+                // No meaningful data to return, the duration is already
+                // captured by the driver itself.
+                debug!(
+                    log,
+                    "successfully propagated service firewall rules";
+                    "elapsed" => ?start.elapsed()
+                );
+                serde_json::json!({})
             }
         }
         .boxed()

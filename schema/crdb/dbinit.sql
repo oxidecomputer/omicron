@@ -3818,6 +3818,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.allow_list (
     allowed_ips INET[] CHECK (array_length(allowed_ips, 1) > 0)
 );
 
+-- Insert default allowlist, allowing all traffic.
+-- See `schema/crdb/insert-default-allowlist/up.sql` for details.
+INSERT INTO omicron.public.allow_list (id, time_created, time_modified, allowed_ips)
+VALUES (
+    '001de000-a110-4000-8000-000000000000',
+    NOW(),
+    NOW(),
+    NULL
+)
+ON CONFLICT (id)
+DO NOTHING;
+
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -3829,7 +3842,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '57.0.0', NULL)
+    (TRUE, NOW(), NOW(), '58.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

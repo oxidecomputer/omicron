@@ -440,7 +440,6 @@ task: "service_firewall_rule_propagation"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: Object (of type ById(..........<REDACTED_UUID>...........)) not found: allow-list
 
 task: "service_zone_nat_tracker"
   configured period: every 30s
