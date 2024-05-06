@@ -31,7 +31,6 @@ use nexus_types::external_api::params::AddressLotBlockCreate;
 use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
-use nexus_types::external_api::params::BgpPeer;
 use nexus_types::external_api::params::LinkConfigCreate;
 use nexus_types::external_api::params::LldpServiceConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
@@ -50,6 +49,7 @@ use nexus_types::external_api::views;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
+use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -549,9 +549,6 @@ impl super::Nexus {
                 .bgp_peers
                 .iter()
                 .map(|r| BgpPeer {
-                    bgp_announce_set: NameOrId::Name(
-                        format!("as{}-announce", r.asn).parse().unwrap(),
-                    ),
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),

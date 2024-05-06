@@ -17,10 +17,10 @@ use crate::{SqlU16, SqlU8};
 use db_macros::Resource;
 use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::params::{self, BgpPeer};
+use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::api::external::ImportExportPolicy;
+use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -110,12 +110,22 @@ impl From<SwitchLinkFec> for PortFec {
     }
 }
 
-impl From<params::LinkFec> for SwitchLinkFec {
-    fn from(value: params::LinkFec) -> Self {
+impl From<external::LinkFec> for SwitchLinkFec {
+    fn from(value: external::LinkFec) -> Self {
         match value {
-            params::LinkFec::Firecode => SwitchLinkFec::Firecode,
-            params::LinkFec::None => SwitchLinkFec::None,
-            params::LinkFec::Rs => SwitchLinkFec::Rs,
+            external::LinkFec::Firecode => SwitchLinkFec::Firecode,
+            external::LinkFec::None => SwitchLinkFec::None,
+            external::LinkFec::Rs => SwitchLinkFec::Rs,
+        }
+    }
+}
+
+impl From<SwitchLinkFec> for external::LinkFec {
+    fn from(value: SwitchLinkFec) -> Self {
+        match value {
+            SwitchLinkFec::Firecode => external::LinkFec::Firecode,
+            SwitchLinkFec::None => external::LinkFec::None,
+            SwitchLinkFec::Rs => external::LinkFec::Rs,
         }
     }
 }
@@ -136,18 +146,34 @@ impl From<SwitchLinkSpeed> for PortSpeed {
     }
 }
 
-impl From<params::LinkSpeed> for SwitchLinkSpeed {
-    fn from(value: params::LinkSpeed) -> Self {
+impl From<external::LinkSpeed> for SwitchLinkSpeed {
+    fn from(value: external::LinkSpeed) -> Self {
         match value {
-            params::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
-            params::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
-            params::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
-            params::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
-            params::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
-            params::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
-            params::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
-            params::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
-            params::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
+            external::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
+            external::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
+            external::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
+            external::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
+            external::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
+            external::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
+            external::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
+            external::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
+            external::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
+        }
+    }
+}
+
+impl From<SwitchLinkSpeed> for external::LinkSpeed {
+    fn from(value: SwitchLinkSpeed) -> Self {
+        match value {
+            SwitchLinkSpeed::Speed0G => external::LinkSpeed::Speed0G,
+            SwitchLinkSpeed::Speed1G => external::LinkSpeed::Speed1G,
+            SwitchLinkSpeed::Speed10G => external::LinkSpeed::Speed10G,
+            SwitchLinkSpeed::Speed25G => external::LinkSpeed::Speed25G,
+            SwitchLinkSpeed::Speed40G => external::LinkSpeed::Speed40G,
+            SwitchLinkSpeed::Speed50G => external::LinkSpeed::Speed50G,
+            SwitchLinkSpeed::Speed100G => external::LinkSpeed::Speed100G,
+            SwitchLinkSpeed::Speed200G => external::LinkSpeed::Speed200G,
+            SwitchLinkSpeed::Speed400G => external::LinkSpeed::Speed400G,
         }
     }
 }
@@ -391,6 +417,9 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
             lldp_service_config_id: self.lldp_service_config_id,
             link_name: self.link_name.clone(),
             mtu: self.mtu.into(),
+            fec: self.fec.into(),
+            speed: self.speed.into(),
+            autoneg: self.autoneg,
         }
     }
 }
@@ -672,17 +701,6 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
-        }
-    }
-}
-
-impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
-    fn into(self) -> external::SwitchPortBgpPeerConfig {
-        external::SwitchPortBgpPeerConfig {
-            port_settings_id: self.port_settings_id,
-            bgp_config_id: self.bgp_config_id,
-            interface_name: self.interface_name.clone(),
-            addr: self.addr.ip(),
         }
     }
 }
