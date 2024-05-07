@@ -275,6 +275,8 @@ fn remove_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
         if output.to_string().contains("No such zone configured") {
             println!("zone {npu_zone} already destroyed");
             return Ok(());
+        } else {
+            return Err(output);
         }
     }
     Ok(())
