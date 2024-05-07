@@ -2507,11 +2507,11 @@ impl ServiceManager {
                             );
 
                             let baseboard_info =
-                                serde_json::to_string_pretty(&baseboard)?;
+                                serde_json::to_string(&baseboard)?;
 
                             switch_zone_setup_config =
                                 switch_zone_setup_config.clone().add_property(
-                                    "config/baseboard_info",
+                                    "baseboard_info",
                                     "astring",
                                     &baseboard_info,
                                 );
@@ -2972,6 +2972,7 @@ impl ServiceManager {
                             .add_property_group(switch_zone_setup_config),
                     );
 
+                // What happens if I change this to "switch"?
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_dns_client_service)

@@ -510,7 +510,7 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
-        info!(zone.log, "Zone booting");
+        info!(zone.log, "Booting {} zone", zone.name);
 
         Zones::boot(&zone.name).await?;
 
@@ -527,6 +527,9 @@ impl RunningZone {
                 service: fmri.to_string(),
                 zone: zone.name.to_string(),
             })?;
+
+        // TODO https://github.com/oxidecomputer/omicron/issues/1898:
+        // Remove all non-self assembling code
 
         // If the zone is self-assembling, then SMF service(s) inside the zone
         // will be creating the listen address for the zone's service(s),

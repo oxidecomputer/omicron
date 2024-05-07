@@ -222,7 +222,7 @@ impl SwitchZoneUser {
         } else {
             info!(&log, "Remove user profiles"; "user" => self.user.clone());
             let cmd = std::process::Command::new("usermod")
-                .args(["-P", "''", &self.user])
+                .args(["-P", "", &self.user])
                 .output()
                 .map_err(|err| {
                     CmdError::Failure(anyhow!(
@@ -558,6 +558,7 @@ async fn switch_zone_setup(
 ) -> Result<(), CmdError> {
     let file: &String = matches.get_one("baseboard_file").unwrap();
     let info: &String = matches.get_one("baseboard_info").unwrap();
+    // TODO: Get rid of zone name?
     let zone_name: &String = matches.get_one("zone_name").unwrap();
     let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
     let bootstrap_name: &String = matches.get_one("bootstrap_name").unwrap();
@@ -602,17 +603,17 @@ async fn switch_zone_setup(
     // Clap only checks if a flag is present or not. In this case, an
     // empty list could sneak through if the flag is set without a value
     // like `-l ""`.
-    if !links.is_empty() {
+    if links.is_empty() {
         return Err(CmdError::Failure(anyhow!(
             "At least one link local link must be provided"
         )));
     } else {
         info!(&log, "Ensuring link local links"; "links" => ?links, "zone name" => ?zone_name);
         for link in &links {
-            println!("{link}");
-            println!("{zone_name}");
+          //  println!("{link}");
+          //  println!("{zone_name}");
             Zones::ensure_has_link_local_v6_address(
-                Some(zone_name),
+                None,
                 &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
             )
             .map_err(|err| {
@@ -638,10 +639,13 @@ async fn switch_zone_setup(
                 err
             ))
         })?;
-    let _ = Zones::ensure_address(Some(&zone_name), &addrobj, addrtype)
+    // TODO: Fix error
+    // root@oxz_switch:~# /usr/sbin/ipadm create-addr -t -T static -a fdb0:a8a1:59c7:4e85::2/64 oxBootstrap0/bootstrap6
+    // ipadm: Could not create address: Can't assign requested address
+    let _ = Zones::ensure_address(None, &addrobj, addrtype)
         .map_err(|err| {
             CmdError::Failure(anyhow!(
-                "Could not address {} {:?}: {}",
+                "Could not ensure address {} {:?}: {}",
                 addrobj,
                 addrtype,
                 err

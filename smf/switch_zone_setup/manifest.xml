@@ -12,7 +12,7 @@
   </dependency>
 
   <exec_method type='method' name='start' 
-    exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i %{config/baseboard_info} -l %{config/link_local_links} -z %{config/zone_name} -a %{config/bootstrap_addr} -n %{config/bootstrap_name} -v %{config/bootstrap_vnic} -g %{config/gz_local_link_addr}'
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i "%{config/baseboard_info}" -l %{config/link_local_links} -z %{config/zone_name} -a %{config/bootstrap_addr} -n %{config/bootstrap_name} -v %{config/bootstrap_vnic} -g %{config/gz_local_link_addr}'
     timeout_seconds='300'>
   </exec_method>
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
