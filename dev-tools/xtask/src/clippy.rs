@@ -71,7 +71,7 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         // `declare_interior_mutable_const` is classified as a style lint, but
         // it can identify real bugs (e.g., declarying a `const Atomic` and
         // using it like a `static Atomic`). However, it is also subject to
-        // false positives (e.g., idiomatically declarying a static array of
+        // false positives (e.g., idiomatically declaring a static array of
         // atomics uses `const Atomic`). We warn on this to catch the former,
         // and expect any uses of the latter to allow this locally.
         .arg("--warn")
