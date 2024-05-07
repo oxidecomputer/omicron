@@ -713,20 +713,6 @@ async fn srrs_create_fake_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Check result of volume_create, make sure the VCR is the same as this
-    // node's invocation.
-
-    let created_volume_vcr: VolumeConstructionRequest =
-        serde_json::from_str(&created_volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    if created_volume_vcr != volume_construction_request {
-        return Err(ActionError::action_failed(Error::internal_error(
-            "VOLUME VCR MISMATCH",
-        )));
-    }
-
     Ok(())
 }
 
