@@ -13,6 +13,8 @@ use crate::db::model::Region;
 use crate::db::model::RegionReplacement;
 use crate::db::model::RegionReplacementState;
 use crate::db::model::RegionReplacementStep;
+use crate::db::model::UpstairsRepairNotification;
+use crate::db::model::UpstairsRepairNotificationType;
 use crate::db::model::VolumeRepair;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -292,8 +294,8 @@ impl DataStore {
         }
     }
 
-    /// Find a region replacement request by new region id
-    pub async fn lookup_region_replacement_request_by_new_region_id(
+    /// Find an in-progress region replacement request by new region id
+    pub async fn lookup_in_progress_region_replacement_request_by_new_region_id(
         &self,
         opctx: &OpContext,
         new_region_id: TypedUuid<DownstairsRegionKind>,
@@ -305,6 +307,7 @@ impl DataStore {
                 dsl::new_region_id
                     .eq(nexus_db_model::to_db_typed_uuid(new_region_id)),
             )
+            .filter(dsl::replacement_state.ne(RegionReplacementState::Complete))
             .get_result_async::<RegionReplacement>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -730,6 +733,46 @@ impl DataStore {
 
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
+    }
+
+    /// Check if a region replacement request has at least one matching
+    /// successful "repair finished" notification.
+    //
+    // For the purposes of changing the state of a region replacement request to
+    // `ReplacementDone`, check if Nexus has seen at least related one
+    // successful "repair finished" notification.
+    //
+    // Note: after a region replacement request has transitioned to `Complete`,
+    // there may be many future "repair finished" notifications for the "new"
+    // region that are unrelated to the replacement request.
+    pub async fn request_has_matching_successful_finish_notification(
+        &self,
+        opctx: &OpContext,
+        region_replacement: &RegionReplacement,
+    ) -> Result<bool, Error> {
+        let Some(new_region_id) = region_replacement.new_region_id else {
+            return Err(Error::invalid_request(format!(
+                "region replacement {} has no new region id!",
+                region_replacement.id,
+            )));
+        };
+
+        use db::schema::upstairs_repair_notification::dsl;
+
+        let maybe_notification = dsl::upstairs_repair_notification
+            .filter(dsl::region_id.eq(new_region_id))
+            .filter(
+                dsl::notification_type
+                    .eq(UpstairsRepairNotificationType::Succeeded),
+            )
+            .first_async::<UpstairsRepairNotification>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(maybe_notification.is_some())
     }
 }
 

@@ -119,26 +119,16 @@ impl super::Nexus {
             if !repair_finish_info.aborted {
                 let maybe_region_replacement = self
                     .datastore()
-                    .lookup_region_replacement_request_by_new_region_id(
+                    .lookup_in_progress_region_replacement_request_by_new_region_id(
                         opctx,
                         repaired_downstairs.region_uuid,
                     )
                     .await?;
 
-                if let Some(region_replacement) = maybe_region_replacement {
-                    // A region replacement started by Nexus successfully
-                    // completed. Update the record in the database, which will
-                    // kick off the associated finish saga to clean up
-                    // resources.
-
-                    self.datastore()
-                        .mark_region_replacement_as_done(
-                            opctx,
-                            region_replacement.id,
-                        )
-                        .await?;
-                } else {
-                    // A live repair completed that was not started by Nexus.
+                if maybe_region_replacement.is_none() {
+                    // A live repair or reconciliation completed successfully,
+                    // but there is no in-progress region replacement request
+                    // for that region, so it wasn't initated by Nexus.
                     //
                     // TODO-followup if there are too many repairs to the same
                     // downstairs, do something with that information.
