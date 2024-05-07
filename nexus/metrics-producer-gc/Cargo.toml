@@ -3,6 +3,9 @@ name = "nexus-metrics-producer-gc"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
