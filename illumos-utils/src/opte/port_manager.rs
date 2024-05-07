@@ -107,7 +107,8 @@ impl PortManager {
     ) -> Result<(Port, PortTicket), Error> {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
-        let subnet = IpNetwork::from(nic.subnet);
+        let subnet =
+            IpNetwork::new(nic.subnet.addr(), nic.subnet.prefix()).unwrap();
         let vpc_subnet = IpCidr::from(subnet);
         let gateway = Gateway::from_subnet(&subnet);
 

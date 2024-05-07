@@ -29,10 +29,10 @@ use crate::RequestAddressError;
     Deserialize,
 )]
 #[diesel(sql_type = sql_types::Inet)]
-pub struct Ipv6Net(pub external::Ipv6Net);
+pub struct Ipv6Net(pub oxnet::Ipv6Net);
 
-NewtypeFrom! { () pub struct Ipv6Net(external::Ipv6Net); }
-NewtypeDeref! { () pub struct Ipv6Net(external::Ipv6Net); }
+NewtypeFrom! { () pub struct Ipv6Net(oxnet::Ipv6Net); }
+NewtypeDeref! { () pub struct Ipv6Net(oxnet::Ipv6Net); }
 
 impl Ipv6Net {
     /// Generate a random subnetwork from this one, of the given prefix length.

@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow.workspace = true
 omicron-common.workspace = true
 owo-colors.workspace = true
+oxnet.workspace = true
 gateway-client.workspace = true
 ipnetwork.workspace = true
 maplit.workspace = true

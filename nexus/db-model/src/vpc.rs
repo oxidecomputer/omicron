@@ -14,6 +14,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::Ipv6NetExt;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;

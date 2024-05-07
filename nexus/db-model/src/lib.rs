@@ -432,9 +432,9 @@ mod tests {
     use ipnetwork::Ipv4Network;
     use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::IpNet;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;

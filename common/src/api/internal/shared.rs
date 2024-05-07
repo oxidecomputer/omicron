@@ -6,9 +6,10 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, Name},
 };
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -53,7 +54,7 @@ pub struct NetworkInterface {
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
+    pub subnet: IpNet,
     pub vni: external::Vni,
     pub primary: bool,
     pub slot: u8,
@@ -527,13 +528,6 @@ impl TryFrom<Vec<IpNet>> for AllowedSourceIps {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for AllowedSourceIps {
-    type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
-        IpAllowList::try_from(list).map(Self::List)
-    }
-}
-
 /// A non-empty allowlist of IP subnets.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(try_from = "Vec<IpNet>", into = "Vec<IpNet>")]
@@ -580,23 +574,10 @@ impl TryFrom<Vec<IpNet>> for IpAllowList {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for IpAllowList {
-    type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
-        if list.is_empty() {
-            return Err("IP allowlist must not be empty");
-        }
-        Ok(Self(list.iter().copied().map(Into::into).collect()))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::api::{
-        external::{IpNet, Ipv4Net, Ipv6Net},
-        internal::shared::AllowedSourceIps,
-    };
-    use ipnetwork::{Ipv4Network, Ipv6Network};
+    use crate::api::internal::shared::AllowedSourceIps;
+    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[test]
@@ -608,17 +589,17 @@ mod tests {
         assert_eq!(
             parsed,
             AllowedSourceIps::try_from(vec![
-                IpNet::from(Ipv4Addr::LOCALHOST),
-                IpNet::V4(Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
-                )),
-                IpNet::V6(Ipv6Net(
-                    Ipv6Network::new(
+                Ipv4Net::host_net(Ipv4Addr::LOCALHOST).into(),
+                IpNet::V4(
+                    Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
+                ),
+                IpNet::V6(
+                    Ipv6Net::new(
                         Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
                         64
                     )
                     .unwrap()
-                )),
+                ),
             ])
             .unwrap()
         );

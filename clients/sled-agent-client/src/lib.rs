@@ -46,7 +46,6 @@ progenitor::generate_api!(
         Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
-        Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
@@ -412,24 +411,23 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
-    fn from(n: omicron_common::api::external::Ipv4Net) -> Self {
+impl From<oxnet::Ipv4Net> for types::Ipv4Net {
+    fn from(n: oxnet::Ipv4Net) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }
 }
 
-impl From<omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
-    fn from(n: omicron_common::api::external::Ipv6Net) -> Self {
+impl From<oxnet::Ipv6Net> for types::Ipv6Net {
+    fn from(n: oxnet::Ipv6Net) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }
 }
 
-impl From<omicron_common::api::external::IpNet> for types::IpNet {
-    fn from(s: omicron_common::api::external::IpNet) -> Self {
-        use omicron_common::api::external::IpNet;
+impl From<oxnet::IpNet> for types::IpNet {
+    fn from(s: oxnet::IpNet) -> Self {
         match s {
-            IpNet::V4(v4) => Self::V4(v4.into()),
-            IpNet::V6(v6) => Self::V6(v6.into()),
+            oxnet::IpNet::V4(v4) => Self::V4(v4.into()),
+            oxnet::IpNet::V6(v6) => Self::V6(v6.into()),
         }
     }
 }
@@ -440,14 +438,14 @@ impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
     }
 }
 
-impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
+impl From<types::Ipv4Net> for oxnet::Ipv4Net {
     fn from(n: types::Ipv4Net) -> Self {
         n.parse().unwrap()
     }
 }
 
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
+impl From<oxnet::Ipv4Net> for types::Ipv4Network {
+    fn from(n: oxnet::Ipv4Net) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }
 }
@@ -480,6 +478,12 @@ impl From<types::IpNet> for ipnetwork::IpNetwork {
             types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
             types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
         }
+    }
+}
+
+impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
+    fn from(n: types::Ipv4Net) -> Self {
+        n.parse().unwrap()
     }
 }
 

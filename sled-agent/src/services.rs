@@ -2543,7 +2543,7 @@ impl ServiceManager {
                                 );
                                 smfh.setprop(
                                     "config/rack-subnet",
-                                    &rack_subnet.net().ip().to_string(),
+                                    &rack_subnet.net().addr().to_string(),
                                 )?;
                             }
 
@@ -3995,12 +3995,12 @@ impl ServiceManager {
 
                                 info!(
                                     self.inner.log, "configuring wicketd";
-                                    "rack_subnet" => %rack_subnet.net().ip(),
+                                    "rack_subnet" => %rack_subnet.net().addr(),
                                 );
 
                                 smfh.setprop(
                                     "config/rack-subnet",
-                                    &rack_subnet.net().ip().to_string(),
+                                    &rack_subnet.net().addr().to_string(),
                                 )?;
 
                                 smfh.refresh()?;

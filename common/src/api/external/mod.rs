@@ -1222,7 +1222,7 @@ impl DiskState {
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
+struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
     /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
@@ -1283,7 +1283,7 @@ impl JsonSchema for Ipv4Net {
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
 #[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
+struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl Ipv6Net {
     /// The length for all VPC IPv6 prefixes
@@ -1314,6 +1314,25 @@ impl Ipv6Net {
         self.is_unique_local()
             && self.is_subnet_of(vpc_prefix.0)
             && self.prefix() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
+    }
+}
+
+pub trait Ipv6NetExt {
+    /// Return `true` if this subnetwork is a valid VPC prefix.
+    ///
+    /// This checks that the subnet is a unique local address, and has the VPC
+    /// prefix length required.
+    fn is_vpc_prefix(&self) -> bool;
+}
+
+impl Ipv6NetExt for oxnet::Ipv6Net {
+    fn is_vpc_prefix(&self) -> bool {
+        /// The length for all VPC IPv6 prefixes
+        pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+
+        // /// The prefix length for all VPC subnets
+        // pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+        self.is_unique_local() && self.prefix() == VPC_IPV6_PREFIX_LENGTH
     }
 }
 
@@ -1421,7 +1440,7 @@ impl JsonSchema for Ipv6Net {
 
 /// An `IpNet` represents an IP network, either IPv4 or IPv6.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum IpNet {
+enum IpNet {
     V4(Ipv4Net),
     V6(Ipv6Net),
 }
@@ -3199,7 +3218,7 @@ pub enum ImportExportPolicy {
     /// Do not perform any filtering.
     #[default]
     NoFiltering,
-    Allow(Vec<IpNet>),
+    Allow(Vec<oxnet::IpNet>),
 }
 
 #[cfg(test)]

@@ -26,6 +26,7 @@ macaddr.workspace = true
 mg-admin-client.workspace = true
 dpd-client.workspace = true
 omicron-uuid-kinds.workspace = true
+oxnet.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

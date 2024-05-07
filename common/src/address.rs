@@ -7,9 +7,10 @@
 //! This addressing functionality is shared by both initialization services
 //! and Nexus, who need to agree upon addressing schemes.
 
-use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
+use crate::api::external::{self, Error};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use once_cell::sync::Lazy;
+use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -72,6 +73,12 @@ pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
 
 pub const NTP_PORT: u16 = 123;
 
+/// The length for all VPC IPv6 prefixes
+pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+
+/// The prefix length for all VPC Sunets
+pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
 // The number of ports available to an SNAT IP.
 // Note that for static NAT, this value isn't used, and all ports are available.
 //
@@ -104,61 +111,50 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
 // /64's within this prefix.
 pub static SERVICE_VPC_IPV6_PREFIX: Lazy<Ipv6Net> = Lazy::new(|| {
-    Ipv6Net(
-        Ipv6Network::new(
-            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
-            Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
-        )
-        .unwrap(),
+    Ipv6Net::new(
+        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+        VPC_IPV6_PREFIX_LENGTH,
     )
+    .unwrap()
 });
 
 /// The IPv4 subnet for External DNS OPTE ports.
-pub static DNS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
-    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap())
-});
+pub static DNS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> =
+    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
 
 /// The IPv6 subnet for External DNS OPTE ports.
 pub static DNS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
-    Ipv6Net(
-        Ipv6Network::new(
-            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
-            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        )
-        .unwrap(),
+    Ipv6Net::new(
+        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
+        VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
+    .unwrap()
 });
 
 /// The IPv4 subnet for Nexus OPTE ports.
-pub static NEXUS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
-    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap())
-});
+pub static NEXUS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> =
+    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
 
 /// The IPv6 subnet for Nexus OPTE ports.
 pub static NEXUS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
-    Ipv6Net(
-        Ipv6Network::new(
-            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
-            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        )
-        .unwrap(),
+    Ipv6Net::new(
+        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+        VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
+    .unwrap()
 });
 
 /// The IPv4 subnet for Boundary NTP OPTE ports.
-pub static NTP_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
-    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap())
-});
+pub static NTP_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> =
+    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap());
 
 /// The IPv6 subnet for Boundary NTP OPTE ports.
 pub static NTP_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
-    Ipv6Net(
-        Ipv6Network::new(
-            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
-            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        )
-        .unwrap(),
+    Ipv6Net::new(
+        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
+        VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
+    .unwrap()
 });
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
@@ -197,24 +193,26 @@ pub struct Ipv6Subnet<const N: u8> {
 
 impl<const N: u8> Ipv6Subnet<N> {
     pub fn new(addr: Ipv6Addr) -> Self {
+        // TODO should Ipv6Net either validate that the address is canonical or
+        // mask it appropriately? i.e. rendering these steps unnecessary?
         // Create a network with the compile-time prefix length.
-        let net = Ipv6Network::new(addr, N).unwrap();
+        let net = Ipv6Net::new(addr, N).unwrap();
         // Ensure the address is set to within-prefix only components.
-        let net = Ipv6Network::new(net.network(), N).unwrap();
-        Self { net: Ipv6Net(net) }
+        let net = Ipv6Net::new(net.network(), N).unwrap();
+        Self { net }
     }
 
     /// Returns the underlying network.
-    pub fn net(&self) -> Ipv6Network {
-        self.net.0
+    pub fn net(&self) -> Ipv6Net {
+        self.net
     }
 }
 
 impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
     fn from(net: Ipv6Network) -> Self {
         // Ensure the address is set to within-prefix only components.
-        let net = Ipv6Network::new(net.network(), N).unwrap();
-        Self { net: Ipv6Net(net) }
+        let net = Ipv6Net::new(net.network(), N).unwrap();
+        Self { net }
     }
 }
 
@@ -252,24 +250,26 @@ impl DnsSubnet {
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
-    pub fn dns_address(&self) -> Ipv6Network {
-        Ipv6Network::new(
-            self.subnet.net().iter().nth(DNS_ADDRESS_INDEX).unwrap(),
-            SLED_PREFIX,
-        )
-        .unwrap()
+    pub fn dns_address(&self) -> Ipv6Addr {
+        // Ipv6Network::new(
+        //     self.subnet.net().iter().nth(DNS_ADDRESS_INDEX).unwrap(),
+        //     SLED_PREFIX,
+        // )
+        // .unwrap()
+        todo!()
     }
 
     /// Returns the address which the Global Zone should create
     /// to be able to contact the DNS server.
     ///
     /// This is the second address within the subnet.
-    pub fn gz_address(&self) -> Ipv6Network {
-        Ipv6Network::new(
-            self.subnet.net().iter().nth(GZ_ADDRESS_INDEX).unwrap(),
-            SLED_PREFIX,
-        )
-        .unwrap()
+    pub fn gz_address(&self) -> Ipv6Addr {
+        // Ipv6Network::new(
+        //     self.subnet.net().iter().nth(GZ_ADDRESS_INDEX).unwrap(),
+        //     SLED_PREFIX,
+        // )
+        // .unwrap()
+        todo!()
     }
 }
 
@@ -281,7 +281,7 @@ pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX>);
 impl ReservedRackSubnet {
     /// Returns the subnet for the reserved rack subnet.
     pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Self {
-        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().ip()))
+        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().addr()))
     }
 
     /// Returns the DNS addresses from this reserved rack subnet.
@@ -308,7 +308,7 @@ pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
         &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
     dns_subnets
         .iter()
-        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address()))
         .collect()
 }
 
@@ -680,7 +680,7 @@ mod test {
         assert_eq!(
             //              Note that these bits (indicating the rack) are zero.
             //              vv
-            "fd00:1122:3344:0000::/56".parse::<Ipv6Network>().unwrap(),
+            "fd00:1122:3344:0000::/56".parse::<Ipv6Net>().unwrap(),
             rack_subnet.0.net(),
         );
 
@@ -690,11 +690,11 @@ mod test {
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(
-            "fd00:1122:3344:0001::1/64".parse::<Ipv6Network>().unwrap(),
+            "fd00:1122:3344:0001::1".parse::<Ipv6Addr>().unwrap(),
             dns_subnets[0].dns_address(),
         );
         assert_eq!(
-            "fd00:1122:3344:0001::2/64".parse::<Ipv6Network>().unwrap(),
+            "fd00:1122:3344:0001::2".parse::<Ipv6Addr>().unwrap(),
             dns_subnets[0].gz_address(),
         );
     }
