@@ -127,7 +127,7 @@ impl BackgroundTask for RegionReplacementDriver {
             match self.datastore.get_done_region_replacements(opctx).await {
                 Ok(requests) => {
                     for request in requests {
-                        let region = match self.datastore.get_region(request.old_region_id).await {
+                        let region = match self.datastore.get_region_optional(request.old_region_id).await {
                             Ok(region) => region,
 
                             Err(e) => {
@@ -141,6 +141,15 @@ impl BackgroundTask for RegionReplacementDriver {
 
                                 continue;
                             }
+                        };
+
+                        let Some(region) = region else {
+                            // This can occur if this background task is interleaving with
+                            // an execution of the finish saga: `get_region` will return
+                            // nothing because that execution could have deleted the
+                            // volume that pointed to the old region. This is a race, not
+                            // an error, continue to the next request.
+                            continue;
                         };
 
                         let result = self.saga_request.send(sagas::SagaRequest::RegionReplacementFinish {

@@ -71,6 +71,22 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    pub async fn get_region_optional(
+        &self,
+        region_id: Uuid,
+    ) -> Result<Option<Region>, Error> {
+        use db::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     async fn get_block_size_from_disk_source(
         &self,
         opctx: &OpContext,
