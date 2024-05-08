@@ -575,7 +575,8 @@ mod metrics {
         /// failed --- which is distinct from the instance watcher marking an
         /// instance as failed due to a failed check.
         reason: Cow<'static, str>,
-        /// this will be a string representation of the failure reason.
+        /// The number of checks for this instance and sled agent which recorded
+        /// this state for this reason.
         datum: Cumulative<u64>,
     }
 
