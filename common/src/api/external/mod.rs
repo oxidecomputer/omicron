@@ -2579,7 +2579,7 @@ pub enum LinkSpeed {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkFec {
-    /// Firecode foward error correction.
+    /// Firecode forward error correction.
     Firecode,
     /// No forward error correction.
     None,
@@ -2931,7 +2931,7 @@ impl JsonSchema for SwitchLinkState {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum BgpPeerState {
-    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// Initial state. Refuse all incoming BGP connections. No resources
     /// allocated to peer.
     Idle,
 
@@ -2950,7 +2950,7 @@ pub enum BgpPeerState {
     /// Synchronizing with peer.
     SessionSetup,
 
-    /// Session established. Able to exchange update, notification and keepliave
+    /// Session established. Able to exchange update, notification and keepalive
     /// messages with peers.
     Established,
 }

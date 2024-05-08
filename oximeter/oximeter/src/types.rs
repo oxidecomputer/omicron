@@ -17,6 +17,7 @@ use num::traits::Zero;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -77,6 +78,8 @@ macro_rules! impl_field_type_from {
 }
 
 impl_field_type_from! { String, FieldType::String }
+impl_field_type_from! { &'static str, FieldType::String }
+impl_field_type_from! { Cow<'static, str>, FieldType::String }
 impl_field_type_from! { i8, FieldType::I8 }
 impl_field_type_from! { u8, FieldType::U8 }
 impl_field_type_from! { i16, FieldType::I16 }
@@ -103,7 +106,7 @@ impl_field_type_from! { bool, FieldType::Bool }
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
-    String(String),
+    String(Cow<'static, str>),
     I8(i8),
     U8(u8),
     I16(i16),
@@ -147,7 +150,9 @@ impl FieldValue {
             typ: field_type.to_string(),
         };
         match field_type {
-            FieldType::String => Ok(FieldValue::String(s.to_string())),
+            FieldType::String => {
+                Ok(FieldValue::String(Cow::Owned(s.to_string())))
+            }
             FieldType::I8 => {
                 Ok(FieldValue::I8(s.parse().map_err(|_| make_err())?))
             }
@@ -222,14 +227,20 @@ impl_field_value_from! { i32, FieldValue::I32 }
 impl_field_value_from! { u32, FieldValue::U32 }
 impl_field_value_from! { i64, FieldValue::I64 }
 impl_field_value_from! { u64, FieldValue::U64 }
-impl_field_value_from! { String, FieldValue::String }
+impl_field_value_from! { Cow<'static, str>, FieldValue::String }
 impl_field_value_from! { IpAddr, FieldValue::IpAddr }
 impl_field_value_from! { Uuid, FieldValue::Uuid }
 impl_field_value_from! { bool, FieldValue::Bool }
 
 impl From<&str> for FieldValue {
     fn from(value: &str) -> Self {
-        FieldValue::String(String::from(value))
+        FieldValue::String(Cow::Owned(String::from(value)))
+    }
+}
+
+impl From<String> for FieldValue {
+    fn from(value: String) -> Self {
+        FieldValue::String(Cow::Owned(value))
     }
 }
 
