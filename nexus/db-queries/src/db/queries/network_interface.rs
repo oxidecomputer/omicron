@@ -1995,25 +1995,13 @@ mod tests {
             let vpc_id = Uuid::new_v4();
             let mut subnets = Vec::with_capacity(n_subnets as _);
             for i in 0..n_subnets {
-                let ipv4net = Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap(),
-                );
-                let ipv6net = Ipv6Net(
-                    Ipv6Network::new(
-                        Ipv6Addr::new(
-                            0xfd12,
-                            0x3456,
-                            0x7890,
-                            i.into(),
-                            0,
-                            0,
-                            0,
-                            0,
-                        ),
-                        64,
-                    )
-                    .unwrap(),
-                );
+                let ipv4net =
+                    Ipv4Net::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap();
+                let ipv6net = Ipv6Net::new(
+                    Ipv6Addr::new(0xfd12, 0x3456, 0x7890, i.into(), 0, 0, 0, 0),
+                    64,
+                )
+                .unwrap();
                 let subnet = VpcSubnet::new(
                     Uuid::new_v4(),
                     vpc_id,

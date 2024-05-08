@@ -402,8 +402,6 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
-    use oxnet::Ipv4Net;
-    use oxnet::Ipv6Net;
     use std::convert::TryInto;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -415,10 +413,10 @@ mod test {
                 name: name.clone(),
                 description: description.to_string(),
             };
-        let ipv4_block = Ipv4Net("172.30.0.0/22".parse().unwrap());
-        let other_ipv4_block = Ipv4Net("172.31.0.0/22".parse().unwrap());
-        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
-        let other_ipv6_block = Ipv6Net("fd00::/64".parse().unwrap());
+        let ipv4_block = "172.30.0.0/22".parse().unwrap();
+        let other_ipv4_block = "172.31.0.0/22".parse().unwrap();
+        let ipv6_block = "fd12:3456:7890::/64".parse().unwrap();
+        let other_ipv6_block = "fd00::/64".parse().unwrap();
         let name = "a-name".to_string().try_into().unwrap();
         let other_name = "b-name".to_string().try_into().unwrap();
         let description = "some description".to_string();
@@ -497,7 +495,7 @@ mod test {
             .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range");
         assert_eq!(
             err,
-            SubnetError::OverlappingIpRange(IpNetwork::from(ipv6_block.0)),
+            SubnetError::OverlappingIpRange(ipnetwork::IpNetwork::from(oxnet::IpNet::from(ipv6_block))),
             "SubnetError variant should include the exact IP range that overlaps"
         );
         let new_row = VpcSubnet::new(
@@ -513,7 +511,7 @@ mod test {
             .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range");
         assert_eq!(
             err,
-            SubnetError::OverlappingIpRange(IpNetwork::from(ipv4_block.0)),
+            SubnetError::OverlappingIpRange(ipnetwork::IpNetwork::from(oxnet::IpNet::from(ipv4_block))),
             "SubnetError variant should include the exact IP range that overlaps"
         );
 

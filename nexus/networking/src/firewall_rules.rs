@@ -362,7 +362,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         }
                         external::VpcFirewallRuleHostFilter::Subnet(name) => {
                             for subnet in subnet_networks
-                                .get(&name)
+                                .get(name)
                                 .unwrap_or(&no_networks)
                             {
                                 host_addrs.push(
@@ -382,7 +382,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         }
                         external::VpcFirewallRuleHostFilter::Vpc(name) => {
                             for interface in vpc_interfaces
-                                .get(&name)
+                                .get(name)
                                 .unwrap_or(&no_interfaces)
                             {
                                 host_addrs.push(

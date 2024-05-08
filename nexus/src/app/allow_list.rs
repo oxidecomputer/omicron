@@ -53,7 +53,7 @@ impl super::Nexus {
             let mut contains_remote = false;
             for entry in list.iter() {
                 contains_remote = entry.contains(remote_addr);
-                if entry.ip().is_unspecified() {
+                if entry.addr().is_unspecified() {
                     return Err(Error::invalid_request(
                         "Source IP allowlist may not contain the \
                         unspecified address. Use \"any\" to allow \

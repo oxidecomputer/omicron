@@ -22,8 +22,9 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-    InstanceNetworkInterface, Ipv4Net,
+    InstanceNetworkInterface,
 };
+use oxnet::Ipv4Net;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =
@@ -97,7 +98,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
-    let subnet = Ipv4Network::new(network_address, subnet_size)
+    let subnet = Ipv4Net::new(network_address, subnet_size)
         .expect("Invalid IPv4 network");
     let subnet_create = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -105,7 +106,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             description: String::from("a small subnet"),
         },
         // Use the minimum subnet size
-        ipv4_block: Ipv4Net(subnet),
+        ipv4_block: subnet,
         ipv6_block: None,
     };
     NexusRequest::objects_post(client, &subnets_url, &Some(&subnet_create))

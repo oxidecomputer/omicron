@@ -1249,7 +1249,6 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::NetworkInterface;
@@ -1259,6 +1258,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
+    use oxnet::IpNet;
     use slog::info;
     use std::collections::BTreeMap;
     use std::net::IpAddr;

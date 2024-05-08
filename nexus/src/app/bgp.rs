@@ -10,9 +10,9 @@ use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus, CreateResult,
-    DeleteResult, Ipv4Net, ListResultVec, LookupResult, NameOrId,
-    SwitchBgpHistory,
+    DeleteResult, ListResultVec, LookupResult, NameOrId, SwitchBgpHistory,
 };
+use oxnet::Ipv4Net;
 use std::net::IpAddr;
 
 impl super::Nexus {
@@ -202,8 +202,7 @@ impl super::Nexus {
             {
                 Ok(result) => {
                     for (prefix, paths) in result.into_inner().iter() {
-                        let ipnet: ipnetwork::Ipv4Network = match prefix.parse()
-                        {
+                        let ipnet = match prefix.parse() {
                             Ok(p) => p,
                             Err(e) => {
                                 error!(
@@ -220,7 +219,7 @@ impl super::Nexus {
                             };
                             let x = BgpImportedRouteIpv4 {
                                 switch: *switch,
-                                prefix: Ipv4Net(ipnet),
+                                prefix: ipnet,
                                 id: p
                                     .bgp
                                     .as_ref()

@@ -21,12 +21,12 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::retry_until_known_result;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
@@ -549,8 +549,7 @@ pub(crate) async fn instance_ensure_dpd_config(
         ));
     }
 
-    let sled_address =
-        Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
+    let sled_address = Ipv6Net::new(*sled_ip_address.ip(), 128).unwrap();
 
     // If all of our IPs are attached or are guaranteed to be owned
     // by the saga calling this fn, then we need to disregard and
@@ -691,7 +690,7 @@ pub(crate) async fn probe_ensure_dpd_config(
         }
     }
 
-    let sled_address = Ipv6Net(Ipv6Network::new(sled_ip_address, 128).unwrap());
+    let sled_address = Ipv6Net::new(sled_ip_address, 128).unwrap();
 
     for target_ip in ips
         .iter()
@@ -1295,7 +1294,8 @@ async fn ensure_nat_entry(
     match target_ip.ip {
         IpNetwork::V4(v4net) => {
             let nat_entry = Ipv4NatValues {
-                external_address: Ipv4Net(v4net).into(),
+                // TODO could simplify this conversion?
+                external_address: Ipv4Net::from(v4net).into(),
                 first_port: target_ip.first_port,
                 last_port: target_ip.last_port,
                 sled_address: sled_address.into(),

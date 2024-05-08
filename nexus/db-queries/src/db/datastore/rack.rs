@@ -1000,6 +1000,7 @@ mod test {
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
+    use oxnet::IpNet;
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -1337,10 +1338,8 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **DNS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET)
+                                        .into(),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1366,10 +1365,8 @@ mod test {
                                     name: "ntp1".parse().unwrap(),
                                     ip: ntp1_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NTP_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET)
+                                        .into(),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1413,8 +1410,8 @@ mod test {
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
                                     )
                                     .into(),
                                     vni: Vni::SERVICES_VNI,
@@ -1442,10 +1439,8 @@ mod test {
                                     name: "ntp2".parse().unwrap(),
                                     ip: ntp2_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NTP_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET)
+                                        .into(),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1666,8 +1661,8 @@ mod test {
                                     name: "nexus1".parse().unwrap(),
                                     ip: nexus_pip1.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
                                     )
                                     .into(),
                                     vni: Vni::SERVICES_VNI,
@@ -1698,10 +1693,9 @@ mod test {
                                     name: "nexus2".parse().unwrap(),
                                     ip: nexus_pip2.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: oxnet::IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1935,10 +1929,8 @@ mod test {
                                 name: "nexus".parse().unwrap(),
                                 ip: nexus_pip.into(),
                                 mac: macs.next().unwrap(),
-                                subnet: IpNetwork::from(
-                                    **NEXUS_OPTE_IPV4_SUBNET,
-                                )
-                                .into(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET)
+                                    .into(),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
@@ -2039,10 +2031,8 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **DNS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET)
+                                        .into(),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -2071,8 +2061,8 @@ mod test {
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
                                     )
                                     .into(),
                                     vni: Vni::SERVICES_VNI,

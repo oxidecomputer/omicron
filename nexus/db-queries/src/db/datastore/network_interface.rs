@@ -838,7 +838,6 @@ mod tests {
 
         // Insert 10 Nexus NICs
         let ip_range = NEXUS_OPTE_IPV4_SUBNET
-            .0
             .iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);

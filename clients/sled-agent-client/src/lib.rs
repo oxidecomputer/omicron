@@ -46,6 +46,7 @@ progenitor::generate_api!(
         Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
@@ -433,6 +434,12 @@ impl From<oxnet::IpNet> for types::IpNet {
 }
 
 impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
+    fn from(n: ipnetwork::Ipv4Network) -> Self {
+        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
+    }
+}
+
+impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
     fn from(n: ipnetwork::Ipv4Network) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }
