@@ -1634,6 +1634,7 @@ table! {
         request_time -> Timestamptz,
         old_region_id -> Uuid,
         volume_id -> Uuid,
+        old_region_volume_id -> Nullable<Uuid>,
         new_region_id -> Nullable<Uuid>,
         replacement_state -> crate::RegionReplacementStateEnum,
         operating_saga_id -> Nullable<Uuid>,

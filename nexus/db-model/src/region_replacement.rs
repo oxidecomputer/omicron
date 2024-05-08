@@ -65,7 +65,11 @@ pub struct RegionReplacement {
 
     pub old_region_id: Uuid,
 
+    /// The volume whose region is being replaced
     pub volume_id: Uuid,
+
+    /// A synthetic volume that only is used to later delete the old region
+    pub old_region_volume_id: Option<Uuid>,
 
     pub new_region_id: Option<Uuid>,
 
@@ -85,6 +89,7 @@ impl RegionReplacement {
             request_time: Utc::now(),
             old_region_id,
             volume_id,
+            old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
             operating_saga_id: None,

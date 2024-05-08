@@ -707,7 +707,7 @@ async fn srrs_create_fake_volume(
 
     let volume = db::model::Volume::new(new_volume_id, volume_data);
 
-    let created_volume = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
@@ -747,6 +747,8 @@ async fn srrs_update_request_record(
         )?;
     let new_region_id = new_dataset_and_region.1.id();
 
+    let old_region_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+
     // Now that the region has been ensured and the construction request has
     // been updated, update the replacement request record to 'Running' and
     // clear the operating saga id. There is no undo step for this, it should
@@ -757,6 +759,7 @@ async fn srrs_update_request_record(
             params.request.id,
             saga_id,
             new_region_id,
+            old_region_volume_id,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -838,6 +841,7 @@ pub(crate) mod test {
             request_time: Utc::now(),
             old_region_id: region_to_replace.id(),
             volume_id: region_to_replace.volume_id(),
+            old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
             operating_saga_id: None,
@@ -1152,6 +1156,7 @@ pub(crate) mod test {
             request_time: Utc::now(),
             old_region_id: region_to_replace.id(),
             volume_id: region_to_replace.volume_id(),
+            old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
             operating_saga_id: None,
@@ -1226,6 +1231,7 @@ pub(crate) mod test {
             request_time: Utc::now(),
             old_region_id: region_to_replace.id(),
             volume_id: region_to_replace.volume_id(),
+            old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
             operating_saga_id: None,

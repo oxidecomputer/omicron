@@ -236,13 +236,14 @@ pub(crate) mod test {
         );
 
         // Manually insert required records
-        let volume_id = Uuid::new_v4();
+        let old_region_volume_id = Uuid::new_v4();
+        let new_volume_id = Uuid::new_v4();
 
-        let region_to_replace = {
+        let replaced_region = {
             let dataset_id = Uuid::new_v4();
             Region::new(
                 dataset_id,
-                volume_id,
+                old_region_volume_id,
                 512_i64.try_into().unwrap(),
                 10,
                 10,
@@ -254,14 +255,14 @@ pub(crate) mod test {
 
             use nexus_db_model::schema::region::dsl;
             diesel::insert_into(dsl::region)
-                .values(region_to_replace.clone())
+                .values(replaced_region.clone())
                 .execute_async(&*conn)
                 .await
                 .unwrap();
         }
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: volume_id,
+            id: old_region_volume_id,
             block_size: 0,
             sub_volumes: vec![VolumeConstructionRequest::Region {
                 block_size: 0,
@@ -269,8 +270,11 @@ pub(crate) mod test {
                 extent_count: 0,
                 gen: 0,
                 opts: CrucibleOpts {
-                    id: volume_id,
-                    target: vec![],
+                    id: old_region_volume_id,
+                    target: vec![
+                        // XXX if you put something here, you'll need a
+                        // synthetic dataset record
+                    ],
                     lossy: false,
                     flush_timeout: None,
                     key: None,
@@ -287,16 +291,17 @@ pub(crate) mod test {
         let volume_data =
             serde_json::to_string(&volume_construction_request).unwrap();
 
-        let _volume = datastore
-            .volume_create(Volume::new(volume_id, volume_data))
+        datastore
+            .volume_create(Volume::new(old_region_volume_id, volume_data))
             .await
             .unwrap();
 
         let request = RegionReplacement {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
-            old_region_id: region_to_replace.id(),
-            volume_id: region_to_replace.volume_id(),
+            old_region_id: replaced_region.id(),
+            volume_id: new_volume_id,
+            old_region_volume_id: Some(old_region_volume_id),
             new_region_id: None, // no value needed here
             replacement_state: RegionReplacementState::ReplacementDone,
             operating_saga_id: None,
@@ -310,7 +315,7 @@ pub(crate) mod test {
         // Run the region replacement finish saga
         let dag = create_saga_dag::<SagaRegionReplacementFinish>(Params {
             serialized_authn: Serialized::for_opctx(&opctx),
-            region_volume_id: volume_id,
+            region_volume_id: old_region_volume_id,
             request: request.clone(),
         })
         .unwrap();
@@ -329,6 +334,10 @@ pub(crate) mod test {
         assert!(result.operating_saga_id.is_none());
 
         // Validate the Volume was deleted
-        assert!(datastore.volume_get(volume_id).await.unwrap().is_none());
+        assert!(datastore
+            .volume_get(old_region_volume_id)
+            .await
+            .unwrap()
+            .is_none());
     }
 }

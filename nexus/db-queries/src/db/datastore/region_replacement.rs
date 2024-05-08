@@ -251,6 +251,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
         new_region_id: Uuid,
+        old_region_volume_id: Uuid,
     ) -> Result<(), Error> {
         use db::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
@@ -261,6 +262,7 @@ impl DataStore {
             )
             .set((
                 dsl::replacement_state.eq(RegionReplacementState::Running),
+                dsl::old_region_volume_id.eq(Some(old_region_volume_id)),
                 dsl::new_region_id.eq(Some(new_region_id)),
                 dsl::operating_saga_id.eq(Option::<Uuid>::None),
             ))
@@ -277,6 +279,9 @@ impl DataStore {
                     if record.operating_saga_id == None
                         && record.replacement_state
                             == RegionReplacementState::Running
+                        && record.new_region_id == Some(new_region_id)
+                        && record.old_region_volume_id
+                            == Some(old_region_volume_id)
                     {
                         Ok(())
                     } else {

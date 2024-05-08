@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_replacement (
 
     volume_id UUID NOT NULL,
 
+    old_region_volume_id UUID,
+
     new_region_id UUID,
 
     replacement_state omicron.public.region_replacement_state NOT NULL,

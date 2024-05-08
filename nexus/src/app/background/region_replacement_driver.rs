@@ -127,35 +127,21 @@ impl BackgroundTask for RegionReplacementDriver {
             match self.datastore.get_done_region_replacements(opctx).await {
                 Ok(requests) => {
                     for request in requests {
-                        let region = match self.datastore.get_region_optional(request.old_region_id).await {
-                            Ok(region) => region,
+                        let Some(old_region_volume_id) = request.old_region_volume_id else {
+                            // This state is illegal!
+                            error!(
+                                &log,
+                                "old region volume id is None!";
+                                "request" => ?request,
+                            );
 
-                            Err(e) => {
-                                error!(
-                                    &log,
-                                    "error getting old region: {e}";
-                                    "request" => ?request,
-                                );
-
-                                err += 1;
-
-                                continue;
-                            }
-                        };
-
-                        let Some(region) = region else {
-                            // This can occur if this background task is interleaving with
-                            // an execution of the finish saga: `get_region` will return
-                            // nothing because that execution could have deleted the
-                            // volume that pointed to the old region. This is a race, not
-                            // an error, continue to the next request.
                             continue;
                         };
 
                         let result = self.saga_request.send(sagas::SagaRequest::RegionReplacementFinish {
                             params: sagas::region_replacement_finish::Params {
                                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-                                region_volume_id: region.volume_id(),
+                                region_volume_id: old_region_volume_id,
                                 request,
                             },
                         }).await;
