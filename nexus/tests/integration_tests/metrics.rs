@@ -338,6 +338,27 @@ async fn test_instance_watcher_metrics(
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     };
 
+    #[track_caller]
+    fn timeseries_for_instance(
+        table: &oximeter_db::oxql::Table,
+        instance_id: Uuid,
+    ) -> &oximeter_db::oxql::Timeseries {
+        let uuid = FieldValue::Uuid(instance_id);
+        let mut timeserieses = table
+            .timeseries()
+            .filter(move |ts| ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid));
+        let Some(timeseries) = timeserieses.next() else {
+            panic!("missing timeseries for instance {instance_id}")
+        };
+        if let Some(timeseries) = timeserieses.next() {
+            panic!(
+                "multiple timeseries for instance {instance_id}: \
+                {timeseries:?}, {timeseries:?}, ..."
+            )
+        }
+        timeseries
+    }
+
     create_default_ip_pool(&client).await; // needed for instance create to work
                                            // Wait until Nexus registers as a producer with Oximeter.
     wait_for_producer(
@@ -359,13 +380,7 @@ async fn test_instance_watcher_metrics(
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
         .expect("missing virtual_machine:check");
-    let ts = checks
-        .timeseries()
-        .find(|ts| {
-            ts.fields.get(INSTANCE_ID_FIELD).unwrap()
-                == &FieldValue::Uuid(instance1_uuid)
-        })
-        .expect("missing timeseries for instance1 checks");
+    let ts = timeseries_for_instance(&checks, instance1_uuid);
     assert_eq!(
         ts.fields.get(STATE_FIELD).unwrap(),
         &FieldValue::String(STATE_STARTING.to_string())
@@ -384,20 +399,8 @@ async fn test_instance_watcher_metrics(
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
         .expect("missing virtual_machine:check");
-    let ts1 = checks
-        .timeseries()
-        .find(|ts| {
-            ts.fields.get(INSTANCE_ID_FIELD).unwrap()
-                == &FieldValue::Uuid(instance1_uuid)
-        })
-        .expect("missing timeseries for instance1 checks");
-    let ts2 = checks
-        .timeseries()
-        .find(|ts| {
-            ts.fields.get(INSTANCE_ID_FIELD).unwrap()
-                == &FieldValue::Uuid(instance2_uuid)
-        })
-        .expect("missing timeseries for instance2 checks");
+    let ts1 = timeseries_for_instance(&checks, instance1_uuid);
+    let ts2 = timeseries_for_instance(&checks, instance2_uuid);
     assert_eq!(
         ts1.fields.get(STATE_FIELD).unwrap(),
         &FieldValue::String(STATE_STARTING.to_string())
