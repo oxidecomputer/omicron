@@ -1859,8 +1859,6 @@ mod tests {
     use crate::db::queries::network_interface::NextMacShifts;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use model::NetworkInterfaceKind;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;

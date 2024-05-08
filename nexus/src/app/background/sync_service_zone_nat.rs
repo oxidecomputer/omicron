@@ -19,7 +19,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
-use omicron_common::api::external;
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use sled_agent_client::types::OmicronZoneType;

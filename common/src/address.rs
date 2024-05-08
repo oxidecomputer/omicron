@@ -8,7 +8,7 @@
 //! and Nexus, who need to agree upon addressing schemes.
 
 use crate::api::external::{self, Error};
-use ipnetwork::{Ipv4Network, Ipv6Network};
+use ipnetwork::Ipv6Network;
 use once_cell::sync::Lazy;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -247,29 +247,29 @@ pub struct DnsSubnet {
 }
 
 impl DnsSubnet {
+    // TODO why are we returning a subnet?
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
-    pub fn dns_address(&self) -> Ipv6Addr {
-        // Ipv6Network::new(
-        //     self.subnet.net().iter().nth(DNS_ADDRESS_INDEX).unwrap(),
-        //     SLED_PREFIX,
-        // )
-        // .unwrap()
-        todo!()
+    pub fn dns_address(&self) -> Ipv6Net {
+        Ipv6Net::new(
+            self.subnet.net().iter().nth(DNS_ADDRESS_INDEX).unwrap(),
+            SLED_PREFIX,
+        )
+        .unwrap()
     }
 
+    // TODO why are we returning a subnet?
     /// Returns the address which the Global Zone should create
     /// to be able to contact the DNS server.
     ///
     /// This is the second address within the subnet.
-    pub fn gz_address(&self) -> Ipv6Addr {
-        // Ipv6Network::new(
-        //     self.subnet.net().iter().nth(GZ_ADDRESS_INDEX).unwrap(),
-        //     SLED_PREFIX,
-        // )
-        // .unwrap()
-        todo!()
+    pub fn gz_address(&self) -> Ipv6Net {
+        Ipv6Net::new(
+            self.subnet.net().iter().nth(GZ_ADDRESS_INDEX).unwrap(),
+            SLED_PREFIX,
+        )
+        .unwrap()
     }
 }
 
@@ -308,7 +308,7 @@ pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
         &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
     dns_subnets
         .iter()
-        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address()))
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().addr()))
         .collect()
 }
 
@@ -690,11 +690,11 @@ mod test {
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(
-            "fd00:1122:3344:0001::1".parse::<Ipv6Addr>().unwrap(),
+            "fd00:1122:3344:0001::1/64".parse::<Ipv6Net>().unwrap(),
             dns_subnets[0].dns_address(),
         );
         assert_eq!(
-            "fd00:1122:3344:0001::2".parse::<Ipv6Addr>().unwrap(),
+            "fd00:1122:3344:0001::2/64".parse::<Ipv6Net>().unwrap(),
             dns_subnets[0].gz_address(),
         );
     }

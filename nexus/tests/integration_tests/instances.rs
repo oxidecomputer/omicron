@@ -65,7 +65,6 @@ use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
-use oxnet::Ipv4Net;
 use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;

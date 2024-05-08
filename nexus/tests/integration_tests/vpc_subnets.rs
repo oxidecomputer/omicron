@@ -21,7 +21,6 @@ use nexus_types::external_api::{params, views::VpcSubnet};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv6NetExt;
-use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 
 type ControlPlaneTestContext =

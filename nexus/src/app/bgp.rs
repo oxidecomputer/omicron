@@ -12,7 +12,6 @@ use omicron_common::api::external::{
     self, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus, CreateResult,
     DeleteResult, ListResultVec, LookupResult, NameOrId, SwitchBgpHistory,
 };
-use oxnet::Ipv4Net;
 use std::net::IpAddr;
 
 impl super::Nexus {

@@ -6,7 +6,6 @@
 
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
-use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatEntry;
