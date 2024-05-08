@@ -48,6 +48,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod address_lot;
+mod allow_list;
 mod bfd;
 mod bgp;
 mod bootstore;
@@ -108,6 +109,7 @@ pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 pub use probe::ProbeInfo;
 pub use rack::RackInit;
+pub use rack::SledUnderlayAllocationResult;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;

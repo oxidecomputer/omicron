@@ -889,6 +889,24 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "service_firewall_rule_propagation" {
+        match serde_json::from_value::<serde_json::Value>(details.clone()) {
+            Ok(serde_json::Value::Object(map)) => {
+                if !map.is_empty() {
+                    eprintln!(
+                        "    unexpected return value from task: {:?}",
+                        map
+                    )
+                }
+            }
+            Ok(val) => {
+                eprintln!("    unexpected return value from task: {:?}", val)
+            }
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -1231,14 +1249,16 @@ async fn cmd_nexus_sled_add(
     args: &SledAddArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    client
+    let sled_id = client
         .sled_add(&UninitializedSledId {
             part: args.part.clone(),
             serial: args.serial.clone(),
         })
         .await
-        .context("adding sled")?;
-    eprintln!("added sled {} ({})", args.serial, args.part);
+        .context("adding sled")?
+        .into_inner()
+        .id;
+    eprintln!("added sled {} ({}): {sled_id}", args.serial, args.part);
     Ok(())
 }
 

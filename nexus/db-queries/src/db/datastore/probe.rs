@@ -15,7 +15,6 @@ use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
-use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -278,20 +277,19 @@ impl super::DataStore {
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        new_probe: &params::ProbeCreate,
+        probe: &Probe,
+        ip_pool: Option<authz::IpPool>,
     ) -> CreateResult<Probe> {
         //TODO in transaction
         use db::schema::probe::dsl;
         let pool = self.pool_connection_authorized(opctx).await?;
-
-        let probe = Probe::from_create(new_probe, authz_project.id());
 
         let _eip = self
             .allocate_probe_ephemeral_ip(
                 opctx,
                 Uuid::new_v4(),
                 probe.id(),
-                new_probe.ip_pool.clone().map(Into::into),
+                ip_pool,
             )
             .await?;
 

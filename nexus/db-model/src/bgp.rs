@@ -31,6 +31,8 @@ pub struct BgpConfig {
     pub asn: SqlU32,
     pub bgp_announce_set_id: Uuid,
     pub vrf: Option<String>,
+    pub shaper: Option<String>,
+    pub checker: Option<String>,
 }
 
 impl Into<external::BgpConfig> for BgpConfig {
@@ -59,6 +61,8 @@ impl BgpConfig {
             asn: c.asn.into(),
             bgp_announce_set_id,
             vrf: c.vrf.as_ref().map(|x| x.to_string()),
+            shaper: c.shaper.as_ref().map(|x| x.to_string()),
+            checker: c.checker.as_ref().map(|x| x.to_string()),
         }
     }
 }
@@ -131,4 +135,11 @@ pub struct BgpPeerView {
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
     pub keepalive: SqlU32,
+    pub remote_asn: Option<SqlU32>,
+    pub min_ttl: Option<SqlU32>,
+    pub md5_auth_key: Option<String>,
+    pub multi_exit_discriminator: Option<SqlU32>,
+    pub local_pref: Option<SqlU32>,
+    pub enforce_first_as: bool,
+    pub vlan_id: Option<SqlU32>,
 }

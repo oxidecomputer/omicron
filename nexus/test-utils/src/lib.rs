@@ -61,6 +61,9 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_client::types::EarlyNetworkConfig;
+use sled_agent_client::types::EarlyNetworkConfigBody;
+use sled_agent_client::types::RackNetworkConfigV1;
 use slog::{debug, error, o, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -913,6 +916,26 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             })
             .await
             .expect("Failed to configure sled agent with our zones");
+        client
+            .write_network_bootstore_config(&EarlyNetworkConfig {
+                body: EarlyNetworkConfigBody {
+                    ntp_servers: Vec::new(),
+                    rack_network_config: Some(RackNetworkConfigV1 {
+                        bfd: Vec::new(),
+                        bgp: Vec::new(),
+                        infra_ip_first: "192.0.2.10".parse().unwrap(),
+                        infra_ip_last: "192.0.2.100".parse().unwrap(),
+                        ports: Vec::new(),
+                        rack_subnet: "fd00:1122:3344:0100::/56"
+                            .parse()
+                            .unwrap(),
+                    }),
+                },
+                generation: 1,
+                schema_version: 1,
+            })
+            .await
+            .expect("Failed to write early networking config to bootstore");
     }
 
     // Set up the Crucible Pantry on an existing Sled Agent.

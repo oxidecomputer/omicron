@@ -30,9 +30,11 @@
 //    001de000-4401   built-in services project
 //    001de000-074c   built-in services vpc
 //    001de000-c470   built-in services vpc subnets
+//    001de000-all0   singleton ID for source IP allowlist ("all0" is like "allow")
 
 use once_cell::sync::Lazy;
 
+pub mod allow_list;
 pub mod project;
 pub mod role_assignment;
 pub mod role_builtin;
@@ -65,11 +67,17 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
 
 #[cfg(test)]
 mod test {
+    use super::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID;
     use super::assert_valid_uuid;
     use super::FLEET_ID;
 
     #[test]
     fn test_builtin_fleet_id_is_valid() {
         assert_valid_uuid(&FLEET_ID);
+    }
+
+    #[test]
+    fn test_allowlist_id_is_valid() {
+        assert_valid_uuid(&USER_FACING_SERVICES_ALLOW_LIST_ID);
     }
 }
