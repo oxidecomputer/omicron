@@ -351,7 +351,7 @@ async fn test_instance_watcher_metrics(
     kick_instance_watcher().await;
 
     let metrics =
-        dbg!(timeseries_query(&cptestctx, "{ get virtual_machine:check, get virtual_machine:incomplete_check }").await);
+        dbg!(timeseries_query(&cptestctx, "get virtual_machine:check").await);
     let checks = metrics
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
