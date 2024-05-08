@@ -9,8 +9,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 // TODO(#40): Remove this exception once resolved.
 #![allow(clippy::unnecessary_wraps)]
-// Clippy's style lints are useful, but not worth running automatically.
-#![allow(clippy::style)]
 
 pub mod app; // Public for documentation examples
 mod cidata;

@@ -531,7 +531,7 @@ impl ServiceInner {
                             }
                         })
                         .collect();
-                    if dns_addrs.len() > 0 {
+                    if !dns_addrs.is_empty() {
                         Some(dns_addrs)
                     } else {
                         None
