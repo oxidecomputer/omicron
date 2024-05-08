@@ -241,7 +241,7 @@ impl CheckOutcome {
     fn state_str(&self) -> Cow<'static, str> {
         match self {
             Self::Success(state) => state.label().into(),
-            Self::Failure(reason) => InstanceState::Failed.label().into(),
+            Self::Failure(_) => InstanceState::Failed.label().into(),
         }
     }
 
@@ -425,13 +425,13 @@ impl BackgroundTask for InstanceWatcher {
                                 .or_default() += 1;
                         }
                         CheckOutcome::Failure(reason) => {
-                            *check_failures.entry(reason.as_str().to_owned()).or_default() += 1;
+                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
                         }
                     }
                 }
                 if let Err(reason) = result {
                     metric.check_error(reason);
-                    *check_errors.entry(reason.as_str().to_owned()).or_default() += 1;
+                    *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
                 }
             }
 
