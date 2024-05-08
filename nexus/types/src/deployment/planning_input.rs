@@ -737,6 +737,13 @@ impl PlanningInputBuilder {
         self.external_dns_version = new_version;
     }
 
+    pub fn set_cockroachdb_settings(
+        &mut self,
+        cockroachdb_settings: CockroachDbSettings,
+    ) {
+        self.cockroachdb_settings = cockroachdb_settings;
+    }
+
     pub fn build(self) -> PlanningInput {
         PlanningInput {
             policy: self.policy,

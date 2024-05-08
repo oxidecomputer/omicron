@@ -374,7 +374,7 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
-                .version
+                .state_fingerprint
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,

@@ -480,7 +480,9 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::DiffSledModified;
+    use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -1180,5 +1182,87 @@ mod test {
                 zone.zone_after.id
             );
         }
+    }
+
+    #[test]
+    fn test_ensure_preserve_downgrade_option() {
+        static TEST_NAME: &str = "planner_ensure_preserve_downgrade_option";
+        let logctx = test_setup_log(TEST_NAME);
+
+        let (collection, input, bp1) = example(&logctx.log, TEST_NAME, 0);
+        let mut builder = input.into_builder();
+        assert!(bp1.cockroachdb_fingerprint.is_empty());
+        assert!(bp1.cockroachdb_setting_preserve_downgrade.is_none());
+
+        // Run the planner with the initial CockroachDB inputs we expect of a
+        // new cluster.
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "a fingerprint".to_owned(),
+            version: COCKROACHDB_CLUSTER_VERSION.to_owned(),
+            preserve_downgrade: "".to_owned(),
+        });
+        let bp2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "initial settings",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp2.cockroachdb_fingerprint, "a fingerprint");
+        assert_eq!(
+            bp2.cockroachdb_setting_preserve_downgrade.unwrap(),
+            COCKROACHDB_CLUSTER_VERSION
+        );
+
+        // OK, so we ensured the setting. When we run the planner again, the
+        // inputs will change:
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "another fingerprint".to_owned(),
+            version: COCKROACHDB_CLUSTER_VERSION.to_owned(),
+            preserve_downgrade: COCKROACHDB_CLUSTER_VERSION.to_owned(),
+        });
+        let bp3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "after ensure",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp3.cockroachdb_fingerprint, "another fingerprint");
+        assert_eq!(
+            bp3.cockroachdb_setting_preserve_downgrade.unwrap(),
+            COCKROACHDB_CLUSTER_VERSION
+        );
+
+        // When `version` doesn't match the policy version, we seek to set the
+        // preserve downgrade option to the empty string:
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "yet another fingerprint".to_owned(),
+            version: "three".to_owned(),
+            preserve_downgrade: COCKROACHDB_CLUSTER_VERSION.to_owned(),
+        });
+        let bp4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "version does not match policy",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp4.cockroachdb_fingerprint, "yet another fingerprint");
+        assert_eq!(bp4.cockroachdb_setting_preserve_downgrade.unwrap(), "");
+
+        logctx.cleanup_successful();
     }
 }
