@@ -31,14 +31,24 @@ pub fn run_cmd() -> Result<()> {
 
     // Iterate the workspace packages and fill out the maps above.
     for pkg_info in workspace.workspace_packages() {
+        let manifest_path = &pkg_info.manifest_path;
+        let manifest = read_cargo_toml(manifest_path)?;
+
+        // Check that `[lints] workspace = true` is set.
+        if !manifest.lints.map(|lints| lints.workspace).unwrap_or(false) {
+            eprintln!(
+                "error: package {:?} does not have `[lints] workspace = true` set",
+                pkg_info.name
+            );
+            nerrors += 1;
+        }
+
         if pkg_info.name == WORKSPACE_HACK_PACKAGE_NAME {
             // Skip over workspace-hack because hakari doesn't yet support
             // workspace deps: https://github.com/guppy-rs/guppy/issues/7
             continue;
         }
 
-        let manifest_path = &pkg_info.manifest_path;
-        let manifest = read_cargo_toml(manifest_path)?;
         for tree in [
             &manifest.dependencies,
             &manifest.dev_dependencies,

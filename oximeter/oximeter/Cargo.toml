@@ -5,6 +5,9 @@ authors = ["Benjamin Naecker <ben@oxide.computer>"]
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true

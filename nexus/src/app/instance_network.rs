@@ -1147,7 +1147,7 @@ pub(crate) async fn probe_delete_dpd_config(
         };
     }
 
-    if let Some(e) = errors.into_iter().nth(0) {
+    if let Some(e) = errors.into_iter().next() {
         return Err(e);
     }
 
