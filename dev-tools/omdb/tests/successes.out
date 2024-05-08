@@ -407,8 +407,8 @@ task: "instance_watcher"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
     checks completed: 0
-     -> successful checks: 0
-     -> failed checks: 0
+       successful checks: 0
+       failed checks: 0
     checks that could not be completed: 0
     stale instance metrics pruned: 0
 
