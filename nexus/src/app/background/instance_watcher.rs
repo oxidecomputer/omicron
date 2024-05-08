@@ -17,8 +17,8 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fmt;
 use std::future::Future;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
@@ -237,6 +237,22 @@ enum CheckOutcome {
     Failure(Failure),
 }
 
+impl CheckOutcome {
+    fn state_str(&self) -> Cow<'static, str> {
+        match self {
+            Self::Success(state) => state.label().into(),
+            Self::Failure(reason) => InstanceState::Failed.label().into(),
+        }
+    }
+
+    fn reason_str(&self) -> Cow<'static, str> {
+        match self {
+            Self::Success(_) => "success".into(),
+            Self::Failure(reason) => reason.as_str(),
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
 )]
@@ -253,6 +269,16 @@ enum Failure {
     /// we believe it *should* know about. This probably means the sled-agent,
     /// and potentially the whole sled, has been restarted.
     NoSuchInstance,
+}
+
+impl Failure {
+    fn as_str(&self) -> Cow<'static, str> {
+        match self {
+            Self::SledAgentUnreachable => "unreachable".into(),
+            Self::SledAgentResponse(status) => status.to_string().into(),
+            Self::NoSuchInstance => "no_such_instance".into(),
+        }
+    }
 }
 
 #[derive(
@@ -277,34 +303,13 @@ enum Incomplete {
     UpdateFailed,
 }
 
-impl fmt::Display for CheckOutcome {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Incomplete {
+    fn as_str(&self) -> Cow<'static, str> {
         match self {
-            Self::Success(state) => write!(f, "{state}"),
-            Self::Failure(reason) => write!(f, "{reason}"),
-        }
-    }
-}
-
-impl fmt::Display for Failure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::SledAgentUnreachable => f.write_str("unreachable"),
-            Self::SledAgentResponse(status) => {
-                write!(f, "{status}")
-            }
-            Self::NoSuchInstance => f.write_str("no_such_instance"),
-        }
-    }
-}
-
-impl fmt::Display for Incomplete {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ClientHttpError(status) => write!(f, "{status}"),
-            Self::ClientError => f.write_str("client_error"),
-            Self::InstanceNotFound => f.write_str("instance_not_found"),
-            Self::UpdateFailed => f.write_str("update_failed"),
+            Self::ClientHttpError(status) => status.to_string().into(),
+            Self::ClientError => "client_error".into(),
+            Self::InstanceNotFound => "instance_not_found".into(),
+            Self::UpdateFailed => "update_failed".into(),
         }
     }
 }
@@ -420,13 +425,13 @@ impl BackgroundTask for InstanceWatcher {
                                 .or_default() += 1;
                         }
                         CheckOutcome::Failure(reason) => {
-                            *check_failures.entry(reason.to_string()).or_default() += 1;
+                            *check_failures.entry(reason.as_str().to_owned()).or_default() += 1;
                         }
                     }
                 }
                 if let Err(reason) = result {
                     metric.check_error(reason);
-                    *check_errors.entry(reason.to_string()).or_default() += 1;
+                    *check_errors.entry(reason.as_str().to_owned()).or_default() += 1;
                 }
             }
 
@@ -450,11 +455,12 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
-    use super::{CheckOutcome, Incomplete, InstanceState, VirtualMachine};
+    use super::{CheckOutcome, Incomplete, VirtualMachine};
     use oximeter::types::Cumulative;
     use oximeter::Metric;
     use oximeter::MetricsError;
     use oximeter::Sample;
+    use std::borrow::Cow;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -512,17 +518,10 @@ mod metrics {
         pub(super) fn completed(&mut self, outcome: CheckOutcome) {
             self.checks
                 .entry(outcome)
-                .or_insert_with(|| match outcome {
-                    CheckOutcome::Failure(failure) => Check {
-                        state: InstanceState::Failed.to_string(),
-                        reason: failure.to_string(),
-                        datum: Cumulative::default(),
-                    },
-                    CheckOutcome::Success(state) => Check {
-                        state: state.to_string(),
-                        reason: "success".to_string(),
-                        datum: Cumulative::default(),
-                    },
+                .or_insert_with(|| Check {
+                    state: outcome.state_str(),
+                    reason: outcome.reason_str(),
+                    datum: Cumulative::default(),
                 })
                 .datum += 1;
 
@@ -533,7 +532,7 @@ mod metrics {
             self.check_errors
                 .entry(reason)
                 .or_insert_with(|| IncompleteCheck {
-                    reason: reason.to_string(),
+                    reason: reason.as_str(),
                     datum: Cumulative::default(),
                 })
                 .datum += 1;
@@ -564,7 +563,7 @@ mod metrics {
     struct Check {
         /// The string representation of the instance's state as understood by
         /// the VMM. If the check failed, this will generally be "failed".
-        state: String,
+        state: Cow<'static, str>,
         /// `Why the instance was marked as being in this state.
         ///
         /// If an instance was marked as "failed" due to a check failure, this
@@ -575,7 +574,7 @@ mod metrics {
         /// sled-agent, and the *sled-agent* reported that the instance has
         /// failed --- which is distinct from the instance watcher marking an
         /// instance as failed due to a failed check.
-        reason: String,
+        reason: Cow<'static, str>,
         /// this will be a string representation of the failure reason.
         datum: Cumulative<u64>,
     }
@@ -586,7 +585,7 @@ mod metrics {
         /// The reason why the check was unsuccessful.
         ///
         /// This is generated from the [`Incomplete`] enum's `Display` implementation.
-        reason: String,
+        reason: Cow<'static, str>,
         /// The number of failed checks for this instance and sled agent.
         datum: Cumulative<u64>,
     }
