@@ -277,6 +277,134 @@ async fn test_timeseries_schema_list(
         .expect("Failed to find HTTP request latency histogram schema");
 }
 
+pub async fn timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    query: impl ToString,
+) -> Vec<oximeter_db::oxql::Table> {
+    // first, make sure the latest timeseries have been collected.
+    cptestctx.oximeter.force_collect().await;
+
+    // okay, do the query
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: query.to_string(),
+    };
+    let query = dbg!(&body.query);
+    let rsp = NexusRequest::new(
+        nexus_test_utils::http_testing::RequestBuilder::new(
+            &cptestctx.external_client,
+            http::Method::POST,
+            "/v1/timeseries/query",
+        )
+        .body(Some(&body)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| {
+        panic!("timeseries query failed: {e:?}\nquery: {query}")
+    });
+    dbg!(rsp).parsed_body().unwrap_or_else(|e| {
+        panic!(
+            "could not parse timeseries query response: {e:?}\nquery: {query}"
+        );
+    })
+}
+
+#[nexus_test]
+async fn test_instance_watcher_metrics(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    use oximeter::types::FieldValue;
+
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+
+    let kick_instance_watcher = || async {
+        internal_client
+            .make_request(
+                http::Method::POST,
+                "/bgtasks/activate",
+                Some(serde_json::json!({
+                    "bgtask_names": vec![String::from("instance_watcher")]
+                })),
+                http::StatusCode::NO_CONTENT,
+            )
+            .await
+            .unwrap();
+        // bleh...
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    };
+
+    create_default_ip_pool(&client).await; // needed for instance create to work
+                                           // Wait until Nexus registers as a producer with Oximeter.
+    wait_for_producer(
+        &cptestctx.oximeter,
+        cptestctx.server.apictx().nexus.id(),
+    )
+    .await;
+
+    create_project(&client, "p-1").await;
+    let instance1 = create_instance(&client, "p-1", "i-1").await;
+    let instance1_uuid = instance1.identity.id;
+
+    // activate the instance watcher background task.
+    kick_instance_watcher().await;
+
+    let metrics =
+        dbg!(timeseries_query(&cptestctx, "{ get virtual_machine:check, get virtual_machine:incomplete_check }").await);
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+    let ts = checks
+        .timeseries()
+        .find(|ts| {
+            ts.fields.get("instance_id").unwrap()
+                == &FieldValue::Uuid(instance1_uuid)
+        })
+        .expect("missing timeseries for instance1 checks");
+    assert_eq!(
+        ts.fields.get("status").unwrap(),
+        &FieldValue::String("starting".to_string())
+    );
+
+    // okay, make another instance
+    let instance2 = create_instance(&client, "p-1", "i-2").await;
+    let instance2_uuid = instance2.identity.id;
+
+    // activate the instance watcher background task.
+    kick_instance_watcher().await;
+
+    let metrics =
+        dbg!(timeseries_query(&cptestctx, "get virtual_machine:check").await);
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+    let ts1 = checks
+        .timeseries()
+        .find(|ts| {
+            ts.fields.get("instance_id").unwrap()
+                == &FieldValue::Uuid(instance1_uuid)
+        })
+        .expect("missing timeseries for instance1 checks");
+    let ts2 = checks
+        .timeseries()
+        .find(|ts| {
+            ts.fields.get("instance_id").unwrap()
+                == &FieldValue::Uuid(instance2_uuid)
+        })
+        .expect("missing timeseries for instance2 checks");
+    assert_eq!(
+        ts1.fields.get("status").unwrap(),
+        &FieldValue::String("starting".to_string())
+    );
+    assert_eq!(
+        ts2.fields.get("status").unwrap(),
+        &FieldValue::String("starting".to_string())
+    );
+}
+
 /// Wait until a producer is registered with Oximeter.
 ///
 /// This blocks until the producer is registered, for up to 60s. It panics if
