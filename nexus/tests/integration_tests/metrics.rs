@@ -383,7 +383,7 @@ async fn test_instance_watcher_metrics(
     let ts = timeseries_for_instance(&checks, instance1_uuid);
     assert_eq!(
         ts.fields.get(STATE_FIELD).unwrap(),
-        &FieldValue::String(STATE_STARTING.to_string())
+        &FieldValue::from(STATE_STARTING)
     );
 
     // okay, make another instance
@@ -403,11 +403,11 @@ async fn test_instance_watcher_metrics(
     let ts2 = timeseries_for_instance(&checks, instance2_uuid);
     assert_eq!(
         ts1.fields.get(STATE_FIELD).unwrap(),
-        &FieldValue::String(STATE_STARTING.to_string())
+        &FieldValue::from(STATE_STARTING)
     );
     assert_eq!(
         ts2.fields.get(STATE_FIELD).unwrap(),
-        &FieldValue::String(STATE_STARTING.to_string())
+        &FieldValue::from(STATE_STARTING)
     );
 }
 
