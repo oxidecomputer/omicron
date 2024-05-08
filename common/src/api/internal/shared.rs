@@ -528,6 +528,13 @@ impl TryFrom<Vec<IpNet>> for AllowedSourceIps {
     }
 }
 
+impl TryFrom<&[ipnetwork::IpNetwork]> for AllowedSourceIps {
+    type Error = &'static str;
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
+        IpAllowList::try_from(list).map(Self::List)
+    }
+}
+
 /// A non-empty allowlist of IP subnets.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(try_from = "Vec<IpNet>", into = "Vec<IpNet>")]
@@ -571,6 +578,17 @@ impl TryFrom<Vec<IpNet>> for IpAllowList {
             return Err("IP allowlist must not be empty");
         }
         Ok(Self(list))
+    }
+}
+
+impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
+    type Error = &'static str;
+
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
+        if list.is_empty() {
+            return Err("IP allowlist must not be empty");
+        }
+        Ok(Self(list.into_iter().map(|net| (*net).into()).collect()))
     }
 }
 

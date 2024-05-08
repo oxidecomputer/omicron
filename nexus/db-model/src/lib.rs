@@ -429,8 +429,6 @@ mod tests {
     use crate::RequestAddressError;
 
     use super::VpcSubnet;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
@@ -442,9 +440,8 @@ mod tests {
 
     #[test]
     fn test_vpc_subnet_check_requestable_addr() {
-        let ipv4_block =
-            Ipv4Net("192.168.0.0/16".parse::<Ipv4Network>().unwrap());
-        let ipv6_block = Ipv6Net("fd00::/48".parse::<Ipv6Network>().unwrap());
+        let ipv4_block = "192.168.0.0/16".parse::<Ipv4Net>().unwrap();
+        let ipv6_block = "fd00::/48".parse::<Ipv6Net>().unwrap();
         let identity = IdentityMetadataCreateParams {
             name: "net-test-vpc".parse().unwrap(),
             description: "A test VPC".parse().unwrap(),
@@ -503,9 +500,7 @@ mod tests {
 
     #[test]
     fn test_ipv6_net_random_subnet() {
-        let base = super::Ipv6Net(Ipv6Net(
-            "fd00::/48".parse::<Ipv6Network>().unwrap(),
-        ));
+        let base = super::Ipv6Net("fd00::/48".parse::<Ipv6Net>().unwrap());
         assert!(
             base.random_subnet(8).is_none(),
             "random_subnet() should fail when prefix is less than the base prefix"
@@ -528,7 +523,7 @@ mod tests {
             "Host address portion should be 0"
         );
         assert!(
-            base.is_supernet_of(subnet.0 .0),
+            base.is_supernet_of(&subnet.0),
             "random_subnet should generate an actual subnet"
         );
         assert_eq!(base.random_subnet(base.prefix()), Some(base));
@@ -536,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_ip_subnet_check_requestable_address() {
-        let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
+        let subnet = super::Ipv4Net("192.168.0.0/16".parse().unwrap());
         subnet.check_requestable_addr("192.168.0.10".parse().unwrap()).unwrap();
         subnet.check_requestable_addr("192.168.1.0".parse().unwrap()).unwrap();
         let addr = "192.178.0.10".parse().unwrap();
@@ -561,7 +556,7 @@ mod tests {
             Err(RequestAddressError::Broadcast)
         );
 
-        let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
+        let subnet = super::Ipv6Net("fd00::/64".parse().unwrap());
         subnet.check_requestable_addr("fd00::a".parse().unwrap()).unwrap();
         assert_eq!(
             subnet.check_requestable_addr("fd00::1".parse().unwrap()),

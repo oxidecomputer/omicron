@@ -1912,7 +1912,7 @@ pub enum VpcFirewallRuleTarget {
     /// The rule applies to a specific IP address
     Ip(IpAddr),
     /// The rule applies to a specific IP subnet
-    IpNet(IpNet),
+    IpNet(oxnet::IpNet),
     // Tags not yet implemented
     // Tag(Name),
 }
@@ -1943,7 +1943,7 @@ pub enum VpcFirewallRuleHostFilter {
     /// The rule applies to traffic from/to a specific IP address
     Ip(IpAddr),
     /// The rule applies to traffic from/to a specific IP subnet
-    IpNet(IpNet),
+    IpNet(oxnet::IpNet),
     // TODO: Internet gateways not yet implemented
     // #[display("inetgw:{0}")]
     // InternetGateway(Name),
@@ -2451,7 +2451,7 @@ pub struct LoopbackAddress {
     pub switch_location: String,
 
     /// The loopback IP address and prefix length.
-    pub address: IpNet,
+    pub address: oxnet::IpNet,
 }
 
 /// A switch port represents a physical external port on a rack switch.
@@ -2693,7 +2693,7 @@ pub struct LldpConfig {
     pub system_description: String,
 
     /// THE LLDP management IP TLV.
-    pub management_ip: IpNet,
+    pub management_ip: oxnet::IpNet,
 }
 
 /// Describes the kind of an switch interface.
@@ -2760,10 +2760,10 @@ pub struct SwitchPortRouteConfig {
     pub interface_name: String,
 
     /// The route's destination network.
-    pub dst: IpNet,
+    pub dst: oxnet::IpNet,
 
     /// The route's gateway address.
-    pub gw: IpNet,
+    pub gw: oxnet::IpNet,
 
     /// The VLAN identifier for the route. Use this if the gateway is reachable
     /// over an 802.1Q tagged L2 segment.
@@ -2892,7 +2892,7 @@ pub struct BgpAnnouncement {
     pub address_lot_block_id: Uuid,
 
     /// The IP network being announced.
-    pub network: IpNet,
+    pub network: oxnet::IpNet,
 }
 
 /// An IP address configuration for a port settings object.
@@ -2905,7 +2905,7 @@ pub struct SwitchPortAddressConfig {
     pub address_lot_block_id: Uuid,
 
     /// The IP address and prefix.
-    pub address: IpNet,
+    pub address: oxnet::IpNet,
 
     /// The interface name this address belongs to.
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
@@ -3065,7 +3065,7 @@ impl AggregateBgpMessageHistory {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpImportedRouteIpv4 {
     /// The destination network prefix.
-    pub prefix: Ipv4Net,
+    pub prefix: oxnet::Ipv4Net,
 
     /// The nexthop the prefix is reachable through.
     pub nexthop: Ipv4Addr,

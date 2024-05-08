@@ -313,14 +313,12 @@ impl<'a> BlueprintBuilder<'a> {
         // of used resources we built above if needed.
         let nexus_v4_ips = AvailableIterator::new(
             NEXUS_OPTE_IPV4_SUBNET
-                .0
                 .iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_nexus_v4_ips,
         );
         let nexus_v6_ips = AvailableIterator::new(
             NEXUS_OPTE_IPV6_SUBNET
-                .0
                 .iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_nexus_v6_ips,

@@ -1093,8 +1093,8 @@ fn rss_config_text<'a>(
         Some(AllowedSourceIps::List(list)) => list
             .iter()
             .map(|net| {
-                let as_str = if net.first_address() == net.last_address() {
-                    net.ip().to_string()
+                let as_str = if net.is_host_net() {
+                    net.addr().to_string()
                 } else {
                     net.to_string()
                 };

@@ -68,9 +68,9 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
         nic: NicInfo,
     ) -> omicron_common::api::internal::shared::NetworkInterface {
         let ip_subnet = if nic.ip.is_ipv4() {
-            external::IpNet::V4(nic.ipv4_block.0)
+            oxnet::IpNet::V4(nic.ipv4_block.0)
         } else {
-            external::IpNet::V6(nic.ipv6_block.0)
+            oxnet::IpNet::V6(nic.ipv6_block.0)
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {

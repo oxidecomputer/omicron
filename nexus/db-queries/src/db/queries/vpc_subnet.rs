@@ -43,7 +43,9 @@ impl SubnetError {
                 DatabaseErrorKind::NotNullViolation,
                 ref info,
             ) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
-                SubnetError::OverlappingIpRange(subnet.ipv4_block.0 .0.into())
+                SubnetError::OverlappingIpRange(ipnetwork::IpNetwork::V4(
+                    subnet.ipv4_block.0.into(),
+                ))
             }
 
             // Attempt to insert overlapping IPv6 subnet
@@ -51,7 +53,9 @@ impl SubnetError {
                 DatabaseErrorKind::NotNullViolation,
                 ref info,
             ) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
-                SubnetError::OverlappingIpRange(subnet.ipv6_block.0 .0.into())
+                SubnetError::OverlappingIpRange(ipnetwork::IpNetwork::V6(
+                    subnet.ipv6_block.0.into(),
+                ))
             }
 
             // Conflicting name for the subnet within a VPC
@@ -233,8 +237,10 @@ pub struct FilterConflictingVpcSubnetRangesQuery {
 
 impl FilterConflictingVpcSubnetRangesQuery {
     pub fn new(subnet: VpcSubnet) -> Self {
-        let ipv4_block = ipnetwork::IpNetwork::from(subnet.ipv4_block.0 .0);
-        let ipv6_block = ipnetwork::IpNetwork::from(subnet.ipv6_block.0 .0);
+        let ipv4_block =
+            ipnetwork::Ipv4Network::from(subnet.ipv4_block.0).into();
+        let ipv6_block =
+            ipnetwork::Ipv6Network::from(subnet.ipv6_block.0).into();
         Self { subnet, ipv4_block, ipv6_block }
     }
 }
@@ -394,10 +400,10 @@ mod test {
     use ipnetwork::IpNetwork;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::convert::TryInto;
     use std::sync::Arc;
     use uuid::Uuid;

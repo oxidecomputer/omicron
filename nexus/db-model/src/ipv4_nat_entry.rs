@@ -81,10 +81,10 @@ pub struct Ipv4NatEntryView {
 impl From<Ipv4NatChange> for Ipv4NatEntryView {
     fn from(value: Ipv4NatChange) -> Self {
         Self {
-            external_address: value.external_address.ip(),
+            external_address: value.external_address.addr(),
             first_port: value.first_port.into(),
             last_port: value.last_port.into(),
-            sled_address: value.sled_address.ip(),
+            sled_address: value.sled_address.addr(),
             vni: value.vni.0,
             mac: *value.mac,
             gen: value.version,

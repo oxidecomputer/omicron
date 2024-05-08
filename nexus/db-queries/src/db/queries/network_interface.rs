@@ -1061,7 +1061,7 @@ impl InsertQuery {
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
-            interface.subnet.ipv4_block.0 .0,
+            interface.subnet.ipv4_block.0.into(),
             interface.subnet.identity.id,
         );
         let next_slot_subquery = NextNicSlot::new(interface.parent_id);
@@ -1871,11 +1871,11 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceCpuCount;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;

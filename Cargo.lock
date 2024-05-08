@@ -4613,6 +4613,7 @@ dependencies = [
  "openssl",
  "oso",
  "oximeter",
+ "oxnet",
  "paste",
  "pem",
  "petgraph",
@@ -4654,6 +4655,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "once_cell",
+ "oxnet",
  "rand 0.8.5",
  "serde_json",
 ]
@@ -4733,6 +4735,7 @@ dependencies = [
  "nexus-db-queries",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxnet",
  "reqwest",
  "sled-agent-client",
  "slog",
@@ -6297,6 +6300,7 @@ dependencies = [
 name = "oxnet"
 version = "0.1.0"
 dependencies = [
+ "ipnetwork",
  "schemars",
  "serde",
  "serde_json",
