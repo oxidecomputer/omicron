@@ -315,6 +315,9 @@ async fn test_instance_watcher_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     use oximeter::types::FieldValue;
+    const INSTANCE_ID_FIELD: &str = "instance_id";
+    const STATE_FIELD: &str = "state";
+    const STATE_STARTING: &str = "starting";
 
     let client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
@@ -359,13 +362,13 @@ async fn test_instance_watcher_metrics(
     let ts = checks
         .timeseries()
         .find(|ts| {
-            ts.fields.get("instance_id").unwrap()
+            ts.fields.get(INSTANCE_ID_FIELD).unwrap()
                 == &FieldValue::Uuid(instance1_uuid)
         })
         .expect("missing timeseries for instance1 checks");
     assert_eq!(
-        ts.fields.get("status").unwrap(),
-        &FieldValue::String("starting".to_string())
+        ts.fields.get(STATE_FIELD).unwrap(),
+        &FieldValue::String(STATE_STARTING.to_string())
     );
 
     // okay, make another instance
@@ -384,24 +387,24 @@ async fn test_instance_watcher_metrics(
     let ts1 = checks
         .timeseries()
         .find(|ts| {
-            ts.fields.get("instance_id").unwrap()
+            ts.fields.get(INSTANCE_ID_FIELD).unwrap()
                 == &FieldValue::Uuid(instance1_uuid)
         })
         .expect("missing timeseries for instance1 checks");
     let ts2 = checks
         .timeseries()
         .find(|ts| {
-            ts.fields.get("instance_id").unwrap()
+            ts.fields.get(INSTANCE_ID_FIELD).unwrap()
                 == &FieldValue::Uuid(instance2_uuid)
         })
         .expect("missing timeseries for instance2 checks");
     assert_eq!(
-        ts1.fields.get("status").unwrap(),
-        &FieldValue::String("starting".to_string())
+        ts1.fields.get(STATE_FIELD).unwrap(),
+        &FieldValue::String(STATE_STARTING.to_string())
     );
     assert_eq!(
-        ts2.fields.get("status").unwrap(),
-        &FieldValue::String("starting".to_string())
+        ts2.fields.get(STATE_FIELD).unwrap(),
+        &FieldValue::String(STATE_STARTING.to_string())
     );
 }
 
