@@ -3,7 +3,7 @@
 #: name = "helios / CI tools"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.72.1"
+#: rust_toolchain = "1.78.0"
 #: output_rules = [
 #:	"=/work/end-to-end-tests/*.gz",
 #:	"=/work/caboose-util.gz",

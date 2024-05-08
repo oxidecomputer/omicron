@@ -3,7 +3,7 @@
 #: name = "helios / build OS images"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.72.1"
+#: rust_toolchain = "1.78.0"
 #: output_rules = [
 #:	"=/work/helios/upload/os-host.tar.gz",
 #:	"=/work/helios/upload/os-trampoline.tar.gz",
