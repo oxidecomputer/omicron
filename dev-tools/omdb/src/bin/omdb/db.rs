@@ -1246,16 +1246,6 @@ async fn cmd_db_disk_physical(
 
 // SERVICES
 
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-    sled_serial: String,
-}
-
 // Snapshots
 fn format_snapshot(state: &SnapshotState) -> impl Display {
     match state {
@@ -1410,15 +1400,6 @@ async fn cmd_db_snapshot_info(
 }
 
 // SLEDS
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceSledRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-}
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
