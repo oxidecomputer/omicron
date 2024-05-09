@@ -347,7 +347,7 @@ impl StorageResources {
                 // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
                 ManagedDisk::ExplicitlyManaged(disk) => {
-                    if self.control_plane_disks.get(identity).is_none() {
+                    if !self.control_plane_disks.contains_key(identity) {
                         *managed_disk =
                             ManagedDisk::Unmanaged(RawDisk::from(disk.clone()));
                         updated = true;
