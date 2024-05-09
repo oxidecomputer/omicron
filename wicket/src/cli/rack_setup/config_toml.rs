@@ -6,6 +6,7 @@
 //! (most of) the rack setup configuration.
 
 use omicron_common::address::IpRange;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use serde::Serialize;
@@ -98,6 +99,11 @@ impl TomlTemplate {
             );
         }
 
+        populate_allowed_source_ips(
+            &mut doc,
+            config.allowed_source_ips.as_ref(),
+        );
+
         *doc.get_mut("bootstrap_sleds").unwrap().as_array_mut().unwrap() =
             build_sleds_array(&config.bootstrap_sleds);
 
@@ -108,6 +114,35 @@ impl TomlTemplate {
 
         Self { doc }
     }
+}
+
+// Populate the allowed source IP list, which can be specified as a specified as
+// a string "any" or a list of IP addresses.
+fn populate_allowed_source_ips(
+    doc: &mut DocumentMut,
+    allowed_source_ips: Option<&AllowedSourceIps>,
+) {
+    let mut table = toml_edit::Table::new();
+    match allowed_source_ips {
+        None | Some(AllowedSourceIps::Any) => {
+            table.insert(
+                "allow",
+                Item::Value(Value::String(Formatted::new("any".to_string()))),
+            );
+        }
+        Some(AllowedSourceIps::List(list)) => {
+            let entries = list
+                .iter()
+                .map(|ip| Value::String(Formatted::new(ip.to_string())))
+                .collect();
+            table.insert(
+                "allow",
+                Item::Value(Value::String(Formatted::new("list".to_string()))),
+            );
+            table.insert("ips", Item::Value(Value::Array(entries)));
+        }
+    }
+    doc.insert("allowed_source_ips", Item::Table(table)).unwrap();
 }
 
 impl fmt::Display for TomlTemplate {
