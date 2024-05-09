@@ -496,7 +496,7 @@ mod tests {
             )
             .unwrap();
             ts0.points.start_times = None;
-            ts0.points.timestamps = timestamps.clone();
+            ts0.points.timestamps.clone_from(&timestamps);
             *ts0.points.values_mut(0).unwrap() = ValueArray::Double(vec![
                 Some(1.0),
                 if matches!(

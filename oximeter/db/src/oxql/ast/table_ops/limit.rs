@@ -150,7 +150,7 @@ mod tests {
             MetricType::Gauge,
         )
         .unwrap();
-        timeseries.points.timestamps = timestamps.clone();
+        timeseries.points.timestamps.clone_from(&timestamps);
         timeseries.points.values[0].values.as_integer_mut().unwrap().extend([
             Some(1),
             Some(2),
@@ -166,7 +166,7 @@ mod tests {
             MetricType::Gauge,
         )
         .unwrap();
-        timeseries.points.timestamps = timestamps.clone();
+        timeseries.points.timestamps.clone_from(&timestamps);
         timeseries.points.values[0].values.as_integer_mut().unwrap().extend([
             Some(4),
             Some(5),

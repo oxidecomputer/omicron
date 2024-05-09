@@ -263,7 +263,7 @@ impl HardwareView {
             updates.push(DiskAdded(disk.clone()));
         }
 
-        self.disks = polled_hw.disks.clone();
+        self.disks.clone_from(&polled_hw.disks);
     }
 }
 
