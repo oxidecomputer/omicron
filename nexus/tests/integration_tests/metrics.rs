@@ -322,7 +322,42 @@ async fn test_instance_watcher_metrics(
     let client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
 
-    let kick_instance_watcher = || async {
+    // TODO(eliza): consider factoring this out to a generic
+    // `activate_background_task` function in `nexus-test-utils` eventually?
+    let activate_instance_watcher = || async {
+        use nexus_client::types::BackgroundTask;
+        use nexus_client::types::CurrentStatus;
+        use nexus_client::types::CurrentStatusRunning;
+        use nexus_client::types::LastResult;
+        use nexus_client::types::LastResultCompleted;
+
+        fn most_recent_start_time(
+            task: &BackgroundTask,
+        ) -> Option<chrono::DateTime<chrono::Utc>> {
+            match task.current {
+                CurrentStatus::Idle => match task.last {
+                    LastResult::Completed(LastResultCompleted {
+                        start_time,
+                        ..
+                    }) => Some(start_time),
+                    LastResult::NeverCompleted => None,
+                },
+                CurrentStatus::Running(CurrentStatusRunning {
+                    start_time,
+                    ..
+                }) => Some(start_time),
+            }
+        }
+
+        eprintln!("\n --- activating instance watcher ---\n");
+        let task = NexusRequest::object_get(
+            internal_client,
+            "/bgtasks/view/instance_watcher",
+        )
+        .execute_and_parse_unwrap::<BackgroundTask>()
+        .await;
+        let last_start = most_recent_start_time(&task);
+
         internal_client
             .make_request(
                 http::Method::POST,
@@ -334,8 +369,28 @@ async fn test_instance_watcher_metrics(
             )
             .await
             .unwrap();
-        // bleh...
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        // Wait for the instance watcher task to finish
+        wait_for_condition(
+            || async {
+                let task = NexusRequest::object_get(
+                    internal_client,
+                    "/bgtasks/view/instance_watcher",
+                )
+                .execute_and_parse_unwrap::<BackgroundTask>()
+                .await;
+                if matches!(&task.current, CurrentStatus::Idle)
+                    && most_recent_start_time(&task) > last_start
+                {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &Duration::from_millis(500),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
     };
 
     #[track_caller]
@@ -372,7 +427,7 @@ async fn test_instance_watcher_metrics(
     let instance1_uuid = instance1.identity.id;
 
     // activate the instance watcher background task.
-    kick_instance_watcher().await;
+    activate_instance_watcher().await;
 
     let metrics =
         dbg!(timeseries_query(&cptestctx, "get virtual_machine:check").await);
@@ -391,7 +446,7 @@ async fn test_instance_watcher_metrics(
     let instance2_uuid = instance2.identity.id;
 
     // activate the instance watcher background task.
-    kick_instance_watcher().await;
+    activate_instance_watcher().await;
 
     let metrics =
         dbg!(timeseries_query(&cptestctx, "get virtual_machine:check").await);
