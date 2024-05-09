@@ -1086,7 +1086,6 @@ fn rss_config_text<'a>(
     );
 
     // Add the allowlist for connecting to user-facing rack services.
-    println!("{:?}", allowed_source_ips);
     let allowed_source_ip_spans = match &allowed_source_ips {
         None | Some(AllowedSourceIps::Any) => {
             vec![plain_list_item(String::from("Any"))]
