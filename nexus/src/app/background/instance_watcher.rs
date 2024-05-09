@@ -402,10 +402,6 @@ impl BackgroundTask for InstanceWatcher {
                 }
             }
 
-            // All requests fired off! While we wait for them to come back,
-            // let's prune old instances.
-            let pruned = self.metrics.lock().unwrap().prune();
-
             // Now, wait for the check results to come back.
             let mut total: usize = 0;
             let mut instance_states: BTreeMap<String, usize> =
@@ -442,6 +438,12 @@ impl BackgroundTask for InstanceWatcher {
                     *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
                 }
             }
+
+            // All requests completed! Prune any old instance metrics for
+            // instances that we didn't check --- if we didn't spawn a check for
+            // something, that means it wasn't present in the most recent
+            // database query.
+            let pruned = self.metrics.lock().unwrap().prune();
 
             slog::info!(opctx.log, "all instance checks complete";
                 "total_instances" => total,
