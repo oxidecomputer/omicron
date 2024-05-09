@@ -7,7 +7,10 @@
 use super::common::BackgroundTask;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
+use nexus_db_model::Instance;
+use nexus_db_model::Project;
 use nexus_db_model::Sled;
+use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -206,6 +209,26 @@ struct VirtualMachine {
     sled_agent_port: u16,
 }
 
+impl VirtualMachine {
+    fn new(
+        sled: &Sled,
+        instance: &Instance,
+        vmm: &Vmm,
+        project: &Project,
+    ) -> Self {
+        let addr = sled.address();
+        Self {
+            instance_id: instance.id(),
+            silo_id: project.silo_id,
+            project_id: project.id(),
+            vmm_id: vmm.id,
+            sled_agent_id: sled.id(),
+            sled_agent_ip: (*addr.ip()).into(),
+            sled_agent_port: addr.port(),
+        }
+    }
+}
+
 struct Check {
     target: VirtualMachine,
 
@@ -363,15 +386,7 @@ impl BackgroundTask for InstanceWatcher {
                 let mut batch = batch.into_iter();
                 if let Some((mut curr_sled, instance, vmm, project)) = batch.next() {
                     let mut client = mk_client(&curr_sled);
-                    let target = VirtualMachine {
-                        instance_id: instance.id(),
-                        silo_id: project.silo_id,
-                        project_id: project.id(),
-                        vmm_id: vmm.id,
-                        sled_agent_id: curr_sled.id(),
-                        sled_agent_ip: (*curr_sled.address().ip()).into(),
-                        sled_agent_port: curr_sled.address().port(),
-                    };
+                    let target = VirtualMachine::new(&curr_sled, &instance, &vmm, &project);
                     tasks.spawn(self.check_instance(opctx, &client, target));
 
                     for (sled, instance, vmm, project) in batch {
@@ -380,15 +395,8 @@ impl BackgroundTask for InstanceWatcher {
                             client = mk_client(&sled);
                             curr_sled = sled;
                         }
-                        let target = VirtualMachine {
-                            instance_id: instance.id(),
-                            silo_id: project.silo_id,
-                            project_id: project.id(),
-                            vmm_id: vmm.id,
-                            sled_agent_id: curr_sled.id(),
-                            sled_agent_ip: (*curr_sled.address().ip()).into(),
-                            sled_agent_port: curr_sled.address().port(),
-                        };
+
+                        let target = VirtualMachine::new(&curr_sled, &instance, &vmm, &project);
                         tasks.spawn(self.check_instance(opctx, &client, target));
                     }
                 }
