@@ -30,7 +30,6 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 /// Background task that periodically checks instance states.
-#[derive(Clone)]
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
@@ -61,7 +60,8 @@ impl InstanceWatcher {
         client: &SledAgentClient,
         target: VirtualMachine,
     ) -> impl Future<Output = Check> + Send + 'static {
-        let watcher = self.clone();
+        let datastore = self.datastore.clone();
+        let resolver = self.resolver.clone();
 
         let opctx = opctx.child(
             std::iter::once((
@@ -73,7 +73,6 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            let InstanceWatcher { datastore, resolver, .. } = watcher;
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client.instance_get_state(&target.instance_id).await;
             let mut check = Check { target, outcome: None, result: Ok(()) };
