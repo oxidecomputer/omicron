@@ -14,7 +14,7 @@ pub struct ClippyArgs {
     #[clap(long)]
     fix: bool,
     /// Error format passed to `cargo clippy`.
-    #[clap(long)]
+    #[clap(long, value_name = "FMT")]
     message_format: Option<String>,
 }
 
@@ -36,7 +36,7 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
     // opportunity to get out of sync with what Cargo actually accepts should a
     // new message format be added.
     if let Some(fmt) = args.message_format {
-        command.args(&["--message-format", &fmt]);
+        command.args(["--message-format", &fmt]);
     }
 
     command
