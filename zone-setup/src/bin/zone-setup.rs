@@ -13,8 +13,10 @@ use illumos_utils::svcadm::Svcadm;
 use illumos_utils::zone::{AddressRequest, Zones};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_common::backoff::{self, BackoffError};
 use serde_json::Value;
-use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+// use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
 use slog::{info, Logger};
 use std::fs::{
     copy, create_dir_all, metadata, read_to_string, set_permissions, write,
@@ -29,7 +31,7 @@ use uzers::{get_group_by_name, get_user_by_name};
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
 pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
-pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
+//pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 pub const ROOT: &str = "root";
 pub const SYS: &str = "sys";
 
@@ -626,44 +628,46 @@ async fn switch_zone_setup(
         }
     };
 
+// TODO: This CANNOT happen inside the zone as the vnics live in the global zone
+
     info!(&log, "Ensuring bootstrap address exists in zone";
     "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic, "bootstrap address" => ?bootstrap_addr);
-    let addrtype =
-        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
-    let addrobj_name = "bootstrap6";
-    let addrobj =
-        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not create new addrobj {:?}: {}",
-                addrobj_name,
-                err
-            ))
-        })?;
-    // TODO: Fix error
-    // root@oxz_switch:~# /usr/sbin/ipadm create-addr -t -T static -a fdb0:a8a1:59c7:4e85::2/64 oxBootstrap0/bootstrap6
-    // ipadm: Could not create address: Can't assign requested address
-    let _ = Zones::ensure_address(None, &addrobj, addrtype)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not ensure address {} {:?}: {}",
-                addrobj,
-                addrtype,
-                err
-            ))
-        })?;
-
+//    let addrtype =
+//        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
+//    let addrobj_name = "bootstrap6";
+//    let addrobj =
+//        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
+//            CmdError::Failure(anyhow!(
+//                "Could not create new addrobj {:?}: {}",
+//                addrobj_name,
+//                err
+//            ))
+//        })?;
+//    // TODO: Fix error
+//    // root@oxz_switch:~# /usr/sbin/ipadm create-addr -t -T static -a fdb0:a8a1:59c7:4e85::2/64 oxBootstrap0/bootstrap6
+//    // ipadm: Could not create address: Can't assign requested address
+//    let _ = Zones::ensure_address(None, &addrobj, addrtype)
+//        .map_err(|err| {
+//            CmdError::Failure(anyhow!(
+//                "Could not ensure address {} {:?}: {}",
+//                addrobj,
+//                addrtype,
+//                err
+//            ))
+//        })?;
+//
     info!(
         &log,
         "Forwarding bootstrap traffic via {} to {}",
         bootstrap_name,
         gz_local_link_addr
     );
-    Route::add_bootstrap_route(
-        BOOTSTRAP_PREFIX,
-        *gz_local_link_addr,
-        &bootstrap_name,
-    )
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+//    Route::add_bootstrap_route(
+//        BOOTSTRAP_PREFIX,
+//        *gz_local_link_addr,
+//        &bootstrap_name,
+//    )
+//    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
@@ -943,6 +947,7 @@ async fn common_nw_set_up(
     Ipadm::set_interface_mtu(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
+    // TODO: Log if there are no addresses, or add a flag so that this doesn't run on the switch zone 
     for addr in &static_addrs {
         if **addr != Ipv6Addr::LOCALHOST {
             info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
@@ -951,9 +956,39 @@ async fn common_nw_set_up(
         }
     }
 
-    info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
-    Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    // TODO: Run this enough times to make sure this implementation is solid
+    // perhaps somehow find out a way to know when the gateway is up?
+    // perhaps configure this for the switch zone separately?
+    backoff::retry_notify(
+        // TODO: Is this the best retry policy?
+        backoff::retry_policy_local(),
+        || async {
+            info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
+            Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
+            .or_else(|err| {
+                // TODO: Only make transient for the following error:
+                // executed and failed with status: exit status: 128 stdout: add net default: gateway fd00:1122:3344:101::1: Network is unreachable\n  stderr: 
+                Err(backoff::BackoffError::transient(
+                    CmdError::Failure(anyhow!(err)),
+                )
+            )})
+        },
+        |err, delay| {
+            info!(
+                &log,
+                "Cannot ensure there is a default route yet (retrying in {:?})",
+                delay;
+                "error" => ?err
+            );
+        },
+    )
+    .await?;
+
+    // TODO: Route must come after bootstrap
+ //   info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
+ //   Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
+ //       .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
     let mut hosts_contents = String::from(

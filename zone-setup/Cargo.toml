@@ -17,3 +17,4 @@ slog.workspace = true
 tokio.workspace = true
 uzers.workspace = true
 zone.workspace = true
+omicron-sled-agent.workspace = true

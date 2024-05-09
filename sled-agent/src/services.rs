@@ -92,7 +92,7 @@ use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
-// use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{
@@ -118,6 +118,7 @@ use illumos_utils::zone::MockZones as Zones;
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
@@ -2481,6 +2482,11 @@ impl ServiceManager {
                                         &format!("[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"),
                                     )
                                     .add_property(
+                                        "baseboard-file",
+                                        "astring",
+                                        SWITCH_ZONE_BASEBOARD_FILE,
+                                    )
+                                    .add_property(
                                         "mgs-address",
                                         "astring",
                                         &format!("[::1]:{MGS_PORT}"),
@@ -2991,14 +2997,13 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Switch zone profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+              //  return Ok(RunningZone::boot(installed_zone).await?);
             }
         }
 
         //        // TODO: Remove from here until end
-        //        let running_zone = RunningZone::boot(installed_zone).await?;
+                let running_zone = RunningZone::boot(installed_zone).await?;
         //
-        //        // TODO: Perhaps add a new tiny service that adds these links?
         //        for (link, needs_link_local) in
         //            running_zone.links().iter().zip(links_need_link_local)
         //        {
@@ -3017,34 +3022,39 @@ impl ServiceManager {
         //            }
         //        }
         //
-        //        if let Some((bootstrap_name, bootstrap_address)) =
-        //            bootstrap_name_and_address.as_ref()
-        //        {
-        //            info!(
-        //                self.inner.log,
-        //                "Ensuring bootstrap address {} exists in {} zone",
-        //                bootstrap_address.to_string(),
-        //                &zone_type_str,
-        //            );
-        //            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
-        //            info!(
-        //                self.inner.log,
-        //                "Forwarding bootstrap traffic via {} to {}",
-        //                bootstrap_name,
-        //                self.inner.global_zone_bootstrap_link_local_address,
-        //            );
-        //            running_zone
-        //                .add_bootstrap_route(
-        //                    BOOTSTRAP_PREFIX,
-        //                    self.inner.global_zone_bootstrap_link_local_address,
-        //                    bootstrap_name,
-        //                )
-        //                .map_err(|err| Error::ZoneCommand {
-        //                    intent: "add bootstrap network route".to_string(),
-        //                    err,
-        //                })?;
-        //        }
 
+        // TODO: Figure out where to best do this. 
+        // It's not possible to have it from the zone itself
+        // as it needs to be run from the global zone
+                if let Some((bootstrap_name, bootstrap_address)) =
+                    bootstrap_name_and_address.as_ref()
+                {
+                    info!(
+                        self.inner.log,
+                        "Ensuring bootstrap address {} exists in {} zone",
+                        bootstrap_address.to_string(),
+                        &zone_type_str,
+                    );
+                    running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+                    info!(
+                        self.inner.log,
+                        "Forwarding bootstrap traffic via {} to {}",
+                        bootstrap_name,
+                        self.inner.global_zone_bootstrap_link_local_address,
+                    );
+                    running_zone
+                        .add_bootstrap_route(
+                            BOOTSTRAP_PREFIX,
+                            self.inner.global_zone_bootstrap_link_local_address,
+                            bootstrap_name,
+                        )
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "add bootstrap network route".to_string(),
+                            err,
+                        })?;
+                }
+                Ok(running_zone)
+        //
         //        let addresses = match &request {
         //            ZoneArgs::Omicron(OmicronZoneConfigLocal {
         //                zone: OmicronZoneConfig { underlay_address, .. },
@@ -4561,7 +4571,7 @@ impl ServiceManager {
                 SledLocalZone::Initializing { request, .. },
                 Some(new_request),
             ) => {
-                info!(log, "Enabling {zone_typestr} zone (already underway)");
+                info!(log, "Enabling {zone_typestr} zone (already underway)"; "switch-state" => "first",);
                 // The zone has not started yet -- we can simply replace
                 // the next request with our new request.
                 *request = new_request;
@@ -4569,6 +4579,60 @@ impl ServiceManager {
             (SledLocalZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
+
+//                let req = request.clone();
+//                // TODO: make this cleaner
+//                let switch_zone_config = SwitchZoneConfigLocal { zone: req, root: Utf8PathBuf::new() };
+//                let zone_args = ZoneArgs::Switch(&switch_zone_config);
+//
+//                let (bootstrap_vnic, bootstrap_name_and_address) =
+//            match self.bootstrap_address_needed(&zone_args)? {
+//                Some((vnic, address)) => {
+//                    let name = vnic.name().to_string();
+//                    (Some(vnic), Some((name, address)))
+//                }
+//                None => (None, None),
+//            };
+//
+//            if let Some((bootstrap_name, bootstrap_address)) =
+//                    bootstrap_name_and_address.as_ref()
+//                {
+//
+//                    info!(
+//                        self.inner.log,
+//                        "BOOTSTRAP VNIC {} BOOTSTRAP NAME {} BOOTSTRAP ADDRESS {}",
+//                        bootstrap_vnic.unwrap().name(),
+//                        bootstrap_name.to_string(),
+//                        bootstrap_address.to_string();
+//                        "switch-state" => "second",
+//                    );
+//
+//                    info!(
+//                        self.inner.log,
+//                        "Ensuring bootstrap address {} exists in switch zone",
+//                        bootstrap_address.to_string();
+//                        "switch-state" => "second",
+//                    );
+//                    zone.ensure_bootstrap_address(*bootstrap_address).await?;
+//                    info!(
+//                        self.inner.log,
+//                        "Forwarding bootstrap traffic via {} to {}",
+//                        bootstrap_name,
+//                        self.inner.global_zone_bootstrap_link_local_address;
+//                        "switch-state" => "second",
+//                    );
+//                    zone
+//                        .add_bootstrap_route(
+//                            BOOTSTRAP_PREFIX,
+//                            self.inner.global_zone_bootstrap_link_local_address,
+//                            bootstrap_name,
+//                        )
+//                        .map_err(|err| Error::ZoneCommand {
+//                            intent: "add bootstrap network route".to_string(),
+//                            err,
+//                        })?;
+//                }
+
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
@@ -4585,6 +4649,7 @@ impl ServiceManager {
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
+                // TODO: Need to wait for underlay to be up for this to work
                 for addr in &request.addresses {
                     if *addr == Ipv6Addr::LOCALHOST {
                         continue;
@@ -4604,14 +4669,14 @@ impl ServiceManager {
                     );
                 }
 
-                if let Some(info) = self.inner.sled_info.get() {
-                    zone.add_default_route(info.underlay_address).map_err(
-                        |err| Error::ZoneCommand {
-                            intent: "Adding Route".to_string(),
-                            err,
-                        },
-                    )?;
-                }
+            //    if let Some(info) = self.inner.sled_info.get() {
+            //        zone.add_default_route(info.underlay_address).map_err(
+            //            |err| Error::ZoneCommand {
+            //                intent: "Adding Route".to_string(),
+            //                err,
+            //            },
+            //        )?;
+            //    }
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
@@ -4845,6 +4910,10 @@ impl ServiceManager {
         let zone_request =
             SwitchZoneConfigLocal { root, zone: request.clone() };
         let zone_args = ZoneArgs::Switch(&zone_request);
+        info!(
+            self.inner.log,
+            "Starting switch zone"; "switch-state" => "first",
+        );
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;

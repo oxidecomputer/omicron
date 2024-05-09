@@ -425,11 +425,11 @@ mod tests {
       </property_group>
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
-        <propval type="type" name="prop" value="value"/>
-        <propval type="type" name="prop2" value="value2"/>
+        <propval type="type" name="prop" value='value'/>
+        <propval type="type" name="prop2" value='value2'/>
       </property_group>
       <property_group type="application" name="mypg2">
-        <propval type="type" name="prop3" value="value3"/>
+        <propval type="type" name="prop3" value='value3'/>
       </property_group>
     </instance>
   </service>
