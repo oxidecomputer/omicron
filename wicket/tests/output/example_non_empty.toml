@@ -47,19 +47,19 @@ internal_services_ip_pool_ranges = [
 # Confirm this list contains all expected sleds before continuing!
 bootstrap_sleds = [
     1, # serial 1 2 3 (model model1 revision 3, IP address UNKNOWN)
-    5, # serial 4 5 6 (model model2 revision 5, ::1)
+    #5, # serial 4 5 6 (model model2 revision 5, ::1)
 ]
 
 # Allowlist of source IPs that can make requests to user-facing services.
 [allowed_source_ips]
 # Any external IPs to make requests. This is the default.
-allow = "any"
+#allow = "any"
 
 # Use the below two lines to only allow requests from the specified IP subnets.
 # Requests from any other source IPs are refused. Note that individual addresses
 # must include the netmask, e.g., `1.2.3.4/32`.
-# allow = "list"
-# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+allow = "list"
+ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
 
 # TODO: docs on network config
 [rack_network_config]
