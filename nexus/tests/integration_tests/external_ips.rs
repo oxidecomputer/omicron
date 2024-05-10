@@ -230,6 +230,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
+    // assert_eq!(fip.ip_pool_id, "how to get the expected pool id?");
 
     assert_ip_pool_utilization(client, "other-pool", 1, 5, 0, 0).await;
 
@@ -248,6 +249,12 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+
+    let url = format!("/v1/system/ip-pools/{}/utilization", "default");
+    // let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    let ip_pool = views::IpPool::objects_get(client, &url).await;
+
+    // assert_eq!(fip.ip_pool_id, "how to get the expected pool id?");
 
     assert_ip_pool_utilization(client, "other-pool", 2, 5, 0, 0).await;
 }
