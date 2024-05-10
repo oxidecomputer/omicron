@@ -4,7 +4,7 @@
 <service_bundle type='manifest' name='sp-sim'>
 
 <service name='oxide/sp-sim' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>

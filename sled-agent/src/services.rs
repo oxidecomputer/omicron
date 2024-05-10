@@ -2329,6 +2329,8 @@ impl ServiceManager {
                     ServiceBuilder::new("oxide/pumpkind");
                 let mut mgd_service = ServiceBuilder::new("oxide/mgd");
                 let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
+                let mut uplink_service = ServiceBuilder::new("oxide/uplink");
+                let mut sp_sim_service = ServiceBuilder::new("oxide/sp-sim");
 
                 let Some((bootstrap_name, bootstrap_address)) =
                     bootstrap_name_and_address.as_ref()
@@ -2441,6 +2443,8 @@ impl ServiceManager {
                                 self.inner.log,
                                 "Setting up Simulated SP service"
                             );
+                            sp_sim_service = sp_sim_service
+                                    .add_instance(ServiceInstanceBuilder::new("default"));
                         }
                         SwitchService::Wicketd { baseboard } => {
                             info!(self.inner.log, "Setting up wicketd service");
@@ -2816,6 +2820,8 @@ impl ServiceManager {
                             // Nothing to do here - this service is special and
                             // configured in
                             // `ensure_switch_zone_uplinks_configured`
+                            uplink_service = uplink_service
+                                    .add_instance(ServiceInstanceBuilder::new("default"));
                         }
                         SwitchService::Mgd => {
                             info!(self.inner.log, "Setting up mgd service");
@@ -2990,7 +2996,8 @@ impl ServiceManager {
                     .add_service(lldpd_service)
                     .add_service(pumpkind_service)
                     .add_service(mgd_service)
-                    .add_service(mg_ddm_service);
+                    .add_service(mg_ddm_service)
+                    .add_service(uplink_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -4669,14 +4676,14 @@ impl ServiceManager {
                     );
                 }
 
-            //    if let Some(info) = self.inner.sled_info.get() {
-            //        zone.add_default_route(info.underlay_address).map_err(
-            //            |err| Error::ZoneCommand {
-            //                intent: "Adding Route".to_string(),
-            //                err,
-            //            },
-            //        )?;
-            //    }
+                if let Some(info) = self.inner.sled_info.get() {
+                    zone.add_default_route(info.underlay_address).map_err(
+                        |err| Error::ZoneCommand {
+                            intent: "Adding Route".to_string(),
+                            err,
+                        },
+                    )?;
+                }
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
