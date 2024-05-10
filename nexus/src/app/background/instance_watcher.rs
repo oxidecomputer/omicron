@@ -34,7 +34,7 @@ pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
-    nexus_id: Uuid,
+    id: WatcherIdentity,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -47,13 +47,13 @@ impl InstanceWatcher {
         datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
         producer_registry: &ProducerRegistry,
-        nexus_id: Uuid,
+        id: WatcherIdentity,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, resolver, metrics, nexus_id }
+        Self { datastore, resolver, metrics, id }
     }
 
     fn check_instance(
@@ -189,10 +189,23 @@ impl InstanceWatcher {
     }
 }
 
+/// The identity of the process performing the health check, for distinguishing
+/// health check metrics emitted by different Nexus instances.
+///
+/// This is a struct just to ensure that the two UUIDs are named arguments
+/// (rather than positional arguments) and can't be swapped accidentally.
+#[derive(Copy, Clone)]
+pub struct WatcherIdentity {
+    pub nexus_id: Uuid,
+    pub rack_id: Uuid,
+}
+
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, oximeter::Target,
 )]
 struct VirtualMachine {
+    /// The rack ID of the Nexus process which performed the health check.
+    rack_id: Uuid,
     /// The ID of the Nexus process which performed the health check.
     nexus_id: Uuid,
     /// The instance's ID.
@@ -213,7 +226,7 @@ struct VirtualMachine {
 
 impl VirtualMachine {
     fn new(
-        nexus_id: Uuid,
+        WatcherIdentity { rack_id, nexus_id }: WatcherIdentity,
         sled: &Sled,
         instance: &Instance,
         vmm: &Vmm,
@@ -221,6 +234,7 @@ impl VirtualMachine {
     ) -> Self {
         let addr = sled.address();
         Self {
+            rack_id,
             nexus_id,
             instance_id: instance.id(),
             silo_id: project.silo_id,
@@ -397,7 +411,7 @@ impl BackgroundTask for InstanceWatcher {
                 let mut batch = batch.into_iter();
                 if let Some((mut curr_sled, instance, vmm, project)) = batch.next() {
                     let mut client = mk_client(&curr_sled);
-                    let target = VirtualMachine::new(self.nexus_id, &curr_sled, &instance, &vmm, &project);
+                    let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
                     tasks.spawn(self.check_instance(opctx, &client, target));
 
                     for (sled, instance, vmm, project) in batch {
@@ -407,7 +421,7 @@ impl BackgroundTask for InstanceWatcher {
                             curr_sled = sled;
                         }
 
-                        let target = VirtualMachine::new(self.nexus_id, &curr_sled, &instance, &vmm, &project);
+                        let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
                         tasks.spawn(self.check_instance(opctx, &client, target));
                     }
                 }

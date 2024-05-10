@@ -357,6 +357,7 @@ impl BackgroundTasks {
                 datastore.clone(),
                 resolver.clone(),
                 producer_registry,
+                instance_watcher::WatcherIdentity { nexus_id, rack_id },
             );
             driver.register(
                 "instance_watcher".to_string(),
