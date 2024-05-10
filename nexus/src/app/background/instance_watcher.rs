@@ -77,7 +77,8 @@ impl InstanceWatcher {
         async move {
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client.instance_get_state(&target.instance_id).await;
-            let mut check = Check { target, outcome: None, result: Ok(()) };
+            let mut check =
+                Check { target, outcome: Default::default(), result: Ok(()) };
             let state = match rsp {
                 Ok(rsp) => rsp.into_inner(),
                 Err(ClientError::ErrorResponse(rsp)) => {
@@ -89,9 +90,8 @@ impl InstanceWatcher {
                         slog::info!(opctx.log, "instance is wayyyyy gone");
                         // TODO(eliza): eventually, we should attempt to put the
                         // instance in the `Failed` state here.
-                        check.outcome = Some(CheckOutcome::Failure(
-                            Failure::NoSuchInstance,
-                        ));
+                        check.outcome =
+                            CheckOutcome::Failure(Failure::NoSuchInstance);
                         return check;
                     }
                     if status.is_client_error() {
@@ -104,9 +104,9 @@ impl InstanceWatcher {
                         "status" => ?status, "error" => ?rsp.into_inner());
                     }
 
-                    check.outcome = Some(CheckOutcome::Failure(
+                    check.outcome = CheckOutcome::Failure(
                         Failure::SledAgentResponse(status.as_u16()),
-                    ));
+                    );
                     return check;
                 }
                 Err(ClientError::CommunicationError(e)) => {
@@ -121,9 +121,8 @@ impl InstanceWatcher {
                     // unreachable. We should start doing that here at some
                     // point.
                     slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
-                    check.outcome = Some(CheckOutcome::Failure(
-                        Failure::SledAgentUnreachable,
-                    ));
+                    check.outcome =
+                        CheckOutcome::Failure(Failure::SledAgentUnreachable);
                     return check;
                 }
                 Err(e) => {
@@ -140,7 +139,7 @@ impl InstanceWatcher {
 
             let new_runtime_state: SledInstanceState = state.into();
             check.outcome =
-                Some(CheckOutcome::Success(new_runtime_state.vmm_state.state));
+                CheckOutcome::Success(new_runtime_state.vmm_state.state);
             slog::debug!(
                 opctx.log,
                 "updating instance state";
@@ -244,7 +243,7 @@ struct Check {
     ///
     /// If we were not able to perform the request at all due to an error on
     /// *our* end, this will be `None`.
-    outcome: Option<CheckOutcome>,
+    outcome: CheckOutcome,
 
     /// `Some` if the instance check was unsuccessful.
     ///
@@ -259,24 +258,31 @@ struct Check {
     result: Result<(), Incomplete>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 enum CheckOutcome {
     Success(InstanceState),
     Failure(Failure),
+    #[default]
+    Unknown,
 }
 
-impl CheckOutcome {
+impl Check {
     fn state_str(&self) -> Cow<'static, str> {
-        match self {
-            Self::Success(state) => state.label().into(),
-            Self::Failure(_) => InstanceState::Failed.label().into(),
+        match self.outcome {
+            CheckOutcome::Success(state) => state.label().into(),
+            CheckOutcome::Failure(_) => InstanceState::Failed.label().into(),
+            CheckOutcome::Unknown => "unknown".into(),
         }
     }
 
     fn reason_str(&self) -> Cow<'static, str> {
-        match self {
-            Self::Success(_) => "success".into(),
-            Self::Failure(reason) => reason.as_str(),
+        match self.outcome {
+            CheckOutcome::Success(_) => "success".into(),
+            CheckOutcome::Failure(reason) => reason.as_str(),
+            CheckOutcome::Unknown => match self.result {
+                Ok(()) => "unknown".into(), // this shouldn't happen, but there's no way to prevent it from happening,
+                Err(e) => e.as_str(),
+            },
         }
     }
 }
@@ -416,32 +422,28 @@ impl BackgroundTask for InstanceWatcher {
             let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
             while let Some(result) = tasks.join_next().await {
                 total += 1;
-                let Check { target, outcome, result } = result.expect(
+                let check = result.expect(
                     "a `JoinError` is returned if a spawned task \
                     panics, or if the task is aborted. we never abort \
                     tasks on this `JoinSet`, and nexus is compiled with \
                     `panic=\"abort\"`, so neither of these cases should \
                     ever occur",
                 );
-                let mut metrics = self.metrics.lock().unwrap();
-                let metric = metrics.instance(target);
-                if let Some(outcome) = outcome {
-                    metric.completed(outcome);
-                    match outcome {
-                        CheckOutcome::Success(state) => {
-                            *instance_states
-                                .entry(state.to_string())
-                                .or_default() += 1;
-                        }
-                        CheckOutcome::Failure(reason) => {
-                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
-                        }
+                match check.outcome {
+                    CheckOutcome::Success(state) => {
+                        *instance_states
+                            .entry(state.to_string())
+                            .or_default() += 1;
                     }
+                    CheckOutcome::Failure(reason) => {
+                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                    }
+                    CheckOutcome::Unknown => {}
                 }
-                if let Err(reason) = result {
-                    metric.check_error(reason);
+                if let Err(ref reason) = check.result {
                     *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
                 }
+                self.metrics.lock().unwrap().record_check(check);
             }
 
             // All requests completed! Prune any old instance metrics for
@@ -489,18 +491,34 @@ mod metrics {
     pub(super) struct Producer(pub(super) Arc<Mutex<Metrics>>);
 
     #[derive(Debug, Default)]
-    pub(super) struct Instance {
+    struct Instance {
         checks: BTreeMap<CheckOutcome, Check>,
         check_errors: BTreeMap<Incomplete, IncompleteCheck>,
         touched: bool,
     }
 
     impl Metrics {
-        pub(crate) fn instance(
-            &mut self,
-            instance: VirtualMachine,
-        ) -> &mut Instance {
-            self.instances.entry(instance).or_default()
+        pub(crate) fn record_check(&mut self, check: super::Check) {
+            let instance = self.instances.entry(check.target).or_default();
+            instance
+                .checks
+                .entry(check.outcome)
+                .or_insert_with(|| Check {
+                    state: check.state_str(),
+                    reason: check.reason_str(),
+                    datum: Cumulative::default(),
+                })
+                .datum += 1;
+            if let Err(error) = check.result {
+                instance
+                    .check_errors
+                    .entry(error)
+                    .or_insert_with(|| IncompleteCheck {
+                        reason: error.as_str(),
+                        datum: Cumulative::default(),
+                    })
+                    .datum += 1;
+            }
         }
 
         pub(super) fn prune(&mut self) -> usize {
@@ -530,30 +548,6 @@ mod metrics {
     }
 
     impl Instance {
-        pub(super) fn completed(&mut self, outcome: CheckOutcome) {
-            self.checks
-                .entry(outcome)
-                .or_insert_with(|| Check {
-                    state: outcome.state_str(),
-                    reason: outcome.reason_str(),
-                    datum: Cumulative::default(),
-                })
-                .datum += 1;
-
-            self.touched = true;
-        }
-
-        pub(super) fn check_error(&mut self, reason: Incomplete) {
-            self.check_errors
-                .entry(reason)
-                .or_insert_with(|| IncompleteCheck {
-                    reason: reason.as_str(),
-                    datum: Cumulative::default(),
-                })
-                .datum += 1;
-            self.touched = true;
-        }
-
         fn len(&self) -> usize {
             self.checks.len() + self.check_errors.len()
         }
