@@ -2940,23 +2940,31 @@ impl ServiceManager {
                                         .collect()
                                 };
 
-                            mg_ddm_config = mg_ddm_config.add_property(
-                                "interfaces",
-                                "astring",
-                                // `svccfg setprop` requires a list of values to
-                                // be enclosed in `()`, and each string value to
-                                // be enclosed in `""`.
-                                &format!(
-                                    "({})",
-                                    maghemite_interfaces
-                                        .iter()
-                                        .map(|interface| format!(
-                                            r#""{}""#,
-                                            interface
-                                        ))
-                                        .join(" "),
-                                ),
-                            );
+                            for i in maghemite_interfaces {
+                                mg_ddm_config = mg_ddm_config.add_property(
+                                    "interfaces",
+                                    "astring",
+                                    &i.to_string(),
+                                );
+                            }
+
+                       //     mg_ddm_config = mg_ddm_config.add_property(
+                       //         "interfaces",
+                       //         "astring",
+                       //         // `svccfg setprop` requires a list of values to
+                       //         // be enclosed in `()`, and each string value to
+                       //         // be enclosed in `""`.
+                       //         &format!(
+                       //             "({})",
+                       //             maghemite_interfaces
+                       //                 .iter()
+                       //                 .map(|interface| format!(
+                       //                     r#""{}""#,
+                       //                     interface
+                       //                 ))
+                       //                 .join(" "),
+                       //         ),
+                       //     );
 
                             if is_gimlet {
                                 mg_ddm_config = mg_ddm_config
@@ -4656,7 +4664,6 @@ impl ServiceManager {
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
-                // TODO: Need to wait for underlay to be up for this to work
                 for addr in &request.addresses {
                     if *addr == Ipv6Addr::LOCALHOST {
                         continue;
@@ -4676,33 +4683,43 @@ impl ServiceManager {
                     );
                 }
 
-                if let Some(info) = self.inner.sled_info.get() {
-                    zone.add_default_route(info.underlay_address).map_err(
-                        |err| Error::ZoneCommand {
-                            intent: "Adding Route".to_string(),
-                            err,
-                        },
-                    )?;
-                }
+            // TODO: This is probably not necessary as it's added byt the zone_network_setup service
+            //    if let Some(info) = self.inner.sled_info.get() {
+            //        zone.add_default_route(info.underlay_address).map_err(
+            //            |err| Error::ZoneCommand {
+            //                intent: "Adding Route".to_string(),
+            //                err,
+            //            },
+            //        )?;
+            //    }
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
 
                     match service {
                         SwitchService::ManagementGatewayService => {
+                            // TODO: Make sure all services use delpropvalue_default_instance
+                            // and addpropvalue_default_instance instead of delpropvalue
+                            // and addpropvalue. Verify property values are correct
+
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
-                            smfh.delpropvalue("config/address", "*")?;
+                            smfh.delpropvalue_default_instance("config/address", "*")?;
 
                             // Restore the localhost address that we always add
                             // when setting up MGS.
-                            smfh.addpropvalue(
+                            smfh.addpropvalue_default_instance(
                                 "config/address",
                                 &format!("[::1]:{MGS_PORT}"),
                             )?;
 
+                            info!(
+                                self.inner.log,
+                                "DEBUG: address for MGS {}",
+                                address
+                            );
                             // Add the underlay address.
-                            smfh.addpropvalue(
+                            smfh.addpropvalue_default_instance(
                                 "config/address",
                                 &format!("[{address}]:{MGS_PORT}"),
                             )?;
@@ -4741,10 +4758,10 @@ impl ServiceManager {
                                     "no rack_id/sled_id available yet"
                                 );
                             }
-                            smfh.delpropvalue("config/address", "*")?;
+                            smfh.delpropvalue_default_instance("config/address", "*")?;
                             smfh.delpropvalue("config/dns_server", "*")?;
                             for address in &request.addresses {
-                                smfh.addpropvalue(
+                                smfh.addpropvalue_default_instance(
                                     "config/address",
                                     &format!("[{}]:{}", address, DENDRITE_PORT),
                                 )?;
@@ -4788,9 +4805,9 @@ impl ServiceManager {
                         }
                         SwitchService::Lldpd { .. } => {
                             info!(self.inner.log, "configuring lldp service");
-                            smfh.delpropvalue("config/address", "*")?;
+                            smfh.delpropvalue_default_instance("config/address", "*")?;
                             for address in &request.addresses {
-                                smfh.addpropvalue(
+                                smfh.addpropvalue_default_instance(
                                     "config/address",
                                     &format!("[{}]:{}", address, LLDP_PORT),
                                 )?;

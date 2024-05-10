@@ -132,6 +132,27 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
+    pub fn addpropvalue_default_instance<P, V>(&self, prop: P, val: V) -> Result<(), Error>
+    where
+        P: ToString,
+        V: ToString,
+    {
+        self.running_zone
+            .run_cmd(&[
+                illumos_utils::zone::SVCCFG,
+                "-s",
+                &self.default_smf_name,
+                "addpropvalue",
+                &prop.to_string(),
+                &val.to_string(),
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("add {} smf property value", prop.to_string()),
+                err,
+            })?;
+        Ok(())
+    }
+
     pub fn addpropgroup<P, T>(
         &self,
         propgroup: P,
@@ -193,6 +214,27 @@ impl<'t> SmfHelper<'t> {
                 illumos_utils::zone::SVCCFG,
                 "-s",
                 &self.smf_name,
+                "delpropvalue",
+                &prop.to_string(),
+                &val.to_string(),
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("del {} smf property value", prop.to_string()),
+                err,
+            })?;
+        Ok(())
+    }
+
+    pub fn delpropvalue_default_instance<P, V>(&self, prop: P, val: V) -> Result<(), Error>
+    where
+        P: ToString,
+        V: ToString,
+    {
+        self.running_zone
+            .run_cmd(&[
+                illumos_utils::zone::SVCCFG,
+                "-s",
+                &self.default_smf_name,
                 "delpropvalue",
                 &prop.to_string(),
                 &val.to_string(),
