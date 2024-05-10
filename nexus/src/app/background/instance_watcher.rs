@@ -34,6 +34,7 @@ pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
+    nexus_id: Uuid,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -46,12 +47,13 @@ impl InstanceWatcher {
         datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
         producer_registry: &ProducerRegistry,
+        nexus_id: Uuid,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, resolver, metrics }
+        Self { datastore, resolver, metrics, nexus_id }
     }
 
     fn check_instance(
@@ -192,6 +194,8 @@ impl InstanceWatcher {
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, oximeter::Target,
 )]
 struct VirtualMachine {
+    /// The ID of the Nexus process which performed the health check.
+    nexus_id: Uuid,
     /// The instance's ID.
     instance_id: Uuid,
     /// The silo ID of the instance's silo.
@@ -210,6 +214,7 @@ struct VirtualMachine {
 
 impl VirtualMachine {
     fn new(
+        nexus_id: Uuid,
         sled: &Sled,
         instance: &Instance,
         vmm: &Vmm,
@@ -217,6 +222,7 @@ impl VirtualMachine {
     ) -> Self {
         let addr = sled.address();
         Self {
+            nexus_id,
             instance_id: instance.id(),
             silo_id: project.silo_id,
             project_id: project.id(),
@@ -385,7 +391,7 @@ impl BackgroundTask for InstanceWatcher {
                 let mut batch = batch.into_iter();
                 if let Some((mut curr_sled, instance, vmm, project)) = batch.next() {
                     let mut client = mk_client(&curr_sled);
-                    let target = VirtualMachine::new(&curr_sled, &instance, &vmm, &project);
+                    let target = VirtualMachine::new(self.nexus_id, &curr_sled, &instance, &vmm, &project);
                     tasks.spawn(self.check_instance(opctx, &client, target));
 
                     for (sled, instance, vmm, project) in batch {
@@ -395,7 +401,7 @@ impl BackgroundTask for InstanceWatcher {
                             curr_sled = sled;
                         }
 
-                        let target = VirtualMachine::new(&curr_sled, &instance, &vmm, &project);
+                        let target = VirtualMachine::new(self.nexus_id, &curr_sled, &instance, &vmm, &project);
                         tasks.spawn(self.check_instance(opctx, &client, target));
                     }
                 }
