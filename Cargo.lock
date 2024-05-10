@@ -5402,6 +5402,7 @@ dependencies = [
  "itertools 0.12.1",
  "macaddr",
  "mg-admin-client",
+ "nexus-client",
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",

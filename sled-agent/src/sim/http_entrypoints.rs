@@ -41,6 +41,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(instance_put_external_ip)?;
@@ -132,6 +133,19 @@ async fn instance_put_state(
     Ok(HttpResponseOk(
         sa.instance_ensure_state(instance_id, body_args.state).await?,
     ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
 }
 
 #[endpoint {

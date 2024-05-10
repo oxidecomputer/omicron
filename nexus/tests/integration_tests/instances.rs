@@ -116,7 +116,9 @@ fn default_vpc_subnets_url() -> String {
     format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
 }
 
-async fn create_project_and_pool(client: &ClientTestContext) -> views::Project {
+pub async fn create_project_and_pool(
+    client: &ClientTestContext,
+) -> views::Project {
     create_default_ip_pool(client).await;
     create_project(client, PROJECT_NAME).await
 }
