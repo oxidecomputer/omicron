@@ -50,9 +50,7 @@ bootstrap_sleds = [
     5, # serial 4 5 6 (model model2 revision 5, ::1)
 ]
 
-# Allowlist of source IPs that can make requests to user-facing services.
 [allowed_source_ips]
-# Any external IPs to make requests. This is the default.
 allow = "any"
 
 # Use the below two lines to only allow requests from the specified IP subnets.
