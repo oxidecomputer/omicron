@@ -533,6 +533,7 @@ mod metrics {
                     })
                     .datum += 1;
             }
+            instance.touched = true;
         }
 
         pub(super) fn prune(&mut self) -> usize {
