@@ -9,6 +9,9 @@ description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
 
+[lints]
+workspace = true
+
 # The parts of the file between the BEGIN HAKARI SECTION and END HAKARI SECTION comments
 # are managed by hakari.
 
@@ -18,7 +21,6 @@ ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
 anyhow = { version = "1.0.82", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
-base64 = { version = "0.22.0" }
 bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
@@ -75,7 +77,7 @@ num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.44", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.18", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
-peg-runtime = { version = "0.8.2", default-features = false, features = ["std"] }
+peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -90,13 +92,13 @@ regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.17", features = ["bytes", "chrono", "uuid1"] }
+scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.22", features = ["serde"] }
-serde = { version = "1.0.199", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.201", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.116", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.4.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-socket2 = { version = "0.5.6", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -113,7 +115,7 @@ tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.22" }
-usdt = { version = "0.3.5" }
+usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.8.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
@@ -126,7 +128,6 @@ ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
 anyhow = { version = "1.0.82", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
-base64 = { version = "0.22.0" }
 bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
@@ -183,7 +184,7 @@ num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.44", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.18", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
-peg-runtime = { version = "0.8.2", default-features = false, features = ["std"] }
+peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -198,13 +199,13 @@ regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.17", features = ["bytes", "chrono", "uuid1"] }
+scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.22", features = ["serde"] }
-serde = { version = "1.0.199", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.201", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.116", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.4.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-socket2 = { version = "0.5.6", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -222,7 +223,7 @@ tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.22" }
-usdt = { version = "0.3.5" }
+usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.8.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }

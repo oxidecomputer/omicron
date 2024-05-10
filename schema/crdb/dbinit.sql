@@ -2637,7 +2637,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     md5_auth_key TEXT,
     multi_exit_discriminator INT8,
     local_pref INT8,
-    enforce_first_as BOOLEAN,
+    enforce_first_as BOOLEAN NOT NULL DEFAULT false,
     allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
@@ -3852,7 +3852,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '59.0.0', NULL)
+    (TRUE, NOW(), NOW(), '60.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
