@@ -5,7 +5,6 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, ensure_all_datasets_and_regions,
         get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
@@ -345,16 +344,20 @@ async fn sdc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
 ) -> Result<String, ActionError> {
-    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
-    let datasets_and_regions = ensure_all_datasets_and_regions(
-        &log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    let datasets_and_regions = osagactx
+        .nexus()
+        .ensure_all_datasets_and_regions(
+            &log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -550,13 +553,15 @@ async fn sdc_regions_ensure_undo(
 
     warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
 
-    let result = delete_crucible_regions(
-        log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await;
+    let result = osagactx
+        .nexus()
+        .delete_crucible_regions(
+            log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await;
 
     match result {
         Err(e) => {

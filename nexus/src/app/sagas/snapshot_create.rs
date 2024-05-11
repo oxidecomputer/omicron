@@ -91,8 +91,6 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, delete_crucible_running_snapshot,
-        delete_crucible_snapshot, ensure_all_datasets_and_regions,
         get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
@@ -380,13 +378,16 @@ async fn ssc_regions_ensure(
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
-    let datasets_and_regions = ensure_all_datasets_and_regions(
-        &log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    let datasets_and_regions = osagactx
+        .nexus()
+        .ensure_all_datasets_and_regions(
+            &log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -458,15 +459,18 @@ async fn ssc_regions_ensure(
 async fn ssc_regions_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
-    delete_crucible_regions(
-        log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    osagactx
+        .nexus()
+        .delete_crucible_regions(
+            log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await?;
     info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
     Ok(())
 }
@@ -764,10 +768,9 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+        osagactx
+            .nexus()
+            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
 
@@ -1090,10 +1093,9 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+        osagactx
+            .nexus()
+            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
     Ok(())
@@ -1350,16 +1352,15 @@ async fn ssc_start_running_snapshot_undo(
 
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_running_snapshot(
-            &log,
-            &client,
-            region.id(),
-            snapshot_id,
-        )
-        .await?;
+        osagactx
+            .nexus()
+            .delete_crucible_running_snapshot(
+                &log,
+                &dataset,
+                region.id(),
+                snapshot_id,
+            )
+            .await?;
 
         osagactx
             .datastore()
