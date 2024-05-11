@@ -142,22 +142,17 @@ fn main() -> Result<()> {
     let logger = Logger::root(drain, slog::o!());
 
     // Change the working directory to the workspace root.
-    info!(logger, "changing working directory to {}", *WORKSPACE_DIR);
+    debug!(logger, "changing working directory to {}", *WORKSPACE_DIR);
     std::env::set_current_dir(&*WORKSPACE_DIR)
         .context("failed to change working directory to workspace root")?;
 
-    // Unset `$CARGO*` and `$RUSTUP_TOOLCHAIN`, which will interfere with
-    // various tools we're about to run. (This needs to come _after_ we read
-    // from `WORKSPACE_DIR` as it relies on `$CARGO_MANIFEST_DIR`.)
-    for (name, _) in std::env::vars_os() {
-        if name
-            .to_str()
-            .map(|s| s.starts_with("CARGO") || s == "RUSTUP_TOOLCHAIN")
-            .unwrap_or(false)
-        {
-            debug!(logger, "unsetting {:?}", name);
-            std::env::remove_var(name);
-        }
+    // Unset `$CARGO`, `$CARGO_MANIFEST_DIR`, and `$RUSTUP_TOOLCHAIN` (all
+    // set by cargo or its rustup proxy), which will interfere with various
+    // tools we're about to run. (This needs to come _after_ we read from
+    // `WORKSPACE_DIR` as it relies on `$CARGO_MANIFEST_DIR`.)
+    for var in ["CARGO", "CARGO_MANIFEST_DIR", "RUSTUP_TOOLCHAIN"] {
+        debug!(logger, "unsetting ${}", var);
+        std::env::remove_var(var);
     }
 
     // Now that we're done mucking about with our environment (something that's
@@ -437,7 +432,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     // RUN JOBS ===============================================================
     let start = Instant::now();
     jobs.run_all().await?;
-    debug!(
+    info!(
         logger,
         "all jobs completed in {:?}",
         Instant::now().saturating_duration_since(start)

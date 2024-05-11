@@ -16,8 +16,7 @@ use camino::Utf8PathBuf;
 use fs_err::tokio::File;
 use futures::stream::FuturesUnordered;
 use futures::stream::TryStreamExt;
-use slog::debug;
-use slog::error;
+use slog::info;
 use slog::Logger;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
@@ -158,24 +157,33 @@ impl<'a> Selector<'a> {
     }
 }
 
+macro_rules! info_or_error {
+    ($logger:expr, $result:expr, $($tt:tt)*) => {
+        if $result.is_ok() {
+            ::slog::info!($logger, $($tt)*);
+        } else {
+            ::slog::error!($logger, $($tt)*);
+        }
+    };
+}
+
 async fn run_job<F>(logger: Logger, name: String, future: F) -> Result<()>
 where
     F: Future<Output = Result<()>> + 'static,
 {
-    debug!(logger, "[{}] running task", name);
+    info!(logger, "[{}] running task", name);
     let start = Instant::now();
     let result = future.await;
     let duration = Instant::now().saturating_duration_since(start);
-    match result {
-        Ok(()) => {
-            debug!(logger, "[{}] task succeeded ({:?})", name, duration);
-            Ok(())
-        }
-        Err(err) => {
-            error!(logger, "[{}] task failed ({:?})", name, duration);
-            Err(err)
-        }
-    }
+    info_or_error!(
+        logger,
+        result,
+        "[{}] task {} ({:?})",
+        name,
+        if result.is_ok() { "succeeded" } else { "failed" },
+        duration
+    );
+    result
 }
 
 async fn spawn_with_output(
@@ -187,7 +195,7 @@ async fn spawn_with_output(
     let log_file_1 = File::create(log_path).await?;
     let log_file_2 = log_file_1.try_clone().await?;
 
-    debug!(logger, "[{}] running: {}", name, command.to_string());
+    info!(logger, "[{}] running: {}", name, command.to_string());
     let start = Instant::now();
     let mut child = command
         .kill_on_drop(true)
@@ -211,14 +219,16 @@ async fn spawn_with_output(
     );
     match tokio::try_join!(child.wait(), stdout, stderr) {
         Ok((status, (), ())) => {
-            debug!(
+            let result = command.check_status(status);
+            info_or_error!(
                 logger,
+                result,
                 "[{}] process exited with {} ({:?})",
                 name,
                 status,
                 Instant::now().saturating_duration_since(start)
             );
-            command.check_status(status)
+            result
         }
         Err(err) => Err(err).with_context(|| {
             format!("I/O error while waiting for job {:?} to complete", name)
