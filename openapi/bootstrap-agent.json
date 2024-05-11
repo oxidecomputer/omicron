@@ -161,6 +161,48 @@
   },
   "components": {
     "schemas": {
+      "AllowedSourceIps": {
+        "description": "Description of source IPs allowed to reach rack services.",
+        "oneOf": [
+          {
+            "description": "Allow traffic from any external IP address.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "ips": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "allow",
+              "ips"
+            ]
+          }
+        ]
+      },
       "Baseboard": {
         "description": "Describes properties that should uniquely identify a Gimlet.",
         "oneOf": [
@@ -283,12 +325,24 @@
             "format": "uint32",
             "minimum": 0
           },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Ipv4Network"
             }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
           }
         },
         "required": [
@@ -304,11 +358,43 @@
             "type": "string",
             "format": "ipv4"
           },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
           "asn": {
-            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "description": "The autonomous system number of the router the peer belongs to.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
           },
           "connect_retry": {
             "nullable": true,
@@ -323,6 +409,11 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
           },
           "hold_time": {
             "nullable": true,
@@ -345,9 +436,55 @@
             "format": "uint64",
             "minimum": 0
           },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "port": {
             "description": "Switch port the peer is reachable on.",
             "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -449,7 +586,69 @@
           "request_id"
         ]
       },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "IpNet": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
+          }
+        ]
+      },
       "IpNetwork": {
+        "x-rust-type": "ipnetwork::IpNetwork",
         "oneOf": [
           {
             "title": "v4",
@@ -489,7 +688,15 @@
           }
         ]
       },
+      "Ipv4Net": {
+        "example": "192.168.1.0/24",
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
+      },
       "Ipv4Network": {
+        "x-rust-type": "ipnetwork::Ipv4Network",
         "type": "string",
         "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
       },
@@ -511,7 +718,15 @@
           "last"
         ]
       },
+      "Ipv6Net": {
+        "example": "fd12:3456::/64",
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
       "Ipv6Network": {
+        "x-rust-type": "ipnetwork::Ipv6Network",
         "type": "string",
         "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
       },
@@ -646,6 +861,17 @@
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
         "properties": {
+          "allowed_source_ips": {
+            "description": "IPs or subnets allowed to make requests to user-facing services",
+            "default": {
+              "allow": "any"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          },
           "bootstrap_discovery": {
             "description": "Describes how bootstrap addresses should be collected during RSS.",
             "allOf": [
@@ -986,6 +1212,14 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [

@@ -136,3 +136,8 @@ pub fn text_failure() -> Style {
 pub fn text_warning() -> Style {
     Style::default().fg(OX_YELLOW)
 }
+
+pub const CHECK_ICON: char = '✓';
+pub const CROSS_ICON: char = '✗';
+pub const WARN_ICON: char = '⚠';
+pub const BULLET_ICON: char = '•';

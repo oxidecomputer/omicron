@@ -22,6 +22,7 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
 use crate::db::model::Project;
+use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -29,11 +30,14 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::Disk;
 use nexus_db_model::VmmRuntimeState;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -383,6 +387,58 @@ impl DataStore {
         };
 
         Ok((instance_updated, vmm_updated))
+    }
+
+    /// Lists all instances on in-service sleds with active Propolis VMM
+    /// processes, returning the instance along with the VMM on which it's
+    /// running, the sled on which the VMM is running, and the project that owns
+    /// the instance.
+    ///
+    /// The query performed by this function is paginated by the sled's UUID.
+    pub async fn instance_and_vmm_list_by_sled_agent(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<(Sled, Instance, Vmm, Project)> {
+        use crate::db::schema::{
+            instance::dsl as instance_dsl, project::dsl as project_dsl,
+            sled::dsl as sled_dsl, vmm::dsl as vmm_dsl,
+        };
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let result = paginated(sled_dsl::sled, sled_dsl::id, pagparams)
+            .filter(sled_dsl::time_deleted.is_null())
+            .sled_filter(SledFilter::InService)
+            .inner_join(
+                vmm_dsl::vmm
+                    .on(vmm_dsl::sled_id
+                        .eq(sled_dsl::id)
+                        .and(vmm_dsl::time_deleted.is_null()))
+                    .inner_join(
+                        instance_dsl::instance
+                            .on(instance_dsl::id
+                                .eq(vmm_dsl::instance_id)
+                                .and(instance_dsl::time_deleted.is_null()))
+                            .inner_join(
+                                project_dsl::project.on(project_dsl::id
+                                    .eq(instance_dsl::project_id)
+                                    .and(project_dsl::time_deleted.is_null())),
+                            ),
+                    ),
+            )
+            .sled_filter(SledFilter::InService)
+            .select((
+                Sled::as_select(),
+                Instance::as_select(),
+                Vmm::as_select(),
+                Project::as_select(),
+            ))
+            .load_async::<(Sled, Instance, Vmm, Project)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(result)
     }
 
     pub async fn project_delete_instance(

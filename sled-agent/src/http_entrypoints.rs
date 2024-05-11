@@ -51,6 +51,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
@@ -471,6 +472,19 @@ async fn instance_put_state(
     Ok(HttpResponseOk(
         sa.instance_ensure_state(instance_id, body_args.state).await?,
     ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
 }
 
 #[endpoint {

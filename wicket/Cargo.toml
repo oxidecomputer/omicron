@@ -6,6 +6,9 @@ edition = "2021"
 license = "MPL-2.0"
 default-run = "wicket"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 buf-list.workspace = true
@@ -27,6 +30,7 @@ rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
@@ -49,6 +53,8 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+expectorate.workspace = true
+maplit.workspace = true
 tempfile.workspace = true
 proptest.workspace = true
 

@@ -12,8 +12,9 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, Error, IdentityMetadata, InstanceState, Ipv4Net,
-    Ipv6Net, Name, ObjectIdentity, RoleName, SimpleIdentity,
+    AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
+    IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
+    RoleName, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -449,6 +450,8 @@ pub struct FloatingIp {
     pub identity: IdentityMetadata,
     /// The IP address held by this resource.
     pub ip: IpAddr,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
     /// The project this resource exists within.
     pub project_id: Uuid,
     /// The ID of the instance that this Floating IP is attached to,
@@ -947,4 +950,17 @@ pub struct Ping {
     /// Whether the external API is reachable. Will always be Ok if the endpoint
     /// returns anything at all.
     pub status: PingStatus,
+}
+
+// ALLOWED SOURCE IPS
+
+/// Allowlist of IPs or subnets that can make requests to user-facing services.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AllowList {
+    /// Time the list was created.
+    pub time_created: DateTime<Utc>,
+    /// Time the list was last modified.
+    pub time_modified: DateTime<Utc>,
+    /// The allowlist of IPs or subnets.
+    pub allowed_ips: ExternalAllowedSourceIps,
 }

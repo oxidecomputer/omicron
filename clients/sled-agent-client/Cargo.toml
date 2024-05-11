@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -19,3 +22,4 @@ slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
+serde_json.workspace = true

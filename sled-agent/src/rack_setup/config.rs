@@ -94,6 +94,7 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -129,6 +130,7 @@ mod test {
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         assert_eq!(
@@ -231,7 +233,7 @@ mod test {
         let read_cfg = SetupServiceConfig::from_file(&cfg_path)
             .expect("failed to read generated config with certificate");
         assert_eq!(read_cfg.external_certificates.len(), 1);
-        let cert = read_cfg.external_certificates.iter().next().unwrap();
+        let cert = read_cfg.external_certificates.first().unwrap();
         let _ = rcgen::KeyPair::from_pem(&cert.key)
             .expect("generated PEM did not parse as KeyPair");
     }

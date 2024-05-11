@@ -42,7 +42,6 @@ use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{authz, db::datastore::ProbeInfo};
 use nexus_types::external_api::shared::BfdStatus;
-use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -81,6 +80,9 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::{
     http_pagination::data_page_params_for, AggregateBgpMessageHistory,
+};
+use omicron_common::api::external::{
+    http_pagination::marker_for_name, SwitchLinkState,
 };
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -271,6 +273,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_settings_delete)?;
 
         api.register(networking_switch_port_list)?;
+        api.register(networking_switch_port_status)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
 
@@ -287,6 +290,9 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bfd_enable)?;
         api.register(networking_bfd_disable)?;
         api.register(networking_bfd_status)?;
+
+        api.register(networking_allow_list_view)?;
+        api.register(networking_allow_list_update)?;
 
         api.register(utilization_view)?;
 
@@ -3422,6 +3428,32 @@ async fn networking_switch_port_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get switch port status
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/switch-port/{port}/status",
+    tags = ["system/hardware"],
+}]
+async fn networking_switch_port_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SwitchPortPathSelector>,
+    query_params: Query<params::SwitchPortSelector>,
+) -> Result<HttpResponseOk<SwitchLinkState>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(
+            nexus
+                .switch_port_status(&opctx, query.switch_location, path.port)
+                .await?,
+        ))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Apply switch port settings
 #[endpoint {
     method = POST,
@@ -3738,6 +3770,53 @@ async fn networking_bfd_status(
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let status = nexus.bfd_status(&opctx).await?;
         Ok(HttpResponseOk(status))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get user-facing services IP allowlist
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
+async fn networking_allow_list_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .allow_list_view(&opctx)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update user-facing services IP allowlist
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
+async fn networking_allow_list_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    params: TypedBody<params::AllowListUpdate>,
+) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let remote_addr = rqctx.request.remote_addr().ip();
+        nexus
+            .allow_list_upsert(&opctx, remote_addr, params)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

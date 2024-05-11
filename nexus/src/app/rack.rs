@@ -31,7 +31,6 @@ use nexus_types::external_api::params::AddressLotBlockCreate;
 use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
-use nexus_types::external_api::params::BgpPeer;
 use nexus_types::external_api::params::LinkConfigCreate;
 use nexus_types::external_api::params::LldpServiceConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
@@ -50,6 +49,7 @@ use nexus_types::external_api::views;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
+use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -469,6 +469,8 @@ impl super::Nexus {
                         asn: bgp_config.asn,
                         bgp_announce_set_id: announce_set_name.into(),
                         vrf: None,
+                        shaper: bgp_config.shaper.clone(),
+                        checker: bgp_config.checker.clone(),
                     },
                 )
                 .await
@@ -547,19 +549,26 @@ impl super::Nexus {
                 .bgp_peers
                 .iter()
                 .map(|r| BgpPeer {
-                    bgp_announce_set: NameOrId::Name(
-                        format!("as{}-announce", r.asn).parse().unwrap(),
-                    ),
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
                     interface_name: "phy0".into(),
                     addr: r.addr.into(),
-                    hold_time: r.hold_time.unwrap_or(6) as u32,
-                    idle_hold_time: r.idle_hold_time.unwrap_or(3) as u32,
-                    delay_open: r.delay_open.unwrap_or(0) as u32,
-                    connect_retry: r.connect_retry.unwrap_or(3) as u32,
-                    keepalive: r.keepalive.unwrap_or(2) as u32,
+                    hold_time: r.hold_time() as u32,
+                    idle_hold_time: r.idle_hold_time() as u32,
+                    delay_open: r.delay_open() as u32,
+                    connect_retry: r.connect_retry() as u32,
+                    keepalive: r.keepalive() as u32,
+                    remote_asn: r.remote_asn,
+                    min_ttl: r.min_ttl,
+                    md5_auth_key: r.md5_auth_key.clone(),
+                    multi_exit_discriminator: r.multi_exit_discriminator,
+                    local_pref: r.local_pref,
+                    enforce_first_as: r.enforce_first_as,
+                    communities: r.communities.clone(),
+                    allowed_import: r.allowed_import.clone(),
+                    allowed_export: r.allowed_export.clone(),
+                    vlan_id: r.vlan_id,
                 })
                 .collect();
 
@@ -639,6 +648,7 @@ impl super::Nexus {
                         .user_password_hash
                         .into(),
                     dns_update,
+                    allowed_source_ips: request.allowed_source_ips,
                 },
             )
             .await?;

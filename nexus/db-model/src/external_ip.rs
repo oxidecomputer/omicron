@@ -590,6 +590,7 @@ impl From<FloatingIp> for views::FloatingIp {
 
         views::FloatingIp {
             ip: ip.ip.ip(),
+            ip_pool_id: ip.ip_pool_id,
             identity,
             project_id: ip.project_id,
             instance_id: ip.parent_id,

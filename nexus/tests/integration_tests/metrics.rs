@@ -4,6 +4,9 @@
 
 use std::time::Duration;
 
+use crate::integration_tests::instances::{
+    create_project_and_pool, instance_post, instance_simulate, InstanceOp,
+};
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
@@ -275,6 +278,289 @@ async fn test_timeseries_schema_list(
             sc.timeseries_name == "http_service:request_latency_histogram"
         })
         .expect("Failed to find HTTP request latency histogram schema");
+}
+
+pub async fn timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    query: impl ToString,
+) -> Vec<oximeter_db::oxql::Table> {
+    // first, make sure the latest timeseries have been collected.
+    cptestctx.oximeter.force_collect().await;
+
+    // okay, do the query
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: query.to_string(),
+    };
+    let query = &body.query;
+    let rsp = NexusRequest::new(
+        nexus_test_utils::http_testing::RequestBuilder::new(
+            &cptestctx.external_client,
+            http::Method::POST,
+            "/v1/timeseries/query",
+        )
+        .body(Some(&body)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| {
+        panic!("timeseries query failed: {e:?}\nquery: {query}")
+    });
+    rsp.parsed_body().unwrap_or_else(|e| {
+        panic!(
+            "could not parse timeseries query response: {e:?}\n\
+            query: {query}\nresponse: {rsp:#?}"
+        );
+    })
+}
+
+#[nexus_test]
+async fn test_instance_watcher_metrics(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    use oximeter::types::FieldValue;
+    const INSTANCE_ID_FIELD: &str = "instance_id";
+    const STATE_FIELD: &str = "state";
+    const STATE_STARTING: &str = "starting";
+    const STATE_RUNNING: &str = "running";
+    const STATE_STOPPING: &str = "stopping";
+    const OXQL_QUERY: &str = "get virtual_machine:check";
+
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+
+    // TODO(eliza): consider factoring this out to a generic
+    // `activate_background_task` function in `nexus-test-utils` eventually?
+    let activate_instance_watcher = || async {
+        use nexus_client::types::BackgroundTask;
+        use nexus_client::types::CurrentStatus;
+        use nexus_client::types::CurrentStatusRunning;
+        use nexus_client::types::LastResult;
+        use nexus_client::types::LastResultCompleted;
+
+        fn most_recent_start_time(
+            task: &BackgroundTask,
+        ) -> Option<chrono::DateTime<chrono::Utc>> {
+            match task.current {
+                CurrentStatus::Idle => match task.last {
+                    LastResult::Completed(LastResultCompleted {
+                        start_time,
+                        ..
+                    }) => Some(start_time),
+                    LastResult::NeverCompleted => None,
+                },
+                CurrentStatus::Running(CurrentStatusRunning {
+                    start_time,
+                    ..
+                }) => Some(start_time),
+            }
+        }
+
+        eprintln!("\n --- activating instance watcher ---\n");
+        let task = NexusRequest::object_get(
+            internal_client,
+            "/bgtasks/view/instance_watcher",
+        )
+        .execute_and_parse_unwrap::<BackgroundTask>()
+        .await;
+        let last_start = most_recent_start_time(&task);
+
+        internal_client
+            .make_request(
+                http::Method::POST,
+                "/bgtasks/activate",
+                Some(serde_json::json!({
+                    "bgtask_names": vec![String::from("instance_watcher")]
+                })),
+                http::StatusCode::NO_CONTENT,
+            )
+            .await
+            .unwrap();
+        // Wait for the instance watcher task to finish
+        wait_for_condition(
+            || async {
+                let task = NexusRequest::object_get(
+                    internal_client,
+                    "/bgtasks/view/instance_watcher",
+                )
+                .execute_and_parse_unwrap::<BackgroundTask>()
+                .await;
+                if matches!(&task.current, CurrentStatus::Idle)
+                    && most_recent_start_time(&task) > last_start
+                {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &Duration::from_millis(500),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+    };
+
+    #[track_caller]
+    fn count_state(
+        table: &oximeter_db::oxql::Table,
+        instance_id: Uuid,
+        state: &'static str,
+    ) -> i64 {
+        use oximeter_db::oxql::point::ValueArray;
+        let uuid = FieldValue::Uuid(instance_id);
+        let state = FieldValue::String(state.into());
+        let mut timeserieses = table.timeseries().filter(|ts| {
+            ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid)
+                && ts.fields.get(STATE_FIELD) == Some(&state)
+        });
+        let Some(timeseries) = timeserieses.next() else {
+            panic!(
+                "missing timeseries for instance {instance_id}, state {state}\n\
+                found: {table:#?}"
+            )
+        };
+        if let Some(timeseries) = timeserieses.next() {
+            panic!(
+                "multiple timeseries for instance {instance_id}, state {state}: \
+                {timeseries:?}, {timeseries:?}, ...\n\
+                found: {table:#?}"
+            )
+        }
+        match timeseries.points.values(0) {
+            Some(ValueArray::Integer(ref vals)) => {
+                vals.iter().filter_map(|&v| v).sum()
+            }
+            x => panic!(
+                "expected timeseries for instance {instance_id}, \
+                state {state} to be an integer, but found: {x:?}"
+            ),
+        }
+    }
+
+    // N.B. that we've gotta use the project name that this function hardcodes
+    // if we're going to use the `instance_post` test helper later.
+    let project = create_project_and_pool(&client).await;
+    let project_name = project.identity.name.as_str();
+    // Wait until Nexus registers as a producer with Oximeter.
+    wait_for_producer(
+        &cptestctx.oximeter,
+        cptestctx.server.apictx().nexus.id(),
+    )
+    .await;
+
+    eprintln!("--- creating instance 1 ---");
+    let instance1 = create_instance(&client, project_name, "i-1").await;
+    let instance1_uuid = instance1.identity.id;
+
+    // activate the instance watcher background task.
+    activate_instance_watcher().await;
+
+    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+    let ts = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
+    assert_eq!(ts, 1);
+
+    // okay, make another instance
+    eprintln!("--- creating instance 2 ---");
+    let instance2 = create_instance(&client, project_name, "i-2").await;
+    let instance2_uuid = instance2.identity.id;
+
+    // activate the instance watcher background task.
+    activate_instance_watcher().await;
+
+    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+    let ts1 = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
+    let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
+    assert_eq!(ts1, 2);
+    assert_eq!(ts2, 1);
+
+    // poke instance 1 to get it into the running state
+    eprintln!("--- starting instance 1 ---");
+    instance_simulate(nexus, &instance1_uuid).await;
+
+    // activate the instance watcher background task.
+    activate_instance_watcher().await;
+
+    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+    let ts1_starting =
+        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
+    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
+    let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
+    assert_eq!(ts1_starting, 2);
+    assert_eq!(ts1_running, 1);
+    assert_eq!(ts2, 2);
+
+    // poke instance 2 to get it into the Running state.
+    eprintln!("--- starting instance 2 ---");
+    instance_simulate(nexus, &instance2_uuid).await;
+    // stop instance 1
+    eprintln!("--- start stopping instance 1 ---");
+    instance_simulate(nexus, &instance1_uuid).await;
+    instance_post(&client, &instance1.identity.name.as_str(), InstanceOp::Stop)
+        .await;
+
+    // activate the instance watcher background task.
+    activate_instance_watcher().await;
+
+    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+
+    let ts1_starting =
+        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
+    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
+    let ts1_stopping =
+        dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING));
+    let ts2_starting =
+        dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
+    let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
+    assert_eq!(ts1_starting, 2);
+    assert_eq!(ts1_running, 1);
+    assert_eq!(ts1_stopping, 1);
+    assert_eq!(ts2_starting, 2);
+    assert_eq!(ts2_running, 1);
+
+    // simulate instance 1 completing its stop, which will remove it from the
+    // set of active instances in CRDB. now, it won't be checked again.
+
+    eprintln!("--- finish stopping instance 1 ---");
+    instance_simulate(nexus, &instance1_uuid).await;
+
+    // activate the instance watcher background task.
+    activate_instance_watcher().await;
+
+    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let checks = metrics
+        .iter()
+        .find(|t| t.name() == "virtual_machine:check")
+        .expect("missing virtual_machine:check");
+    let ts1_starting =
+        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
+    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
+    let ts1_stopping =
+        dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING));
+    let ts2_starting =
+        dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
+    let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
+    assert_eq!(ts1_starting, 2);
+    assert_eq!(ts1_running, 1);
+    assert_eq!(ts1_stopping, 1);
+    assert_eq!(ts2_starting, 2);
+    assert_eq!(ts2_running, 2);
 }
 
 /// Wait until a producer is registered with Oximeter.

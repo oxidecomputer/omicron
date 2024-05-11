@@ -127,7 +127,8 @@
           "routes": [
             {
               "destination": "0.0.0.0/0",
-              "nexthop": "172.20.15.33"
+              "nexthop": "172.20.15.33",
+              "vlan_id": null
             }
           ],
           "addresses": [
@@ -144,7 +145,8 @@
           "routes": [
             {
               "destination": "0.0.0.0/0",
-              "nexthop": "172.20.15.33"
+              "nexthop": "172.20.15.33",
+              "vlan_id": null
             }
           ],
           "addresses": [
@@ -160,6 +162,9 @@
       ],
       "bgp": [],
       "bfd": []
+    },
+    "allowed_source_ips": {
+      "allow": "any"
     }
   }
 }

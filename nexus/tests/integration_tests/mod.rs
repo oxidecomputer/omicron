@@ -4,6 +4,7 @@
 //! the way it is.
 
 mod address_lots;
+mod allow_list;
 mod authn_http;
 mod authz;
 mod basic;

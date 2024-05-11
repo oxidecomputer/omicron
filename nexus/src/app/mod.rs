@@ -39,6 +39,7 @@ use uuid::Uuid;
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
+mod allow_list;
 pub(crate) mod background;
 mod bfd;
 mod bgp;
@@ -386,6 +387,7 @@ impl Nexus {
             config.deployment.id,
             resolver.clone(),
             saga_request,
+            producer_registry,
         );
 
         let external_resolver = {
