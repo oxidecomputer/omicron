@@ -163,13 +163,10 @@ fn main() -> Result<()> {
     // Now that we're done mucking about with our environment (something that's
     // not necessarily safe in multi-threaded programs), create a Tokio runtime
     // and call `do_run`.
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(do_run(logger, args))
+    do_run(logger, args)
 }
 
+#[tokio::main]
 async fn do_run(logger: Logger, args: Args) -> Result<()> {
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
