@@ -6,8 +6,9 @@ mod cmd;
 mod job;
 
 use std::sync::Arc;
+use std::time::Instant;
 
-use anyhow::ensure;
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8PathBuf;
@@ -15,8 +16,10 @@ use chrono::Utc;
 use clap::Parser;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
+use once_cell::sync::Lazy;
 use semver::Version;
 use slog::debug;
+use slog::error;
 use slog::info;
 use slog::Drain;
 use slog::Logger;
@@ -66,48 +69,86 @@ const RECOVERY_IMAGE_PACKAGES: [(&str, InstallMethod); 2] = [
 const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
 const OPTE_VERSION: &str = include_str!("../../../tools/opte_version");
 
+static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
+    // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
+    let mut dir =
+        Utf8PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect(
+            "$CARGO_MANIFEST_DIR is not set; run this via `cargo xtask releng`",
+        ));
+    dir.pop();
+    dir.pop();
+    dir
+});
+
 #[derive(Parser)]
+/// Run the Oxide release engineering process and produce a TUF repo that can be
+/// used to update a rack.
+///
+/// For more information, see `docs/releng.adoc` in the Omicron repository.
+///
+/// Note that `--host-dataset` and `--recovery-dataset` must be set to different
+/// values to build the two OS images in parallel. This is strongly recommended.
 struct Args {
+    /// ZFS dataset to use for `helios-build` when building the host image
+    #[clap(long, default_value_t = Self::default_dataset("host"))]
+    host_dataset: String,
+
+    /// ZFS dataset to use for `helios-build` when building the recovery
+    /// (trampoline) image
+    #[clap(long, default_value_t = Self::default_dataset("recovery"))]
+    recovery_dataset: String,
+
     /// Path to a Helios repository checkout (default: "helios" in the same
     /// directory as "omicron")
-    #[clap(long)]
-    helios_path: Option<Utf8PathBuf>,
-
-    /// ZFS dataset to use for `helios-build` (default: "rpool/images/$LOGNAME")
-    #[clap(long)]
-    helios_image_dataset: Option<String>,
+    #[clap(long, default_value_t = Self::default_helios_dir())]
+    helios_dir: Utf8PathBuf,
 
     /// Ignore the current HEAD of the Helios repository checkout
     #[clap(long)]
     ignore_helios_origin: bool,
 
-    /// Output dir for TUF repo and log files (default: "out/releng" in the
-    /// "omicron" directory)
-    #[clap(long)]
-    output_dir: Option<Utf8PathBuf>,
+    /// Output dir for TUF repo and log files
+    #[clap(long, default_value_t = Self::default_output_dir())]
+    output_dir: Utf8PathBuf,
+}
+
+impl Args {
+    fn default_dataset(name: &str) -> String {
+        format!(
+            "rpool/images/{}/{}",
+            std::env::var("LOGNAME").expect("$LOGNAME is not set"),
+            name
+        )
+    }
+
+    fn default_helios_dir() -> Utf8PathBuf {
+        WORKSPACE_DIR
+            .parent()
+            .expect("omicron is presumably not cloned at /")
+            .join("helios")
+    }
+
+    fn default_output_dir() -> Utf8PathBuf {
+        WORKSPACE_DIR.join("out/releng")
+    }
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
+
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = Logger::root(drain, slog::o!());
 
     // Change the working directory to the workspace root.
-    let workspace_dir =
-        Utf8PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").context(
-            "$CARGO_MANIFEST_DIR is not set; run this via `cargo xtask releng`",
-        )?)
-        // $CARGO_MANIFEST_DIR is `.../omicron/dev-tools/releng`
-        .join("../..")
-        .canonicalize_utf8()
-        .context("failed to canonicalize workspace dir")?;
-    info!(logger, "changing working directory to {}", workspace_dir);
-    std::env::set_current_dir(&workspace_dir)
+    info!(logger, "changing working directory to {}", *WORKSPACE_DIR);
+    std::env::set_current_dir(&*WORKSPACE_DIR)
         .context("failed to change working directory to workspace root")?;
 
-    // Unset `CARGO*` and `RUSTUP_TOOLCHAIN`, which will interfere with various
-    // tools we're about to run.
+    // Unset `$CARGO*` and `$RUSTUP_TOOLCHAIN`, which will interfere with
+    // various tools we're about to run. (This needs to come _after_ we read
+    // from `WORKSPACE_DIR` as it relies on `$CARGO_MANIFEST_DIR`.)
     for (name, _) in std::env::vars_os() {
         if name
             .to_str()
@@ -126,24 +167,10 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(do_run(logger, workspace_dir))
+        .block_on(do_run(logger, args))
 }
 
-async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
-    let args = Args::parse();
-
-    let helios_dir = args.helios_path.unwrap_or_else(|| {
-        workspace_dir
-            .parent()
-            .expect("omicron repo is not the root directory")
-            .join("helios")
-    });
-    let output_dir = args
-        .output_dir
-        .unwrap_or_else(|| workspace_dir.join("out").join("releng"));
-    let tempdir = camino_tempfile::tempdir()
-        .context("failed to create temporary directory")?;
-
+async fn do_run(logger: Logger, args: Args) -> Result<()> {
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .ensure_stdout(&logger)
@@ -164,105 +191,125 @@ async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
     info!(logger, "version: {}", version);
 
     let manifest = Arc::new(omicron_zone_package::config::parse_manifest(
-        &fs::read_to_string(workspace_dir.join("package-manifest.toml"))
+        &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
             .await?,
     )?);
 
     // PREFLIGHT ==============================================================
+    let mut preflight_ok = true;
+
     for (package, _) in HOST_IMAGE_PACKAGES
         .into_iter()
         .chain(RECOVERY_IMAGE_PACKAGES.into_iter())
     {
-        ensure!(
-            manifest.packages.contains_key(package),
-            "package {} to be installed in the OS image \
-            is not listed in the package manifest",
-            package
-        );
+        if !manifest.packages.contains_key(package) {
+            error!(
+                logger,
+                "package {} to be installed in the OS image \
+                is not listed in the package manifest",
+                package
+            );
+            preflight_ok = false;
+        }
     }
 
     // Ensure the Helios checkout exists
-    if helios_dir.exists() {
+    if args.helios_dir.exists() {
         if !args.ignore_helios_origin {
             // check that our helios clone is up to date
             Command::new("git")
                 .arg("-C")
-                .arg(&helios_dir)
+                .arg(&args.helios_dir)
                 .args(["fetch", "--no-write-fetch-head", "origin", "master"])
                 .ensure_success(&logger)
                 .await?;
             let stdout = Command::new("git")
                 .arg("-C")
-                .arg(&helios_dir)
+                .arg(&args.helios_dir)
                 .args(["rev-parse", "HEAD", "origin/master"])
                 .ensure_stdout(&logger)
                 .await?;
             let mut lines = stdout.lines();
             let first =
                 lines.next().context("git-rev-parse output was empty")?;
-            ensure!(
-                lines.all(|line| line == first),
-                "helios checkout at {0} is out-of-date; run \
-                `git pull -C {0}`, or run omicron-releng with \
-                --ignore-helios-origin or --helios-path",
-                shell_words::quote(helios_dir.as_str())
-            );
+            if !lines.all(|line| line == first) {
+                error!(
+                    logger,
+                    "helios checkout at {0} is out-of-date; run \
+                    `git pull -C {0}`, or run omicron-releng with \
+                    --ignore-helios-origin or --helios-path",
+                    shell_words::quote(args.helios_dir.as_str())
+                );
+                preflight_ok = false;
+            }
         }
     } else {
-        info!(logger, "cloning helios to {}", helios_dir);
+        info!(logger, "cloning helios to {}", args.helios_dir);
         Command::new("git")
             .args(["clone", "https://github.com/oxidecomputer/helios.git"])
-            .arg(&helios_dir)
+            .arg(&args.helios_dir)
             .ensure_success(&logger)
             .await?;
     }
 
     // Check that the omicron1 brand is installed
-    ensure!(
-        Command::new("pkg")
-            .args(["verify", "-q", "/system/zones/brand/omicron1/tools"])
-            .is_success(&logger)
-            .await?,
-        "the omicron1 brand is not installed; install it with \
-        `pfexec pkg install /system/zones/brand/omicron1/tools`"
-    );
+    if !Command::new("pkg")
+        .args(["verify", "-q", "/system/zones/brand/omicron1/tools"])
+        .is_success(&logger)
+        .await?
+    {
+        error!(
+            logger,
+            "the omicron1 brand is not installed; install it with \
+            `pfexec pkg install /system/zones/brand/omicron1/tools`"
+        );
+        preflight_ok = false;
+    }
 
-    // Check that the dataset for helios-image to use exists
-    let helios_image_dataset = match args.helios_image_dataset {
-        Some(s) => s,
-        None => format!(
-            "rpool/images/{}",
-            std::env::var("LOGNAME")
-                .context("$LOGNAME is not present in environment")?
-        ),
-    };
-    ensure!(
-        Command::new("zfs")
+    // Check that the datasets for helios-image to use exist
+    for (dataset, option) in [
+        (&args.host_dataset, "--host-dataset"),
+        (&args.recovery_dataset, "--recovery-dataset"),
+    ] {
+        if !Command::new("zfs")
             .arg("list")
-            .arg(&helios_image_dataset)
+            .arg(dataset)
             .is_success(&logger)
-            .await?,
-        "the dataset {0} does not exist, which is required for helios-build; \
-        run `pfexec zfs create -p {0}`, or run omicron-releng with \
-        --helios-image-dataset to specify a different one",
-        shell_words::quote(&helios_image_dataset)
-    );
+            .await?
+        {
+            error!(
+                logger,
+                "the dataset {0} does not exist; run `pfexec zfs create \
+                -p {0}`, or specify a different one with {1}",
+                shell_words::quote(dataset),
+                option
+            );
+            preflight_ok = false;
+        }
+    }
 
-    fs::create_dir_all(&output_dir).await?;
+    if !preflight_ok {
+        bail!("some preflight checks failed");
+    }
+
+    fs::create_dir_all(&args.output_dir).await?;
 
     // DEFINE JOBS ============================================================
-    let mut jobs = Jobs::new(&logger, &output_dir);
+    let tempdir = camino_tempfile::tempdir()
+        .context("failed to create temporary directory")?;
+    let mut jobs = Jobs::new(&logger, &args.output_dir);
 
     jobs.push_command(
         "helios-setup",
         Command::new("ptime")
             .args(["-m", "gmake", "setup"])
-            .current_dir(&helios_dir)
-            // ?!
-            .env("PWD", &helios_dir)
-            // Setting `BUILD_OS` to no makes setup skip repositories we don't need
-            // for building the OS itself (we are just building an image from an
-            // already-built OS).
+            .current_dir(&args.helios_dir)
+            // ?!?!
+            // somehow, the Makefile does not see a new `$(PWD)` without this.
+            .env("PWD", &args.helios_dir)
+            // Setting `BUILD_OS` to no makes setup skip repositories we don't
+            // need for building the OS itself (we are just building an image
+            // from an already-built OS).
             .env("BUILD_OS", "no"),
     );
 
@@ -278,7 +325,7 @@ async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
             "omicron-package",
         ]),
     );
-    let omicron_package = workspace_dir.join("target/release/omicron-package");
+    let omicron_package = WORKSPACE_DIR.join("target/release/omicron-package");
 
     macro_rules! os_image_jobs {
         (
@@ -287,6 +334,7 @@ async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
             proto_packages: $proto_packages:expr,
             image_prefix: $image_prefix:literal,
             image_build_args: $image_build_args:expr,
+            image_dataset: $image_dataset:expr,
         ) => {
             jobs.push_command(
                 concat!($target_name, "-target"),
@@ -310,7 +358,7 @@ async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
             jobs.push(
                 concat!($target_name, "-proto"),
                 build_proto_area(
-                    workspace_dir.join("out"),
+                    WORKSPACE_DIR.join("out"),
                     proto_dir.clone(),
                     &$proto_packages,
                     manifest.clone(),
@@ -330,33 +378,29 @@ async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
                 concat!($target_name, "-image"),
                 Command::new("ptime")
                     .arg("-m")
-                    .arg(helios_dir.join("helios-build"))
+                    .arg(args.helios_dir.join("helios-build"))
                     .arg("experiment-image")
-                    .arg("-o")
-                    .arg(output_dir.join($target_name))
-                    .arg("-p")
+                    .arg("-o") // output directory for image
+                    .arg(args.output_dir.join($target_name))
+                    .arg("-p") // use an external package repository
                     .arg(format!("helios-dev={}", HELIOS_REPO))
-                    .arg("-F")
+                    .arg("-F") // pass extra image builder features
                     .arg(format!("optever={}", OPTE_VERSION.trim()))
-                    .arg("-P")
+                    .arg("-P") // include all files from extra proto area
                     .arg(proto_dir.join("root"))
-                    .arg("-N")
+                    .arg("-N") // image name
                     .arg(image_name)
+                    .arg("-s") // tempdir name suffix
+                    .arg($target_name)
                     .args($image_build_args)
-                    .current_dir(&helios_dir),
+                    .current_dir(&args.helios_dir)
+                    .env("IMAGE_DATASET", &$image_dataset),
             )
             .after("helios-setup")
             .after(concat!($target_name, "-proto"));
         };
     }
 
-    os_image_jobs! {
-        target_name: "recovery",
-        target_args: ["--image", "trampoline"],
-        proto_packages: RECOVERY_IMAGE_PACKAGES,
-        image_prefix: "recovery",
-        image_build_args: ["-R"],
-    }
     os_image_jobs! {
         target_name: "host",
         target_args: [
@@ -372,14 +416,35 @@ async fn do_run(logger: Logger, workspace_dir: Utf8PathBuf) -> Result<()> {
         proto_packages: HOST_IMAGE_PACKAGES,
         image_prefix: "ci",
         image_build_args: ["-B"],
+        image_dataset: args.host_dataset,
     }
-    // avoid fighting for the target dir lock
-    jobs.select("host-package").after("recovery-package");
-    // only one helios-build job can run at once
-    jobs.select("host-image").after("recovery-image");
+    os_image_jobs! {
+        target_name: "recovery",
+        target_args: ["--image", "trampoline"],
+        proto_packages: RECOVERY_IMAGE_PACKAGES,
+        image_prefix: "recovery",
+        image_build_args: ["-R"],
+        image_dataset: args.recovery_dataset,
+    }
+
+    // Build the recovery target after we build the host target. Only one
+    // of these will build at a time since Cargo locks its target directory;
+    // since host-package and host-image both take longer than their recovery
+    // counterparts, this should be the fastest option to go first.
+    jobs.select("recovery-package").after("host-package");
+    if args.host_dataset == args.recovery_dataset {
+        // If the datasets are the same, we can't parallelize these.
+        jobs.select("recovery-image").after("host-image");
+    }
 
     // RUN JOBS ===============================================================
+    let start = Instant::now();
     jobs.run_all().await?;
+    debug!(
+        logger,
+        "all jobs completed in {:?}",
+        Instant::now().saturating_duration_since(start)
+    );
 
     // fs::create_dir_all(host_proto.path().join("root/root"))?;
     // fs::write(

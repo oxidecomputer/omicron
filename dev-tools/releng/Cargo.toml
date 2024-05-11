@@ -6,21 +6,22 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-camino-tempfile.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
+chrono.workspace = true
+clap.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
+futures.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
+once_cell.workspace = true
 semver.workspace = true
 shell-words.workspace = true
+slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-slog.workspace = true
 tar.workspace = true
-clap.workspace = true
 tokio = { workspace = true, features = ["full"] }
-chrono.workspace = true
-futures.workspace = true
 
 [lints]
 workspace = true
