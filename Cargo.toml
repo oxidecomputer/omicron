@@ -21,6 +21,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
     "end-to-end-tests",
@@ -103,6 +104,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.

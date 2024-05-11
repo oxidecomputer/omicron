@@ -1,0 +1,26 @@
+[package]
+name = "omicron-releng"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+camino-tempfile.workspace = true
+camino.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
+omicron-workspace-hack.workspace = true
+omicron-zone-package.workspace = true
+semver.workspace = true
+shell-words.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+slog.workspace = true
+tar.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["full"] }
+chrono.workspace = true
+futures.workspace = true
+
+[lints]
+workspace = true
