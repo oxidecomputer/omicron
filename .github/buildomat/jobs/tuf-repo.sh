@@ -5,12 +5,12 @@
 #: target = "helios-2.0"
 #: rust_toolchain = "1.77.2"
 #: output_rules = [
-#:	"%/work/*.log",
 #:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
 #:	"=/work/os-host/os.tar.gz",
 #:	"=/work/os-recovery/os.tar.gz",
+#:	"%/work/*.log",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/amd-apcb",
