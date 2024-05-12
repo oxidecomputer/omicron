@@ -190,7 +190,8 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         .to_owned();
 
     let mut version = BASE_VERSION.clone();
-    // Differentiate between CI and local builds.
+    // Differentiate between CI and local builds. We use `0.word` as the
+    // prerelease field because it comes before `alpha`.
     version.pre =
         if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
             .parse()?;
@@ -272,6 +273,13 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             .ensure_success(&logger)
             .await?;
     }
+    // Record the branch and commit in the output
+    Command::new("git")
+        .arg("-C")
+        .arg(&args.helios_dir)
+        .args(["status", "--branch", "--porcelain=2"])
+        .ensure_success(&logger)
+        .await?;
 
     // Check that the omicron1 brand is installed
     if !Command::new("pkg")
@@ -470,6 +478,13 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         // If the datasets are the same, we can't parallelize these.
         jobs.select("recovery-image").after("host-image");
     }
+    // Set up /root/.profile in the host OS image.
+    jobs.push(
+        "host-profile",
+        host_add_root_profile(tempdir.path().join("proto/host/root/root")),
+    )
+    .after("host-proto");
+    jobs.select("host-image").after("host-profile");
 
     jobs.push(
         "tuf-stamp",
@@ -606,5 +621,15 @@ async fn build_proto_area(
         }
     }
 
+    Ok(())
+}
+
+async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
+    fs::create_dir_all(&host_proto_root).await?;
+    fs::write(
+        host_proto_root.join(".profile"),
+        "# Add opteadm, ddadm, oxlog to PATH\n\
+        export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n",
+    ).await?;
     Ok(())
 }
