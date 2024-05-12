@@ -5,6 +5,7 @@
 mod cmd;
 mod hubris;
 mod job;
+mod tuf;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -216,9 +217,11 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     // PREFLIGHT ==============================================================
     let mut preflight_ok = true;
 
-    for (package, _) in HOST_IMAGE_PACKAGES
+    for package in HOST_IMAGE_PACKAGES
         .into_iter()
-        .chain(RECOVERY_IMAGE_PACKAGES.into_iter())
+        .chain(RECOVERY_IMAGE_PACKAGES)
+        .map(|(package, _)| package)
+        .chain(TUF_PACKAGES)
     {
         if !manifest.packages.contains_key(package) {
             error!(
@@ -482,24 +485,35 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     )
     .after("host-proto");
 
+    for (name, base_url) in [
+        ("staging", "https://permslip-staging.corp.oxide.computer"),
+        ("production", "https://signer-us-west.corp.oxide.computer"),
+    ] {
+        jobs.push(
+            format!("hubris-{}", name),
+            hubris::fetch_hubris_artifacts(
+                base_url,
+                client.clone(),
+                WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
+                args.output_dir.join(format!("hubris-{}", name)),
+            ),
+        );
+    }
+
     jobs.push(
-        "hubris-staging",
-        hubris::fetch_hubris_artifacts(
-            "https://permslip-staging.corp.oxide.computer",
-            client.clone(),
-            WORKSPACE_DIR.join("tools/permslip_staging"),
-            args.output_dir.join("hubris-staging"),
+        "tuf-repo",
+        tuf::build_tuf_repo(
+            logger.clone(),
+            args.output_dir.clone(),
+            version.clone(),
+            manifest.clone(),
         ),
-    );
-    jobs.push(
-        "hubris-production",
-        hubris::fetch_hubris_artifacts(
-            "https://signer-us-west.corp.oxide.computer",
-            client.clone(),
-            WORKSPACE_DIR.join("tools/permslip_production"),
-            args.output_dir.join("hubris-production"),
-        ),
-    );
+    )
+    .after("tuf-stamp")
+    .after("host-image")
+    .after("recovery-image")
+    .after("hubris-staging")
+    .after("hubris-production");
 
     // RUN JOBS ===============================================================
     let start = Instant::now();
@@ -509,14 +523,6 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         "all jobs completed in {:?}",
         Instant::now().saturating_duration_since(start)
     );
-
-    // fs::create_dir_all(host_proto.path().join("root/root"))?;
-    // fs::write(
-    //     host_proto.path().join("root/root/.profile"),
-    //     "# Add opteadm, ddadm, oxlog to PATH\n\
-    //     export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n"
-    // )?;
-
     Ok(())
 }
 
