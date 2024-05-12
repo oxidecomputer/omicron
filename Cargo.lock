@@ -5603,16 +5603,22 @@ dependencies = [
  "clap",
  "fs-err",
  "futures",
+ "num_cpus",
+ "omicron-common",
  "omicron-workspace-hack",
  "omicron-zone-package",
  "once_cell",
+ "reqwest",
  "semver 1.0.22",
+ "serde",
  "shell-words",
  "slog",
  "slog-async",
  "slog-term",
  "tar",
  "tokio",
+ "toml 0.8.12",
+ "tufaceous-lib",
 ]
 
 [[package]]

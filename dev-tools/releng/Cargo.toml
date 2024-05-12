@@ -12,16 +12,22 @@ chrono.workspace = true
 clap.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
+num_cpus.workspace = true
+omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
 once_cell.workspace = true
+reqwest.workspace = true
 semver.workspace = true
+serde.workspace = true
 shell-words.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
+tufaceous-lib.workspace = true
 
 [lints]
 workspace = true

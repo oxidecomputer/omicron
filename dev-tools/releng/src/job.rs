@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -26,11 +27,13 @@ use tokio::io::BufReader;
 use tokio::process::Command;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::Semaphore;
 
 use crate::cmd::CommandExt;
 
 pub(crate) struct Jobs {
     logger: Logger,
+    permits: Arc<Semaphore>,
     log_dir: Utf8PathBuf,
     map: HashMap<String, Job>,
 }
@@ -47,9 +50,14 @@ pub(crate) struct Selector<'a> {
 }
 
 impl Jobs {
-    pub(crate) fn new(logger: &Logger, log_dir: &Utf8Path) -> Jobs {
+    pub(crate) fn new(
+        logger: &Logger,
+        permits: Arc<Semaphore>,
+        log_dir: &Utf8Path,
+    ) -> Jobs {
         Jobs {
             logger: logger.clone(),
+            permits,
             log_dir: log_dir.to_owned(),
             map: HashMap::new(),
         }
@@ -70,6 +78,7 @@ impl Jobs {
             Job {
                 future: Box::pin(run_job(
                     self.logger.clone(),
+                    self.permits.clone(),
                     name.clone(),
                     future,
                 )),
@@ -95,6 +104,7 @@ impl Jobs {
                     // returning &mut
                     std::mem::replace(command, Command::new("false")),
                     self.logger.clone(),
+                    self.permits.clone(),
                     name.clone(),
                     self.log_dir.join(&name).with_extension("log"),
                 )),
@@ -167,10 +177,17 @@ macro_rules! info_or_error {
     };
 }
 
-async fn run_job<F>(logger: Logger, name: String, future: F) -> Result<()>
+async fn run_job<F>(
+    logger: Logger,
+    permits: Arc<Semaphore>,
+    name: String,
+    future: F,
+) -> Result<()>
 where
     F: Future<Output = Result<()>> + 'static,
 {
+    let _ = permits.acquire_owned().await?;
+
     info!(logger, "[{}] running task", name);
     let start = Instant::now();
     let result = future.await;
@@ -189,9 +206,12 @@ where
 async fn spawn_with_output(
     mut command: Command,
     logger: Logger,
+    permits: Arc<Semaphore>,
     name: String,
     log_path: Utf8PathBuf,
 ) -> Result<()> {
+    let _ = permits.acquire_owned().await?;
+
     let log_file_1 = File::create(log_path).await?;
     let log_file_2 = log_file_1.try_clone().await?;
 

@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod cmd;
+mod hubris;
 mod job;
 
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::bail;
@@ -26,6 +28,7 @@ use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 use crate::cmd::CommandExt;
 use crate::job::Jobs;
@@ -65,9 +68,22 @@ const RECOVERY_IMAGE_PACKAGES: [(&str, InstallMethod); 2] = [
     ("installinator", InstallMethod::Install),
     ("mg-ddm-gz", InstallMethod::Install),
 ];
+/// Packages to ship with the TUF repo.
+const TUF_PACKAGES: [&str; 11] = [
+    "clickhouse_keeper",
+    "clickhouse",
+    "cockroachdb",
+    "crucible-pantry-zone",
+    "crucible-zone",
+    "external-dns",
+    "internal-dns",
+    "nexus",
+    "ntp",
+    "oximeter",
+    "probe",
+];
 
 const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
-const OPTE_VERSION: &str = include_str!("../../../tools/opte_version");
 
 static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
@@ -163,6 +179,8 @@ fn main() -> Result<()> {
 
 #[tokio::main]
 async fn do_run(logger: Logger, args: Args) -> Result<()> {
+    let permits = Arc::new(Semaphore::new(num_cpus::get()));
+
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .ensure_stdout(&logger)
@@ -186,6 +204,14 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
             .await?,
     )?);
+    let opte_version =
+        fs::read_to_string(WORKSPACE_DIR.join("tools/opte_version")).await?;
+
+    let client = reqwest::ClientBuilder::new()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("failed to build reqwest client")?;
 
     // PREFLIGHT ==============================================================
     let mut preflight_ok = true;
@@ -289,7 +315,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     // DEFINE JOBS ============================================================
     let tempdir = camino_tempfile::tempdir()
         .context("failed to create temporary directory")?;
-    let mut jobs = Jobs::new(&logger, &args.output_dir);
+    let mut jobs = Jobs::new(&logger, permits.clone(), &args.output_dir);
 
     jobs.push_command(
         "helios-setup",
@@ -346,6 +372,20 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             )
             .after(concat!($target_name, "-target"));
 
+            jobs.push(
+                concat!($target_name, "-stamp"),
+                stamp_packages(
+                    logger.clone(),
+                    permits.clone(),
+                    args.output_dir.clone(),
+                    omicron_package.clone(),
+                    $target_name,
+                    version.clone(),
+                    $proto_packages.iter().map(|(name, _)| *name),
+                ),
+            )
+            .after(concat!($target_name, "-package"));
+
             let proto_dir = tempdir.path().join("proto").join($target_name);
             jobs.push(
                 concat!($target_name, "-proto"),
@@ -356,7 +396,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
                     manifest.clone(),
                 ),
             )
-            .after(concat!($target_name, "-package"));
+            .after(concat!($target_name, "-stamp"));
 
             // The ${os_short_commit} token will be expanded by `helios-build`
             let image_name = format!(
@@ -373,11 +413,11 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
                     .arg(args.helios_dir.join("helios-build"))
                     .arg("experiment-image")
                     .arg("-o") // output directory for image
-                    .arg(args.output_dir.join($target_name))
+                    .arg(args.output_dir.join(concat!("os-", $target_name)))
                     .arg("-p") // use an external package repository
                     .arg(format!("helios-dev={}", HELIOS_REPO))
                     .arg("-F") // pass extra image builder features
-                    .arg(format!("optever={}", OPTE_VERSION.trim()))
+                    .arg(format!("optever={}", opte_version.trim()))
                     .arg("-P") // include all files from extra proto area
                     .arg(proto_dir.join("root"))
                     .arg("-N") // image name
@@ -418,7 +458,6 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         image_build_args: ["-R"],
         image_dataset: args.recovery_dataset,
     }
-
     // Build the recovery target after we build the host target. Only one
     // of these will build at a time since Cargo locks its target directory;
     // since host-package and host-image both take longer than their recovery
@@ -428,6 +467,39 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         // If the datasets are the same, we can't parallelize these.
         jobs.select("recovery-image").after("host-image");
     }
+
+    jobs.push(
+        "tuf-stamp",
+        stamp_packages(
+            logger.clone(),
+            permits.clone(),
+            args.output_dir.clone(),
+            omicron_package.clone(),
+            "host",
+            version.clone(),
+            TUF_PACKAGES.into_iter(),
+        ),
+    )
+    .after("host-proto");
+
+    jobs.push(
+        "hubris-staging",
+        hubris::fetch_hubris_artifacts(
+            "https://permslip-staging.corp.oxide.computer",
+            client.clone(),
+            WORKSPACE_DIR.join("tools/permslip_staging"),
+            args.output_dir.join("hubris-staging"),
+        ),
+    );
+    jobs.push(
+        "hubris-production",
+        hubris::fetch_hubris_artifacts(
+            "https://signer-us-west.corp.oxide.computer",
+            client.clone(),
+            WORKSPACE_DIR.join("tools/permslip_production"),
+            args.output_dir.join("hubris-production"),
+        ),
+    );
 
     // RUN JOBS ===============================================================
     let start = Instant::now();
@@ -446,6 +518,31 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     // )?;
 
     Ok(())
+}
+
+async fn stamp_packages(
+    logger: Logger,
+    permits: Arc<Semaphore>,
+    output_dir: Utf8PathBuf,
+    omicron_package: Utf8PathBuf,
+    target_name: &'static str,
+    version: Version,
+    packages: impl Iterator<Item = &'static str>,
+) -> Result<()> {
+    let version = version.to_string();
+    let mut jobs = Jobs::new(&logger, permits, &output_dir);
+    for package in packages {
+        jobs.push_command(
+            format!("stamp-{}", package),
+            Command::new(&omicron_package)
+                .arg("--target")
+                .arg(target_name)
+                .arg("stamp")
+                .arg(package)
+                .arg(&version),
+        );
+    }
+    jobs.run_all().await
 }
 
 async fn build_proto_area(
