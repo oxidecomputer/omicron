@@ -2,19 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{
-    instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
-    SagaInitError, ACTION_GENERATE_ID,
-};
+use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::instance::InstanceStateChangeError;
 use crate::app::sagas::declare_saga_actions;
-use chrono::Utc;
 use nexus_db_model::Generation;
-use nexus_db_queries::db::{
-    datastore::InstanceAndVmms, identity::Resource, lookup::LookupPath,
-};
+use steno::ActionError;
+
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::external::{Error, InstanceState};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -29,38 +23,43 @@ pub(crate) struct Params {
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
 
-    pub start_state: InstanceAndVmms,
+    pub instance: db::model::Instance,
+
+    pub active_vmm: Option<db::model::Vmm>,
+
+    pub target_vmm: Option<db::model::Vmm>,
 }
 
 const SAGA_INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
 
 async fn siu_lock_instance(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<Generation, ActionError> {
     let osagactx = sagactx.user_data();
     let Params {
-        ref authz_instance,
-        ref serialized_authn,
-        ref start_state,
-        ..
+        ref authz_instance, ref serialized_authn, ref instance, ..
     } = sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    // try to lock
 
+    // try to acquire the instance updater lock
     let lock_id = sagactx.lookup::<Uuid>(SAGA_INSTANCE_LOCK_ID)?;
-    let lock = osagactx
+    osagactx
         .datastore()
         .instance_updater_try_lock(
             &opctx,
             &authz_instance,
-            start_state.instance.runtime_state.updater_gen,
+            instance.runtime_state.updater_gen,
             &lock_id,
         )
-        .await?;
-
-    Ok(())
+        .await
+        .map_err(ActionError::action_failed)?
+        .ok_or_else(|| {
+            ActionError::action_failed(
+                serde_json::json!({"error": "can't get ye lock"}),
+            )
+        })
 }
 
 async fn siu_unlock_instance(
