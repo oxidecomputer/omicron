@@ -19,7 +19,7 @@ workspace = true
 [dependencies]
 ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
-anyhow = { version = "1.0.82", features = ["backtrace"] }
+anyhow = { version = "1.0.83", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
@@ -126,7 +126,7 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 [build-dependencies]
 ahash = { version = "0.8.8" }
 aho-corasick = { version = "1.1.2" }
-anyhow = { version = "1.0.82", features = ["backtrace"] }
+anyhow = { version = "1.0.83", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
