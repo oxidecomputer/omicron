@@ -387,6 +387,7 @@ impl Nexus {
             config.deployment.id,
             resolver.clone(),
             saga_request,
+            producer_registry,
         );
 
         let external_resolver = {

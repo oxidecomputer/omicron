@@ -9936,7 +9936,7 @@
         "description": "The current state of a BGP peer.",
         "oneOf": [
           {
-            "description": "Initial state. Refuse all incomming BGP connections. No resources allocated to peer.",
+            "description": "Initial state. Refuse all incoming BGP connections. No resources allocated to peer.",
             "type": "string",
             "enum": [
               "idle"
@@ -9978,7 +9978,7 @@
             ]
           },
           {
-            "description": "Session established. Able to exchange update, notification and keepliave messages with peers.",
+            "description": "Session established. Able to exchange update, notification and keepalive messages with peers.",
             "type": "string",
             "enum": [
               "established"
@@ -12420,6 +12420,11 @@
                 "type": "string",
                 "format": "ip"
               },
+              "ip_pool_id": {
+                "description": "The ID of the IP pool this resource belongs to.",
+                "type": "string",
+                "format": "uuid"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -12454,6 +12459,7 @@
               "description",
               "id",
               "ip",
+              "ip_pool_id",
               "kind",
               "name",
               "project_id",
@@ -12896,6 +12902,11 @@
             "type": "string",
             "format": "ip"
           },
+          "ip_pool_id": {
+            "description": "The ID of the IP pool this resource belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -12924,6 +12935,7 @@
           "description",
           "id",
           "ip",
+          "ip_pool_id",
           "name",
           "project_id",
           "time_created",
@@ -14730,7 +14742,7 @@
         "description": "The forward error correction mode of a link.",
         "oneOf": [
           {
-            "description": "Firecode foward error correction.",
+            "description": "Firecode forward error correction.",
             "type": "string",
             "enum": [
               "firecode"

@@ -117,9 +117,9 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8901269c6307e8d93993578286ac0edf7f195079ffff5ebdeea6a59ffb7e36bc"
+checksum = "038dfcf04a5feb68e9c60b21c9625a54c2c0616e79b72b0fd87075a056ae1d1b"
 
 [[package]]
 name = "anstyle-parse"
@@ -416,9 +416,9 @@ checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "base64"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64ct"
@@ -2044,12 +2044,12 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#29ae98d1f909c6832661408a4c03f929e8afa6e9"
+version = "0.10.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#283d8978abfcfa9b720a155b18cc124c82cb29c9"
 dependencies = [
  "async-stream",
  "async-trait",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bytes",
  "camino",
  "chrono",
@@ -2057,7 +2057,7 @@ dependencies = [
  "dropshot_endpoint",
  "form_urlencoded",
  "futures",
- "hostname",
+ "hostname 0.4.0",
  "http 0.2.12",
  "hyper 0.14.28",
  "indexmap 2.2.6",
@@ -2065,10 +2065,10 @@ dependencies = [
  "openapiv3",
  "paste",
  "percent-encoding",
- "proc-macro2",
  "rustls 0.22.4",
  "rustls-pemfile 2.1.2",
  "schemars",
+ "scopeguard",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -2082,7 +2082,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.12",
- "usdt 0.3.5",
+ "usdt 0.5.0",
  "uuid",
  "version_check",
  "waitgroup",
@@ -2090,8 +2090,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#29ae98d1f909c6832661408a4c03f929e8afa6e9"
+version = "0.10.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#283d8978abfcfa9b720a155b18cc124c82cb29c9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2239,7 +2239,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "colored",
@@ -2696,7 +2696,7 @@ dependencies = [
 name = "gateway-client"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "gateway-messages",
  "omicron-workspace-hack",
@@ -3132,6 +3132,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9c7c7c8ac16c798734b8a24560c1362120597c40d5e1459f09498f8f6c8f2ba"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows 0.52.0",
+]
+
+[[package]]
 name = "http"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3296,7 +3307,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.9",
+ "socket2 0.5.6",
  "tokio",
  "tower-service",
  "tracing",
@@ -3417,7 +3428,7 @@ dependencies = [
  "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
- "windows",
+ "windows 0.48.0",
 ]
 
 [[package]]
@@ -4372,16 +4383,15 @@ dependencies = [
 
 [[package]]
 name = "multer"
-version = "3.0.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a15d522be0a9c3e46fd2632e272d178f56387bdb5c9fbb3a36c649062e9b5219"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
 dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
  "http 1.0.0",
  "httparse",
- "log",
  "memchr",
  "mime",
  "spin 0.9.8",
@@ -4560,7 +4570,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bb8",
  "camino",
  "camino-tempfile",
@@ -4652,7 +4662,7 @@ name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "expectorate",
  "futures",
@@ -4886,7 +4896,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dns-service-client",
@@ -5310,7 +5320,7 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.0",
+ "base64 0.22.1",
  "camino",
  "clap",
  "dropshot",
@@ -5356,7 +5366,7 @@ dependencies = [
  "assert_matches",
  "async-bb8-diesel",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "buf-list",
  "bytes",
  "camino",
@@ -5392,6 +5402,7 @@ dependencies = [
  "itertools 0.12.1",
  "macaddr",
  "mg-admin-client",
+ "nexus-client",
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
@@ -5594,7 +5605,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bootstore",
  "bootstrap-agent-client",
  "bytes",
@@ -5740,7 +5751,6 @@ dependencies = [
  "aho-corasick",
  "anyhow",
  "base16ct",
- "base64 0.22.0",
  "bit-set",
  "bit-vec",
  "bitflags 1.3.2",
@@ -5816,13 +5826,13 @@ dependencies = [
  "ring 0.17.8",
  "rustix",
  "schemars",
+ "scopeguard",
  "semver 1.0.22",
  "serde",
  "serde_json",
  "sha2",
  "similar",
  "slog",
- "socket2 0.5.6",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -5840,7 +5850,7 @@ dependencies = [
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
- "usdt 0.3.5",
+ "usdt 0.5.0",
  "usdt-impl 0.5.0",
  "uuid",
  "yasna",
@@ -6052,7 +6062,7 @@ name = "oxide-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "futures",
  "http 0.2.12",
@@ -6500,9 +6510,9 @@ checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
 
 [[package]]
 name = "peg"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "400bcab7d219c38abf8bd7cc2054eb9bbbd4312d66f6a5557d572a203f646f61"
+checksum = "8a625d12ad770914cbf7eff6f9314c3ef803bfe364a1b20bc36ddf56673e71e5"
 dependencies = [
  "peg-macros",
  "peg-runtime",
@@ -6510,9 +6520,9 @@ dependencies = [
 
 [[package]]
 name = "peg-macros"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46e61cce859b76d19090f62da50a9fe92bab7c2a5f09e183763559a2ac392c90"
+checksum = "f241d42067ed3ab6a4fece1db720838e1418f36d868585a27931f95d6bc03582"
 dependencies = [
  "peg-runtime",
  "proc-macro2",
@@ -6521,9 +6531,9 @@ dependencies = [
 
 [[package]]
 name = "peg-runtime"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36bae92c60fa2398ce4678b98b2c4b5a7c61099961ca1fa305aec04a9ad28922"
+checksum = "e3aeb8f54c078314c2065ee649a7241f46b9d8e418e1a9581ba0546657d7aa3a"
 
 [[package]]
 name = "pem"
@@ -6531,7 +6541,7 @@ version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e459365e590736a54c3fa561947c84837534b8e9af6fc5bf781307e82658fae"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "serde",
 ]
 
@@ -6979,7 +6989,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.6.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0f0b1062f471f33d4d42273c03c4079f6ebf4ad9"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0aeb3a723ec515561a93ab38ae4da5cbf071306f"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -6990,7 +7000,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.6.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0f0b1062f471f33d4d42273c03c4079f6ebf4ad9"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0aeb3a723ec515561a93ab38ae4da5cbf071306f"
 dependencies = [
  "bytes",
  "futures-core",
@@ -7004,7 +7014,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.6.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0f0b1062f471f33d4d42273c03c4079f6ebf4ad9"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0aeb3a723ec515561a93ab38ae4da5cbf071306f"
 dependencies = [
  "getopts",
  "heck 0.5.0",
@@ -7026,7 +7036,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.6.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0f0b1062f471f33d4d42273c03c4079f6ebf4ad9"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#0aeb3a723ec515561a93ab38ae4da5cbf071306f"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -7631,7 +7641,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52e44394d2086d010551b14b53b1f24e31647570cd1deb0379e2c21b329aba00"
 dependencies = [
- "hostname",
+ "hostname 0.3.1",
  "quick-error",
 ]
 
@@ -7992,7 +8002,7 @@ version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29993a25686778eb88d4189742cd713c9bce943bc54251a33509dc63cbacf73d"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "rustls-pki-types",
 ]
 
@@ -8104,7 +8114,7 @@ version = "0.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5da862a2115c0767681e28309a367dbd0a2366026948aae0272787e582d71eaf"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "bindgen",
  "chrono",
  "data-encoding",
@@ -8278,9 +8288,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.199"
+version = "1.0.201"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9f6e76df036c77cd94996771fb40db98187f096dd0b9af39c6c6e452ba966a"
+checksum = "780f1cebed1629e4753a1a38a3c72d30b97ec044f0aef68cb26650a3c5cf363c"
 dependencies = [
  "serde_derive",
 ]
@@ -8325,9 +8335,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.199"
+version = "1.0.201"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11bd257a6541e141e42ca6d24ae26f7714887b47e89aa739099104c7e4d3b7fc"
+checksum = "c5e405930b9796f1c00bee880d03fc7e0bb4b9a11afc776885ffe84320da2865"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8763,7 +8773,7 @@ version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcaaf6e68789d3f0411f1e72bc443214ef252a1038b6e344836e50442541f190"
 dependencies = [
- "hostname",
+ "hostname 0.3.1",
  "slog",
  "slog-json",
  "time",
@@ -10241,7 +10251,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.16"
-source = "git+https://github.com/oxidecomputer/typify#f7442947ca90eb97af6446a90e73600a7adc191b"
+source = "git+https://github.com/oxidecomputer/typify#336a042b8242587f57c5e8ec3ac0e54d3610e59c"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -10250,7 +10260,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.16"
-source = "git+https://github.com/oxidecomputer/typify#f7442947ca90eb97af6446a90e73600a7adc191b"
+source = "git+https://github.com/oxidecomputer/typify#336a042b8242587f57c5e8ec3ac0e54d3610e59c"
 dependencies = [
  "heck 0.5.0",
  "log",
@@ -10267,7 +10277,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.16"
-source = "git+https://github.com/oxidecomputer/typify#f7442947ca90eb97af6446a90e73600a7adc191b"
+source = "git+https://github.com/oxidecomputer/typify#336a042b8242587f57c5e8ec3ac0e54d3610e59c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10950,7 +10960,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bootstrap-agent-client",
  "buf-list",
  "bytes",
@@ -11086,6 +11096,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
 dependencies = [
  "windows-targets 0.48.5",
+]
+
+[[package]]
+name = "windows"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
+dependencies = [
+ "windows-core",
+ "windows-targets 0.52.0",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
+dependencies = [
+ "windows-targets 0.52.0",
 ]
 
 [[package]]

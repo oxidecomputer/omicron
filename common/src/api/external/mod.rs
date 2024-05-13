@@ -527,11 +527,20 @@ impl JsonSchema for RoleName {
 // in the database as an i64.  Constraining it here ensures that we can't fail
 // to serialize the value.
 //
-// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ByteCount(u64);
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;
@@ -2579,7 +2588,7 @@ pub enum LinkSpeed {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkFec {
-    /// Firecode foward error correction.
+    /// Firecode forward error correction.
     Firecode,
     /// No forward error correction.
     None,
@@ -2931,7 +2940,7 @@ impl JsonSchema for SwitchLinkState {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum BgpPeerState {
-    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// Initial state. Refuse all incoming BGP connections. No resources
     /// allocated to peer.
     Idle,
 
@@ -2950,7 +2959,7 @@ pub enum BgpPeerState {
     /// Synchronizing with peer.
     SessionSetup,
 
-    /// Session established. Able to exchange update, notification and keepliave
+    /// Session established. Able to exchange update, notification and keepalive
     /// messages with peers.
     Established,
 }
