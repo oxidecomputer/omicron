@@ -527,11 +527,20 @@ impl JsonSchema for RoleName {
 // in the database as an i64.  Constraining it here ensures that we can't fail
 // to serialize the value.
 //
-// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ByteCount(u64);
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;
