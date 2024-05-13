@@ -216,7 +216,9 @@ async fn spawn_with_output(
     name: String,
     log_path: Utf8PathBuf,
 ) -> Result<()> {
-    let _ = permits.acquire_owned().await?;
+    if !PERMIT_NOT_REQUIRED.contains(&name.as_str()) {
+        let _ = permits.acquire_owned().await?;
+    }
 
     let log_file_1 = File::create(log_path).await?;
     let log_file_2 = log_file_1.try_clone().await?;
