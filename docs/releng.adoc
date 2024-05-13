@@ -28,8 +28,8 @@ The release engineering process builds the control plane and combines
 it with the many external artifacts into a final artifact -- a Zip
 archive of a TUF repository -- that contains everything necessary for
 the product to operate. This process is run on each commit to ensure it
-is always functional. You can also run the process locally with `cargo
-xtask releng`.
+is always functional. You can also run the process locally with
+`cargo xtask releng`.
 
 == Process overview
 
