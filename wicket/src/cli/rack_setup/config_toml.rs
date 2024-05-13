@@ -122,7 +122,25 @@ fn populate_allowed_source_ips(
     doc: &mut DocumentMut,
     allowed_source_ips: Option<&AllowedSourceIps>,
 ) {
+    const ALLOWLIST_COMMENT: &str = r#"
+# Allowlist of source IPs that can make requests to user-facing services.
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
+# Use the below two lines to only allow requests from the specified IP subnets.
+# Requests from any other source IPs are refused. Note that individual addresses
+# must include the netmask, e.g., "1.2.3.4/32".
+#
+# allow = "list"
+# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+"#;
+
     let mut table = toml_edit::Table::new();
+    table.decor_mut().set_prefix(ALLOWLIST_COMMENT);
     match allowed_source_ips {
         None | Some(AllowedSourceIps::Any) => {
             table.insert(
