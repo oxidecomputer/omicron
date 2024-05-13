@@ -142,8 +142,6 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
-mkdir tests
-cp /input/package/work/target/debug/deps/* tests/
 
 # Ask buildomat for the range of extra addresses that we're allowed to use, and
 # break them up into the ranges we need.

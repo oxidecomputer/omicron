@@ -40,9 +40,9 @@ export CARGO_PROFILE_DEV_DEBUG=1
 export CARGO_PROFILE_TEST_DEBUG=1
 ptime -m cargo build --locked -p end-to-end-tests --tests --bin bootstrap \
   --message-format json-render-diagnostics >/tmp/output.end-to-end.json
-mapfile -t test_bins \
-  < <(/opt/ooce/bin/jq -r 'select(.profile.test) | .executable' /tmp/output.end-to-end.json \
-    | cut -c$((${#PWD} + 2))-)
+mkdir tests
+/opt/ooce/bin/jq -r 'select(.profile.test) | .executable' /tmp/output.end-to-end.json \
+  | xargs -I {} -t cp {} tests/
 
 # Assemble these outputs and some utilities into a tarball that can be used by
 # deployment phases of buildomat.
@@ -55,6 +55,6 @@ files=(
 	target/release/omicron-package
 	target/release/xtask
 	target/debug/bootstrap
+	tests/*
 )
-ptime -m tar cvzf $WORK/package.tar.gz \
-	"${files[@]}" "${packages[@]}" "${test_bins[@]}"
+ptime -m tar cvzf $WORK/package.tar.gz "${files[@]}" "${packages[@]}"
