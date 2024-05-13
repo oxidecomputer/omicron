@@ -1,0 +1,79 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Oxide Release Engineering
+
+Omicron is the Oxide control plane, and thus brings together all of the
+various components outside of this repo that make up the software on the
+product. This includes (but definitely isn't limited to):
+
+- https://github.com/oxidecomputer/propolis[Propolis], our hypervisor
+- https://github.com/oxidecomputer/helios[Helios], our host operating
+  system
+- https://github.com/oxidecomputer/crucible[Crucible], our block storage
+  service
+- https://github.com/oxidecomputer/maghemite[Maghemite], our switch
+  control software and routing protocol
+- https://github.com/oxidecomputer/hubris[Hubris], our embedded
+  microcontroller operating system used on the root of trust and service
+  processors
+- https://github.com/oxidecomputer/console[The web console]
+
+Each of these has their own build processes that produce some sort of
+usable artifact, whether that is an illumos zone or a tarball of static
+assets.
+
+The release engineering process builds the control plane and combines
+it with the many external artifacts into a final artifact -- a Zip
+archive of a TUF repository -- that contains everything necessary for
+the product to operate. This process is run on each commit to ensure it
+is always functional. You can also run the process locally with `cargo
+xtask releng`.
+
+== Process overview
+
+. `tools/install_builder_prerequisites.sh` downloads several artifacts
+  (via the `tools/ci_*` scripts) that are necessary to build Omicron;
+  many of these are ultimately packaged by `omicron-package`. These
+  scripts are generally controlled by the `tools/*_version` and
+  `tools/*_checksums` files.
+. `cargo xtask releng` downloads the current root of trust and
+  service processor images built by the Hubris release engineering
+  process, which are signed in https://github.com/oxidecomputer/permission-slip[Permission Slip].
+  This is controlled by the `tools/permslip_production` and
+  `tools/permslip_staging` files.
+. `omicron-package` is the heart of the release engineering process; it
+  reads the manifest from `package-manifest.toml`, runs an appropriate
+  `cargo build` command, downloads any additional artifacts, and
+  packages them into a series of illumos zones and tarballs. (It can
+  also manage installation and uninstallation of these zones; see
+  how-to-run.adoc.)
+. Some of the packaged artifacts are installed directly in the OS
+  images; `cargo xtask releng` unpacks these into a temporary directory
+  that is overlaid onto the OS image in the next step.
+. `helios-build` from the https://github.com/oxidecomputer/helios[Helios]
+  repository then builds two images: the *host* image, which is used
+  during normal operation, and the *trampoline* (or *recovery*) image,
+  which is used to update the host image.
+. Finally, `cargo xtask releng` generates a Zip archive of a
+  https://theupdateframework.io/[TUF] repository, which contains the
+  host and trampoline OS images, the ROT and SP images, and all the
+  illumos zones that are not installed into the OS images. This archive
+  can be uploaded to Wicket to perform an upgrade of the rack while the
+  control plane is not running.
+
+`cargo xtask releng` performs all of these steps in parallel (with
+the temporary exception of artifact downloads handled by
+`tools/install_builder_prerequisites.sh`.)
+
+== Beyond `cargo xtask releng`
+
+Currently we use TUF repos generated in CI (by `cargo xtask releng`)
+directly. These repositories use a generated throwaway key to sign
+the TUF metadata. In the limit, we will have a process to sign release
+builds of these TUF repositories, which will be available as a Zip
+archive for an operator to upload to Nexus or Wicket, as well as an
+HTTPS repository for racks connected to the internet or with access to
+a proxy to perform automatic updates. The exact nature of the PKI and
+trust policies for each of these update flows is under discussion.
