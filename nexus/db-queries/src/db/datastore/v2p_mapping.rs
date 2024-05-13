@@ -28,7 +28,7 @@ impl DataStore {
         while let Some(p) = paginator.next() {
             let batch = paginated(
                 dsl::v2p_mapping_view,
-                dsl::sled_id,
+                dsl::nic_id,
                 &p.current_pagparams(),
             )
             .select(V2PMappingView::as_select())
@@ -40,12 +40,6 @@ impl DataStore {
             mappings.extend(batch);
         }
 
-        let results = dsl::v2p_mapping_view
-            .select(V2PMappingView::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(results)
+        Ok(mappings)
     }
 }
