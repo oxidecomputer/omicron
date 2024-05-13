@@ -67,12 +67,6 @@ bootstrap_sleds = [
 [allowed_source_ips]
 allow = "any"
 
-# Use the below two lines to only allow requests from the specified IP subnets.
-# Requests from any other source IPs are refused. Note that individual addresses
-# must include the netmask, e.g., `1.2.3.4/32`.
-# allow = "list"
-# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
-
 # TODO: docs on network config
 [rack_network_config]
 infra_ip_first = "172.30.0.1"
