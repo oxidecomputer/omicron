@@ -80,7 +80,7 @@ stdout:
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
-note: listing all sleds (use -F to filter, e.g. -F in-service)
+note: listing all commissioned sleds (use -F to filter, e.g. -F in-service)
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
