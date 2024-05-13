@@ -137,7 +137,7 @@ pub(crate) async fn build_tuf_repo(
         if n == 0 {
             break;
         }
-        hasher.update(&buf);
+        hasher.update(&buf[..n]);
     }
     fs::write(
         output_dir.join("repo.zip.sha256.txt"),
