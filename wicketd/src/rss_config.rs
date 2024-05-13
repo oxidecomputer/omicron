@@ -54,7 +54,7 @@ use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 // TODO-correctness For now, we always use the same rack subnet when running
 // RSS. When we get to multirack, this will be wrong, but there are many other
 // RSS-related things that need to change then too.
-const RACK_SUBNET: Lazy<Ipv6Subnet<RACK_PREFIX>> = Lazy::new(|| {
+static RACK_SUBNET: Lazy<Ipv6Subnet<RACK_PREFIX>> = Lazy::new(|| {
     let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
     Ipv6Subnet::new(ip)
 });
@@ -527,6 +527,7 @@ impl CurrentRssConfig {
             value.internal_services_ip_pool_ranges;
         self.external_dns_ips = value.external_dns_ips;
         self.external_dns_zone_name = value.external_dns_zone_name;
+        self.allowed_source_ips = Some(value.allowed_source_ips);
 
         // Build a new auth key map, dropping all old keys from the map.
         let new_bgp_auth_key_ids =

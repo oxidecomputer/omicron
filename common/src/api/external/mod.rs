@@ -527,11 +527,20 @@ impl JsonSchema for RoleName {
 // in the database as an i64.  Constraining it here ensures that we can't fail
 // to serialize the value.
 //
-// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ByteCount(u64);
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;
@@ -2897,39 +2906,6 @@ pub struct SwitchPortAddressConfig {
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
     // Use `Name` instead of `String` for `interface_name` type
     pub interface_name: String,
-}
-
-/// Opaque object representing link state. The contents of this object are not
-/// yet stable.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SwitchLinkState {
-    link: dpd_client::types::Link,
-    monitors: Option<dpd_client::types::Monitors>,
-}
-
-impl SwitchLinkState {
-    pub fn new(
-        link: dpd_client::types::Link,
-        monitors: Option<dpd_client::types::Monitors>,
-    ) -> Self {
-        Self { link, monitors }
-    }
-}
-
-impl JsonSchema for SwitchLinkState {
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        let obj = schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject::default(),
-        );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
-        obj
-    }
-
-    fn schema_name() -> String {
-        "SwitchLinkState".to_owned()
-    }
 }
 
 /// The current state of a BGP peer.

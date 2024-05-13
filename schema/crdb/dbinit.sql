@@ -3262,6 +3262,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+-- state of a sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    sled_state omicron.public.sled_state NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
 -- description of a collection of omicron physical disks stored in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
     -- foreign key into `blueprint` table
@@ -3425,6 +3435,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
 );
+
+CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
+    sled_id
+) WHERE time_deleted IS NULL;
 
 /*
  * A special view of an instance provided to operators for insights into what's
@@ -3842,7 +3856,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '59.0.0', NULL)
+    (TRUE, NOW(), NOW(), '61.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

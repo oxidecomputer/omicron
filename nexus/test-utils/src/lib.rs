@@ -33,6 +33,7 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
+use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
 use nexus_types::internal_api::params::DatasetKind;
@@ -754,18 +755,21 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let blueprint = {
             let mut blueprint_zones = BTreeMap::new();
+            let mut sled_state = BTreeMap::new();
             for (maybe_sled_agent, zones) in [
                 (self.sled_agent.as_ref(), &self.blueprint_zones),
                 (self.sled_agent2.as_ref(), &self.blueprint_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
+                    let sled_id = SledUuid::from_untyped_uuid(sa.sled_agent.id);
                     blueprint_zones.insert(
-                        SledUuid::from_untyped_uuid(sa.sled_agent.id),
+                        sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
                             zones: zones.clone(),
                         },
                     );
+                    sled_state.insert(sled_id, SledState::Active);
                 }
             }
             Blueprint {
@@ -776,6 +780,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 //
                 // However, for now, this isn't necessary.
                 blueprint_disks: BTreeMap::new(),
+                sled_state,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation

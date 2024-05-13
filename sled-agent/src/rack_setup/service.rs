@@ -95,6 +95,7 @@ use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
     BlueprintZoneDisposition, BlueprintZonesConfig, InvalidOmicronZoneType,
 };
+use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
@@ -531,7 +532,7 @@ impl ServiceInner {
                             }
                         })
                         .collect();
-                    if dns_addrs.len() > 0 {
+                    if !dns_addrs.is_empty() {
                         Some(dns_addrs)
                     } else {
                         None
@@ -1398,6 +1399,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     }
 
     let mut blueprint_zones = BTreeMap::new();
+    let mut sled_state = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
         let zones_config = BlueprintZonesConfig {
             // This is a bit of a hack. We only construct a blueprint after
@@ -1419,12 +1421,14 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         };
 
         blueprint_zones.insert(*sled_id, zones_config);
+        sled_state.insert(*sled_id, SledState::Active);
     }
 
     Ok(Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
+        sled_state,
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
