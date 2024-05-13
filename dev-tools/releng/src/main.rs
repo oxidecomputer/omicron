@@ -342,6 +342,16 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             .env("BUILD_OS", "no"),
     );
 
+    // Download the toolchain for phbl before we get to the image build steps.
+    // (This is possibly a micro-optimization.)
+    jobs.push_command(
+        "phbl-toolchain",
+        Command::new("cargo")
+            .arg("--version")
+            .current_dir(args.helios_dir.join("projects/phbl")),
+    )
+    .after("helios-setup");
+
     jobs.push_command(
         "omicron-package",
         Command::new("ptime").args([
@@ -498,7 +508,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             TUF_PACKAGES.into_iter(),
         ),
     )
-    .after("host-proto");
+    .after("host-stamp");
 
     for (name, base_url) in [
         ("staging", "https://permslip-staging.corp.oxide.computer"),

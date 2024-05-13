@@ -31,6 +31,10 @@ use tokio::sync::Semaphore;
 
 use crate::cmd::CommandExt;
 
+// We want these two jobs to run without delay because they take the longest
+// amount of time, so we allow them to run without taking a permit first.
+const PERMIT_NOT_REQUIRED: [&str; 2] = ["host-package", "host-image"];
+
 pub(crate) struct Jobs {
     logger: Logger,
     permits: Arc<Semaphore>,
@@ -186,7 +190,9 @@ async fn run_job<F>(
 where
     F: Future<Output = Result<()>> + 'static,
 {
-    let _ = permits.acquire_owned().await?;
+    if !PERMIT_NOT_REQUIRED.contains(&name.as_str()) {
+        let _ = permits.acquire_owned().await?;
+    }
 
     info!(logger, "[{}] running task", name);
     let start = Instant::now();
