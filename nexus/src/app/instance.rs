@@ -29,7 +29,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::instance::InstanceUpdateResult;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceRuntimeState;
 use nexus_db_queries::db::datastore::InstanceSnapshot;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -1514,20 +1513,6 @@ impl super::Nexus {
             .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
-    }
-
-    pub(crate) async fn update_instance_state(
-        &self,
-        opctx: &OpContext,
-        InstanceSnapshot { instance, active_vmm, target_vmm, .. }: InstanceSnapshot,
-    ) -> Result<InstanceRuntimeState, Error> {
-        if let Some(active_vmm) = active_vmm {
-            match active_vmm.runtime_state.instance_state {
-                InstanceState::Destroyed => {}
-                _ => todo!("eliza"),
-            }
-        }
-        todo!("eliza")
     }
 
     /// Invoked by a sled agent to publish an updated runtime state for an
