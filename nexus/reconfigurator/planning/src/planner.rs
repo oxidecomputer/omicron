@@ -19,6 +19,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -112,7 +113,7 @@ impl<'a> Planner<'a> {
                 // up when we ask for commissioned sleds? Warn, but don't try to
                 // decommission it again.
                 (SledPolicy::Expunged, SledState::Decommissioned) => {
-                    warn!(
+                    error!(
                         self.log,
                         "decommissioned sled returned by \
                          SledFilter::Commissioned";

@@ -636,6 +636,10 @@ impl DataStore {
                     // When a sled is decommissioned, the associated disks with
                     // that sled should also be implicitly set to
                     // decommissioned.
+                    //
+                    // We use an explicit `match` to force ourselves to consider
+                    // disk state if we add any addition sled states in the
+                    // future.
                     let new_disk_state = match new_sled_state {
                         SledState::Active => None,
                         SledState::Decommissioned => Some(
