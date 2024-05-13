@@ -336,7 +336,6 @@ nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.46"
 num = { version = "0.4.2", default-features = false, features = [ "libm" ] }
-num_cpus = "1.16.0"
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }

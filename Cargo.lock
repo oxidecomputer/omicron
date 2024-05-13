@@ -5595,7 +5595,6 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "num_cpus",
  "omicron-common",
  "omicron-workspace-hack",
  "omicron-zone-package",

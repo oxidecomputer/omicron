@@ -180,7 +180,11 @@ fn main() -> Result<()> {
 
 #[tokio::main]
 async fn do_run(logger: Logger, args: Args) -> Result<()> {
-    let permits = Arc::new(Semaphore::new(num_cpus::get()));
+    let permits = Arc::new(Semaphore::new(
+        std::thread::available_parallelism()
+            .context("couldn't get available parallelism")?
+            .into(),
+    ));
 
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
