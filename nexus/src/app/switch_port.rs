@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::external_api::params;
+use crate::external_api::shared::SwitchLinkState;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
@@ -14,7 +15,6 @@ use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::SwitchLinkState;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
@@ -332,7 +332,20 @@ impl super::Nexus {
             }
         };
 
-        Ok(SwitchLinkState::new(status, monitors))
+        let link_json = serde_json::to_value(status).map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to marshal link info to json: {e}"
+            ))
+        })?;
+        let monitors_json = match monitors {
+            Some(x) => Some(serde_json::to_value(x).map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to marshal monitors to json: {e}"
+                ))
+            })?),
+            None => None,
+        };
+        Ok(SwitchLinkState::new(link_json, monitors_json))
     }
 }
 

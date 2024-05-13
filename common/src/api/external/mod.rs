@@ -2903,39 +2903,6 @@ pub struct SwitchPortAddressConfig {
     pub interface_name: String,
 }
 
-/// Opaque object representing link state. The contents of this object are not
-/// yet stable.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SwitchLinkState {
-    link: dpd_client::types::Link,
-    monitors: Option<dpd_client::types::Monitors>,
-}
-
-impl SwitchLinkState {
-    pub fn new(
-        link: dpd_client::types::Link,
-        monitors: Option<dpd_client::types::Monitors>,
-    ) -> Self {
-        Self { link, monitors }
-    }
-}
-
-impl JsonSchema for SwitchLinkState {
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        let obj = schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject::default(),
-        );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
-        obj
-    }
-
-    fn schema_name() -> String {
-        "SwitchLinkState".to_owned()
-    }
-}
-
 /// The current state of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
