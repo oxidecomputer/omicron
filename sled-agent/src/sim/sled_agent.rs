@@ -477,6 +477,22 @@ impl SledAgent {
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
     }
 
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id)
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        Ok(instance.current())
+    }
+
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().await = error;
     }

@@ -1779,3 +1779,5 @@ allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
 allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
 joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
+
+allow_tables_to_appear_in_same_query!(sled, sled_instance);

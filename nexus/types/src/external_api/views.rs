@@ -450,6 +450,8 @@ pub struct FloatingIp {
     pub identity: IdentityMetadata,
     /// The IP address held by this resource.
     pub ip: IpAddr,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
     /// The project this resource exists within.
     pub project_id: Uuid,
     /// The ID of the instance that this Floating IP is attached to,
