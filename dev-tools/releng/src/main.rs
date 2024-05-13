@@ -375,10 +375,23 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             image_build_args: $image_build_args:expr,
             image_dataset: $image_dataset:expr,
         ) => {
+            let artifacts_path = if concat!($target_name) == "host" {
+                Utf8PathBuf::from("out/")
+            } else {
+                args.output_dir.join("artifacts-recovery")
+            };
+
             jobs.push_command(
                 concat!($target_name, "-target"),
                 Command::new(&omicron_package)
-                    .args(["--target", $target_name, "target", "create"])
+                    .args([
+                        "--target",
+                        $target_name,
+                        "--artifacts",
+                        artifacts_path.as_str(),
+                        "target",
+                        "create",
+                    ])
                     .args($target_args),
             )
             .after("omicron-package");
@@ -388,6 +401,8 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
                 Command::new(&omicron_package).args([
                     "--target",
                     $target_name,
+                    "--artifacts",
+                    artifacts_path.as_str(),
                     "package",
                 ]),
             )
@@ -401,6 +416,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
                     args.output_dir.clone(),
                     omicron_package.clone(),
                     $target_name,
+                    artifacts_path.clone(),
                     version.clone(),
                     $proto_packages.iter().map(|(name, _)| *name),
                 ),
@@ -411,7 +427,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             jobs.push(
                 concat!($target_name, "-proto"),
                 build_proto_area(
-                    WORKSPACE_DIR.join("out"),
+                    artifacts_path,
                     proto_dir.clone(),
                     &$proto_packages,
                     manifest.clone(),
@@ -504,6 +520,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             args.output_dir.clone(),
             omicron_package.clone(),
             "host",
+            WORKSPACE_DIR.join("out"),
             version.clone(),
             TUF_PACKAGES.into_iter(),
         ),
@@ -551,12 +568,14 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn stamp_packages(
     logger: Logger,
     permits: Arc<Semaphore>,
     output_dir: Utf8PathBuf,
     omicron_package: Utf8PathBuf,
     target_name: &'static str,
+    artifacts_path: Utf8PathBuf,
     version: Version,
     packages: impl Iterator<Item = &'static str>,
 ) -> Result<()> {
@@ -568,6 +587,8 @@ async fn stamp_packages(
             Command::new(&omicron_package)
                 .arg("--target")
                 .arg(target_name)
+                .arg("--artifacts")
+                .arg(&artifacts_path)
                 .arg("stamp")
                 .arg(package)
                 .arg(&version),
