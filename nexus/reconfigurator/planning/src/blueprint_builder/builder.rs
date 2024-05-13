@@ -1080,10 +1080,11 @@ impl<'a> BlueprintZonesBuilder<'a> {
         }
     }
 
-    /// Produces an owned map of zones for the requested sleds
+    /// Produces an owned map of zones for the sleds recorded in this blueprint
+    /// plus any newly-added sleds
     pub fn into_zones_map(
         self,
-        commissioned_sled_ids: impl Iterator<Item = SledUuid>,
+        added_sled_ids: impl Iterator<Item = SledUuid>,
     ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
         // Start with self.changed_zones, which contains entries for any
         // sled whose zones config is changing in this blueprint.
@@ -1100,7 +1101,7 @@ impl<'a> BlueprintZonesBuilder<'a> {
         }
 
         // Finally, insert any newly-added sleds.
-        for sled_id in commissioned_sled_ids {
+        for sled_id in added_sled_ids {
             zones.entry(sled_id).or_insert_with(|| BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![],
