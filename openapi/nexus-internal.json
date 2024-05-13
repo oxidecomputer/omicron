@@ -1785,6 +1785,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "sled_state": {
+            "description": "A map of sled id -> desired state of the sled.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SledState"
+            }
+          },
           "time_created": {
             "description": "when this blueprint was generated (for debugging)",
             "type": "string",
@@ -1799,6 +1806,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "sled_state",
           "time_created"
         ]
       },
@@ -4693,6 +4701,25 @@
         },
         "required": [
           "sled"
+        ]
+      },
+      "SledState": {
+        "description": "The current state of the sled, as determined by Nexus.",
+        "oneOf": [
+          {
+            "description": "The sled is currently active, and has resources allocated on it.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is decommissioned, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)",
+            "type": "string",
+            "enum": [
+              "decommissioned"
+            ]
+          }
         ]
       },
       "SourceNatConfig": {

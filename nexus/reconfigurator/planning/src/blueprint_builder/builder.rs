@@ -30,6 +30,7 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
+use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
@@ -141,6 +142,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
+    sled_state: BTreeMap<SledUuid, SledState>,
 
     creator: String,
     comments: Vec<String>,
@@ -200,10 +202,16 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .collect::<BTreeMap<_, _>>();
         let num_sleds = blueprint_zones.len();
+        let sled_state = blueprint_zones
+            .keys()
+            .copied()
+            .map(|sled_id| (sled_id, SledState::Active))
+            .collect();
         Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            sled_state,
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -332,6 +340,21 @@ impl<'a> BlueprintBuilder<'a> {
         let available_system_macs =
             AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
+        let sled_state = input
+            .all_sleds(SledFilter::All)
+            .map(|(sled_id, details)| {
+                // Prefer the sled state from our parent blueprint for sleds
+                // that were in it; there may be new sleds in `input`, in which
+                // case we'll use their current state as our starting point.
+                let state = parent_blueprint
+                    .sled_state
+                    .get(&sled_id)
+                    .copied()
+                    .unwrap_or(details.state);
+                (sled_id, state)
+            })
+            .collect();
+
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
@@ -339,6 +362,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
+            sled_state,
             creator: creator.to_owned(),
             comments: Vec::new(),
             nexus_v4_ips,
@@ -362,6 +386,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
             blueprint_disks,
+            sled_state: self.sled_state,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
