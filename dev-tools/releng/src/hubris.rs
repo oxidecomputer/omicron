@@ -119,6 +119,9 @@ async fn fetch_hash(
         })
 }
 
+// These structs are similar to `DeserializeManifest` and friends from
+// tufaceous-lib, except that the source is a hash instead of a file path. This
+// hash is used to download the artifact from Permission Slip.
 #[derive(Deserialize)]
 struct Manifest {
     #[serde(rename = "artifact")]
