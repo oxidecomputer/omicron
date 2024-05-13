@@ -598,7 +598,7 @@ async fn stamp_packages(
 }
 
 async fn build_proto_area(
-    package_dir: Utf8PathBuf,
+    mut package_dir: Utf8PathBuf,
     proto_dir: Utf8PathBuf,
     packages: &'static [(&'static str, InstallMethod)],
     manifest: Arc<Config>,
@@ -606,6 +606,9 @@ async fn build_proto_area(
     let opt_oxide = proto_dir.join("root/opt/oxide");
     let manifest_site = proto_dir.join("root/lib/svc/manifest/site");
     fs::create_dir_all(&opt_oxide).await?;
+
+    // use the stamped packages
+    package_dir.push("versioned");
 
     for &(package_name, method) in packages {
         let package =

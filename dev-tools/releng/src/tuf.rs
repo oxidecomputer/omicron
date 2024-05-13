@@ -93,7 +93,7 @@ pub(crate) async fn build_tuf_repo(
                     .service_name
             )),
             path: crate::WORKSPACE_DIR
-                .join("out")
+                .join("out/versioned")
                 .join(format!("{}.tar.gz", package)),
         });
     }
