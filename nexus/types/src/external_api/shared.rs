@@ -339,14 +339,14 @@ pub struct BfdStatus {
 /// yet stable.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SwitchLinkState {
-    link: dpd_client::types::Link,
-    monitors: Option<dpd_client::types::Monitors>,
+    link: serde_json::Value,
+    monitors: Option<serde_json::Value>,
 }
 
 impl SwitchLinkState {
     pub fn new(
-        link: dpd_client::types::Link,
-        monitors: Option<dpd_client::types::Monitors>,
+        link: serde_json::Value,
+        monitors: Option<serde_json::Value>,
     ) -> Self {
         Self { link, monitors }
     }

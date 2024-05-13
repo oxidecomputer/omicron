@@ -4900,7 +4900,6 @@ dependencies = [
  "chrono",
  "clap",
  "dns-service-client",
- "dpd-client",
  "futures",
  "gateway-client",
  "humantime",

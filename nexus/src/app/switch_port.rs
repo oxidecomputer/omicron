@@ -332,7 +332,20 @@ impl super::Nexus {
             }
         };
 
-        Ok(SwitchLinkState::new(status, monitors))
+        let link_json = serde_json::to_value(status).map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to marshal link info to json: {e}"
+            ))
+        })?;
+        let monitors_json = match monitors {
+            Some(x) => Some(serde_json::to_value(x).map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to marshal monitors to json: {e}"
+                ))
+            })?),
+            None => None,
+        };
+        Ok(SwitchLinkState::new(link_json, monitors_json))
     }
 }
 

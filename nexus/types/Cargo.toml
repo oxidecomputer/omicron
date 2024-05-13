@@ -12,7 +12,6 @@ anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 base64.workspace = true
-dpd-client.workspace = true
 futures.workspace = true
 humantime.workspace = true
 ipnetwork.workspace = true
