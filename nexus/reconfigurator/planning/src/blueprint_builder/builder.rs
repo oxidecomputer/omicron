@@ -88,6 +88,14 @@ pub enum Error {
     NoSystemMacAddressAvailable,
     #[error("exhausted available Nexus IP addresses")]
     ExhaustedNexusIps,
+    #[error(
+        "invariant violation: found decommissioned sled with \
+         {num_zones} non-expunged zones: {sled_id}"
+    )]
+    DecommissionedSledWithNonExpungedZones {
+        sled_id: SledUuid,
+        num_zones: usize,
+    },
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
 }
@@ -340,20 +348,30 @@ impl<'a> BlueprintBuilder<'a> {
         let available_system_macs =
             AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
-        let sled_state = input
-            .all_sleds(SledFilter::All)
-            .map(|(sled_id, details)| {
-                // Prefer the sled state from our parent blueprint for sleds
-                // that were in it; there may be new sleds in `input`, in which
-                // case we'll use their current state as our starting point.
-                let state = parent_blueprint
-                    .sled_state
-                    .get(&sled_id)
-                    .copied()
-                    .unwrap_or(details.state);
-                (sled_id, state)
-            })
-            .collect();
+        // Prefer the sled state from our parent blueprint for sleds
+        // that were in it; there may be new sleds in `input`, in which
+        // case we'll use their current state as our starting point.
+        let mut sled_state = parent_blueprint.sled_state.clone();
+        let mut commissioned_sled_ids = BTreeSet::new();
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            commissioned_sled_ids.insert(sled_id);
+            sled_state.entry(sled_id).or_insert(details.state);
+        }
+
+        // Make a garbage collection pass through `sled_state`. We want to keep
+        // any sleds which either:
+        //
+        // 1. do not have a desired state of `Decommissioned`
+        // 2. do have a desired state of `Decommissioned` and are still included
+        //    in our input's list of commissioned sleds
+        //
+        // Sleds that don't fall into either of these cases have reached the
+        // actual `Decommissioned` state, which means we no longer need to carry
+        // forward that desired state.
+        sled_state.retain(|sled_id, state| {
+            *state != SledState::Decommissioned
+                || commissioned_sled_ids.contains(sled_id)
+        });
 
         Ok(BlueprintBuilder {
             log,
@@ -373,12 +391,27 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
+    /// Iterates over the list of sled IDs for which we have zones.
+    ///
+    /// This may include decommissioned sleds.
+    pub fn sled_ids_with_zones(&self) -> impl Iterator<Item = SledUuid> {
+        self.zones.sled_ids_with_zones()
+    }
+
+    pub fn current_sled_zones(
+        &self,
+        sled_id: SledUuid,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.current_sled_zones(sled_id).map(|(config, _)| config)
+    }
+
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
-        let blueprint_zones =
-            self.zones.into_zones_map(self.input.all_sled_ids(SledFilter::All));
+        let blueprint_zones = self
+            .zones
+            .into_zones_map(self.input.all_sled_ids(SledFilter::Commissioned));
         let blueprint_disks = self
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
@@ -394,6 +427,15 @@ impl<'a> BlueprintBuilder<'a> {
             creator: self.creator,
             comment: self.comments.join(", "),
         }
+    }
+
+    /// Set the desired state of the given sled.
+    pub fn set_sled_state(
+        &mut self,
+        sled_id: SledUuid,
+        desired_state: SledState,
+    ) {
+        self.sled_state.insert(sled_id, desired_state);
     }
 
     /// Within tests, set a seeded RNG for deterministic results.
@@ -465,7 +507,7 @@ impl<'a> BlueprintBuilder<'a> {
                     &log,
                     "sled has state Decommissioned, yet has zones \
                      allocated to it; will expunge them \
-                     (sled policy is \"{policy}\")"
+                     (sled policy is \"{policy:?}\")"
                 );
             }
             ZoneExpungeReason::SledExpunged => {
@@ -1012,6 +1054,18 @@ impl<'a> BlueprintZonesBuilder<'a> {
         })
     }
 
+    /// Iterates over the list of sled IDs for which we have zones.
+    ///
+    /// This may include decommissioned sleds.
+    pub fn sled_ids_with_zones(&self) -> impl Iterator<Item = SledUuid> {
+        let mut sled_ids =
+            self.changed_zones.keys().copied().collect::<BTreeSet<_>>();
+        for &sled_id in self.parent_zones.keys() {
+            sled_ids.insert(sled_id);
+        }
+        sled_ids.into_iter()
+    }
+
     /// Iterates over the list of Omicron zones currently configured for this
     /// sled in the blueprint that's being built, along with each zone's state
     /// in the builder.
@@ -1034,38 +1088,35 @@ impl<'a> BlueprintZonesBuilder<'a> {
         }
     }
 
-    /// Produces an owned map of zones for the requested sleds
+    /// Produces an owned map of zones for the sleds recorded in this blueprint
+    /// plus any newly-added sleds
     pub fn into_zones_map(
-        mut self,
-        sled_ids: impl Iterator<Item = SledUuid>,
+        self,
+        added_sled_ids: impl Iterator<Item = SledUuid>,
     ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
-        sled_ids
-            .map(|sled_id| {
-                // Start with self.changed_zones, which contains entries for any
-                // sled whose zones config is changing in this blueprint.
-                if let Some(zones) = self.changed_zones.remove(&sled_id) {
-                    (sled_id, zones.build())
-                }
-                // Next, check self.parent_zones, to represent an unchanged
-                // sled.
-                else if let Some(parent_zones) =
-                    self.parent_zones.get(&sled_id)
-                {
-                    (sled_id, parent_zones.clone())
-                } else {
-                    // If the sled is not in self.parent_zones, then it must be
-                    // a new sled and we haven't added any zones to it yet.  Use
-                    // the standard initial config.
-                    (
-                        sled_id,
-                        BlueprintZonesConfig {
-                            generation: Generation::new(),
-                            zones: vec![],
-                        },
-                    )
-                }
-            })
-            .collect()
+        // Start with self.changed_zones, which contains entries for any
+        // sled whose zones config is changing in this blueprint.
+        let mut zones = self
+            .changed_zones
+            .into_iter()
+            .map(|(sled_id, zones)| (sled_id, zones.build()))
+            .collect::<BTreeMap<_, _>>();
+
+        // Carry forward any zones from our parent blueprint. This may include
+        // zones for decommissioned sleds.
+        for (sled_id, parent_zones) in self.parent_zones {
+            zones.entry(*sled_id).or_insert_with(|| parent_zones.clone());
+        }
+
+        // Finally, insert any newly-added sleds.
+        for sled_id in added_sled_ids {
+            zones.entry(sled_id).or_insert_with(|| BlueprintZonesConfig {
+                generation: Generation::new(),
+                zones: vec![],
+            });
+        }
+
+        zones
     }
 }
 
@@ -1170,6 +1221,7 @@ pub mod test {
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
@@ -1269,7 +1321,7 @@ pub mod test {
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
         for (sled_id, sled_resources) in
-            example.input.all_sled_resources(SledFilter::All)
+            example.input.all_sled_resources(SledFilter::Commissioned)
         {
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_id in sled_resources.zpools.keys() {
@@ -1377,6 +1429,83 @@ pub mod test {
     }
 
     #[test]
+    fn test_prune_decommissioned_sleds() {
+        static TEST_NAME: &str =
+            "blueprint_builder_test_prune_decommissioned_sleds";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, input, mut blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        verify_blueprint(&blueprint1);
+
+        // Mark one sled as having a desired state of decommissioned.
+        let decommision_sled_id = blueprint1
+            .sled_state
+            .keys()
+            .copied()
+            .next()
+            .expect("at least one sled");
+        *blueprint1.sled_state.get_mut(&decommision_sled_id).unwrap() =
+            SledState::Decommissioned;
+
+        // Change the input to note that the sled is expunged, but still active.
+        let mut builder = input.into_builder();
+        builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().policy =
+            SledPolicy::Expunged;
+        builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
+            SledState::Active;
+        let input = builder.build();
+
+        // Generate a new blueprint. This sled should still be included: even
+        // though the desired state is decommissioned, the current state is
+        // still active, so we should carry it forward.
+        let blueprint2 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &input,
+            "test_prune_decommissioned_sleds",
+        )
+        .expect("created builder")
+        .build();
+        verify_blueprint(&blueprint2);
+
+        // We carried forward the desired state.
+        assert_eq!(
+            blueprint2.sled_state.get(&decommision_sled_id).copied(),
+            Some(SledState::Decommissioned)
+        );
+
+        // Change the input to mark the sled decommissioned. (Normally realizing
+        // blueprint2 would make this change.)
+        let mut builder = input.into_builder();
+        builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
+            SledState::Decommissioned;
+        let input = builder.build();
+
+        // Generate a new blueprint. This desired sled state should no longer be
+        // present: it has reached the terminal decommissioned state, so there's
+        // no more work to be done.
+        let blueprint3 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            "test_prune_decommissioned_sleds",
+        )
+        .expect("created builder")
+        .build();
+        verify_blueprint(&blueprint3);
+
+        // Ensure we've dropped the decommissioned sled. (We may still have
+        // _zones_ for it that need cleanup work, but all state transitions for
+        // it are complete.)
+        assert_eq!(
+            blueprint3.sled_state.get(&decommision_sled_id).copied(),
+            None,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
@@ -1384,7 +1513,7 @@ pub mod test {
 
         // Start with an empty blueprint (sleds with no zones).
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::All),
+            input.all_sled_ids(SledFilter::Commissioned),
             "test",
             TEST_NAME,
         );
@@ -1430,7 +1559,7 @@ pub mod test {
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::All),
+            input.all_sled_ids(SledFilter::Commissioned),
             "test",
             TEST_NAME,
         );

@@ -1744,7 +1744,7 @@
             }
           },
           "blueprint_zones": {
-            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nUnlike `sled_state`, this map may contain entries for sleds that are no longer a part of the control plane cluster (e.g., sleds that have been decommissioned, but still have expunged zones where cleanup has not yet completed).",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintZonesConfig"
@@ -1786,7 +1786,7 @@
             "format": "uuid"
           },
           "sled_state": {
-            "description": "A map of sled id -> desired state of the sled.",
+            "description": "A map of sled id -> desired state of the sled.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/SledState"

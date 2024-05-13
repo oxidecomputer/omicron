@@ -106,18 +106,23 @@ pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
 
-    /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZoneDisposition`] for each zone.
+    /// A map of sled id -> desired state of the sled.
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
+    pub sled_state: BTreeMap<SledUuid, SledState>,
+
+    /// A map of sled id -> zones deployed on each sled, along with the
+    /// [`BlueprintZoneDisposition`] for each zone.
+    ///
+    /// Unlike `sled_state`, this map may contain entries for sleds that are no
+    /// longer a part of the control plane cluster (e.g., sleds that have been
+    /// decommissioned, but still have expunged zones where cleanup has not yet
+    /// completed).
     pub blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
 
     /// A map of sled id -> disks in use on each sled.
     pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-
-    /// A map of sled id -> desired state of the sled.
-    pub sled_state: BTreeMap<SledUuid, SledState>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,

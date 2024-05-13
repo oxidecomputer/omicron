@@ -43,7 +43,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
                                                                                                           
   REMOVED SLEDS:                                                                                          
                                                                                                           
--  sled 68d24ac5-f341-49ea-a92a-0381b52ab387: blueprint zones at generation 3                             
+-  sled 68d24ac5-f341-49ea-a92a-0381b52ab387: blueprint zones at generation 2                             
 -    crucible       3b3c14b6-a8e2-4054-a577-8d96cb576230   expunged      fd00:1122:3344:102::2c  removed  
 -    crucible       47a87c6e-ef45-4d52-9a3e-69cdd96737cc   expunged      fd00:1122:3344:102::23  removed  
 -    crucible       6464d025-4652-4948-919e-740bec5699b1   expunged      fd00:1122:3344:102::24  removed  

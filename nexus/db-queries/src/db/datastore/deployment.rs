@@ -1553,7 +1553,7 @@ mod tests {
         // Check the number of blueprint elements against our collection.
         assert_eq!(
             blueprint1.blueprint_zones.len(),
-            planning_input.all_sled_ids(SledFilter::All).count(),
+            planning_input.all_sled_ids(SledFilter::Commissioned).count(),
         );
         assert_eq!(
             blueprint1.blueprint_zones.len(),

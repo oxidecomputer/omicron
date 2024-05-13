@@ -11,6 +11,7 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
@@ -18,6 +19,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -80,15 +82,82 @@ impl<'a> Planner<'a> {
 
         self.do_plan_expunge()?;
         self.do_plan_add()?;
+        self.do_plan_decommission()?;
+
+        Ok(())
+    }
+
+    fn do_plan_decommission(&mut self) -> Result<(), Error> {
+        // Check for any sleds that are currently commissioned but can be
+        // decommissioned. Our gates for decommissioning are:
+        //
+        // 1. The policy indicates the sled has been removed (i.e., the policy
+        //    is "expunged"; we may have other policies that satisfy this
+        //    requirement in the future).
+        // 2. All zones associated with the sled have been marked expunged.
+        // 3. There are no instances assigned to this sled. This is blocked by
+        //    omicron#4872, so today we omit this check entirely, as any sled
+        //    that could be otherwise decommissioned that still has instances
+        //    assigned to it needs support intervention for cleanup.
+        // 4. All disks associated with the sled have been marked expunged. This
+        //    happens implicitly when a sled is expunged, so is covered by our
+        //    first check.
+        for (sled_id, sled_details) in
+            self.input.all_sleds(SledFilter::Commissioned)
+        {
+            // Check 1: look for sleds that are expunged.
+            match (sled_details.policy, sled_details.state) {
+                // If the sled is still in service, don't decommission it.
+                (SledPolicy::InService { .. }, _) => continue,
+                // If the sled is already decommissioned it... why is it showing
+                // up when we ask for commissioned sleds? Warn, but don't try to
+                // decommission it again.
+                (SledPolicy::Expunged, SledState::Decommissioned) => {
+                    error!(
+                        self.log,
+                        "decommissioned sled returned by \
+                         SledFilter::Commissioned";
+                        "sled_id" => %sled_id,
+                    );
+                    continue;
+                }
+                // The sled is expunged but not yet decommissioned; fall through
+                // to check the rest of the criteria.
+                (SledPolicy::Expunged, SledState::Active) => (),
+            }
+
+            // Check 2: have all this sled's zones been expunged? It's possible
+            // we ourselves have made this change, which is fine.
+            let all_zones_expunged =
+                self.blueprint.current_sled_zones(sled_id).all(|zone| {
+                    zone.disposition == BlueprintZoneDisposition::Expunged
+                });
+
+            // Check 3: Are there any instances assigned to this sled? See
+            // comment above; while we wait for omicron#4872, we just assume
+            // there are no instances running.
+            let num_instances_assigned = 0;
+
+            if all_zones_expunged && num_instances_assigned == 0 {
+                self.blueprint
+                    .set_sled_state(sled_id, SledState::Decommissioned);
+            }
+        }
 
         Ok(())
     }
 
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
-        // Remove services from sleds marked expunged. We use `SledFilter::All`
-        // and have a custom `needs_zone_expungement` function that allows us
-        // to produce better errors.
-        for (sled_id, sled_details) in self.input.all_sleds(SledFilter::All) {
+        let mut commissioned_sled_ids = BTreeSet::new();
+
+        // Remove services from sleds marked expunged. We use
+        // `SledFilter::Commissioned` and have a custom `needs_zone_expungement`
+        // function that allows us to produce better errors.
+        for (sled_id, sled_details) in
+            self.input.all_sleds(SledFilter::Commissioned)
+        {
+            commissioned_sled_ids.insert(sled_id);
+
             // Does this sled need zone expungement based on the details?
             let Some(reason) =
                 needs_zone_expungement(sled_details.state, sled_details.policy)
@@ -98,6 +167,31 @@ impl<'a> Planner<'a> {
 
             // Perform the expungement.
             self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+        }
+
+        // Check for any decommissioned sleds (i.e., sleds for which our
+        // blueprint has zones, but are not in the input sled list). Any zones
+        // for decommissioned sleds must have already be expunged for
+        // decommissioning to have happened; fail if we find non-expunged zones
+        // associated with a decommissioned sled.
+        for sled_id in self.blueprint.sled_ids_with_zones() {
+            if !commissioned_sled_ids.contains(&sled_id) {
+                let num_zones = self
+                    .blueprint
+                    .current_sled_zones(sled_id)
+                    .filter(|zone| {
+                        zone.disposition != BlueprintZoneDisposition::Expunged
+                    })
+                    .count();
+                if num_zones > 0 {
+                    return Err(
+                        Error::DecommissionedSledWithNonExpungedZones {
+                            sled_id,
+                            num_zones,
+                        },
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -852,7 +946,7 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, input, blueprint1) =
+        let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME, 5);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
@@ -890,6 +984,17 @@ mod test {
         let decommissioned_sled_id = {
             let (sled_id, details) = sleds_iter.next().expect("no sleds");
             details.state = SledState::Decommissioned;
+
+            // Decommissioned sleds can only occur if their zones have been
+            // expunged, so lie and pretend like that already happened
+            // (otherwise the planner will rightfully fail to generate a new
+            // blueprint, because we're feeding it invalid inputs).
+            for zone in
+                &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
+            {
+                zone.disposition = BlueprintZoneDisposition::Expunged;
+            }
+
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
@@ -950,13 +1055,6 @@ mod test {
 
         let expunged_modified = sleds.remove(&expunged_sled_id).unwrap();
         assert_all_zones_expunged(&expunged_modified, "expunged sled");
-
-        let decommissioned_modified =
-            sleds.remove(&decommissioned_sled_id).unwrap();
-        assert_all_zones_expunged(
-            &decommissioned_modified,
-            "decommissioned sled",
-        );
 
         // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
         // should get additional Nexus zones. We expect a total of 6 new Nexus
@@ -1109,5 +1207,94 @@ mod test {
                 zone.zone_after.id
             );
         }
+    }
+
+    #[test]
+    fn planner_decommissions_sleds() {
+        static TEST_NAME: &str = "planner_decommissions_sleds";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // Expunge one of the sleds.
+        let mut builder = input.into_builder();
+        let expunged_sled_id = {
+            let mut iter = builder.sleds_mut().iter_mut();
+            let (sled_id, details) = iter.next().expect("at least one sled");
+            details.policy = SledPolicy::Expunged;
+            *sled_id
+        };
+
+        let input = builder.build();
+        let mut blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        // Define a time_created for consistent output across runs.
+        blueprint2.time_created =
+            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+
+        assert_contents(
+            "tests/output/planner_decommissions_sleds_bp2.txt",
+            &blueprint2.display().to_string(),
+        );
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        println!("1 -> 2 (expunged {expunged_sled_id}):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_decommissions_sleds_1_2.txt",
+            &diff.display().to_string(),
+        );
+
+        // All the zones of the expunged sled should be expunged, and the sled
+        // itself should be decommissioned.
+        assert!(blueprint2.blueprint_zones[&expunged_sled_id]
+            .are_all_zones_expunged());
+        assert_eq!(
+            blueprint2.sled_state[&expunged_sled_id],
+            SledState::Decommissioned
+        );
+
+        // Remove the now-decommissioned sled from the planning input.
+        let mut builder = input.into_builder();
+        builder.sleds_mut().remove(&expunged_sled_id);
+        let input = builder.build();
+
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+
+        // There should be no changes to the blueprint; we don't yet garbage
+        // collect zones, so we should still have the sled's expunged zones
+        // (even though the sled itself is no longer present in the list of
+        // commissioned sleds).
+        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
+        println!(
+            "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.sleds_unchanged().count(), DEFAULT_N_SLEDS);
+
+        logctx.cleanup_successful();
     }
 }
