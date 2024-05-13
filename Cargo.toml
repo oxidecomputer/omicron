@@ -2,7 +2,6 @@
 members = [
     "api_identity",
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -85,7 +84,6 @@ members = [
 
 default-members = [
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
