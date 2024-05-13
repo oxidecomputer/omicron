@@ -102,7 +102,7 @@ impl Jobs {
         self.map.insert(
             name.clone(),
             Job {
-                future: Box::pin(spawn_with_output(
+                future: spawn_with_output(
                     // terrible hack to deal with the `Command` builder
                     // returning &mut
                     std::mem::replace(command, Command::new("false")),
@@ -110,7 +110,8 @@ impl Jobs {
                     self.permits.clone(),
                     name.clone(),
                     self.log_dir.join(&name).with_extension("log"),
-                )),
+                )
+                .boxed(),
                 wait_for: Vec::new(),
                 notify: Vec::new(),
             },

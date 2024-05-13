@@ -204,7 +204,8 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     build.push_str("git");
     build.extend(commit.chars().take(11));
     version.build = build.parse()?;
-    info!(logger, "version: {}", version);
+    let version_str = version.to_string();
+    info!(logger, "version: {}", version_str);
 
     let manifest = Arc::new(omicron_zone_package::config::parse_manifest(
         &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
@@ -370,134 +371,125 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     );
     let omicron_package = WORKSPACE_DIR.join("target/release/omicron-package");
 
-    macro_rules! os_image_jobs {
-        (
-            target_name: $target_name:literal,
-            target_args: $target_args:expr,
-            proto_packages: $proto_packages:expr,
-            image_prefix: $image_prefix:literal,
-            image_build_args: $image_build_args:expr,
-            image_dataset: $image_dataset:expr,
-        ) => {
-            let artifacts_path = if concat!($target_name) == "host" {
-                Utf8PathBuf::from("out/")
-            } else {
-                args.output_dir.join("artifacts-recovery")
-            };
-
-            jobs.push_command(
-                concat!($target_name, "-target"),
-                Command::new(&omicron_package)
-                    .args([
+    // Generate `omicron-package stamp` jobs for a list of packages as a nested
+    // `Jobs`. Returns the selector for the outer job.
+    //
+    // (This could be a function but the resulting function would have too many
+    // confusable arguments.)
+    macro_rules! stamp_packages {
+        ($name:expr, $target:expr, $packages:expr) => {{
+            let mut stamp_jobs =
+                Jobs::new(&logger, permits.clone(), &args.output_dir);
+            for package in $packages {
+                stamp_jobs.push_command(
+                    format!("stamp-{}", package),
+                    Command::new(&omicron_package).args([
                         "--target",
-                        $target_name,
+                        $target.as_str(),
                         "--artifacts",
-                        artifacts_path.as_str(),
-                        "target",
-                        "create",
-                    ])
-                    .args($target_args),
-            )
-            .after("omicron-package");
+                        $target.artifacts_path(&args).as_str(),
+                        "stamp",
+                        package,
+                        &version_str,
+                    ]),
+                );
+            }
+            jobs.push($name, stamp_jobs.run_all())
+        }};
+    }
 
-            jobs.push_command(
-                concat!($target_name, "-package"),
-                Command::new(&omicron_package).args([
+    for target in [Target::Host, Target::Recovery] {
+        let artifacts_path = target.artifacts_path(&args);
+
+        // omicron-package target create
+        jobs.push_command(
+            format!("{}-target", target),
+            Command::new(&omicron_package)
+                .args([
                     "--target",
-                    $target_name,
+                    target.as_str(),
                     "--artifacts",
                     artifacts_path.as_str(),
-                    "package",
-                ]),
-            )
-            .after(concat!($target_name, "-target"));
+                    "target",
+                    "create",
+                ])
+                .args(target.target_args()),
+        )
+        .after("omicron-package");
 
-            jobs.push(
-                concat!($target_name, "-stamp"),
-                stamp_packages(
-                    logger.clone(),
-                    permits.clone(),
-                    args.output_dir.clone(),
-                    omicron_package.clone(),
-                    $target_name,
-                    artifacts_path.clone(),
-                    version.clone(),
-                    $proto_packages.iter().map(|(name, _)| *name),
+        // omicron-package package
+        jobs.push_command(
+            format!("{}-package", target),
+            Command::new(&omicron_package).args([
+                "--target",
+                target.as_str(),
+                "--artifacts",
+                artifacts_path.as_str(),
+                "package",
+            ]),
+        )
+        .after(format!("{}-target", target));
+
+        // omicron-package stamp
+        stamp_packages!(
+            format!("{}-stamp", target),
+            target,
+            target.proto_package_names()
+        )
+        .after(format!("{}-package", target));
+
+        // [build proto dir, to be overlaid into disk image]
+        let proto_dir = tempdir.path().join("proto").join(target.as_str());
+        jobs.push(
+            format!("{}-proto", target),
+            build_proto_area(
+                artifacts_path,
+                proto_dir.clone(),
+                target.proto_packages(),
+                manifest.clone(),
+            ),
+        )
+        .after(format!("{}-stamp", target));
+
+        // The ${os_short_commit} token will be expanded by `helios-build`
+        let image_name = format!(
+            "{} {}/${{os_short_commit}} {}",
+            target.image_prefix(),
+            commit.chars().take(7).collect::<String>(),
+            Utc::now().format("%Y-%m-%d %H:%M")
+        );
+
+        // helios-build experiment-image
+        jobs.push_command(
+            format!("{}-image", target),
+            Command::new("ptime")
+                .arg("-m")
+                .arg(args.helios_dir.join("helios-build"))
+                .arg("experiment-image")
+                .arg("-o") // output directory for image
+                .arg(args.output_dir.join(format!("os-{}", target)))
+                .arg("-p") // use an external package repository
+                .arg(format!("helios-dev={}", HELIOS_REPO))
+                .arg("-F") // pass extra image builder features
+                .arg(format!("optever={}", opte_version.trim()))
+                .arg("-P") // include all files from extra proto area
+                .arg(proto_dir.join("root"))
+                .arg("-N") // image name
+                .arg(image_name)
+                .arg("-s") // tempdir name suffix
+                .arg(target.as_str())
+                .args(target.image_build_args())
+                .current_dir(&args.helios_dir)
+                .env(
+                    "IMAGE_DATASET",
+                    match target {
+                        Target::Host => &args.host_dataset,
+                        Target::Recovery => &args.recovery_dataset,
+                    },
                 ),
-            )
-            .after(concat!($target_name, "-package"));
-
-            let proto_dir = tempdir.path().join("proto").join($target_name);
-            jobs.push(
-                concat!($target_name, "-proto"),
-                build_proto_area(
-                    artifacts_path,
-                    proto_dir.clone(),
-                    &$proto_packages,
-                    manifest.clone(),
-                ),
-            )
-            .after(concat!($target_name, "-stamp"));
-
-            // The ${os_short_commit} token will be expanded by `helios-build`
-            let image_name = format!(
-                "{} {}/${{os_short_commit}} {}",
-                $image_prefix,
-                commit.chars().take(7).collect::<String>(),
-                Utc::now().format("%Y-%m-%d %H:%M")
-            );
-
-            jobs.push_command(
-                concat!($target_name, "-image"),
-                Command::new("ptime")
-                    .arg("-m")
-                    .arg(args.helios_dir.join("helios-build"))
-                    .arg("experiment-image")
-                    .arg("-o") // output directory for image
-                    .arg(args.output_dir.join(concat!("os-", $target_name)))
-                    .arg("-p") // use an external package repository
-                    .arg(format!("helios-dev={}", HELIOS_REPO))
-                    .arg("-F") // pass extra image builder features
-                    .arg(format!("optever={}", opte_version.trim()))
-                    .arg("-P") // include all files from extra proto area
-                    .arg(proto_dir.join("root"))
-                    .arg("-N") // image name
-                    .arg(image_name)
-                    .arg("-s") // tempdir name suffix
-                    .arg($target_name)
-                    .args($image_build_args)
-                    .current_dir(&args.helios_dir)
-                    .env("IMAGE_DATASET", &$image_dataset),
-            )
-            .after("helios-setup")
-            .after(concat!($target_name, "-proto"));
-        };
-    }
-
-    os_image_jobs! {
-        target_name: "host",
-        target_args: [
-            "--image",
-            "standard",
-            "--machine",
-            "gimlet",
-            "--switch",
-            "asic",
-            "--rack-topology",
-            "multi-sled"
-        ],
-        proto_packages: HOST_IMAGE_PACKAGES,
-        image_prefix: "ci",
-        image_build_args: ["-B"],
-        image_dataset: args.host_dataset,
-    }
-    os_image_jobs! {
-        target_name: "recovery",
-        target_args: ["--image", "trampoline"],
-        proto_packages: RECOVERY_IMAGE_PACKAGES,
-        image_prefix: "recovery",
-        image_build_args: ["-R"],
-        image_dataset: args.recovery_dataset,
+        )
+        .after("helios-setup")
+        .after(format!("{}-proto", target));
     }
     // Build the recovery target after we build the host target. Only one
     // of these will build at a time since Cargo locks its target directory;
@@ -508,6 +500,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         // If the datasets are the same, we can't parallelize these.
         jobs.select("recovery-image").after("host-image");
     }
+
     // Set up /root/.profile in the host OS image.
     jobs.push(
         "host-profile",
@@ -516,20 +509,8 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     .after("host-proto");
     jobs.select("host-image").after("host-profile");
 
-    jobs.push(
-        "tuf-stamp",
-        stamp_packages(
-            logger.clone(),
-            permits.clone(),
-            args.output_dir.clone(),
-            omicron_package.clone(),
-            "host",
-            WORKSPACE_DIR.join("out"),
-            version.clone(),
-            TUF_PACKAGES.into_iter(),
-        ),
-    )
-    .after("host-stamp");
+    stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
+        .after("host-stamp");
 
     for (name, base_url) in [
         ("staging", "https://permslip-staging.corp.oxide.computer"),
@@ -551,8 +532,8 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         tuf::build_tuf_repo(
             logger.clone(),
             args.output_dir.clone(),
-            version.clone(),
-            manifest.clone(),
+            version,
+            manifest,
         ),
     )
     .after("tuf-stamp")
@@ -572,33 +553,79 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn stamp_packages(
-    logger: Logger,
-    permits: Arc<Semaphore>,
-    output_dir: Utf8PathBuf,
-    omicron_package: Utf8PathBuf,
-    target_name: &'static str,
-    artifacts_path: Utf8PathBuf,
-    version: Version,
-    packages: impl Iterator<Item = &'static str>,
-) -> Result<()> {
-    let version = version.to_string();
-    let mut jobs = Jobs::new(&logger, permits, &output_dir);
-    for package in packages {
-        jobs.push_command(
-            format!("stamp-{}", package),
-            Command::new(&omicron_package)
-                .arg("--target")
-                .arg(target_name)
-                .arg("--artifacts")
-                .arg(&artifacts_path)
-                .arg("stamp")
-                .arg(package)
-                .arg(&version),
-        );
+#[derive(Clone, Copy)]
+enum Target {
+    Host,
+    Recovery,
+}
+
+impl Target {
+    fn as_str(self) -> &'static str {
+        match self {
+            Target::Host => "host",
+            Target::Recovery => "recovery",
+        }
     }
-    jobs.run_all().await
+
+    fn artifacts_path(self, args: &Args) -> Utf8PathBuf {
+        match self {
+            Target::Host => WORKSPACE_DIR.join("out"),
+            Target::Recovery => {
+                args.output_dir.join(format!("artifacts-{}", self))
+            }
+        }
+    }
+
+    fn target_args(self) -> &'static [&'static str] {
+        match self {
+            Target::Host => &[
+                "--image",
+                "standard",
+                "--machine",
+                "gimlet",
+                "--switch",
+                "asic",
+                "--rack-topology",
+                "multi-sled",
+            ],
+            Target::Recovery => &["--image", "trampoline"],
+        }
+    }
+
+    fn proto_packages(self) -> &'static [(&'static str, InstallMethod)] {
+        match self {
+            Target::Host => &HOST_IMAGE_PACKAGES,
+            Target::Recovery => &RECOVERY_IMAGE_PACKAGES,
+        }
+    }
+
+    fn proto_package_names(self) -> impl Iterator<Item = &'static str> {
+        self.proto_packages().iter().map(|(name, _)| *name)
+    }
+
+    fn image_prefix(self) -> &'static str {
+        match self {
+            Target::Host => "ci",
+            Target::Recovery => "recovery",
+        }
+    }
+
+    fn image_build_args(self) -> &'static [&'static str] {
+        match self {
+            Target::Host => &[
+                "-B", // include omicron1 brand
+            ],
+            Target::Recovery => &[
+                "-R", // recovery image
+            ],
+        }
+    }
+}
+
+impl std::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 async fn build_proto_area(
