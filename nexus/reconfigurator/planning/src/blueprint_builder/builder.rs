@@ -88,6 +88,14 @@ pub enum Error {
     NoSystemMacAddressAvailable,
     #[error("exhausted available Nexus IP addresses")]
     ExhaustedNexusIps,
+    #[error(
+        "invariant violation: found decommissioned sled with \
+         {num_zones} non-expunged zones: {sled_id}"
+    )]
+    DecommissionedSledWithNonExpungedZones {
+        sled_id: SledUuid,
+        num_zones: usize,
+    },
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
 }

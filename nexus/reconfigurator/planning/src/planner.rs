@@ -171,16 +171,26 @@ impl<'a> Planner<'a> {
 
         // Check for any decommissioned sleds (i.e., sleds for which our
         // blueprint has zones, but are not in the input sled list). Any zones
-        // for decommissioned sleds _should_ already be expunged; ensure that is
-        // the case.
+        // for decommissioned sleds must have already be expunged for
+        // decommissioning to have happened; fail if we find non-expunged zones
+        // associated with a decommissioned sled.
         for sled_id in self.blueprint.sled_ids_with_zones() {
             if !commissioned_sled_ids.contains(&sled_id) {
-                self.blueprint.expunge_all_zones_for_sled(
-                    sled_id,
-                    // Decommissioned sleds are not present in our input, so we
-                    // don't know what its policy was.
-                    ZoneExpungeReason::SledDecommissioned { policy: None },
-                )?;
+                let num_zones = self
+                    .blueprint
+                    .current_sled_zones(sled_id)
+                    .filter(|zone| {
+                        zone.disposition != BlueprintZoneDisposition::Expunged
+                    })
+                    .count();
+                if num_zones > 0 {
+                    return Err(
+                        Error::DecommissionedSledWithNonExpungedZones {
+                            sled_id,
+                            num_zones,
+                        },
+                    );
+                }
             }
         }
 
@@ -456,9 +466,7 @@ fn needs_zone_expungement(
             // an illegal state, but representable. If we see a sled in this
             // state, we should still expunge all zones in it, but parent code
             // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned {
-                policy: Some(policy),
-            });
+            return Some(ZoneExpungeReason::SledDecommissioned { policy });
         }
     }
 
@@ -474,7 +482,7 @@ fn needs_zone_expungement(
 /// logical flow.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ZoneExpungeReason {
-    SledDecommissioned { policy: Option<SledPolicy> },
+    SledDecommissioned { policy: SledPolicy },
     SledExpunged,
 }
 
@@ -938,7 +946,7 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, input, blueprint1) =
+        let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME, 5);
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
@@ -976,6 +984,17 @@ mod test {
         let decommissioned_sled_id = {
             let (sled_id, details) = sleds_iter.next().expect("no sleds");
             details.state = SledState::Decommissioned;
+
+            // Decommissioned sleds can only occur if their zones have been
+            // expunged, so lie and pretend like that already happened
+            // (otherwise the planner will rightfully fail to generate a new
+            // blueprint, because we're feeding it invalid inputs).
+            for zone in
+                &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
+            {
+                zone.disposition = BlueprintZoneDisposition::Expunged;
+            }
+
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
@@ -1036,13 +1055,6 @@ mod test {
 
         let expunged_modified = sleds.remove(&expunged_sled_id).unwrap();
         assert_all_zones_expunged(&expunged_modified, "expunged sled");
-
-        let decommissioned_modified =
-            sleds.remove(&decommissioned_sled_id).unwrap();
-        assert_all_zones_expunged(
-            &decommissioned_modified,
-            "decommissioned sled",
-        );
 
         // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
         // should get additional Nexus zones. We expect a total of 6 new Nexus
