@@ -8,8 +8,6 @@
 #:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
-#:	"=/work/os-host/os.tar.gz",
-#:	"=/work/os-recovery/os.tar.gz",
 #:	"%/work/*.log",
 #: ]
 #: access_repos = [
@@ -28,11 +26,6 @@
 #:	"oxidecomputer/helios-omnios-extra",
 #:	"oxidecomputer/nanobl-rs",
 #: ]
-#:
-#: [[publish]]
-#: series = "image"
-#: name = "os.tar.gz"
-#: from_output = "/work/os-host/os.tar.gz"
 #:
 #: [[publish]]
 #: series = "rot-all"
