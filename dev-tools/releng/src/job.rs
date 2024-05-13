@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,6 +14,8 @@ use anyhow::Result;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use fs_err::tokio::File;
+use futures::future::BoxFuture;
+use futures::future::FutureExt;
 use futures::stream::FuturesUnordered;
 use futures::stream::TryStreamExt;
 use slog::info;
@@ -43,7 +44,7 @@ pub(crate) struct Jobs {
 }
 
 struct Job {
-    future: Pin<Box<dyn Future<Output = Result<()>>>>,
+    future: BoxFuture<'static, Result<()>>,
     wait_for: Vec<oneshot::Receiver<()>>,
     notify: Vec<oneshot::Sender<()>>,
 }
@@ -67,25 +68,23 @@ impl Jobs {
         }
     }
 
-    pub(crate) fn push<F>(
+    pub(crate) fn push(
         &mut self,
         name: impl AsRef<str>,
-        future: F,
-    ) -> Selector<'_>
-    where
-        F: Future<Output = Result<()>> + 'static,
-    {
+        future: impl Future<Output = Result<()>> + Send + 'static,
+    ) -> Selector<'_> {
         let name = name.as_ref().to_owned();
         assert!(!self.map.contains_key(&name), "duplicate job name {}", name);
         self.map.insert(
             name.clone(),
             Job {
-                future: Box::pin(run_job(
+                future: run_job(
                     self.logger.clone(),
                     self.permits.clone(),
                     name.clone(),
                     future,
-                )),
+                )
+                .boxed(),
                 wait_for: Vec::new(),
                 notify: Vec::new(),
             },
@@ -181,22 +180,19 @@ macro_rules! info_or_error {
     };
 }
 
-async fn run_job<F>(
+async fn run_job(
     logger: Logger,
     permits: Arc<Semaphore>,
     name: String,
-    future: F,
-) -> Result<()>
-where
-    F: Future<Output = Result<()>> + 'static,
-{
+    future: impl Future<Output = Result<()>> + Send + 'static,
+) -> Result<()> {
     if !PERMIT_NOT_REQUIRED.contains(&name.as_str()) {
         let _ = permits.acquire_owned().await?;
     }
 
     info!(logger, "[{}] running task", name);
     let start = Instant::now();
-    let result = future.await;
+    let result = tokio::spawn(future).await?;
     let duration = Instant::now().saturating_duration_since(start);
     info_or_error!(
         logger,
@@ -233,14 +229,14 @@ async fn spawn_with_output(
         .spawn()
         .with_context(|| format!("failed to exec `{}`", command.to_string()))?;
 
-    let stdout = reader(
-        &name,
+    let stdout = spawn_reader(
+        format!("[{:>16}] ", name),
         child.stdout.take().unwrap(),
         tokio::io::stdout(),
         log_file_1,
     );
-    let stderr = reader(
-        &name,
+    let stderr = spawn_reader(
+        format!("[{:>16}] ", name),
         child.stderr.take().unwrap(),
         tokio::io::stderr(),
         log_file_2,
@@ -264,23 +260,26 @@ async fn spawn_with_output(
     }
 }
 
-async fn reader(
-    name: &str,
-    reader: impl AsyncRead + Unpin,
-    mut terminal_writer: impl AsyncWrite + Unpin,
+async fn spawn_reader(
+    prefix: String,
+    reader: impl AsyncRead + Send + Unpin + 'static,
+    mut terminal_writer: impl AsyncWrite + Send + Unpin + 'static,
     logfile_writer: File,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(reader);
     let mut logfile_writer = tokio::fs::File::from(logfile_writer);
-    let mut buf = format!("[{:>16}] ", name).into_bytes();
+    let mut buf = prefix.into_bytes();
     let prefix_len = buf.len();
-    loop {
-        buf.truncate(prefix_len);
-        let size = reader.read_until(b'\n', &mut buf).await?;
-        if size == 0 {
-            return Ok(());
+    tokio::spawn(async move {
+        loop {
+            buf.truncate(prefix_len);
+            let size = reader.read_until(b'\n', &mut buf).await?;
+            if size == 0 {
+                return Ok(());
+            }
+            terminal_writer.write_all(&buf).await?;
+            logfile_writer.write_all(&buf[prefix_len..]).await?;
         }
-        terminal_writer.write_all(&buf).await?;
-        logfile_writer.write_all(&buf[prefix_len..]).await?;
-    }
+    })
+    .await?
 }
