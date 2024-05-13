@@ -5837,11 +5837,8 @@ dependencies = [
  "pem-rfc7468",
  "petgraph",
  "postgres-types",
- "ppv-lite86",
  "predicates",
  "proc-macro2",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
  "regex",
  "regex-automata 0.4.5",
  "regex-syntax 0.8.2",
@@ -5879,7 +5876,6 @@ dependencies = [
  "yasna",
  "zerocopy 0.7.32",
  "zeroize",
- "zip",
 ]
 
 [[package]]
