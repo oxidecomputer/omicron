@@ -33,6 +33,10 @@ is always functional. You can also run the process locally with
 
 == Process overview
 
+`cargo xtask releng` performs all of these steps in parallel (with
+the temporary exception of artifact downloads handled by
+`tools/install_builder_prerequisites.sh`):
+
 . `tools/install_builder_prerequisites.sh` downloads several artifacts
   (via the `tools/ci_*` scripts) that are necessary to build Omicron;
   many of these are ultimately packaged by `omicron-package`. These
@@ -49,9 +53,11 @@ is always functional. You can also run the process locally with
   packages them into a series of illumos zones and tarballs. (It can
   also manage installation and uninstallation of these zones; see
   how-to-run.adoc.)
-. Some of the packaged artifacts are installed directly in the OS
-  images; `cargo xtask releng` unpacks these into a temporary directory
-  that is overlaid onto the OS image in the next step.
+. Some of the illumos zones are distributed with the OS images (because
+  they are reliant on OS-specific APIs), and some are distributed
+  separately. `cargo xtask releng` unpacks the zones for the OS image
+  into a temporary directory that is overlaid onto the OS image in the
+  next step.
 . `helios-build` from the https://github.com/oxidecomputer/helios[Helios]
   repository then builds two images: the *host* image, which is used
   during normal operation, and the *trampoline* (or *recovery*) image,
@@ -62,10 +68,6 @@ is always functional. You can also run the process locally with
   illumos zones that are not installed into the OS images. This archive
   can be uploaded to Wicket to perform an upgrade of the rack while the
   control plane is not running.
-
-`cargo xtask releng` performs all of these steps in parallel (with
-the temporary exception of artifact downloads handled by
-`tools/install_builder_prerequisites.sh`.)
 
 == Beyond `cargo xtask releng`
 
