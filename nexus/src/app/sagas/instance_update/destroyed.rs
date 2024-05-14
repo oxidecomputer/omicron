@@ -178,24 +178,20 @@ async fn siud_delete_v2p_mappings(
 
     // Per the commentary in instance_network::delete_instance_v2p_mappings`,
     // this should be idempotent.
-    instance_network::delete_instance_v2p_mappings(
-        osagactx.datastore(),
-        osagactx.log(),
-        &osagactx.nexus().opctx_alloc,
-        &opctx,
-        instance.id(),
-    )
-    .await
-    .or_else(|err| {
-        // Necessary for idempotency
-        match err {
-            Error::ObjectNotFound {
-                type_name: ResourceType::Instance,
-                lookup_type: _,
-            } => Ok(()),
-            _ => Err(ActionError::action_failed(err)),
-        }
-    })
+    osagactx
+        .nexus()
+        .delete_instance_v2p_mappings(&opctx, instance.id())
+        .await
+        .or_else(|err| {
+            // Necessary for idempotency
+            match err {
+                Error::ObjectNotFound {
+                    type_name: ResourceType::Instance,
+                    lookup_type: _,
+                } => Ok(()),
+                _ => Err(ActionError::action_failed(err)),
+            }
+        })
 }
 
 async fn siud_delete_nat_entries(
@@ -212,9 +208,6 @@ async fn siud_delete_nat_entries(
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    let opctx_alloc = &osagactx.nexus().opctx_alloc;
-    let resolver = osagactx.nexus().resolver().await;
-    let datastore = osagactx.datastore();
     let log = osagactx.log();
 
     info!(
@@ -225,21 +218,12 @@ async fn siud_delete_nat_entries(
         "instance_update" => %"VMM destroyed",
     );
 
-    instance_network::instance_delete_dpd_config(
-        datastore,
-        log,
-        &resolver,
-        &opctx,
-        opctx_alloc,
-        authz_instance,
-    )
-    .await
-    .or_else(|err|
-        // Necessary for idempotency
-        match err {
-            Error::ObjectNotFound { .. } => Ok(()),
-            _ => Err(ActionError::action_failed(err)),
-        })
+    osagactx
+        .nexus()
+        .instance_delete_dpd_config(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 async fn siud_update_instance(

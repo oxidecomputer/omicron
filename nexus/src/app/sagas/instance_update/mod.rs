@@ -42,7 +42,7 @@ declare_saga_actions! {
     // updating the instance.
     LOCK_INSTANCE -> "saga_instance_lock_gen" {
         + siu_lock_instance
-        - siu_unlock_instance
+        - siu_lock_instance_undo
     }
 
     UNLOCK_INSTANCE -> "no_result7" {
