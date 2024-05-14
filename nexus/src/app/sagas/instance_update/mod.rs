@@ -2,18 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
-use crate::app::instance::InstanceStateChangeError;
+use super::{
+    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
+    ACTION_GENERATE_ID,
+};
+use crate::app::db::datastore::InstanceAndVmms;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_model::Generation;
-use steno::ActionError;
-
-use nexus_db_queries::{authn, authz, db};
+use nexus_db_queries::{authn, authz};
+use omicron_common::api::external::InstanceState;
 use serde::{Deserialize, Serialize};
+use steno::{ActionError, DagBuilder, Node, SagaName};
 use uuid::Uuid;
 
-pub mod destroyed;
-
+mod destroyed;
 /// Parameters to the instance update saga.
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
@@ -23,14 +25,107 @@ pub(crate) struct Params {
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
 
-    pub instance: db::model::Instance,
-
-    pub active_vmm: Option<db::model::Vmm>,
-
-    pub target_vmm: Option<db::model::Vmm>,
+    pub state: InstanceAndVmms,
 }
 
-const SAGA_INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
+const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
+const INSTANCE_LOCK_GEN: &str = "saga_instance_lock_gen";
+
+// instance update saga: actions
+
+declare_saga_actions! {
+    instance_update;
+
+    // Read the target Instance from CRDB and join with its active VMM and
+    // migration target VMM records if they exist, and then acquire the
+    // "instance updater" lock with this saga's ID if no other saga is currently
+    // updating the instance.
+    LOCK_INSTANCE -> "saga_instance_lock_gen" {
+        + siu_lock_instance
+        - siu_unlock_instance
+    }
+
+    UNLOCK_INSTANCE -> "no_result7" {
+        + siu_unlock_instance
+    }
+}
+
+// instance update saga: definition
+
+#[derive(Debug)]
+pub(crate) struct SagaInstanceUpdate;
+impl NexusSaga for SagaInstanceUpdate {
+    const NAME: &'static str = "instance-update";
+    type Params = Params;
+
+    fn register_actions(registry: &mut ActionRegistry) {
+        instance_update_register_actions(registry);
+    }
+
+    fn make_saga_dag(
+        params: &Self::Params,
+        mut builder: DagBuilder,
+    ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(Node::action(
+            INSTANCE_LOCK_ID,
+            "GenerateInstanceLockId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+        builder.append(lock_instance_action());
+
+        // determine which subsaga to execute based on the state of the instance
+        // and the VMMs associated with it.
+        match params.state {
+            // VMM destroyed subsaga
+            InstanceAndVmms { instance, active_vmm: Some(vmm), .. }
+                if vmm.runtime.state.state() == &InstanceState::Destroyed =>
+            {
+                const DESTROYED_SUBSAGA_PARAMS: &str =
+                    "params_for_vmm_destroyed_subsaga";
+                let subsaga_params = destroyed::Params {
+                    serialized_authn: params.serialized_authn.clone(),
+                    instance: instance.clone(),
+                    authz_instance: params.authz_instance.clone(),
+                    vmm,
+                };
+                let subsaga_dag = {
+                    let subsaga_builder = DagBuilder::new(SagaName::new(
+                        destroyed::SagaVmmDestroyed::NAME,
+                    ));
+                    destroyed::SagaVmmDestroyed::make_saga_dag(
+                        &subsaga_params,
+                        subsaga_builder,
+                    )?
+                };
+
+                builder.append(Node::constant(
+                    DESTROYED_SUBSAGA_PARAMS,
+                    serde_json::to_value(&subsaga_params).map_err(|e| {
+                        SagaInitError::SerializeError(
+                            DESTROYED_SUBSAGA_PARAMS.to_string(),
+                            e,
+                        )
+                    })?,
+                ));
+
+                builder.append(Node::subsaga(
+                    "vmm_destroyed_subsaga_no_result",
+                    subsaga_dag,
+                    DESTROYED_SUBSAGA_PARAMS,
+                ));
+            }
+            _ => {
+                // TODO(eliza): other subsagas
+            }
+        };
+
+        builder.append(unlock_instance_action());
+
+        Ok(builder.build()?)
+    }
+}
+
+// instance update saga: action implementations
 
 async fn siu_lock_instance(
     sagactx: NexusActionContext,
@@ -44,7 +139,7 @@ async fn siu_lock_instance(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     // try to acquire the instance updater lock
-    let lock_id = sagactx.lookup::<Uuid>(SAGA_INSTANCE_LOCK_ID)?;
+    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     osagactx
         .datastore()
         .instance_updater_try_lock(
@@ -68,8 +163,8 @@ async fn siu_unlock_instance(
     let osagactx = sagactx.user_data();
     let Params { ref authz_instance, ref serialized_authn, .. } =
         sagactx.saga_params::<Params>()?;
-    let lock_id = sagactx.lookup::<Uuid>(SAGA_INSTANCE_LOCK_ID)?;
-    let gen = sagactx.lookup::<Generation>(SAGA_INSTANCE_LOCK_GEN)?;
+    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
+    let gen = sagactx.lookup::<Generation>(INSTANCE_LOCK_GEN)?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
@@ -88,7 +183,7 @@ async fn siu_lock_instance_undo(
     let Params {
         ref authz_instance, ref serialized_authn, ref instance, ..
     } = sagactx.saga_params::<Params>()?;
-    let lock_id = sagactx.lookup::<Uuid>(SAGA_INSTANCE_LOCK_ID)?;
+    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let updater_gen = instance.runtime_state.updater_gen.next().into();
