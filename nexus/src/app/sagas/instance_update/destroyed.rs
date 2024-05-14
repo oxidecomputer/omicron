@@ -16,6 +16,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
 use serde::{Deserialize, Serialize};
+use slog::info;
 
 /// Parameters to the instance update VMM destroyed sub-saga.
 #[derive(Debug, Deserialize, Serialize)]
@@ -52,8 +53,8 @@ declare_saga_actions! {
         + siud_delete_nat_entries
     }
 
-    UPDATE_VMM_DESTROYED -> "no_result5" {
-        + siud_instance_update_vmm_destroyed
+    UPDATE_INSTANCE -> "no_result5" {
+        + siud_update_instance
     }
 
     MARK_VMM_DELETED -> "no_result6" {
@@ -76,10 +77,10 @@ impl NexusSaga for SagaVmmDestroyed {
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(delete_sled_resource_action());
-        builder.append(delete_virtual_provosioning_action());
+        builder.append(delete_virtual_provisioning_action());
         builder.append(delete_v2p_mappings_action());
         builder.append(delete_nat_entries_action());
-        builder.append(instance_update_vmm_destroyed_action());
+        builder.append(update_instance_action());
         builder.append(mark_vmm_deleted_action());
 
         Ok(builder.build()?)
@@ -90,11 +91,19 @@ async fn siud_delete_sled_resource(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref vmm, .. } =
+    let Params { ref serialized_authn, ref vmm, ref instance, .. } =
         sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    info!(
+        osagactx.log(),
+        "instance update (VMM destroyed): deleting sled reservation";
+        "instance_id" => %instance.id(),
+        "propolis_id" => %vmm.id,
+        "instance_update" => %"VMM destroyed",
+    );
 
     osagactx
         .datastore()
@@ -114,11 +123,19 @@ async fn siud_delete_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref instance, .. } =
+    let Params { ref serialized_authn, ref instance, ref vmm, .. } =
         sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    info!(
+        osagactx.log(),
+        "instance update (VMM destroyed): deleting virtual provisioning";
+        "instance_id" => %instance.id(),
+        "propolis_id" => %vmm.id,
+        "instance_update" => %"VMM destroyed",
+    );
 
     osagactx
         .datastore()
@@ -145,11 +162,19 @@ async fn siud_delete_v2p_mappings(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref instance, .. } =
+    let Params { ref serialized_authn, ref instance, ref vmm, .. } =
         sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    info!(
+        osagactx.log(),
+        "instance update (VMM destroyed): deleting V2P mappings";
+        "instance_id" => %instance.id(),
+        "propolis_id" => %vmm.id,
+        "instance_update" => %"VMM destroyed",
+    );
 
     // Per the commentary in instance_network::delete_instance_v2p_mappings`,
     // this should be idempotent.
@@ -177,8 +202,13 @@ async fn siud_delete_nat_entries(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params::<Params>()?;
+    let Params {
+        ref serialized_authn,
+        ref authz_instance,
+        ref vmm,
+        ref instance,
+        ..
+    } = sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
@@ -186,6 +216,14 @@ async fn siud_delete_nat_entries(
     let resolver = osagactx.nexus().resolver().await;
     let datastore = osagactx.datastore();
     let log = osagactx.log();
+
+    info!(
+        log,
+        "instance update (VMM destroyed): deleting NAT entries";
+        "instance_id" => %instance.id(),
+        "propolis_id" => %vmm.id,
+        "instance_update" => %"VMM destroyed",
+    );
 
     instance_network::instance_delete_dpd_config(
         datastore,
@@ -204,17 +242,26 @@ async fn siud_delete_nat_entries(
         })
 }
 
-async fn siud_instance_update_vmm_destroyed(
+async fn siud_update_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { instance, .. } = sagactx.saga_params::<Params>()?;
+    let Params { instance, vmm, .. } = sagactx.saga_params::<Params>()?;
     let new_runtime = InstanceRuntimeState {
         propolis_id: None,
         nexus_state: external::InstanceState::Stopped.into(),
         gen: Generation(instance.runtime_state.gen.0.next()),
         ..instance.runtime_state
     };
+
+    info!(
+        osagactx.log(),
+        "instance update (VMM destroyed): updating runtime state";
+        "instance_id" => %instance.id(),
+        "propolis_id" => %vmm.id,
+        "new_runtime_state" => ?new_runtime,
+        "instance_update" => %"VMM destroyed",
+    );
 
     // It's okay for this to fail, it just means that the active VMM ID has changed.
     let _ = osagactx
@@ -228,11 +275,20 @@ async fn siud_mark_vmm_deleted(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref vmm, .. } =
+    let Params { ref serialized_authn, ref vmm, ref instance, .. } =
         sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    info!(
+        osagactx.log(),
+        "instance update (VMM destroyed): marking VMM record deleted";
+        "instance_id" => %instance.id(),
+        "propolis_id" => %vmm.id,
+        "instance_update" => %"VMM destroyed",
+    );
+
     osagactx
         .datastore()
         .vmm_mark_deleted(&opctx, &vmm.id)
