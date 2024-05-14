@@ -1505,6 +1505,15 @@ table! {
 }
 
 table! {
+    bp_sled_state (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        sled_state -> crate::SledStateEnum,
+    }
+}
+
+table! {
     bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,

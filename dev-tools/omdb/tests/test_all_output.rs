@@ -165,7 +165,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // collection?
     assert!(parsed
         .planning_input
-        .all_sled_ids(SledFilter::All)
+        .all_sled_ids(SledFilter::Commissioned)
         .next()
         .is_some());
     assert!(!parsed.collections.is_empty());

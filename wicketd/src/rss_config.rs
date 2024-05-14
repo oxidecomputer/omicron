@@ -527,6 +527,7 @@ impl CurrentRssConfig {
             value.internal_services_ip_pool_ranges;
         self.external_dns_ips = value.external_dns_ips;
         self.external_dns_zone_name = value.external_dns_zone_name;
+        self.allowed_source_ips = Some(value.allowed_source_ips);
 
         // Build a new auth key map, dropping all old keys from the map.
         let new_bgp_auth_key_ids =

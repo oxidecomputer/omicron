@@ -182,7 +182,7 @@ pub async fn reconfigurator_state_load(
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
     let sled_rows = datastore
-        .sled_list_all_batched(opctx, SledFilter::All)
+        .sled_list_all_batched(opctx, SledFilter::Commissioned)
         .await
         .context("listing sleds")?;
     let zpool_rows = datastore

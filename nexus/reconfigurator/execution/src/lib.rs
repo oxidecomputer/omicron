@@ -12,6 +12,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -29,6 +30,7 @@ mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
+mod sled_state;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
@@ -196,10 +198,21 @@ where
         String::from(nexus_label),
         blueprint,
         &sleds_by_id,
-        &overrides,
+        overrides,
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
+
+    sled_state::decommission_sleds(
+        &opctx,
+        datastore,
+        blueprint
+            .sled_state
+            .iter()
+            .filter(|&(_, &state)| state == SledState::Decommissioned)
+            .map(|(&sled_id, _)| sled_id),
+    )
+    .await?;
 
     Ok(())
 }
