@@ -828,7 +828,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
 
     let sled_id = osagactx
         .datastore()
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .instance_fetch_with_active_vmm(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?
         .sled_id();
