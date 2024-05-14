@@ -2,6 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! A quick-and-dirty job runner.
+//!
+//! Jobs are async functions given a name. All jobs must be described before the
+//! jobs can be run (`Jobs::run_all` consumes the job runner). Jobs can depend
+//! on other jobs, which is implemented via `tokio::sync::oneshot` channels; a
+//! completed job sends a message to all registered receivers, which are waiting
+//! on the messages in order to run. This essentially creates a DAG, except
+//! instead of us having to keep track of it, we make it Tokio's problem.
+//!
+//! A `tokio::sync::Semaphore` is used to restrict the number of jobs to
+//! `std::thread::available_parallelism`, except for a hardcoded list of
+//! prioritized job names that are allowed to ignore this.
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::process::Stdio;
@@ -145,6 +158,9 @@ impl Job {
 
         self.future.await?;
         for sender in self.notify {
+            // Ignore the error here -- the only reason we should fail to send
+            // our message is if a task has failed or the user hit Ctrl-C, at
+            // which point a bunch of error logging is not particularly useful.
             sender.send(()).ok();
         }
         Ok(())
@@ -274,6 +290,9 @@ async fn spawn_reader(
     tokio::spawn(async move {
         loop {
             buf.truncate(prefix_len);
+            // We have no particular control over the output from the child
+            // processes we run, so we read until a newline character without
+            // relying on valid UTF-8 output.
             let size = reader.read_until(b'\n', &mut buf).await?;
             if size == 0 {
                 return Ok(());
