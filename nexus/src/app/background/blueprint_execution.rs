@@ -178,7 +178,7 @@ mod test {
     #[nexus_test(server = crate::Server)]
     async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
         // Set up the test.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),

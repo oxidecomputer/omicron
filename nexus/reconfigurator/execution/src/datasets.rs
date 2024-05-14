@@ -147,7 +147,7 @@ mod tests {
         const TEST_NAME: &str = "test_ensure_crucible_dataset_records_exist";
 
         // Set up.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),

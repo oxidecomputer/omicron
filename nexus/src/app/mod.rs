@@ -643,6 +643,16 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
+    pub(crate) async fn get_techport_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.techport_external_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
     pub(crate) async fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
