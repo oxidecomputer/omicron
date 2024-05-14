@@ -179,7 +179,7 @@ async fn test_metrics(
     // Wait until Nexus registers as a producer with Oximeter.
     wait_for_producer(
         &cptestctx.oximeter,
-        cptestctx.server.apictx().nexus.id(),
+        cptestctx.server.server_context().nexus.id(),
     )
     .await;
 
@@ -259,7 +259,7 @@ async fn test_timeseries_schema_list(
     // Nexus registers itself as a metric producer on startup, with its own UUID
     // as the producer ID. Wait for this to show up in the registered lists of
     // producers.
-    let nexus_id = cptestctx.server.apictx().nexus.id();
+    let nexus_id = cptestctx.server.server_context().nexus.id();
     wait_for_producer(&cptestctx.oximeter, nexus_id).await;
 
     // We should be able to fetch the list of timeseries, and it should include
@@ -328,7 +328,7 @@ async fn test_instance_watcher_metrics(
 
     let client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     // TODO(eliza): consider factoring this out to a generic
     // `activate_background_task` function in `nexus-test-utils` eventually?
@@ -445,7 +445,7 @@ async fn test_instance_watcher_metrics(
     // Wait until Nexus registers as a producer with Oximeter.
     wait_for_producer(
         &cptestctx.oximeter,
-        cptestctx.server.apictx().nexus.id(),
+        cptestctx.server.server_context().nexus.id(),
     )
     .await;
 

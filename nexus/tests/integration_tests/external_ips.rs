@@ -628,7 +628,7 @@ async fn test_floating_ip_create_attachment(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
@@ -725,7 +725,7 @@ async fn test_external_ip_live_attach_detach(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
@@ -934,7 +934,7 @@ async fn test_floating_ip_attach_fail_between_projects(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let _nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
@@ -1009,7 +1009,7 @@ async fn test_external_ip_attach_fail_if_in_use_by_other(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;

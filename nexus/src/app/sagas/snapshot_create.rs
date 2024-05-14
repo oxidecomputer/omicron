@@ -1876,7 +1876,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -1889,7 +1889,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1976,7 +1976,7 @@ mod test {
         // Verifies:
         // - No snapshot records exist
         // - No region snapshot records exist
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
         assert!(no_snapshot_records_exist(datastore).await);
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
@@ -2016,7 +2016,7 @@ mod test {
         // Read out the instance's assigned sled, then poke the instance to get
         // it from the Starting state to the Running state so the test disk can
         // be snapshotted.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
             .instance_id(instance.identity.id)
@@ -2080,7 +2080,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2219,7 +2219,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2324,7 +2324,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters

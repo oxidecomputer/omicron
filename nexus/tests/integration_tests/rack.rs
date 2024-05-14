@@ -35,14 +35,17 @@ async fn test_list_own_rack(cptestctx: &ControlPlaneTestContext) {
             .all_items;
 
     assert_eq!(1, racks.len());
-    assert_eq!(cptestctx.server.apictx().nexus.rack_id(), racks[0].identity.id);
+    assert_eq!(
+        cptestctx.server.server_context().nexus.rack_id(),
+        racks[0].identity.id
+    );
 }
 
 #[nexus_test]
 async fn test_get_own_rack(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let expected_id = cptestctx.server.apictx().nexus.rack_id();
+    let expected_id = cptestctx.server.server_context().nexus.rack_id();
     let rack_url = format!("/v1/system/hardware/racks/{}", expected_id);
     let rack = NexusRequest::object_get(client, &rack_url)
         .authn_as(AuthnMode::PrivilegedUser)

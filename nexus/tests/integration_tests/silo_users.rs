@@ -26,10 +26,10 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = OpContext::for_tests(
         cptestctx.logctx.log.new(o!()),
-        cptestctx.server.apictx().nexus.datastore().clone(),
+        cptestctx.server.server_context().nexus.datastore().clone(),
     );
 
     // we start out with the two default users

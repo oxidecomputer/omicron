@@ -56,7 +56,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Setup
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_background(
