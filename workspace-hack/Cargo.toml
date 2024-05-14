@@ -79,7 +79,7 @@ num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
-petgraph = { version = "0.6.4", features = ["serde-1"] }
+petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
@@ -186,7 +186,7 @@ num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
-petgraph = { version = "0.6.4", features = ["serde-1"] }
+petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
