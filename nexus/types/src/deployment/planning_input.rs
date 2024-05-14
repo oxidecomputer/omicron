@@ -250,6 +250,14 @@ pub enum SledFilter {
     /// fetch "all sleds regardless of current policy or state".
     Commissioned,
 
+    /// All sleds that were previously part of the control plane cluster but
+    /// have been decommissioned.
+    ///
+    /// Any sleds matching this filter are expected to no longer be present.
+    /// This filter is only useful for historical or debugging purposes, such as
+    /// listing decommissioned sleds via `omdb`.
+    Decommissioned,
+
     /// Sleds that are eligible for discretionary services.
     Discretionary,
 
@@ -312,6 +320,7 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
                 SledFilter::Commissioned => true,
+                SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
@@ -322,6 +331,7 @@ impl SledPolicy {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
                 SledFilter::Commissioned => true,
+                SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => false,
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
@@ -330,6 +340,7 @@ impl SledPolicy {
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::Commissioned => true,
+                SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
@@ -360,6 +371,7 @@ impl SledState {
         match self {
             SledState::Active => match filter {
                 SledFilter::Commissioned => true,
+                SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
@@ -368,6 +380,7 @@ impl SledState {
             },
             SledState::Decommissioned => match filter {
                 SledFilter::Commissioned => false,
+                SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
