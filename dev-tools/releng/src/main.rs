@@ -127,6 +127,14 @@ struct Args {
     /// Output dir for TUF repo and log files
     #[clap(long, default_value_t = Self::default_output_dir())]
     output_dir: Utf8PathBuf,
+
+    /// Path to the git binary
+    #[clap(long, env = "GIT", default_value = "git")]
+    git_bin: Utf8PathBuf,
+
+    /// Path to a pre-built omicron-package binary (skips building if set)
+    #[clap(long, env = "OMICRON_PACKAGE")]
+    omicron_package_bin: Option<Utf8PathBuf>,
 }
 
 impl Args {
@@ -186,7 +194,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
             .into(),
     ));
 
-    let commit = Command::new("git")
+    let commit = Command::new(&args.git_bin)
         .args(["rev-parse", "HEAD"])
         .ensure_stdout(&logger)
         .await?
@@ -244,13 +252,13 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     if args.helios_dir.exists() {
         if !args.ignore_helios_origin {
             // check that our helios clone is up to date
-            Command::new("git")
+            Command::new(&args.git_bin)
                 .arg("-C")
                 .arg(&args.helios_dir)
                 .args(["fetch", "--no-write-fetch-head", "origin", "master"])
                 .ensure_success(&logger)
                 .await?;
-            let stdout = Command::new("git")
+            let stdout = Command::new(&args.git_bin)
                 .arg("-C")
                 .arg(&args.helios_dir)
                 .args(["rev-parse", "HEAD", "origin/master"])
@@ -272,14 +280,14 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
         }
     } else {
         info!(logger, "cloning helios to {}", args.helios_dir);
-        Command::new("git")
+        Command::new(&args.git_bin)
             .args(["clone", "https://github.com/oxidecomputer/helios.git"])
             .arg(&args.helios_dir)
             .ensure_success(&logger)
             .await?;
     }
     // Record the branch and commit in the output
-    Command::new("git")
+    Command::new(&args.git_bin)
         .arg("-C")
         .arg(&args.helios_dir)
         .args(["status", "--branch", "--porcelain=2"])
@@ -357,19 +365,25 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
     )
     .after("helios-setup");
 
-    jobs.push_command(
-        "omicron-package",
-        Command::new("ptime").args([
-            "-m",
-            "cargo",
-            "build",
-            "--locked",
-            "--release",
-            "--bin",
+    let omicron_package = if let Some(path) = &args.omicron_package_bin {
+        // omicron-package is provided, so don't build it.
+        jobs.push("omicron-package", std::future::ready(Ok(())));
+        path.clone()
+    } else {
+        jobs.push_command(
             "omicron-package",
-        ]),
-    );
-    let omicron_package = WORKSPACE_DIR.join("target/release/omicron-package");
+            Command::new("ptime").args([
+                "-m",
+                "cargo",
+                "build",
+                "--locked",
+                "--release",
+                "--bin",
+                "omicron-package",
+            ]),
+        );
+        WORKSPACE_DIR.join("target/release/omicron-package")
+    };
 
     // Generate `omicron-package stamp` jobs for a list of packages as a nested
     // `Jobs`. Returns the selector for the outer job.
