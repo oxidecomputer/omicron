@@ -69,12 +69,32 @@ async fn siu_unlock_instance(
     let Params { ref authz_instance, ref serialized_authn, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(SAGA_INSTANCE_LOCK_ID)?;
+    let gen = sagactx.lookup::<Generation>(SAGA_INSTANCE_LOCK_GEN)?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     osagactx
         .datastore()
         .instance_updater_unlock(&opctx, &authz_instance, &lock_id)
+        .await?;
+    Ok(())
+}
+
+// this is different from "lock instance" lol
+async fn siu_lock_instance_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let Params {
+        ref authz_instance, ref serialized_authn, ref instance, ..
+    } = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>(SAGA_INSTANCE_LOCK_ID)?;
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    let updater_gen = instance.runtime_state.updater_gen.next().into();
+    osagactx
+        .datastore()
+        .instance_updater_unlock(&opctx, &authz_instance, &lock_id, updater_gen)
         .await?;
     Ok(())
 }
