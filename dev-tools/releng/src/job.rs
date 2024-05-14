@@ -38,12 +38,11 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
-use tokio::process::Command;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::Semaphore;
 
-use crate::cmd::CommandExt;
+use crate::cmd::Command;
 
 // We want these two jobs to run without delay because they take the longest
 // amount of time, so we allow them to run without taking a permit first.
@@ -108,7 +107,7 @@ impl Jobs {
     pub(crate) fn push_command(
         &mut self,
         name: impl AsRef<str>,
-        command: &mut Command,
+        command: Command,
     ) -> Selector<'_> {
         let name = name.as_ref().to_owned();
         assert!(!self.map.contains_key(&name), "duplicate job name {}", name);
@@ -116,9 +115,7 @@ impl Jobs {
             name.clone(),
             Job {
                 future: spawn_with_output(
-                    // terrible hack to deal with the `Command` builder
-                    // returning &mut
-                    std::mem::replace(command, Command::new("false")),
+                    command,
                     self.logger.clone(),
                     self.permits.clone(),
                     name.clone(),
@@ -223,7 +220,7 @@ async fn run_job(
 }
 
 async fn spawn_with_output(
-    mut command: Command,
+    command: Command,
     logger: Logger,
     permits: Arc<Semaphore>,
     name: String,
@@ -233,10 +230,12 @@ async fn spawn_with_output(
         let _ = permits.acquire_owned().await?;
     }
 
+    let (command_desc, mut command) = command.into_parts();
+
     let log_file_1 = File::create(log_path).await?;
     let log_file_2 = log_file_1.try_clone().await?;
 
-    info!(logger, "[{}] running: {}", name, command.to_string());
+    info!(logger, "[{}] running: {}", name, command_desc);
     let start = Instant::now();
     let mut child = command
         .kill_on_drop(true)
@@ -244,7 +243,7 @@ async fn spawn_with_output(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("failed to exec `{}`", command.to_string()))?;
+        .with_context(|| format!("failed to exec `{}`", command_desc))?;
 
     let stdout = spawn_reader(
         format!("[{:>16}] ", name),
@@ -262,7 +261,7 @@ async fn spawn_with_output(
     let status = child.wait().await.with_context(|| {
         format!("I/O error while waiting for job {:?} to complete", name)
     })?;
-    let result = command.check_status(status);
+    let result = command_desc.check_status(status);
     info_or_error!(
         logger,
         result,

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::ffi::OsStr;
-use std::fmt::Write;
+use std::path::Path;
 use std::process::ExitStatus;
 use std::process::Output;
 use std::process::Stdio;
@@ -14,117 +14,149 @@ use anyhow::Context;
 use anyhow::Result;
 use slog::debug;
 use slog::Logger;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
-pub(crate) trait CommandExt {
-    fn check_status(&self, status: ExitStatus) -> Result<()>;
-    fn to_string(&self) -> String;
-
-    async fn is_success(&mut self, logger: &Logger) -> Result<bool>;
-    async fn ensure_success(&mut self, logger: &Logger) -> Result<()>;
-    async fn ensure_stdout(&mut self, logger: &Logger) -> Result<String>;
+/// Wrapper for `tokio::process::Command` where the builder methods take/return
+/// `self`, plus a number of convenience methods.
+pub(crate) struct Command {
+    inner: tokio::process::Command,
 }
 
-impl CommandExt for Command {
-    fn check_status(&self, status: ExitStatus) -> Result<()> {
-        ensure!(
-            status.success(),
-            "command `{}` exited with {}",
-            self.to_string(),
-            status
-        );
-        Ok(())
+impl Command {
+    pub(crate) fn new(program: impl AsRef<OsStr>) -> Command {
+        Command { inner: tokio::process::Command::new(program) }
     }
 
-    fn to_string(&self) -> String {
-        let command = self.as_std();
-        let mut command_str = String::new();
+    pub(crate) fn arg(mut self, arg: impl AsRef<OsStr>) -> Command {
+        self.inner.arg(arg);
+        self
+    }
+
+    pub(crate) fn args(
+        mut self,
+        args: impl IntoIterator<Item = impl AsRef<OsStr>>,
+    ) -> Command {
+        self.inner.args(args);
+        self
+    }
+
+    pub(crate) fn current_dir(mut self, dir: impl AsRef<Path>) -> Command {
+        self.inner.current_dir(dir);
+        self
+    }
+
+    pub(crate) fn env(
+        mut self,
+        key: impl AsRef<OsStr>,
+        value: impl AsRef<OsStr>,
+    ) -> Command {
+        self.inner.env(key, value);
+        self
+    }
+
+    pub(crate) async fn is_success(mut self, logger: &Logger) -> Result<bool> {
+        self.inner
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        Ok(xtrace(&mut self, logger).await?.status.success())
+    }
+
+    pub(crate) async fn ensure_success(
+        mut self,
+        logger: &Logger,
+    ) -> Result<()> {
+        self.inner
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        let status = xtrace(&mut self, logger).await?.status;
+        check_status(self, status)
+    }
+
+    pub(crate) async fn ensure_stdout(
+        mut self,
+        logger: &Logger,
+    ) -> Result<String> {
+        self.inner
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        let output = xtrace(&mut self, logger).await?;
+        check_status(self, output.status)?;
+        String::from_utf8(output.stdout).context("command stdout was not UTF-8")
+    }
+
+    pub(crate) fn into_parts(self) -> (Description, tokio::process::Command) {
+        (Description { str: self.to_string() }, self.inner)
+    }
+}
+
+impl std::fmt::Display for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let command = self.inner.as_std();
         for (name, value) in command.get_envs() {
             if let Some(value) = value {
                 write!(
-                    command_str,
+                    f,
                     "{}={} ",
                     shell_words::quote(&name.to_string_lossy()),
                     shell_words::quote(&value.to_string_lossy())
-                )
-                .unwrap();
+                )?;
             }
         }
         write!(
-            command_str,
+            f,
             "{}",
-            shell_words::join(
-                std::iter::once(command.get_program())
-                    .chain(command.get_args())
-                    .map(OsStr::to_string_lossy)
-            )
-        )
-        .unwrap();
-        command_str
-    }
-
-    async fn is_success(&mut self, logger: &Logger) -> Result<bool> {
-        Ok(xtrace(self, logger, Command::status).await?.success())
-    }
-
-    async fn ensure_success(&mut self, logger: &Logger) -> Result<()> {
-        let status = xtrace(self, logger, Command::status).await?;
-        self.check_status(status)
-    }
-
-    async fn ensure_stdout(&mut self, logger: &Logger) -> Result<String> {
-        let output = xtrace(self, logger, Command::output).await?;
-
-        // Obnoxiously, `tokio::process::Command::output` overrides
-        // your stdout and stderr settings (because it doesn't use
-        // std::process::Command::output).
-        //
-        // Compensate by dumping whatever is in `output.stderr` to stderr.
-        tokio::io::stderr().write_all(&output.stderr).await?;
-
-        self.check_status(output.status)?;
-        String::from_utf8(output.stdout).context("command stdout was not UTF-8")
+            shell_words::quote(&command.get_program().to_string_lossy())
+        )?;
+        for arg in command.get_args() {
+            write!(f, " {}", shell_words::quote(&arg.to_string_lossy()))?;
+        }
+        Ok(())
     }
 }
 
-trait AsStatus {
-    fn as_status(&self) -> &ExitStatus;
+/// Returned from [`Command::into_parts`] for use in the `job` module.
+pub(crate) struct Description {
+    str: String,
 }
 
-impl AsStatus for ExitStatus {
-    fn as_status(&self) -> &ExitStatus {
-        &self
+impl Description {
+    pub(crate) fn check_status(&self, status: ExitStatus) -> Result<()> {
+        check_status(self, status)
     }
 }
 
-impl AsStatus for Output {
-    fn as_status(&self) -> &ExitStatus {
-        &self.status
+impl std::fmt::Display for Description {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.str)
     }
 }
 
-async fn xtrace<F, Fut, T>(
-    command: &mut Command,
-    logger: &Logger,
-    f: F,
-) -> Result<T>
-where
-    F: FnOnce(&mut Command) -> Fut,
-    Fut: std::future::Future<Output = std::io::Result<T>>,
-    T: AsStatus,
-{
-    command.stdin(Stdio::null()).kill_on_drop(true);
-    debug!(logger, "running: {}", command.to_string());
+fn check_status(
+    command: impl std::fmt::Display,
+    status: ExitStatus,
+) -> Result<()> {
+    ensure!(status.success(), "command `{}` exited with {}", command, status);
+    Ok(())
+}
+
+async fn xtrace(command: &mut Command, logger: &Logger) -> Result<Output> {
+    command.inner.stdin(Stdio::null()).kill_on_drop(true);
+    debug!(logger, "running: {}", command);
     let start = Instant::now();
-    let result = f(command)
+    let output = command
+        .inner
+        .spawn()
+        .with_context(|| format!("failed to exec `{}`", command))?
+        .wait_with_output()
         .await
-        .with_context(|| format!("failed to exec `{}`", command.to_string()))?;
+        .with_context(|| format!("failed to wait on `{}`", command))?;
     debug!(
         logger,
         "process exited with {} ({:?})",
-        result.as_status(),
+        output.status,
         Instant::now().saturating_duration_since(start)
     );
-    Ok(result)
+    Ok(output)
 }

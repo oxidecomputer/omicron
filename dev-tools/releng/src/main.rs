@@ -28,10 +28,9 @@ use slog::Drain;
 use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
-use tokio::process::Command;
 use tokio::sync::Semaphore;
 
-use crate::cmd::CommandExt;
+use crate::cmd::Command;
 use crate::job::Jobs;
 
 /// The base version we're currently building. Build information is appended to
