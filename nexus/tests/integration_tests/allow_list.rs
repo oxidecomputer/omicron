@@ -9,6 +9,7 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views};
 use omicron_common::api::external::AllowedSourceIps;
+use omicron_common::api::external::IpNet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
@@ -74,7 +75,7 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Set the list with exactly one IP, make sure it's the same.
-    let allowed_ips = AllowedSourceIps::try_from(vec![our_addr.into()])
+    let allowed_ips = AllowedSourceIps::try_from(vec![IpNet::single(our_addr)])
         .expect("Expected a valid IP list");
     update_list_and_compare(client, allowed_ips).await;
 
@@ -82,8 +83,10 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
     //
     // This is a regression for
     // https://github.com/oxidecomputer/omicron/issues/5727.
-    let addrs =
-        vec![our_addr.into(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)).into()];
+    let addrs = vec![
+        IpNet::single(our_addr),
+        IpNet::single(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+    ];
     let allowed_ips = AllowedSourceIps::try_from(addrs.clone())
         .expect("Expected a valid IP list");
     update_list_and_compare(client, allowed_ips).await;
@@ -98,7 +101,7 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
 
     // Check that we cannot make the request with a list that doesn't include
     // us.
-    let addrs = vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)).into()];
+    let addrs = vec![IpNet::single(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)))];
     let allowed_ips = AllowedSourceIps::try_from(addrs.clone())
         .expect("Expected a valid IP list");
     let new_list = params::AllowListUpdate { allowed_ips };
