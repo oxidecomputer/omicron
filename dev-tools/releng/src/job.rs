@@ -258,31 +258,33 @@ async fn spawn_with_output(
         tokio::io::stderr(),
         log_file_2,
     );
-    match tokio::try_join!(child.wait(), stdout, stderr) {
-        Ok((status, (), ())) => {
-            let result = command.check_status(status);
-            info_or_error!(
-                logger,
-                result,
-                "[{}] process exited with {} ({:?})",
-                name,
-                status,
-                Instant::now().saturating_duration_since(start)
-            );
-            result
-        }
-        Err(err) => Err(err).with_context(|| {
-            format!("I/O error while waiting for job {:?} to complete", name)
-        }),
-    }
+
+    let status = child.wait().await.with_context(|| {
+        format!("I/O error while waiting for job {:?} to complete", name)
+    })?;
+    let result = command.check_status(status);
+    info_or_error!(
+        logger,
+        result,
+        "[{}] process exited with {} ({:?})",
+        name,
+        status,
+        Instant::now().saturating_duration_since(start)
+    );
+
+    // bubble up any errors from `spawn_reader`
+    stdout.await??;
+    stderr.await??;
+
+    result
 }
 
-async fn spawn_reader(
+fn spawn_reader(
     prefix: String,
     reader: impl AsyncRead + Send + Unpin + 'static,
     mut terminal_writer: impl AsyncWrite + Send + Unpin + 'static,
     logfile_writer: File,
-) -> std::io::Result<()> {
+) -> tokio::task::JoinHandle<Result<()>> {
     let mut reader = BufReader::new(reader);
     let mut logfile_writer = tokio::fs::File::from(logfile_writer);
     let mut buf = prefix.into_bytes();
@@ -301,5 +303,4 @@ async fn spawn_reader(
             logfile_writer.write_all(&buf[prefix_len..]).await?;
         }
     })
-    .await?
 }
