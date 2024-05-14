@@ -53,6 +53,11 @@ impl Command {
         self
     }
 
+    pub(crate) fn env_remove(mut self, key: impl AsRef<OsStr>) -> Command {
+        self.inner.env_remove(key);
+        self
+    }
+
     pub(crate) async fn is_success(mut self, logger: &Logger) -> Result<bool> {
         self.inner
             .stdin(Stdio::null())

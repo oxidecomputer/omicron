@@ -127,6 +127,11 @@ struct Args {
     #[clap(long, default_value_t = Self::default_output_dir())]
     output_dir: Utf8PathBuf,
 
+    /// Path to the directory containing the rustup proxy `bin/cargo` (usually
+    /// set by Cargo)
+    #[clap(long, env = "CARGO_HOME")]
+    cargo_home: Option<Utf8PathBuf>,
+
     /// Path to the git binary
     #[clap(long, env = "GIT", default_value = "git")]
     git_bin: Utf8PathBuf,
@@ -157,7 +162,8 @@ impl Args {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     let decorator = TermDecorator::new().build();
@@ -177,35 +183,20 @@ fn main() -> Result<()> {
         .context("failed to get cargo metadata")?
         .target_directory;
 
-    // Unset `$CARGO`, `$CARGO_MANIFEST_DIR`, and `$RUSTUP_TOOLCHAIN` (all
-    // set by cargo or its rustup proxy), which will interfere with various
-    // tools we're about to run. (This needs to come _after_ we read from
-    // `WORKSPACE_DIR` as it relies on `$CARGO_MANIFEST_DIR`.)
-    //
-    // We also don't respect `$CARGO` when running Cargo throughout this
-    // program; we need `cargo` to be the rustup proxy for various Helios
-    // build tools. Cargo always searches $PATH for rustc, so running
-    // the toolchain-specific Cargo set in `$CARGO` without a valid
-    // `$RUSTUP_TOOLCHAIN` leads to hilarious toolchain mismatches when
-    // compiling dependencies that happen to have a `rust-toolchain.toml` in
-    // their source directory or Git checkout.
-    for var in ["CARGO", "CARGO_MANIFEST_DIR", "RUSTUP_TOOLCHAIN"] {
-        debug!(logger, "unsetting ${}", var);
-        std::env::remove_var(var);
-    }
+    // We build everything in Omicron with $CARGO, but we need to use the rustup
+    // proxy for Cargo when outside Omicron.
+    let rustup_cargo = match &args.cargo_home {
+        Some(path) => path.join("bin/cargo"),
+        None => Utf8PathBuf::from("cargo"),
+    };
+    // `var_os` here is deliberate: if CARGO is set to a non-UTF-8 path we
+    // shouldn't do something confusing as a fallback.
+    let cargo = match std::env::var_os("CARGO") {
+        Some(path) => Utf8PathBuf::try_from(std::path::PathBuf::from(path))
+            .context("$CARGO is not valid UTF-8")?,
+        None => rustup_cargo.clone(),
+    };
 
-    // Now that we're done mucking about with our environment (something that's
-    // not necessarily safe in multi-threaded programs), create a Tokio runtime
-    // and call `do_run`.
-    do_run(logger, args, target_dir)
-}
-
-#[tokio::main]
-async fn do_run(
-    logger: Logger,
-    args: Args,
-    target_dir: Utf8PathBuf,
-) -> Result<()> {
     let permits = Arc::new(Semaphore::new(
         std::thread::available_parallelism()
             .context("couldn't get available parallelism")?
@@ -370,16 +361,20 @@ async fn do_run(
             // Setting `BUILD_OS` to no makes setup skip repositories we don't
             // need for building the OS itself (we are just building an image
             // from an already-built OS).
-            .env("BUILD_OS", "no"),
+            .env("BUILD_OS", "no")
+            .env_remove("CARGO")
+            .env_remove("RUSTUP_TOOLCHAIN"),
     );
 
     // Download the toolchain for phbl before we get to the image build steps.
     // (This is possibly a micro-optimization.)
     jobs.push_command(
         "phbl-toolchain",
-        Command::new("cargo")
+        Command::new(&rustup_cargo)
             .arg("--version")
-            .current_dir(args.helios_dir.join("projects/phbl")),
+            .current_dir(args.helios_dir.join("projects/phbl"))
+            .env_remove("CARGO")
+            .env_remove("RUSTUP_TOOLCHAIN"),
     )
     .after("helios-setup");
 
@@ -392,7 +387,7 @@ async fn do_run(
             "omicron-package",
             Command::new("ptime").args([
                 "-m",
-                "cargo",
+                cargo.as_str(),
                 "build",
                 "--locked",
                 "--release",
@@ -415,15 +410,17 @@ async fn do_run(
             for package in $packages {
                 stamp_jobs.push_command(
                     format!("stamp-{}", package),
-                    Command::new(&omicron_package).args([
-                        "--target",
-                        $target.as_str(),
-                        "--artifacts",
-                        $target.artifacts_path(&args).as_str(),
-                        "stamp",
-                        package,
-                        &version_str,
-                    ]),
+                    Command::new(&omicron_package)
+                        .args([
+                            "--target",
+                            $target.as_str(),
+                            "--artifacts",
+                            $target.artifacts_path(&args).as_str(),
+                            "stamp",
+                            package,
+                            &version_str,
+                        ])
+                        .env_remove("CARGO_MANIFEST_DIR"),
                 );
             }
             jobs.push($name, stamp_jobs.run_all())
@@ -445,20 +442,23 @@ async fn do_run(
                     "target",
                     "create",
                 ])
-                .args(target.target_args()),
+                .args(target.target_args())
+                .env_remove("CARGO_MANIFEST_DIR"),
         )
         .after("omicron-package");
 
         // omicron-package package
         jobs.push_command(
             format!("{}-package", target),
-            Command::new(&omicron_package).args([
-                "--target",
-                target.as_str(),
-                "--artifacts",
-                artifacts_path.as_str(),
-                "package",
-            ]),
+            Command::new(&omicron_package)
+                .args([
+                    "--target",
+                    target.as_str(),
+                    "--artifacts",
+                    artifacts_path.as_str(),
+                    "package",
+                ])
+                .env_remove("CARGO_MANIFEST_DIR"),
         )
         .after(format!("{}-target", target));
 
@@ -518,7 +518,9 @@ async fn do_run(
                         Target::Host => &args.host_dataset,
                         Target::Recovery => &args.recovery_dataset,
                     },
-                ),
+                )
+                .env_remove("CARGO")
+                .env_remove("RUSTUP_TOOLCHAIN"),
         )
         .after("helios-setup")
         .after(format!("{}-proto", target));
