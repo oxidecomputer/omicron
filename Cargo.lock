@@ -5589,6 +5589,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
+ "cargo_metadata",
  "chrono",
  "clap",
  "fs-err",

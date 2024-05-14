@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
+cargo_metadata = "0.18.1"
 chrono.workspace = true
 clap.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }

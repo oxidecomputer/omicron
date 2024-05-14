@@ -171,6 +171,13 @@ fn main() -> Result<()> {
     std::env::set_current_dir(&*WORKSPACE_DIR)
         .context("failed to change working directory to workspace root")?;
 
+    // Determine the target directory.
+    let target_dir = cargo_metadata::MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .context("failed to get cargo metadata")?
+        .target_directory;
+
     // Unset `$CARGO`, `$CARGO_MANIFEST_DIR`, and `$RUSTUP_TOOLCHAIN` (all
     // set by cargo or its rustup proxy), which will interfere with various
     // tools we're about to run. (This needs to come _after_ we read from
@@ -183,11 +190,15 @@ fn main() -> Result<()> {
     // Now that we're done mucking about with our environment (something that's
     // not necessarily safe in multi-threaded programs), create a Tokio runtime
     // and call `do_run`.
-    do_run(logger, args)
+    do_run(logger, args, target_dir)
 }
 
 #[tokio::main]
-async fn do_run(logger: Logger, args: Args) -> Result<()> {
+async fn do_run(
+    logger: Logger,
+    args: Args,
+    target_dir: Utf8PathBuf,
+) -> Result<()> {
     let permits = Arc::new(Semaphore::new(
         std::thread::available_parallelism()
             .context("couldn't get available parallelism")?
@@ -382,7 +393,7 @@ async fn do_run(logger: Logger, args: Args) -> Result<()> {
                 "omicron-package",
             ]),
         );
-        WORKSPACE_DIR.join("target/release/omicron-package")
+        target_dir.join("release/omicron-package")
     };
 
     // Generate `omicron-package stamp` jobs for a list of packages as a nested
