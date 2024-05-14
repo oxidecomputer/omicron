@@ -36,8 +36,8 @@ ptime -m cargo build --locked --release -p xtask
 
 # Build the end-to-end tests
 # Reduce debuginfo just to line tables.
-export CARGO_PROFILE_DEV_DEBUG=1
-export CARGO_PROFILE_TEST_DEBUG=1
+export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+export CARGO_PROFILE_TEST_DEBUG=line-tables-only
 ptime -m cargo build --locked -p end-to-end-tests --tests --bin bootstrap \
   --message-format json-render-diagnostics >/tmp/output.end-to-end.json
 mkdir tests
