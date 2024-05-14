@@ -197,10 +197,6 @@ retry ./tools/ci_download_clickhouse
 # Install static console assets. These are used when packaging Nexus.
 retry ./tools/ci_download_console
 
-# Download the OpenAPI spec for maghemite. This is required to build the
-# ddm-admin-api crate.
-retry ./tools/ci_download_maghemite_openapi
-
 # Download the OpenAPI spec for dendrite. This is required to build the
 # dpd-client crate.
 retry ./tools/ci_download_dendrite_openapi

@@ -47,8 +47,6 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
@@ -60,8 +58,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service,
-    retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use oximeter::types::ProducerRegistry;
@@ -174,16 +171,15 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::Instance(instance_manager_error) => {
-                match instance_manager_error {
-                    crate::instance_manager::Error::Instance(
-                        instance_error,
-                    ) => match instance_error {
-                        crate::instance::Error::Propolis(propolis_error) => {
-                            // Work around dropshot#693: HttpError::for_status
-                            // only accepts client errors and asserts on server
-                            // errors, so convert server errors by hand.
-                            match propolis_error.status() {
+            Error::Instance(crate::instance_manager::Error::Instance(
+                instance_error,
+            )) => {
+                match instance_error {
+                    crate::instance::Error::Propolis(propolis_error) => {
+                        // Work around dropshot#693: HttpError::for_status
+                        // only accepts client errors and asserts on server
+                        // errors, so convert server errors by hand.
+                        match propolis_error.status() {
                                 None => HttpError::for_internal_error(
                                     propolis_error.to_string(),
                                 ),
@@ -199,18 +195,22 @@ impl From<Error> for dropshot::HttpError {
                                         HttpError::for_internal_error(propolis_error.to_string()),
                                 }
                             }
-                        }
-                        crate::instance::Error::Transition(omicron_error) => {
-                            // Preserve the status associated with the wrapped
-                            // Omicron error so that Nexus will see it in the
-                            // Progenitor client error it gets back.
-                            HttpError::from(omicron_error)
-                        }
-                        e => HttpError::for_internal_error(e.to_string()),
-                    },
+                    }
+                    crate::instance::Error::Transition(omicron_error) => {
+                        // Preserve the status associated with the wrapped
+                        // Omicron error so that Nexus will see it in the
+                        // Progenitor client error it gets back.
+                        HttpError::from(omicron_error)
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
+            Error::Instance(
+                e @ crate::instance_manager::Error::NoSuchInstance(_),
+            ) => HttpError::for_not_found(
+                Some("NO_SUCH_INSTANCE".to_string()),
+                e.to_string(),
+            ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
@@ -417,6 +417,7 @@ impl SledAgent {
             request.body.id,
             request.body.rack_id,
             long_running_task_handles.hardware_manager.baseboard(),
+            *sled_address.ip(),
             log.new(o!("component" => "MetricsManager")),
         )?;
 
@@ -438,21 +439,6 @@ impl SledAgent {
                 );
             }
         }
-
-        // Spawn a task in the background to register our metric producer with
-        // Nexus. This should not block progress here.
-        let endpoint = ProducerEndpoint {
-            id: request.body.id,
-            kind: ProducerKind::SledAgent,
-            address: sled_address.into(),
-            base_route: String::from("/metrics/collect"),
-            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
-        };
-        tokio::task::spawn(register_metric_producer_with_nexus(
-            log.clone(),
-            nexus_client.clone(),
-            endpoint,
-        ));
 
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
@@ -999,6 +985,18 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Returns the state of the instance with the provided ID.
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, Error> {
+        self.inner
+            .instances
+            .get_instance_state(instance_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
     /// Idempotently ensures that the given virtual disk is attached (or not) as
     /// specified.
     ///
@@ -1170,33 +1168,6 @@ impl SledAgent {
             zpools,
         })
     }
-}
-
-async fn register_metric_producer_with_nexus(
-    log: Logger,
-    client: NexusClientWithResolver,
-    endpoint: ProducerEndpoint,
-) {
-    let endpoint = nexus_client::types::ProducerEndpoint::from(&endpoint);
-    let register_with_nexus = || async {
-        client.client().cpapi_producers_post(&endpoint).await.map_err(|e| {
-            BackoffError::transient(format!("Metric registration error: {e}"))
-        })
-    };
-    retry_notify(
-        retry_policy_internal_service(),
-        register_with_nexus,
-        |error, delay| {
-            warn!(
-                log,
-                "failed to register as a metric producer with Nexus";
-                "error" => ?error,
-                "retry_after" => ?delay,
-            );
-        },
-    )
-    .await
-    .expect("Expected an infinite retry loop registering with Nexus");
 }
 
 #[derive(From, thiserror::Error, Debug)]

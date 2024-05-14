@@ -9,8 +9,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 // TODO(#40): Remove this exception once resolved.
 #![allow(clippy::unnecessary_wraps)]
-// Clippy's style lints are useful, but not worth running automatically.
-#![allow(clippy::style)]
 
 pub mod app; // Public for documentation examples
 mod cidata;
@@ -38,10 +36,13 @@ use nexus_types::internal_api::params::{
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
+use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::{
-    ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
+    AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
+use oximeter::types::ProducerRegistry;
+use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
@@ -55,7 +56,7 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "20240327.0")
+        .openapi("Oxide Region API", "20240502.0")
         .description("API for interacting with the Oxide control plane")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
@@ -134,6 +135,11 @@ impl Server {
         let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
 
+        // While we've started our internal server, we need to wait until we've
+        // definitely implemented our source IP allowlist for making requests to
+        // the external server we're about to start.
+        apictx.nexus.await_ip_allowlist_plumbing().await;
+
         // Launch the external server.
         let tls_config = apictx
             .nexus
@@ -185,12 +191,21 @@ impl Server {
             server_starter_external_techport.start()
         };
 
+        // Start the metric producer server that oximeter uses to fetch our
+        // metric data.
+        let producer_server = start_producer_server(
+            &log,
+            &apictx.producer_registry,
+            http_server_internal.local_addr(),
+        )?;
+
         apictx
             .nexus
             .set_servers(
                 http_server_external,
                 http_server_techport_external,
                 http_server_internal,
+                producer_server,
             )
             .await;
         let server = Server { apictx: apictx.clone() };
@@ -208,17 +223,6 @@ impl Server {
     /// or until something else initiates a graceful shutdown.
     pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
         self.apictx.nexus.wait_for_shutdown().await
-    }
-
-    /// Register the Nexus server as a metric producer with oximeter.
-    pub async fn register_as_producer(&self) {
-        let nexus = &self.apictx.nexus;
-
-        nexus
-            .register_as_producer(
-                nexus.get_internal_server_address().await.unwrap(),
-            )
-            .await;
     }
 }
 
@@ -316,6 +320,7 @@ impl nexus_test_interface::NexusServer for Server {
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },
+                    allowed_source_ips: AllowedSourceIps::Any,
                 },
             )
             .await
@@ -421,6 +426,43 @@ pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     }
     let internal_server = InternalServer::start(config, &log).await?;
     let server = Server::start(internal_server).await?;
-    server.register_as_producer().await;
     server.wait_for_finish().await
+}
+
+/// Create a new metric producer server.
+fn start_producer_server(
+    log: &Logger,
+    registry: &ProducerRegistry,
+    nexus_addr: SocketAddr,
+) -> Result<ProducerServer, String> {
+    // The producer server should listen on any available port, using the
+    // same IP as the main Dropshot server.
+    let address = SocketAddr::new(nexus_addr.ip(), 0);
+
+    // Create configuration for the server.
+    //
+    // Note that because we're registering with _ourselves_, the listening
+    // address for the producer server and the registration address use the
+    // same IP.
+    let config = oximeter_producer::Config {
+        server_info: ProducerEndpoint {
+            id: registry.producer_id(),
+            kind: ProducerKind::Service,
+            address,
+            // NOTE: This is now unused, and will be removed in the future.
+            base_route: String::new(),
+            interval: std::time::Duration::from_secs(10),
+        },
+        // Some(_) here prevents DNS resolution, using our own address to
+        // register.
+        registration_address: Some(nexus_addr),
+        request_body_max_bytes: 1024 * 1024 * 10,
+        log: oximeter_producer::LogConfig::Logger(
+            log.new(o!("component" => "nexus-producer-server")),
+        ),
+    };
+
+    // Start the server, which will run the registration in a task.
+    ProducerServer::with_registry(registry.clone(), &config)
+        .map_err(|e| e.to_string())
 }

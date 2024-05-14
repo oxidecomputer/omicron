@@ -17,20 +17,17 @@ use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
-use uuid::Uuid;
 
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
 pub(crate) async fn deploy_zones(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
+    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
-            let db_sled = match sleds_by_id
-                .get(&SledUuid::from_untyped_uuid(*sled_id))
-            {
+            let db_sled = match sleds_by_id.get(sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_zones_expunged() {
@@ -41,7 +38,7 @@ pub(crate) async fn deploy_zones(
                         );
                         return None;
                     }
-                    let err = anyhow!("sled not found in db list: {}", sled_id);
+                    let err = anyhow!("sled not found in db list: {sled_id}");
                     warn!(opctx.log, "{err:#}");
                     return Some(err);
                 }
@@ -106,7 +103,6 @@ mod test {
     };
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeMap;
@@ -128,11 +124,9 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones: blueprint_zones
-                    .into_iter()
-                    .map(|(typed_id, z)| (typed_id.into_untyped_uuid(), z))
-                    .collect(),
+                blueprint_zones,
                 blueprint_disks: BTreeMap::new(),
+                sled_state: BTreeMap::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),

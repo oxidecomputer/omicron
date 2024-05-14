@@ -114,7 +114,6 @@ Options:
                                    OMDB_FETCH_LIMIT=] [default: 500]
       --include-deleted            whether to include soft-deleted records when enumerating objects
                                    that can be soft-deleted
-  -w, --destructive                Allow potentially-destructive subcommands
   -h, --help                       Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "--help"]
@@ -144,7 +143,6 @@ Options:
                                    OMDB_FETCH_LIMIT=] [default: 500]
       --include-deleted            whether to include soft-deleted records when enumerating objects
                                    that can be soft-deleted
-  -w, --destructive                Allow potentially-destructive subcommands
   -h, --help                       Print help
 ---------------------------------------------
 stderr:
@@ -157,7 +155,7 @@ stdout:
 stderr:
 Print information about disks
 
-Usage: omdb db disks [OPTIONS] <COMMAND>
+Usage: omdb db disks <COMMAND>
 
 Commands:
   info      Get info for a specific disk
@@ -166,8 +164,7 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns"]
 termination: Exited(2)
@@ -177,7 +174,7 @@ stdout:
 stderr:
 Print information about internal and external DNS
 
-Usage: omdb db dns [OPTIONS] <COMMAND>
+Usage: omdb db dns <COMMAND>
 
 Commands:
   show   Summarize current version of all DNS zones
@@ -186,8 +183,7 @@ Commands:
   help   Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "diff"]
 termination: Exited(2)
@@ -230,15 +226,13 @@ Options:
           Show sleds that match the given filter
 
           Possible values:
-          - all:                All sleds
-          - discretionary:      Sleds that are eligible for discretionary services
-          - in-service:         Sleds that are in service (even if they might not be eligible for
-            discretionary services)
-          - reservation-create: Sleds on which reservations can be created
-          - vpc-firewall:       Sleds which should be sent VPC firewall rules
-
-  -w, --destructive
-          Allow potentially-destructive subcommands
+          - commissioned:           All sleds that are currently part of the control plane cluster
+          - discretionary:          Sleds that are eligible for discretionary services
+          - in-service:             Sleds that are in service (even if they might not be eligible
+            for discretionary services)
+          - query-during-inventory: Sleds whose sled agents should be queried for inventory
+          - reservation-create:     Sleds on which reservations can be created
+          - vpc-firewall:           Sleds which should be sent VPC firewall rules
 
   -h, --help
           Print help (see a summary with '-h')
@@ -253,7 +247,7 @@ stdout:
 stderr:
 Print information about snapshots
 
-Usage: omdb db snapshots [OPTIONS] <COMMAND>
+Usage: omdb db snapshots <COMMAND>
 
 Commands:
   info  Get info for a specific snapshot
@@ -261,8 +255,7 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "network"]
 termination: Exited(2)
@@ -280,9 +273,8 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --verbose      Print out raw data structures from the data store
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+      --verbose  Print out raw data structures from the data store
+  -h, --help     Print help
 =============================================
 EXECUTING COMMAND: omdb ["mgs"]
 termination: Exited(2)
@@ -302,7 +294,6 @@ Commands:
 
 Options:
       --mgs-url <MGS_URL>  URL of an MGS instance to query [env: OMDB_MGS_URL=]
-  -w, --destructive        Allow potentially-destructive subcommands
   -h, --help               Print help
 =============================================
 EXECUTING COMMAND: omdb ["nexus"]
@@ -324,7 +315,6 @@ Commands:
 Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
                                                  OMDB_NEXUS_URL=]
-  -w, --destructive                              Allow potentially-destructive subcommands
   -h, --help                                     Print help
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks"]
@@ -335,7 +325,7 @@ stdout:
 stderr:
 print information about background tasks
 
-Usage: omdb nexus background-tasks [OPTIONS] <COMMAND>
+Usage: omdb nexus background-tasks <COMMAND>
 
 Commands:
   doc       Show documentation about background tasks
@@ -345,8 +335,7 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "blueprints"]
 termination: Exited(2)
@@ -356,7 +345,7 @@ stdout:
 stderr:
 interact with blueprints
 
-Usage: omdb nexus blueprints [OPTIONS] <COMMAND>
+Usage: omdb nexus blueprints <COMMAND>
 
 Commands:
   list        List all blueprints
@@ -369,8 +358,7 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "sleds"]
 termination: Exited(2)
@@ -380,7 +368,7 @@ stdout:
 stderr:
 interact with sleds
 
-Usage: omdb nexus sleds [OPTIONS] <COMMAND>
+Usage: omdb nexus sleds <COMMAND>
 
 Commands:
   list-uninitialized  List all uninitialized sleds
@@ -389,8 +377,7 @@ Commands:
   help                Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent"]
 termination: Exited(2)
@@ -410,7 +397,6 @@ Commands:
 
 Options:
       --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-  -w, --destructive                      Allow potentially-destructive subcommands
   -h, --help                             Print help
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent", "zones"]
@@ -421,15 +407,14 @@ stdout:
 stderr:
 print information about zones
 
-Usage: omdb sled-agent zones [OPTIONS] <COMMAND>
+Usage: omdb sled-agent zones <COMMAND>
 
 Commands:
   list  Print list of all running control plane zones
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent", "zpools"]
 termination: Exited(2)
@@ -439,13 +424,12 @@ stdout:
 stderr:
 print information about zpools
 
-Usage: omdb sled-agent zpools [OPTIONS] <COMMAND>
+Usage: omdb sled-agent zpools <COMMAND>
 
 Commands:
   list  Print list of all zpools managed by the sled agent
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --destructive  Allow potentially-destructive subcommands
-  -h, --help         Print help
+  -h, --help  Print help
 =============================================

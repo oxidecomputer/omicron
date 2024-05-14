@@ -1455,8 +1455,11 @@ async fn cmd_db_sleds(
     let filter = match args.filter {
         Some(filter) => filter,
         None => {
-            eprintln!("note: listing all sleds (use -F to filter, e.g. -F in-service)");
-            SledFilter::All
+            eprintln!(
+                "note: listing all commissioned sleds \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            SledFilter::Commissioned
         }
     };
 
