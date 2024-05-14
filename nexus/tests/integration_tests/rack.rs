@@ -5,6 +5,10 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
+use nexus_client::types::SledId;
+use nexus_db_model::SledBaseboard;
+use nexus_db_model::SledSystemHardware;
+use nexus_db_model::SledUpdate;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -17,7 +21,7 @@ use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SledRole;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_nexus::TestInterfaces;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -167,7 +171,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
     // Add one of these sleds.
     let add_url = "/v1/system/hardware/sleds/";
     let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
-    NexusRequest::objects_post(
+    let sled_id = NexusRequest::objects_post(
         external_client,
         add_url,
         &params::UninitializedSledId {
@@ -176,11 +180,53 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
+    .execute_and_parse_unwrap::<SledId>()
     .await
-    .expect("failed to add sled");
+    .id;
 
-    // Attempting to add the same sled again should fail.
+    // Attempting to add the same sled again should succeed with the same sled
+    // ID: this operation should be idempotent up until the point at which the
+    // sled is inserted in the db.
+    let repeat_sled_id = NexusRequest::objects_post(
+        external_client,
+        add_url,
+        &params::UninitializedSledId {
+            serial: baseboard.serial.clone(),
+            part: baseboard.part.clone(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SledId>()
+    .await
+    .id;
+    assert_eq!(sled_id, repeat_sled_id);
+
+    // Now upsert the sled.
+    let nexus = &cptestctx.server.apictx().nexus;
+    nexus
+        .datastore()
+        .sled_upsert(SledUpdate::new(
+            sled_id.into_untyped_uuid(),
+            "[::1]:0".parse().unwrap(),
+            SledBaseboard {
+                serial_number: baseboard.serial.clone(),
+                part_number: baseboard.part.clone(),
+                revision: 0,
+            },
+            SledSystemHardware {
+                is_scrimlet: false,
+                usable_hardware_threads: 8,
+                usable_physical_ram: (1 << 30).try_into().unwrap(),
+                reservoir_size: (1 << 20).try_into().unwrap(),
+            },
+            nexus.rack_id(),
+            Generation::new().into(),
+        ))
+        .await
+        .expect("inserted sled");
+
+    // The sled has been commissioned as part of the rack, so adding it should
+    // fail.
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             external_client,

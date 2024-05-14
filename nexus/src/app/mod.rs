@@ -520,6 +520,11 @@ impl Nexus {
         &self.id
     }
 
+    /// Return the rack ID for this Nexus instance.
+    pub fn rack_id(&self) -> Uuid {
+        self.rack_id
+    }
+
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
