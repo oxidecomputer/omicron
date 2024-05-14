@@ -9,8 +9,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 // TODO(#40): Remove this exception once resolved.
 #![allow(clippy::unnecessary_wraps)]
-// Clippy's style lints are useful, but not worth running automatically.
-#![allow(clippy::style)]
 
 pub mod app; // Public for documentation examples
 mod cidata;
@@ -40,7 +38,7 @@ use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::{
-    ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
+    AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
 use oximeter::types::ProducerRegistry;
@@ -58,7 +56,7 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "20240327.0")
+        .openapi("Oxide Region API", "20240502.0")
         .description("API for interacting with the Oxide control plane")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
@@ -136,6 +134,11 @@ impl Server {
         // Wait until RSS handoff completes.
         let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
+
+        // While we've started our internal server, we need to wait until we've
+        // definitely implemented our source IP allowlist for making requests to
+        // the external server we're about to start.
+        apictx.nexus.await_ip_allowlist_plumbing().await;
 
         // Launch the external server.
         let tls_config = apictx
@@ -317,6 +320,7 @@ impl nexus_test_interface::NexusServer for Server {
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },
+                    allowed_source_ips: AllowedSourceIps::Any,
                 },
             )
             .await

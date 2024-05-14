@@ -5,6 +5,9 @@ edition = "2021"
 description = "Crate for producing metric data to be collected by the Oxide control plane"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono.workspace = true
 dropshot.workspace = true
@@ -24,6 +27,6 @@ internal-dns.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 clap.workspace = true
-httptest.workspace = true
+omicron-test-utils.workspace = true
 serde_json.workspace = true
 slog-term.workspace = true

@@ -376,7 +376,7 @@ impl TaskExec {
                     self.activate(ActivationReason::Signaled).await;
                 }
 
-                _ = dependencies.next(), if dependencies.len() > 0 => {
+                _ = dependencies.next(), if !dependencies.is_empty() => {
                     self.activate(ActivationReason::Dependency).await;
                 }
             }

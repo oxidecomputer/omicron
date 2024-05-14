@@ -83,6 +83,7 @@ use omicron_common::api::external::{
     http_pagination::data_page_params_for, AggregateBgpMessageHistory,
 };
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -270,6 +271,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_settings_delete)?;
 
         api.register(networking_switch_port_list)?;
+        api.register(networking_switch_port_status)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
 
@@ -286,6 +288,9 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bfd_enable)?;
         api.register(networking_bfd_disable)?;
         api.register(networking_bfd_status)?;
+
+        api.register(networking_allow_list_view)?;
+        api.register(networking_allow_list_update)?;
 
         api.register(utilization_view)?;
 
@@ -3421,6 +3426,32 @@ async fn networking_switch_port_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get switch port status
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/switch-port/{port}/status",
+    tags = ["system/hardware"],
+}]
+async fn networking_switch_port_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SwitchPortPathSelector>,
+    query_params: Query<params::SwitchPortSelector>,
+) -> Result<HttpResponseOk<shared::SwitchLinkState>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(
+            nexus
+                .switch_port_status(&opctx, query.switch_location, path.port)
+                .await?,
+        ))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Apply switch port settings
 #[endpoint {
     method = POST,
@@ -3737,6 +3768,53 @@ async fn networking_bfd_status(
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let status = nexus.bfd_status(&opctx).await?;
         Ok(HttpResponseOk(status))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get user-facing services IP allowlist
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
+async fn networking_allow_list_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .allow_list_view(&opctx)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update user-facing services IP allowlist
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
+async fn networking_allow_list_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    params: TypedBody<params::AllowListUpdate>,
+) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let remote_addr = rqctx.request.remote_addr().ip();
+        nexus
+            .allow_list_upsert(&opctx, remote_addr, params)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5210,6 +5288,12 @@ async fn sled_list_uninitialized(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// The unique ID of a sled.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct SledId {
+    pub id: Uuid,
+}
+
 /// Add sled to initialized rack
 //
 // TODO: In the future this should really be a PUT request, once we resolve
@@ -5218,19 +5302,22 @@ async fn sled_list_uninitialized(
 // we are only operating on single rack systems.
 #[endpoint {
     method = POST,
-    path = "/v1/system/hardware/sleds/",
+    path = "/v1/system/hardware/sleds",
     tags = ["system/hardware"]
 }]
 async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
     sled: TypedBody<params::UninitializedSledId>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<SledId>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.sled_add(&opctx, sled.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let id = nexus
+            .sled_add(&opctx, sled.into_inner())
+            .await?
+            .into_untyped_uuid();
+        Ok(HttpResponseCreated(SledId { id }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5514,13 +5601,13 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    /// A silo ID. If unspecified, get aggregrate metrics across all silos.
+    /// A silo ID. If unspecified, get aggregate metrics across all silos.
     pub silo_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SiloMetricParams {
-    /// A project ID. If unspecified, get aggregrate metrics across all projects
+    /// A project ID. If unspecified, get aggregate metrics across all projects
     /// in current silo.
     pub project_id: Option<Uuid>,
 }

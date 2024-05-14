@@ -13,6 +13,7 @@ use omicron_common::api::external::{
     DeleteResult, Ipv4Net, ListResultVec, LookupResult, NameOrId,
     SwitchBgpHistory,
 };
+use std::net::IpAddr;
 
 impl super::Nexus {
     pub async fn bgp_config_set(
@@ -95,7 +96,7 @@ impl super::Nexus {
                 "failed to get mg clients: {e}"
             ))
         })? {
-            let router_info = match client.get_routers().await {
+            let router_info = match client.read_routers().await {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
                     error!(
@@ -107,13 +108,29 @@ impl super::Nexus {
             };
 
             for r in &router_info {
-                for (addr, info) in &r.peers {
-                    let Ok(addr) = addr.parse() else {
+                let asn = r.asn;
+
+                let peers = match client.get_neighbors(asn).await {
+                    Ok(result) => result.into_inner(),
+                    Err(e) => {
+                        error!(
+                        self.log,
+                        "failed to get peers for asn {asn} from {switch}: {e}"
+                    );
+                        continue;
+                    }
+                };
+                for (host, info) in peers {
+                    let Ok(host) = host.parse() else {
+                        error!(
+                            self.log,
+                            "failed to parse peer host address {host}",
+                        );
                         continue;
                     };
                     result.push(BgpPeerStatus {
                         switch: *switch,
-                        addr,
+                        addr: host,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),
                         state: info.state.into(),
@@ -176,28 +193,45 @@ impl super::Nexus {
                 "failed to get mg clients: {e}"
             ))
         })? {
-            let imported: Vec<BgpImportedRouteIpv4> = match client
-                .get_imported4(&mg_admin_client::types::GetImported4Request {
+            let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
+            match client
+                .get_imported(&mg_admin_client::types::AsnSelector {
                     asn: sel.asn,
                 })
                 .await
             {
-                Ok(result) => result
-                    .into_inner()
-                    .into_iter()
-                    .map(|x| BgpImportedRouteIpv4 {
-                        switch: *switch,
-                        prefix: Ipv4Net(
-                            ipnetwork::Ipv4Network::new(
-                                x.prefix.value,
-                                x.prefix.length,
-                            )
-                            .unwrap(),
-                        ),
-                        nexthop: x.nexthop,
-                        id: x.id,
-                    })
-                    .collect(),
+                Ok(result) => {
+                    for (prefix, paths) in result.into_inner().iter() {
+                        let ipnet: ipnetwork::Ipv4Network = match prefix.parse()
+                        {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "failed to parse prefix {prefix}: {e}"
+                                );
+                                continue;
+                            }
+                        };
+                        for p in paths.iter() {
+                            let nexthop = match p.nexthop {
+                                IpAddr::V4(addr) => addr,
+                                IpAddr::V6(_) => continue,
+                            };
+                            let x = BgpImportedRouteIpv4 {
+                                switch: *switch,
+                                prefix: Ipv4Net(ipnet),
+                                id: p
+                                    .bgp
+                                    .as_ref()
+                                    .map(|bgp| bgp.id)
+                                    .unwrap_or(0),
+                                nexthop,
+                            };
+                            imported.push(x);
+                        }
+                    }
+                }
                 Err(e) => {
                     error!(
                         self.log,

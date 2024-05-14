@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -39,6 +42,7 @@ itertools.workspace = true
 macaddr.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
+nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-networking.workspace = true
 nexus-test-interface.workspace = true
@@ -69,6 +73,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+display-error-chain.workspace = true
 slog-term.workspace = true
 steno.workspace = true
 tempfile.workspace = true

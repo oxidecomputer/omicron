@@ -2632,9 +2632,45 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     delay_open INT8,
     connect_retry INT8,
     keepalive INT8,
+    remote_asn INT8,
+    min_ttl INT2,
+    md5_auth_key TEXT,
+    multi_exit_discriminator INT8,
+    local_pref INT8,
+    enforce_first_as BOOLEAN NOT NULL DEFAULT false,
+    allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
+    allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    community INT8 NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, community)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_import (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_allow_export (
+    port_settings_id UUID NOT NULL,
+    interface_name TEXT NOT NULL,
+    addr INET NOT NULL,
+    prefix INET NOT NULL,
+
+    PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
@@ -2646,7 +2682,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     time_deleted TIMESTAMPTZ,
     asn INT8 NOT NULL,
     vrf TEXT,
-    bgp_announce_set_id UUID NOT NULL
+    bgp_announce_set_id UUID NOT NULL,
+    shaper TEXT,
+    checker TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -3224,6 +3262,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+-- state of a sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    sled_state omicron.public.sled_state NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
 -- description of a collection of omicron physical disks stored in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
     -- foreign key into `blueprint` table
@@ -3387,6 +3435,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
 );
+
+CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
+    sled_id
+) WHERE time_deleted IS NULL;
 
 /*
  * A special view of an instance provided to operators for insights into what's
@@ -3726,6 +3778,13 @@ SELECT
  bpc.delay_open,
  bpc.connect_retry,
  bpc.keepalive,
+ bpc.remote_asn,
+ bpc.min_ttl,
+ bpc.md5_auth_key,
+ bpc.multi_exit_discriminator,
+ bpc.local_pref,
+ bpc.enforce_first_as,
+ bpc.vlan_id,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
@@ -3760,6 +3819,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
+-- An allowlist of IP addresses that can make requests to user-facing services.
+CREATE TABLE IF NOT EXISTS omicron.public.allow_list (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- A nullable list of allowed source IPs.
+    --
+    -- NULL is used to indicate _any_ source IP is allowed. A _non-empty_ list
+    -- represents an explicit allow list of IPs or IP subnets. Note that the
+    -- list itself may never be empty.
+    allowed_ips INET[] CHECK (array_length(allowed_ips, 1) > 0)
+);
+
+-- Insert default allowlist, allowing all traffic.
+-- See `schema/crdb/insert-default-allowlist/up.sql` for details.
+INSERT INTO omicron.public.allow_list (id, time_created, time_modified, allowed_ips)
+VALUES (
+    '001de000-a110-4000-8000-000000000000',
+    NOW(),
+    NOW(),
+    NULL
+)
+ON CONFLICT (id)
+DO NOTHING;
+
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -3771,7 +3856,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '55.0.0', NULL)
+    (TRUE, NOW(), NOW(), '61.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

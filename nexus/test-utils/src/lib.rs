@@ -33,6 +33,7 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
+use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
 use nexus_types::internal_api::params::DatasetKind;
@@ -61,6 +62,9 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_client::types::EarlyNetworkConfig;
+use sled_agent_client::types::EarlyNetworkConfigBody;
+use sled_agent_client::types::RackNetworkConfigV1;
 use slog::{debug, error, o, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -751,18 +755,21 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let blueprint = {
             let mut blueprint_zones = BTreeMap::new();
+            let mut sled_state = BTreeMap::new();
             for (maybe_sled_agent, zones) in [
                 (self.sled_agent.as_ref(), &self.blueprint_zones),
                 (self.sled_agent2.as_ref(), &self.blueprint_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
+                    let sled_id = SledUuid::from_untyped_uuid(sa.sled_agent.id);
                     blueprint_zones.insert(
-                        SledUuid::from_untyped_uuid(sa.sled_agent.id),
+                        sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
                             zones: zones.clone(),
                         },
                     );
+                    sled_state.insert(sled_id, SledState::Active);
                 }
             }
             Blueprint {
@@ -773,6 +780,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 //
                 // However, for now, this isn't necessary.
                 blueprint_disks: BTreeMap::new(),
+                sled_state,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation
@@ -911,6 +919,26 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             })
             .await
             .expect("Failed to configure sled agent with our zones");
+        client
+            .write_network_bootstore_config(&EarlyNetworkConfig {
+                body: EarlyNetworkConfigBody {
+                    ntp_servers: Vec::new(),
+                    rack_network_config: Some(RackNetworkConfigV1 {
+                        bfd: Vec::new(),
+                        bgp: Vec::new(),
+                        infra_ip_first: "192.0.2.10".parse().unwrap(),
+                        infra_ip_last: "192.0.2.100".parse().unwrap(),
+                        ports: Vec::new(),
+                        rack_subnet: "fd00:1122:3344:0100::/56"
+                            .parse()
+                            .unwrap(),
+                    }),
+                },
+                generation: 1,
+                schema_version: 1,
+            })
+            .await
+            .expect("Failed to write early networking config to bootstore");
     }
 
     // Set up the Crucible Pantry on an existing Sled Agent.

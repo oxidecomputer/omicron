@@ -53,7 +53,7 @@ impl ExampleSystem {
 
         // Start with an empty blueprint containing only our sleds, no zones.
         let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::All),
+            base_input.all_sled_ids(SledFilter::Commissioned),
             "test suite",
             (test_name, "ExampleSystem initial"),
         );
@@ -68,7 +68,7 @@ impl ExampleSystem {
         .unwrap();
         builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
         for (sled_id, sled_resources) in
-            base_input.all_sled_resources(SledFilter::All)
+            base_input.all_sled_resources(SledFilter::Commissioned)
         {
             let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
             let _ = builder

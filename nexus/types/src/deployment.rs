@@ -12,6 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
+use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
@@ -112,11 +113,19 @@ pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
 
-    /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZoneDisposition`] for each zone.
+    /// A map of sled id -> desired state of the sled.
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
+    pub sled_state: BTreeMap<SledUuid, SledState>,
+
+    /// A map of sled id -> zones deployed on each sled, along with the
+    /// [`BlueprintZoneDisposition`] for each zone.
+    ///
+    /// Unlike `sled_state`, this map may contain entries for sleds that are no
+    /// longer a part of the control plane cluster (e.g., sleds that have been
+    /// decommissioned, but still have expunged zones where cleanup has not yet
+    /// completed).
     pub blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
 
     /// A map of sled id -> disks in use on each sled.

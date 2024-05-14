@@ -1223,8 +1223,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1379,6 +1386,48 @@
           "dependency"
         ]
       },
+      "AllowedSourceIps": {
+        "description": "Description of source IPs allowed to reach rack services.",
+        "oneOf": [
+          {
+            "description": "Allow traffic from any external IP address.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "ips": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "allow",
+              "ips"
+            ]
+          }
+        ]
+      },
       "BackgroundTask": {
         "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
         "type": "object",
@@ -1515,12 +1564,24 @@
             "format": "uint32",
             "minimum": 0
           },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Ipv4Network"
             }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
           }
         },
         "required": [
@@ -1536,11 +1597,43 @@
             "type": "string",
             "format": "ipv4"
           },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
           "asn": {
-            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "description": "The autonomous system number of the router the peer belongs to.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
           },
           "connect_retry": {
             "nullable": true,
@@ -1555,6 +1648,11 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
           },
           "hold_time": {
             "nullable": true,
@@ -1577,9 +1675,55 @@
             "format": "uint64",
             "minimum": 0
           },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "port": {
             "description": "Switch port the peer is reachable on.",
             "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -1600,7 +1744,7 @@
             }
           },
           "blueprint_zones": {
-            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nUnlike `sled_state`, this map may contain entries for sleds that are no longer a part of the control plane cluster (e.g., sleds that have been decommissioned, but still have expunged zones where cleanup has not yet completed).",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintZonesConfig"
@@ -1641,6 +1785,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "sled_state": {
+            "description": "A map of sled id -> desired state of the sled.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SledState"
+            }
+          },
           "time_created": {
             "description": "when this blueprint was generated (for debugging)",
             "type": "string",
@@ -1655,6 +1806,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "sled_state",
           "time_created"
         ]
       },
@@ -2864,6 +3016,47 @@
         "format": "uint64",
         "minimum": 0
       },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "InstanceRuntimeState": {
         "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
         "type": "object",
@@ -3009,6 +3202,7 @@
         ]
       },
       "IpNetwork": {
+        "x-rust-type": "ipnetwork::IpNetwork",
         "oneOf": [
           {
             "title": "v4",
@@ -3103,6 +3297,7 @@
         "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv4Network": {
+        "x-rust-type": "ipnetwork::Ipv4Network",
         "type": "string",
         "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
       },
@@ -3129,9 +3324,10 @@
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Network": {
+        "x-rust-type": "ipnetwork::Ipv6Network",
         "type": "string",
         "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
       },
@@ -3799,6 +3995,14 @@
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
+          "allowed_source_ips": {
+            "description": "IPs or subnets allowed to make requests to user-facing services",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          },
           "blueprint": {
             "description": "Blueprint describing services initialized by RSS.",
             "allOf": [
@@ -3880,6 +4084,7 @@
           }
         },
         "required": [
+          "allowed_source_ips",
           "blueprint",
           "certs",
           "datasets",
@@ -4063,6 +4268,14 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -4352,6 +4565,17 @@
           "usable_physical_ram"
         ]
       },
+      "SledId": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "SledInstanceState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
@@ -4479,6 +4703,25 @@
           "sled"
         ]
       },
+      "SledState": {
+        "description": "The current state of the sled, as determined by Nexus.",
+        "oneOf": [
+          {
+            "description": "The sled is currently active, and has resources allocated on it.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is decommissioned, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)",
+            "type": "string",
+            "enum": [
+              "decommissioned"
+            ]
+          }
+        ]
+      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -4584,6 +4827,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
       },

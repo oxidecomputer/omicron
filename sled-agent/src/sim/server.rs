@@ -534,6 +534,7 @@ pub async fn run_standalone_server(
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
+        allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

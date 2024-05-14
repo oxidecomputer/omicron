@@ -17,7 +17,31 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use thiserror::Error;
 
-/// Tracker and validator for network resources allocated to Omicron-managed zones.
+/// Tracker and validator for network resources allocated to Omicron-managed
+/// zones.
+///
+/// ## Implementation notes
+///
+/// `OmicronZoneNetworkResources` consists of two 1:1:1 "trijective" maps:
+///
+/// 1. Providing a unique map for Omicron zone IDs, external IP IDs, and
+///    external IPs.
+/// 2. Providing a unique map for Omicron zone IDs, vNIC IDs, and vNICs.
+///
+/// One question that arises: should there instead be a single 1:1:1:1:1 map?
+/// In other words, is there a 1:1 mapping between external IPs and vNICs as
+/// well? The answer is "generally yes", but:
+///
+/// - They're not stored in the database that way, and it's possible that
+///   there's some divergence.
+/// - We currently don't plan to get any utility out of asserting the 1:1:1:1:1
+///   map. The main planned use of this is for expunged zone garbage collection
+///   -- while that benefits from trijective maps tremendously, there's no
+///   additional value in asserting a unique mapping between external IPs and
+///   vNICs.
+///
+/// So we use two separate maps for now. But a single map is always a
+/// possibility in the future, if required.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OmicronZoneNetworkResources {
     /// external IPs allocated to Omicron zones

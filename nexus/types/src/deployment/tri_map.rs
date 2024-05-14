@@ -30,7 +30,9 @@ pub(crate) struct TriMap<T: TriMapEntry> {
 }
 
 // Note: Eq and PartialEq are not implemented for TriMap. Implementing them
-// would need to be done with care, because
+// would need to be done with care, because TriMap is not semantically like an
+// IndexMap: two maps are equivalent even if their entries are in a different
+// order.
 
 /// The `Serialize` impl for `TriMap` serializes just the list of entries.
 impl<T: TriMapEntry> Serialize for TriMap<T>

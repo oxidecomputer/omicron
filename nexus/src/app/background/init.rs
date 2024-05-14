@@ -12,12 +12,14 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::instance_watcher;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
 use super::physical_disk_adoption;
 use super::region_replacement;
+use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
@@ -27,6 +29,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -90,6 +93,13 @@ pub struct BackgroundTasks {
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
+
+    /// task handle for the task that polls sled agents for instance states.
+    pub task_instance_watcher: common::TaskHandle,
+
+    /// task handle for propagation of VPC firewall rules for Omicron services
+    /// with external network connectivity,
+    pub task_service_firewall_propagation: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -103,6 +113,7 @@ impl BackgroundTasks {
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
+        producer_registry: &ProducerRegistry,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -325,7 +336,7 @@ impl BackgroundTasks {
         // process
         let task_region_replacement = {
             let detector = region_replacement::RegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
                 saga_request.clone(),
             );
 
@@ -340,6 +351,37 @@ impl BackgroundTasks {
 
             task
         };
+
+        let task_instance_watcher = {
+            let watcher = instance_watcher::InstanceWatcher::new(
+                datastore.clone(),
+                resolver.clone(),
+                producer_registry,
+                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+            );
+            driver.register(
+                "instance_watcher".to_string(),
+                "periodically checks instance states".to_string(),
+                config.instance_watcher.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+        // Background task: service firewall rule propagation
+        let task_service_firewall_propagation = driver.register(
+            String::from("service_firewall_rule_propagation"),
+            String::from(
+                "propagates VPC firewall rules for Omicron \
+                services with external network connectivity",
+            ),
+            config.service_firewall_propagation.period_secs,
+            Box::new(service_firewall_rules::ServiceRulePropagator::new(
+                datastore,
+            )),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
 
         BackgroundTasks {
             driver,
@@ -360,6 +402,8 @@ impl BackgroundTasks {
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_region_replacement,
+            task_instance_watcher,
+            task_service_firewall_propagation,
         }
     }
 

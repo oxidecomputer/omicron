@@ -71,13 +71,13 @@ pub struct Pxa {
     /// The first IP address your Oxide cluster can use.
     ///
     /// Requires `pxa-end`.
-    #[clap(long = "pxa-start", requires = "end")]
+    #[clap(long = "pxa-start", requires = "end", env = "PXA_START")]
     start: Option<String>,
 
     /// The last IP address your Oxide cluster can use
     ///
     /// Requires `pxa-start`.
-    #[clap(long = "pxa-end", requires = "start")]
+    #[clap(long = "pxa-end", requires = "start", env = "PXA_END")]
     end: Option<String>,
 }
 
@@ -113,8 +113,8 @@ const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
-    "e3ea4b495ba0a71801ded0776ae4bbd31df57e26";
-const SOFTNPU_COMMIT: &'static str = "dbab082dfa89da5db5ca2325c257089d2f130092";
+    "960f11afe859e0316088e04578aedb700fba6159";
+const SOFTNPU_COMMIT: &'static str = "3203c51cf4473d30991b522062ac0df2e045c2f2";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
@@ -270,7 +270,15 @@ fn remove_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
         "--ports",
         "sc0_1,tfportqsfp0_0",
     ]);
-    execute(cmd)?;
+    if let Err(output) = execute(cmd) {
+        // Don't throw an error if the zone was already removed
+        if output.to_string().contains("No such zone configured") {
+            println!("zone {npu_zone} already destroyed");
+            return Ok(());
+        } else {
+            return Err(output);
+        }
+    }
     Ok(())
 }
 

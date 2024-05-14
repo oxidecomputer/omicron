@@ -22,8 +22,10 @@ use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
@@ -34,6 +36,7 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::FloatingIp;
 use nexus_types::identity::Resource;
@@ -150,7 +153,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // automatically linked to current silo
-    create_default_ip_pool(&client).await;
+    let default_pool = create_default_ip_pool(&client).await;
 
     assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
 
@@ -159,7 +162,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
             .unwrap(),
     );
     // not automatically linked to currently silo. see below
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    let (other_pool, ..) =
+        create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
 
     assert_ip_pool_utilization(client, "other-pool", 0, 5, 0, 0).await;
 
@@ -179,6 +183,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)));
+    assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
     assert_ip_pool_utilization(client, "default", 1, 65536, 0, 0).await;
 
@@ -197,6 +202,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+    assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
     assert_ip_pool_utilization(client, "default", 2, 65536, 0, 0).await;
 
@@ -227,10 +233,11 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
+    assert_eq!(fip.ip_pool_id, other_pool.identity.id);
 
     assert_ip_pool_utilization(client, "other-pool", 1, 5, 0, 0).await;
 
-    // Create with chosen IP from fleet-scoped named pool.
+    // Create with chosen IP from non-default pool.
     let fip_name = FIP_NAMES[3];
     let ip_addr = "10.1.0.5".parse().unwrap();
     let fip = create_floating_ip(
@@ -245,8 +252,131 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+    assert_eq!(fip.ip_pool_id, other_pool.identity.id);
 
     assert_ip_pool_utilization(client, "other-pool", 2, 5, 0, 0).await;
+}
+
+#[nexus_test]
+async fn test_floating_ip_create_non_admin(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: views::Silo = object_get(client, &silo_url).await;
+
+    // manually create default pool and link to test silo, as opposed to default
+    // silo, which is what the helper would do
+    let _ = create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+
+    // create other pool and link to silo
+    let other_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    link_ip_pool(&client, "other-pool", &silo.identity.id, false).await;
+
+    // create third pool and don't link to silo
+    let unlinked_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "unlinked-pool", Some(unlinked_pool_range)).await;
+
+    // Create a silo user
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Make silo collaborator
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // create project as user (i.e., in their silo)
+    NexusRequest::objects_post(
+        client,
+        "/v1/projects",
+        &params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: PROJECT_NAME.parse().unwrap(),
+                description: "floating ip project".to_string(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .expect("Failed to create project");
+
+    let create_url = get_floating_ips_url(PROJECT_NAME);
+
+    // create a floating IP as this user, first with default pool
+    let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "root-beer".parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        pool: None,
+        ip: None,
+    };
+    let fip: views::FloatingIp =
+        NexusRequest::objects_post(client, &create_url, &body)
+            .authn_as(AuthnMode::SiloUser(user.id))
+            .execute_and_parse_unwrap()
+            .await;
+    assert_eq!(fip.identity.name.to_string(), "root-beer");
+
+    // now with other pool linked to my silo
+    let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "another-soda".parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
+        ip: None,
+    };
+    let fip: views::FloatingIp =
+        NexusRequest::objects_post(client, &create_url, &body)
+            .authn_as(AuthnMode::SiloUser(user.id))
+            .execute_and_parse_unwrap()
+            .await;
+    assert_eq!(fip.identity.name.to_string(), "another-soda");
+
+    // now with pool not linked to my silo (fails with 404)
+    let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "secret-third-soda".parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        pool: Some(NameOrId::Name("unlinked-pool".parse().unwrap())),
+        ip: None,
+    };
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &create_url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap();
+
+    assert_eq!(error.message, "not found: ip-pool with name \"unlinked-pool\"");
 }
 
 #[nexus_test]

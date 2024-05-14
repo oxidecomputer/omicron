@@ -111,10 +111,11 @@ impl super::Nexus {
 
         let params::FloatingIpCreate { identity, pool, ip } = params;
 
+        // resolve NameOrId into authz::IpPool
         let pool = match pool {
             Some(pool) => Some(
                 self.ip_pool_lookup(opctx, &pool)?
-                    .lookup_for(authz::Action::Read)
+                    .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
             ),
