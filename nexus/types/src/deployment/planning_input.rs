@@ -250,8 +250,8 @@ pub enum SledFilter {
     /// fetch "all sleds regardless of current policy or state".
     Commissioned,
 
-    /// All sleds that we previously part of the control plane cluster but have
-    /// been decommissioned.
+    /// All sleds that were previously part of the control plane cluster but
+    /// have been decommissioned.
     ///
     /// Any sleds matching this filter are expected to no longer be present.
     /// This filter is only useful for historical or debugging purposes, such as

@@ -185,7 +185,7 @@ impl From<RackInitError> for Error {
 pub enum SledUnderlayAllocationResult {
     /// A new allocation was created
     New(SledUnderlaySubnetAllocation),
-    /// A prior allocation associated with a commissioned was found
+    /// A prior allocation associated with a commissioned sled was found
     CommissionedSled(SledUnderlaySubnetAllocation),
 }
 
@@ -342,9 +342,8 @@ impl DataStore {
                     .map(|(_, sled)| sled.state())
                 {
                     Some(SledState::Active) => {
-                        // This allocation is for an active sled or for a sled
-                        // that hasn't yet been added to the control plane;
-                        // return the existing allocation.
+                        // This allocation is for an active sled; return the
+                        // existing allocation.
                         return Ok(
                             SledUnderlayAllocationResult::CommissionedSled(
                                 allocation,
