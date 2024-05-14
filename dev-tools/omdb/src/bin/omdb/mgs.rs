@@ -4,6 +4,7 @@
 
 //! Prototype code for collecting information from systems in the rack
 
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::Context;
 use clap::Args;
@@ -32,7 +33,12 @@ use sensors::SensorsArgs;
 #[derive(Debug, Args)]
 pub struct MgsArgs {
     /// URL of an MGS instance to query
-    #[clap(long, env("OMDB_MGS_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_MGS_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     mgs_url: Option<String>,
 
     #[command(subcommand)]
