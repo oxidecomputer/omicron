@@ -2,30 +2,39 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{
-    siu_lock_instance, siu_unlock_instance, NexusActionContext, Params,
-};
+use super::ActionRegistry;
+use super::NexusActionContext;
+use super::NexusSaga;
 use crate::app::instance_network;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::ActionError;
 use nexus_db_model::Generation;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
+use serde::{Deserialize, Serialize};
+
+/// Parameters to the instance update VMM destroyed sub-saga.
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Params {
+    pub(crate) authz_instance: authz::Instance,
+
+    /// Authentication context to use to fetch the instance's current state from
+    /// the database.
+    pub serialized_authn: authn::saga::Serialized,
+
+    pub instance: db::model::Instance,
+
+    pub vmm: db::model::Vmm,
+}
+
+// instance update VMM destroyed subsaga: actions
 
 declare_saga_actions! {
     instance_update_destroyed;
-
-    // Read the target Instance from CRDB and join with its active VMM and
-    // migration target VMM records if they exist, and then acquire the
-    // "instance updater" lock with this saga's ID if no other saga is currently
-    // updating the instance.
-    LOCK_INSTANCE -> "lock_generation" {
-        + siu_lock_instance
-        - siu_unlock_instance
-    }
 
     DELETE_SLED_RESOURCE -> "no_result1" {
         + siud_delete_sled_resource
@@ -50,9 +59,30 @@ declare_saga_actions! {
     MARK_VMM_DELETED -> "no_result6" {
         + siud_mark_vmm_deleted
     }
+}
 
-    UNLOCK_INSTANCE -> "no_result7" {
-        + siu_unlock_instance
+#[derive(Debug)]
+pub(crate) struct SagaVmmDestroyed;
+impl NexusSaga for SagaVmmDestroyed {
+    const NAME: &'static str = "instance-update-vmm-destroyed";
+    type Params = Params;
+
+    fn register_actions(registry: &mut ActionRegistry) {
+        instance_update_destroyed_register_actions(registry);
+    }
+
+    fn make_saga_dag(
+        params: &Self::Params,
+        mut builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(delete_sled_resource_action());
+        builder.append(delete_virtual_provosioning_action());
+        builder.append(delete_v2p_mappings_action());
+        builder.append(delete_nat_entries_action());
+        builder.append(instance_update_vmm_destroyed_action());
+        builder.append(mark_vmm_deleted_action());
+
+        Ok(builder.build()?)
     }
 }
 
@@ -60,20 +90,15 @@ async fn siud_delete_sled_resource(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref active_vmm, .. } =
+    let Params { ref serialized_authn, ref vmm, .. } =
         sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    let propolis_id = active_vmm
-        .as_ref()
-        // TODO(eliza): don't unwrap here and put it in params instead when deciding
-        // what to start.
-        .expect("if we started this saga there is an active propolis ID")
-        .id;
+
     osagactx
         .datastore()
-        .sled_reservation_delete(&opctx, propolis_id)
+        .sled_reservation_delete(&opctx, vmm.id)
         .await
         .or_else(|err| {
             // Necessary for idempotency
@@ -203,20 +228,14 @@ async fn siud_mark_vmm_deleted(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref active_vmm, .. } =
+    let Params { ref serialized_authn, ref vmm, .. } =
         sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    let propolis_id = active_vmm
-        .as_ref()
-        // TODO(eliza): don't unwrap here and put it in params instead when deciding
-        // what to start.
-        .expect("if we started this saga there is an active propolis ID")
-        .id;
     osagactx
         .datastore()
-        .vmm_mark_deleted(&opctx, &propolis_id)
+        .vmm_mark_deleted(&opctx, &vmm.id)
         .await
         .map(|_| ())
         .map_err(ActionError::action_failed)
