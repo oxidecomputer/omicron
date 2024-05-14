@@ -45,7 +45,7 @@ digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.11.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.0.28" }
+flate2 = { version = "1.0.30" }
 fs-err = { version = "2.11.0", default-features = false, features = ["tokio"] }
 futures = { version = "0.3.30" }
 futures-channel = { version = "0.3.30", features = ["sink"] }
@@ -149,7 +149,7 @@ digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.11.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.0.28" }
+flate2 = { version = "1.0.30" }
 fs-err = { version = "2.11.0", default-features = false, features = ["tokio"] }
 futures = { version = "0.3.30" }
 futures-channel = { version = "0.3.30", features = ["sink"] }
