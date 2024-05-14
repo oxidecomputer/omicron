@@ -152,6 +152,13 @@ pub struct Nexus {
     /// The metric producer server from which oximeter collects metric data.
     producer_server: std::sync::Mutex<Option<ProducerServer>>,
 
+    /// Reusable `reqwest::Client`, to be cloned and used with the Progenitor-
+    /// generated `Client::new_with_client`.
+    ///
+    /// (This does not need to be in an `Arc` because `reqwest::Client` uses
+    /// `Arc` internally.)
+    reqwest_client: reqwest::Client,
+
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
 
@@ -343,6 +350,12 @@ impl Nexus {
             }
         }
 
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
         let timeseries_client = if let Some(address) =
@@ -412,6 +425,7 @@ impl Nexus {
             internal_server: std::sync::Mutex::new(None),
             producer_server: std::sync::Mutex::new(None),
             populate_status,
+            reqwest_client,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),

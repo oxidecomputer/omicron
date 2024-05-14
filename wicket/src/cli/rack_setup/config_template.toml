@@ -39,15 +39,21 @@ internal_services_ip_pool_ranges = []
 bootstrap_sleds = []
 
 # Allowlist of source IPs that can make requests to user-facing services.
-[allowed_source_ips]
-# Any external IPs to make requests. This is the default.
-allow = "any"
-
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
 # Use the below two lines to only allow requests from the specified IP subnets.
 # Requests from any other source IPs are refused. Note that individual addresses
-# must include the netmask, e.g., `1.2.3.4/32`.
+# must include the netmask, e.g., "1.2.3.4/32".
+#
 # allow = "list"
 # ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+[allowed_source_ips]
+allow = "any"
 
 # TODO: docs on network config
 [rack_network_config]

@@ -42,6 +42,7 @@ use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{authz, db::datastore::ProbeInfo};
 use nexus_types::external_api::shared::BfdStatus;
+use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -80,9 +81,6 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::{
     http_pagination::data_page_params_for, AggregateBgpMessageHistory,
-};
-use omicron_common::api::external::{
-    http_pagination::marker_for_name, SwitchLinkState,
 };
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -3438,7 +3436,7 @@ async fn networking_switch_port_status(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SwitchPortPathSelector>,
     query_params: Query<params::SwitchPortSelector>,
-) -> Result<HttpResponseOk<SwitchLinkState>, HttpError> {
+) -> Result<HttpResponseOk<shared::SwitchLinkState>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
