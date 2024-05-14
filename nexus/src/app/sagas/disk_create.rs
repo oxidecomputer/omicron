@@ -1093,7 +1093,7 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.context.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(&cptestctx);
@@ -1111,7 +1111,7 @@ pub(crate) mod test {
     }
 
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx.context.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let disk_selector = params::DiskSelector {
             project: Some(
@@ -1134,7 +1134,7 @@ pub(crate) mod test {
         let test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.context.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
 

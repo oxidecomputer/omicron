@@ -57,7 +57,7 @@ pub struct ApiContext {
 impl ApiContext {
     /// Create a new context with a rack ID and logger. This creates the
     /// underlying `Nexus` as well.
-    pub async fn new(
+    pub async fn for_internal(
         rack_id: Uuid,
         log: Logger,
         config: &NexusConfig,

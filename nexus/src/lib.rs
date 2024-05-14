@@ -97,8 +97,12 @@ impl InternalServer {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
-        let context =
-            ApiContext::new(config.deployment.rack_id, ctxlog, &config).await?;
+        let context = ApiContext::for_internal(
+            config.deployment.rack_id,
+            ctxlog,
+            &config,
+        )
+        .await?;
 
         // Launch the internal server.
         let server_starter_internal = dropshot::HttpServerStarter::new(
@@ -228,7 +232,7 @@ impl Server {
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
     pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
-        self.apictx.context.nexus.wait_for_shutdown().await
+        self.server_context().nexus.wait_for_shutdown().await
     }
 }
 

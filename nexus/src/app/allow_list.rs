@@ -57,6 +57,10 @@ impl super::Nexus {
             // Note that we elide this check when handling a request proxied
             // from `wicketd`. This is intentional and used as a safety
             // mechanism in the even of lockout or other recovery scenarios.
+            let check_remote_addr = match server_kind {
+                ServerKind::External => true,
+                ServerKind::Techport | ServerKind::Internal => false,
+            };
             let mut contains_remote = false;
             for entry in list.iter() {
                 contains_remote |= entry.contains(remote_addr);
@@ -74,8 +78,7 @@ impl super::Nexus {
                     ));
                 }
             }
-            if !contains_remote && !matches!(server_kind, ServerKind::Techport)
-            {
+            if check_remote_addr && !contains_remote {
                 return Err(Error::invalid_request(
                     "The source IP allow list would prevent access \
                     from the current client! Ensure that the allowlist \
