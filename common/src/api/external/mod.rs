@@ -1234,6 +1234,13 @@ impl DiskState {
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
+    /// Constructs a new `Ipv4Net` representing a single IP.
+    pub fn single(ip: Ipv4Addr) -> Self {
+        Ipv4Net(
+            ipnetwork::Ipv4Network::new(ip, 32).expect("32 is within range"),
+        )
+    }
+
     /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
     /// address space.
     pub fn is_private(&self) -> bool {
@@ -1300,6 +1307,13 @@ impl Ipv6Net {
 
     /// The prefix length for all VPC Sunets
     pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
+    /// Constructs a new `Ipv6Net` representing a single IPv6 address.
+    pub fn single(ip: Ipv6Addr) -> Self {
+        Ipv6Net(
+            ipnetwork::Ipv6Network::new(ip, 128).expect("128 is within range"),
+        )
+    }
 
     /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
     /// range defined in RFC 4193, e.g., `fd00:/8`
@@ -1436,6 +1450,14 @@ pub enum IpNet {
 }
 
 impl IpNet {
+    /// Constructs a new `IpNet` representing a single IP.
+    pub fn single(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(ip) => IpNet::V4(Ipv4Net::single(ip)),
+            IpAddr::V6(ip) => IpNet::V6(Ipv6Net::single(ip)),
+        }
+    }
+
     /// Return the underlying address.
     pub fn ip(&self) -> IpAddr {
         match self {
@@ -1508,36 +1530,19 @@ impl From<ipnetwork::IpNetwork> for IpNet {
     }
 }
 
+// NOTE: We deliberately do *NOT* implement `From<Ip{v4,v6,}Addr> for IpNet`.
+// This is because there are many ways to convert an address into a network.
+// See https://github.com/oxidecomputer/omicron/issues/5687.
+
 impl From<Ipv4Net> for IpNet {
     fn from(n: Ipv4Net) -> IpNet {
         IpNet::V4(n)
     }
 }
 
-impl From<Ipv4Addr> for IpNet {
-    fn from(n: Ipv4Addr) -> IpNet {
-        IpNet::V4(Ipv4Net(ipnetwork::Ipv4Network::from(n)))
-    }
-}
-
 impl From<Ipv6Net> for IpNet {
     fn from(n: Ipv6Net) -> IpNet {
         IpNet::V6(n)
-    }
-}
-
-impl From<Ipv6Addr> for IpNet {
-    fn from(n: Ipv6Addr) -> IpNet {
-        IpNet::V6(Ipv6Net(ipnetwork::Ipv6Network::from(n)))
-    }
-}
-
-impl From<IpAddr> for IpNet {
-    fn from(n: IpAddr) -> IpNet {
-        match n {
-            IpAddr::V4(v4) => IpNet::from(v4),
-            IpAddr::V6(v6) => IpNet::from(v6),
-        }
     }
 }
 
