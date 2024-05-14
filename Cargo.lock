@@ -4899,6 +4899,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "derive-where",
  "dns-service-client",
  "futures",
  "gateway-client",
@@ -4911,6 +4912,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openssl",
  "parse-display",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",
@@ -4921,6 +4923,7 @@ dependencies = [
  "steno",
  "strum",
  "tabled",
+ "test-strategy",
  "thiserror",
  "uuid",
 ]
