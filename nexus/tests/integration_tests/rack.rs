@@ -205,7 +205,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(sled_id, repeat_sled_id);
 
     // Now upsert the sled.
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     nexus
         .datastore()
         .sled_upsert(SledUpdate::new(
