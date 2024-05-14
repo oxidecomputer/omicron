@@ -55,6 +55,7 @@ use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -64,6 +65,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog_error_chain::InlineErrorChain;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -85,6 +87,7 @@ pub struct RackInit {
     pub recovery_user_id: external_params::UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
+    pub allowed_source_ips: AllowedSourceIps,
 }
 
 /// Possible errors while trying to initialize rack
@@ -105,6 +108,8 @@ enum RackInitError {
     Retryable(DieselError),
     // Other non-retryable database error
     Database(DieselError),
+    // Error adding initial allowed source IP list
+    AllowedSourceIpError(Error),
 }
 
 // Catch-all for Diesel error conversion into RackInitError, which
@@ -168,8 +173,18 @@ impl From<RackInitError> for Error {
                 "failed operation due to database error: {:#}",
                 err
             )),
+            RackInitError::AllowedSourceIpError(err) => err,
         }
     }
+}
+
+/// Possible results of attempting a new sled underlay allocation
+#[derive(Debug, Clone)]
+pub enum SledUnderlayAllocationResult {
+    /// A new allocation was created
+    New(SledUnderlaySubnetAllocation),
+    /// A prior allocation was found
+    Existing(SledUnderlaySubnetAllocation),
 }
 
 impl DataStore {
@@ -295,7 +310,7 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
         hw_baseboard_id: Uuid,
-    ) -> Result<SledUnderlaySubnetAllocation, Error> {
+    ) -> Result<SledUnderlayAllocationResult, Error> {
         // Fetch all the existing allocations via self.rack_id
         let allocations = self.rack_subnet_allocations(opctx, rack_id).await?;
 
@@ -306,17 +321,14 @@ impl DataStore {
         const MIN_SUBNET_OCTET: i16 = 33;
         let mut new_allocation = SledUnderlaySubnetAllocation {
             rack_id,
-            sled_id: Uuid::new_v4(),
+            sled_id: SledUuid::new_v4().into(),
             subnet_octet: MIN_SUBNET_OCTET,
             hw_baseboard_id,
         };
-        let mut allocation_already_exists = false;
         for allocation in allocations {
             if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
                 // We already have an allocation for this sled.
-                new_allocation = allocation;
-                allocation_already_exists = true;
-                break;
+                return Ok(SledUnderlayAllocationResult::Existing(allocation));
             }
             if allocation.subnet_octet == new_allocation.subnet_octet {
                 bail_unless!(
@@ -332,11 +344,8 @@ impl DataStore {
         // allocations when sleds are being added. We will need another
         // mechanism ala generation numbers when we must interleave additions
         // and removals of sleds.
-        if !allocation_already_exists {
-            self.sled_subnet_allocation_insert(opctx, &new_allocation).await?;
-        }
-
-        Ok(new_allocation)
+        self.sled_subnet_allocation_insert(opctx, &new_allocation).await?;
+        Ok(SledUnderlayAllocationResult::New(new_allocation))
     }
 
     /// Return all current underlay allocations for the rack.
@@ -855,6 +864,17 @@ impl DataStore {
                         }
                     })?;
 
+                    // Insert the initial source IP allowlist for requests to
+                    // user-facing services.
+                    Self::allow_list_upsert_on_connection(
+                        opctx,
+                        &conn,
+                        rack_init.allowed_source_ips,
+                    ).await.map_err(|e| {
+                        err.set(RackInitError::AllowedSourceIpError(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
                     let rack = diesel::update(rack_dsl::rack)
                         .filter(rack_dsl::id.eq(rack_id))
                         .set((
@@ -964,6 +984,7 @@ mod test {
         BlueprintZoneDisposition, OmicronZoneExternalSnatIp,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::inventory::NetworkInterface;
@@ -977,9 +998,9 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::TypedUuid;
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
+    use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -996,6 +1017,7 @@ mod test {
                     id: Uuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
+                    sled_state: BTreeMap::new(),
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
@@ -1050,6 +1072,7 @@ mod test {
                     "test suite".to_string(),
                     "test suite".to_string(),
                 ),
+                allowed_source_ips: AllowedSourceIps::Any,
             }
         }
     }
@@ -1234,6 +1257,12 @@ mod test {
         }
     }
 
+    fn sled_states_active(
+        sled_ids: impl Iterator<Item = SledUuid>,
+    ) -> BTreeMap<SledUuid, SledState> {
+        sled_ids.map(|sled_id| (sled_id, SledState::Active)).collect()
+    }
+
     #[tokio::test]
     async fn rack_set_initialized_with_services() {
         let test_name = "rack_set_initialized_with_services";
@@ -1292,7 +1321,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled1.id(),
+            SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -1367,7 +1396,7 @@ mod test {
             },
         );
         blueprint_zones.insert(
-            sled2.id(),
+            SledUuid::from_untyped_uuid(sled2.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -1443,7 +1472,7 @@ mod test {
             },
         );
         blueprint_zones.insert(
-            sled3.id(),
+            SledUuid::from_untyped_uuid(sled3.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![BlueprintZoneConfig {
@@ -1466,6 +1495,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -1620,7 +1650,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled.id(),
+            SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -1721,6 +1751,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -1890,7 +1921,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled.id(),
+            SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![BlueprintZoneConfig {
@@ -1932,6 +1963,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -1994,7 +2026,7 @@ mod test {
 
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
-            sled.id(),
+            SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
                 zones: vec![
@@ -2070,6 +2102,7 @@ mod test {
         }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
+            sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             parent_blueprint_id: None,
@@ -2121,7 +2154,7 @@ mod test {
         for i in 0..5i16 {
             let allocation = SledUnderlaySubnetAllocation {
                 rack_id,
-                sled_id: Uuid::new_v4(),
+                sled_id: SledUuid::new_v4().into(),
                 subnet_octet: 33 + i,
                 hw_baseboard_id: Uuid::new_v4(),
             };
@@ -2141,7 +2174,7 @@ mod test {
         // sled_id. Ensure we get an error due to a unique constraint.
         let mut should_fail_allocation = SledUnderlaySubnetAllocation {
             rack_id,
-            sled_id: Uuid::new_v4(),
+            sled_id: SledUuid::new_v4().into(),
             subnet_octet: 37,
             hw_baseboard_id: Uuid::new_v4(),
         };
@@ -2169,7 +2202,7 @@ mod test {
         // Allocations outside our expected range fail
         let mut should_fail_allocation = SledUnderlaySubnetAllocation {
             rack_id,
-            sled_id: Uuid::new_v4(),
+            sled_id: SledUuid::new_v4().into(),
             subnet_octet: 32,
             hw_baseboard_id: Uuid::new_v4(),
         };
@@ -2205,18 +2238,28 @@ mod test {
 
         let rack_id = Uuid::new_v4();
 
+        let mut hw_baseboard_ids = vec![];
         let mut allocated_octets = vec![];
         for _ in 0..5 {
+            let hw_baseboard_id = Uuid::new_v4();
+            hw_baseboard_ids.push(hw_baseboard_id);
             allocated_octets.push(
-                datastore
+                match datastore
                     .allocate_sled_underlay_subnet_octets(
                         &opctx,
                         rack_id,
-                        Uuid::new_v4(),
+                        hw_baseboard_id,
                     )
                     .await
                     .unwrap()
-                    .subnet_octet,
+                {
+                    SledUnderlayAllocationResult::New(allocation) => {
+                        allocation.subnet_octet
+                    }
+                    SledUnderlayAllocationResult::Existing(allocation) => {
+                        panic!("unexpected allocation {allocation:?}");
+                    }
+                },
             );
         }
 
@@ -2231,6 +2274,32 @@ mod test {
             expected,
             allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
         );
+
+        // If we attempt to insert the same baseboards again, we should get the
+        // existing allocations back.
+        for (hw_baseboard_id, expected_octet) in
+            hw_baseboard_ids.into_iter().zip(expected)
+        {
+            match datastore
+                .allocate_sled_underlay_subnet_octets(
+                    &opctx,
+                    rack_id,
+                    hw_baseboard_id,
+                )
+                .await
+                .unwrap()
+            {
+                SledUnderlayAllocationResult::New(allocation) => {
+                    panic!("unexpected allocation {allocation:?}");
+                }
+                SledUnderlayAllocationResult::Existing(allocation) => {
+                    assert_eq!(
+                        allocation.subnet_octet, expected_octet,
+                        "unexpected octet for {allocation:?}"
+                    );
+                }
+            }
+        }
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

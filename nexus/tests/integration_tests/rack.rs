@@ -144,3 +144,67 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(1, uninitialized_sleds_2.len());
     assert_eq!(uninitialized_sleds, uninitialized_sleds_2);
 }
+
+#[nexus_test]
+async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
+    let external_client = &cptestctx.external_client;
+    let list_url = "/v1/system/hardware/sleds-uninitialized";
+    let mut uninitialized_sleds =
+        NexusRequest::object_get(external_client, list_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get uninitialized sleds")
+            .parsed_body::<ResultsPage<UninitializedSled>>()
+            .unwrap()
+            .items;
+    debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
+
+    // There are currently two fake sim gimlets created in the latest inventory
+    // collection as part of test setup.
+    assert_eq!(2, uninitialized_sleds.len());
+
+    // Add one of these sleds.
+    let add_url = "/v1/system/hardware/sleds/";
+    let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
+    NexusRequest::objects_post(
+        external_client,
+        add_url,
+        &params::UninitializedSledId {
+            serial: baseboard.serial.clone(),
+            part: baseboard.part.clone(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to add sled");
+
+    // Attempting to add the same sled again should fail.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            external_client,
+            http::StatusCode::BAD_REQUEST,
+            http::Method::POST,
+            add_url,
+            &params::UninitializedSledId {
+                serial: baseboard.serial.clone(),
+                part: baseboard.part.clone(),
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("adding sled")
+        .parsed_body()
+        .expect("parsing error body");
+    assert_eq!(error.error_code, Some("ObjectAlreadyExists".to_string()));
+    assert!(
+        error.message.contains(&baseboard.serial)
+            && error.message.contains(&baseboard.part),
+        "expected to find {} and {} within error message: {}",
+        baseboard.serial,
+        baseboard.part,
+        error.message
+    );
+}

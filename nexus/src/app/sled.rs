@@ -273,7 +273,13 @@ impl super::Nexus {
         address: SocketAddrV6,
         kind: DatasetKind,
     ) -> Result<(), Error> {
-        info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
+        info!(
+            self.log,
+            "upserting dataset";
+            "zpool_id" => zpool_id.to_string(),
+            "dataset_id" => id.to_string(),
+            "address" => address.to_string()
+        );
         let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())

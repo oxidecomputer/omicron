@@ -1164,6 +1164,7 @@ mod tests {
     use crate::bootstrap::params::BootstrapAddressDiscovery;
     use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
@@ -1267,6 +1268,7 @@ mod tests {
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         let mut svp = ServicePortBuilder::new(&config);

@@ -17,12 +17,13 @@ use internal_dns::ServiceName;
 use ipnetwork::Ipv6Network;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
-    Prefix4, StaticRoute4, StaticRoute4List,
+    CheckerSource, ImportExportPolicy as MgImportExportPolicy, Prefix, Prefix4,
+    Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
 };
 use mg_admin_client::Client as MgdClient;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
-use omicron_common::api::external::BfdMode;
+use omicron_common::api::external::{BfdMode, ImportExportPolicy, IpNet};
 use omicron_common::api::internal::shared::{
     BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
     RackNetworkConfigV1, SwitchLocation, UplinkConfig,
@@ -497,6 +498,58 @@ impl<'a> EarlyNetworkSetup<'a> {
                     keepalive: peer.keepalive.unwrap_or(2),
                     resolution: BGP_SESSION_RESOLUTION,
                     passive: false,
+                    remote_asn: peer.remote_asn,
+                    min_ttl: peer.min_ttl,
+                    md5_auth_key: peer.md5_auth_key.clone(),
+                    multi_exit_discriminator: peer.multi_exit_discriminator,
+                    communities: peer.communities.clone(),
+                    local_pref: peer.local_pref,
+                    enforce_first_as: peer.enforce_first_as,
+                    allow_export: match &peer.allowed_export {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy::Allow(
+                                list.clone()
+                                    .iter()
+                                    .map(|x| match x {
+                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }),
+                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }),
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                    allow_import: match &peer.allowed_import {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy::Allow(
+                                list.clone()
+                                    .iter()
+                                    .map(|x| match x {
+                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }),
+                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
+                                            length: p.prefix(),
+                                            value: p.ip(),
+                                        }),
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                    vlan_id: peer.vlan_id,
                 };
                 match bgp_peer_configs.get_mut(&port.port) {
                     Some(peers) => {
@@ -514,6 +567,14 @@ impl<'a> EarlyNetworkSetup<'a> {
                 mgd.bgp_apply(&ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
+                    shaper: config.shaper.as_ref().map(|x| ShaperSource {
+                        code: x.clone(),
+                        asn: config.asn,
+                    }),
+                    checker: config.checker.as_ref().map(|x| CheckerSource {
+                        code: x.clone(),
+                        asn: config.asn,
+                    }),
                     originate: config
                         .originate
                         .iter()
@@ -545,7 +606,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                     IpAddr::V6(_) => continue,
                 };
-                let sr = StaticRoute4 { nexthop, prefix };
+                let vlan_id = r.vlan_id;
+                let sr = StaticRoute4 { nexthop, prefix, vlan_id };
                 rq.routes.list.push(sr);
             }
         }
@@ -917,6 +979,7 @@ mod tests {
                         routes: vec![RouteConfig {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: uplink.gateway_ip.into(),
+                            vlan_id: None,
                         }],
                         addresses: vec![uplink.uplink_cidr.into()],
                         switch: uplink.switch,

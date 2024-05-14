@@ -4,9 +4,8 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
-};
+use crate::bootstrap::early_networking::EarlyNetworkConfig;
+use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
@@ -23,16 +22,13 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use illumos_utils::opte::params::DeleteVirtualNetworkInterfaceHost;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
-use ipnetwork::Ipv6Network;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchPorts;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_storage::resources::DisksManagementResult;
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -45,6 +41,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(instance_put_external_ip)?;
@@ -65,6 +62,7 @@ pub fn api() -> SledApiDescription {
         api.register(omicron_physical_disks_put)?;
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
+        api.register(sled_add)?;
 
         Ok(())
     }
@@ -135,6 +133,19 @@ async fn instance_put_state(
     Ok(HttpResponseOk(
         sa.instance_ensure_state(instance_id, body_args.state).await?,
     ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
 }
 
 #[endpoint {
@@ -396,24 +407,9 @@ async fn uplink_ensure(
     path = "/network-bootstore-config",
 }]
 async fn read_network_bootstore_config(
-    _rqctx: RequestContext<Arc<SledAgent>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
 ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
-    let config = EarlyNetworkConfig {
-        generation: 0,
-        schema_version: 1,
-        body: EarlyNetworkConfigBody {
-            ntp_servers: Vec::new(),
-            rack_network_config: Some(RackNetworkConfig {
-                rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56)
-                    .unwrap(),
-                infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                ports: Vec::new(),
-                bgp: Vec::new(),
-                bfd: Vec::new(),
-            }),
-        },
-    };
+    let config = rqctx.context().bootstore_network_config.lock().await.clone();
     Ok(HttpResponseOk(config))
 }
 
@@ -422,9 +418,11 @@ async fn read_network_bootstore_config(
     path = "/network-bootstore-config",
 }]
 async fn write_network_bootstore_config(
-    _rqctx: RequestContext<Arc<SledAgent>>,
-    _body: TypedBody<EarlyNetworkConfig>,
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<EarlyNetworkConfig>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let mut config = rqctx.context().bootstore_network_config.lock().await;
+    *config = body.into_inner();
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -491,5 +489,16 @@ async fn omicron_zones_put(
     let sa = rqctx.context();
     let body_args = body.into_inner();
     sa.omicron_zones_ensure(body_args).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/sleds"
+}]
+async fn sled_add(
+    _rqctx: RequestContext<Arc<SledAgent>>,
+    _body: TypedBody<AddSledRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     Ok(HttpResponseUpdatedNoContent())
 }

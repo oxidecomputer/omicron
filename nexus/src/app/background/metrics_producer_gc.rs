@@ -123,6 +123,8 @@ impl BackgroundTask for MetricProducerGc {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::oximeter::PRODUCER_LEASE_DURATION;
+
     use super::*;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::DateTime;
@@ -138,6 +140,7 @@ mod tests {
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params;
     use omicron_common::api::internal::nexus;
+    use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -185,6 +188,20 @@ mod tests {
             .oximeter_create(&opctx, &collector_info)
             .await
             .expect("failed to insert collector");
+
+        // There are several producers which automatically register themselves
+        // during tests, from Nexus and the simulated sled-agent for example. We
+        // don't particularly care about these registrations, so ignore any such
+        // requests to our simulated collector server.
+        let body = serde_json::to_string(&ProducerRegistrationResponse {
+            lease_duration: PRODUCER_LEASE_DURATION,
+        })
+        .unwrap();
+        collector.expect(
+            Expectation::matching(request::method_path("POST", "/producers"))
+                .times(0..)
+                .respond_with(status_code(201).body(body)),
+        );
 
         // Insert a producer.
         let producer = ProducerEndpoint::new(

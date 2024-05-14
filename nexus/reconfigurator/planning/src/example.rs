@@ -13,7 +13,6 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use typed_rng::TypedUuidRng;
 
@@ -52,7 +51,7 @@ impl ExampleSystem {
 
         // Start with an empty blueprint containing only our sleds, no zones.
         let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::All),
+            base_input.all_sled_ids(SledFilter::Commissioned),
             "test suite",
             (test_name, "ExampleSystem initial"),
         );
@@ -67,7 +66,7 @@ impl ExampleSystem {
         .unwrap();
         builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
         for (sled_id, sled_resources) in
-            base_input.all_sled_resources(SledFilter::All)
+            base_input.all_sled_resources(SledFilter::Commissioned)
         {
             let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
             let _ = builder
@@ -91,10 +90,7 @@ impl ExampleSystem {
         builder.set_rng_seed((test_name, "ExampleSystem collection"));
 
         for sled_id in blueprint.sleds() {
-            // TODO-cleanup use `TypedUuid` everywhere
-            let Some(zones) =
-                blueprint.blueprint_zones.get(sled_id.as_untyped_uuid())
-            else {
+            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
             for zone in zones.zones.iter() {

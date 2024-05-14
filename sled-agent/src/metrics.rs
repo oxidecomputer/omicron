@@ -4,10 +4,16 @@
 
 //! Metrics produced by the sled-agent for collection by oximeter.
 
+use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::MetricsError;
 use oximeter::types::ProducerRegistry;
+use oximeter_producer::LogConfig;
+use oximeter_producer::Server as ProducerServer;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -32,6 +38,9 @@ pub(crate) const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 /// The interval on which we sample link metrics.
 pub(crate) const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum Dropshot request size for the metrics server.
+const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
+
 /// An error during sled-agent metric production.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -54,6 +63,9 @@ pub enum Error {
 
     #[error("Missing NULL byte in hostname")]
     HostnameMissingNull,
+
+    #[error("Failed to start metric producer server")]
+    ProducerServer(#[source] oximeter_producer::Error),
 }
 
 // Basic metadata about the sled agent used when publishing metrics.
@@ -73,7 +85,7 @@ struct SledIdentifiers {
 // which are essentially an `Arc<Mutex<Inner>>`. It would be nice to avoid that
 // pattern, but until we have more statistics, it's not clear whether that's
 // worth it right now.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 // NOTE: The ID fields aren't used on non-illumos systems, rather than changing
 // the name of fields that are not yet used.
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
@@ -93,7 +105,7 @@ pub struct MetricsManager {
     // real key.
     #[cfg(target_os = "illumos")]
     tracked_links: Arc<Mutex<BTreeMap<String, TargetId>>>,
-    registry: ProducerRegistry,
+    producer_server: Arc<ProducerServer>,
 }
 
 impl MetricsManager {
@@ -105,14 +117,17 @@ impl MetricsManager {
         sled_id: Uuid,
         rack_id: Uuid,
         baseboard: Baseboard,
+        sled_address: Ipv6Addr,
         log: Logger,
     ) -> Result<Self, Error> {
-        let registry = ProducerRegistry::with_id(sled_id);
+        let producer_server =
+            start_producer_server(&log, sled_id, sled_address)?;
 
         cfg_if::cfg_if! {
             if #[cfg(target_os = "illumos")] {
                 let kstat_sampler = KstatSampler::new(&log).map_err(Error::Kstat)?;
-                registry
+                producer_server
+                    .registry()
                     .register_producer(kstat_sampler.clone())
                     .map_err(Error::Registry)?;
                 let tracked_links = Arc::new(Mutex::new(BTreeMap::new()));
@@ -125,14 +140,43 @@ impl MetricsManager {
             kstat_sampler,
             #[cfg(target_os = "illumos")]
             tracked_links,
-            registry,
+            producer_server,
         })
     }
 
     /// Return a reference to the contained producer registry.
     pub fn registry(&self) -> &ProducerRegistry {
-        &self.registry
+        self.producer_server.registry()
     }
+}
+
+/// Start a metric producer server.
+fn start_producer_server(
+    log: &Logger,
+    sled_id: Uuid,
+    sled_address: Ipv6Addr,
+) -> Result<Arc<ProducerServer>, Error> {
+    let log = log.new(slog::o!("component" => "producer-server"));
+    let registry = ProducerRegistry::with_id(sled_id);
+
+    // Listen on any available socket, using our underlay address.
+    let address = SocketAddr::new(sled_address.into(), 0);
+
+    // Resolve Nexus via DNS.
+    let registration_address = None;
+    let config = oximeter_producer::Config {
+        server_info: ProducerEndpoint {
+            id: registry.producer_id(),
+            kind: ProducerKind::SledAgent,
+            address,
+            base_route: String::new(), // Unused, will be removed.
+            interval: METRIC_COLLECTION_INTERVAL,
+        },
+        registration_address,
+        request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
+        log: LogConfig::Logger(log),
+    };
+    ProducerServer::start(&config).map(Arc::new).map_err(Error::ProducerServer)
 }
 
 #[cfg(target_os = "illumos")]

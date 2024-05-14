@@ -10,6 +10,7 @@ extern crate diesel;
 extern crate newtype_derive;
 
 mod address_lot;
+mod allow_list;
 mod bfd;
 mod bgp;
 mod block_size;
@@ -114,6 +115,7 @@ mod db {
 pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
+pub use allow_list::*;
 pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;

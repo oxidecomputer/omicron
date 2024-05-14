@@ -8,6 +8,9 @@ license = "MPL-2.0"
 [build-dependencies]
 omicron-rpaths.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bytes.workspace = true
 camino.workspace = true

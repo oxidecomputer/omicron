@@ -4,6 +4,8 @@
 
 //! Tests basic instance support in the API
 
+use crate::integration_tests::metrics::wait_for_producer;
+
 use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
@@ -114,7 +116,9 @@ fn default_vpc_subnets_url() -> String {
     format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
 }
 
-async fn create_project_and_pool(client: &ClientTestContext) -> views::Project {
+pub async fn create_project_and_pool(
+    client: &ClientTestContext,
+) -> views::Project {
     create_default_ip_pool(client).await;
     create_project(client, PROJECT_NAME).await
 }
@@ -1058,10 +1062,6 @@ async fn assert_metrics(
 
 #[nexus_test]
 async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
@@ -1070,6 +1070,9 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // Create an IP pool and project that we'll use for testing.
     let project = create_project_and_pool(&client).await;
     let project_id = project.identity.id;
+
+    // Wait until Nexus is registered as a metric producer with Oximeter.
+    wait_for_producer(&cptestctx.oximeter, nexus.id()).await;
 
     // Query the view of these metrics stored within CRDB
     let opctx =
@@ -1143,6 +1146,13 @@ async fn test_instance_metrics_with_migration(
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
+
+    // Wait until Nexus registers as a producer with Oximeter.
+    wait_for_producer(
+        &cptestctx.oximeter,
+        cptestctx.server.apictx().nexus.id(),
+    )
+    .await;
 
     // Create a second sled to migrate to/from.
     let default_sled_id: Uuid =

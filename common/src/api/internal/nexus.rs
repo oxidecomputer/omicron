@@ -110,9 +110,8 @@ pub struct ProducerEndpoint {
     /// The IP address and port at which `oximeter` can collect metrics from the
     /// producer.
     pub address: SocketAddr,
-    /// The API base route from which `oximeter` can collect metrics.
-    ///
-    /// The full route is `{base_route}/{id}`.
+    /// NOTE: This field is deprecated, and will be ignored. It will be removed
+    /// in future releases.
     pub base_route: String,
     /// The interval on which `oximeter` should collect metrics.
     pub interval: Duration,
@@ -123,6 +122,16 @@ impl ProducerEndpoint {
     pub fn collection_route(&self) -> String {
         format!("{}/{}", &self.base_route, &self.id)
     }
+}
+
+/// Response to a successful producer registration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ProducerRegistrationResponse {
+    /// Period within which producers must renew their lease.
+    ///
+    /// Producers are required to periodically re-register with Nexus, to ensure
+    /// that they are still collected from by `oximeter`.
+    pub lease_duration: Duration,
 }
 
 /// An identifier for a single update artifact.

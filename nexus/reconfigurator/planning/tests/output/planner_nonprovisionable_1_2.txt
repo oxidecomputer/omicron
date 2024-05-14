@@ -21,6 +21,20 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
      internal_ntp   7f4e9f9f-08f8-4d14-885d-e977c05525ad   in service    fd00:1122:3344:105::21           
      nexus          6dff7633-66bb-4924-a6ff-2c896e66964b   in service    fd00:1122:3344:105::22           
                                                                                                           
+   sled 68d24ac5-f341-49ea-a92a-0381b52ab387: blueprint zones at generation 2                             
+     crucible       3b3c14b6-a8e2-4054-a577-8d96cb576230   expunged      fd00:1122:3344:102::2c           
+     crucible       47a87c6e-ef45-4d52-9a3e-69cdd96737cc   expunged      fd00:1122:3344:102::23           
+     crucible       6464d025-4652-4948-919e-740bec5699b1   expunged      fd00:1122:3344:102::24           
+     crucible       6939ce48-b17c-4616-b176-8a419a7697be   expunged      fd00:1122:3344:102::29           
+     crucible       878dfddd-3113-4197-a3ea-e0d4dbe9b476   expunged      fd00:1122:3344:102::25           
+     crucible       8d4d2b28-82bb-4e36-80da-1408d8c35d82   expunged      fd00:1122:3344:102::2b           
+     crucible       9fd52961-426f-4e62-a644-b70871103fca   expunged      fd00:1122:3344:102::26           
+     crucible       b44cdbc0-0ce0-46eb-8b21-a09e113aa1d0   expunged      fd00:1122:3344:102::27           
+     crucible       b6b759d0-f60d-42b7-bbbc-9d61c9e895a9   expunged      fd00:1122:3344:102::28           
+     crucible       c407795c-6c8b-428e-8ab8-b962913c447f   expunged      fd00:1122:3344:102::2a           
+     internal_ntp   f3f2e4f3-0985-4ef6-8336-ce479382d05d   expunged      fd00:1122:3344:102::21           
+     nexus          01d58626-e1b0-480f-96be-ac784863c7dc   expunged      fd00:1122:3344:102::22           
+                                                                                                          
   MODIFIED SLEDS:                                                                                         
                                                                                                           
 *  sled 48d95fef-bc9f-4f50-9a53-1e075836291d: blueprint zones at generation: 2 -> 3                       
@@ -59,44 +73,6 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 *     └─ changed: disposition                                                                             
 -    nexus          2aa0ea4f-3561-4989-a98c-9ab7d9a240fb   in service    fd00:1122:3344:103::22  modified 
 +     ├─                                                   expunged      fd00:1122:3344:103::22           
-*     └─ changed: disposition                                                                             
-                                                                                                          
-*  sled 68d24ac5-f341-49ea-a92a-0381b52ab387: blueprint zones at generation: 2 -> 3                       
--    crucible       3b3c14b6-a8e2-4054-a577-8d96cb576230   in service    fd00:1122:3344:102::2c  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::2c           
-*     └─ changed: disposition                                                                             
--    crucible       47a87c6e-ef45-4d52-9a3e-69cdd96737cc   in service    fd00:1122:3344:102::23  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::23           
-*     └─ changed: disposition                                                                             
--    crucible       6464d025-4652-4948-919e-740bec5699b1   in service    fd00:1122:3344:102::24  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::24           
-*     └─ changed: disposition                                                                             
--    crucible       6939ce48-b17c-4616-b176-8a419a7697be   in service    fd00:1122:3344:102::29  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::29           
-*     └─ changed: disposition                                                                             
--    crucible       878dfddd-3113-4197-a3ea-e0d4dbe9b476   in service    fd00:1122:3344:102::25  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::25           
-*     └─ changed: disposition                                                                             
--    crucible       8d4d2b28-82bb-4e36-80da-1408d8c35d82   in service    fd00:1122:3344:102::2b  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::2b           
-*     └─ changed: disposition                                                                             
--    crucible       9fd52961-426f-4e62-a644-b70871103fca   in service    fd00:1122:3344:102::26  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::26           
-*     └─ changed: disposition                                                                             
--    crucible       b44cdbc0-0ce0-46eb-8b21-a09e113aa1d0   in service    fd00:1122:3344:102::27  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::27           
-*     └─ changed: disposition                                                                             
--    crucible       b6b759d0-f60d-42b7-bbbc-9d61c9e895a9   in service    fd00:1122:3344:102::28  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::28           
-*     └─ changed: disposition                                                                             
--    crucible       c407795c-6c8b-428e-8ab8-b962913c447f   in service    fd00:1122:3344:102::2a  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::2a           
-*     └─ changed: disposition                                                                             
--    internal_ntp   f3f2e4f3-0985-4ef6-8336-ce479382d05d   in service    fd00:1122:3344:102::21  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::21           
-*     └─ changed: disposition                                                                             
--    nexus          01d58626-e1b0-480f-96be-ac784863c7dc   in service    fd00:1122:3344:102::22  modified 
-+     ├─                                                   expunged      fd00:1122:3344:102::22           
 *     └─ changed: disposition                                                                             
                                                                                                           
 *  sled 75bc286f-2b4b-482c-9431-59272af529da: blueprint zones at generation: 2 -> 3                       
