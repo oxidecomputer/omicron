@@ -329,6 +329,7 @@ async fn test_instance_watcher_metrics(
     let client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
     let nexus = &cptestctx.server.server_context().nexus;
+    let oximeter = &cptestctx.oximeter;
 
     // TODO(eliza): consider factoring this out to a generic
     // `activate_background_task` function in `nexus-test-utils` eventually?
@@ -399,6 +400,8 @@ async fn test_instance_watcher_metrics(
         )
         .await
         .unwrap();
+        // Make sure that the latest metrics have been collected.
+        oximeter.force_collect().await;
     };
 
     #[track_caller]
@@ -443,11 +446,8 @@ async fn test_instance_watcher_metrics(
     let project = create_project_and_pool(&client).await;
     let project_name = project.identity.name.as_str();
     // Wait until Nexus registers as a producer with Oximeter.
-    wait_for_producer(
-        &cptestctx.oximeter,
-        cptestctx.server.server_context().nexus.id(),
-    )
-    .await;
+    wait_for_producer(&oximeter, cptestctx.server.server_context().nexus.id())
+        .await;
 
     eprintln!("--- creating instance 1 ---");
     let instance1 = create_instance(&client, project_name, "i-1").await;
