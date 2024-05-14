@@ -181,6 +181,14 @@ fn main() -> Result<()> {
     // set by cargo or its rustup proxy), which will interfere with various
     // tools we're about to run. (This needs to come _after_ we read from
     // `WORKSPACE_DIR` as it relies on `$CARGO_MANIFEST_DIR`.)
+    //
+    // We also don't respect `$CARGO` when running Cargo throughout this
+    // program; we need `cargo` to be the rustup proxy for various Helios
+    // build tools. Cargo always searches $PATH for rustc, so running
+    // the toolchain-specific Cargo set in `$CARGO` without a valid
+    // `$RUSTUP_TOOLCHAIN` leads to hilarious toolchain mismatches when
+    // compiling dependencies that happen to have a `rust-toolchain.toml` in
+    // their source directory or Git checkout.
     for var in ["CARGO", "CARGO_MANIFEST_DIR", "RUSTUP_TOOLCHAIN"] {
         debug!(logger, "unsetting ${}", var);
         std::env::remove_var(var);
