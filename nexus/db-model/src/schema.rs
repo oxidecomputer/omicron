@@ -463,7 +463,6 @@ table! {
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
-        base_route -> Text,
         oximeter_id -> Uuid,
     }
 }

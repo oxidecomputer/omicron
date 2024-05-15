@@ -53,7 +53,6 @@ impl From<ProducerEndpoint> for internal::nexus::ProducerEndpoint {
             id: ep.id(),
             kind: ep.kind.into(),
             address: SocketAddr::new(ep.ip.ip(), *ep.port),
-            base_route: ep.base_route.clone(),
             interval: Duration::from_secs_f64(ep.interval),
         }
     }
@@ -71,7 +70,6 @@ pub struct ProducerEndpoint {
     pub ip: ipnetwork::IpNetwork,
     pub port: SqlU16,
     pub interval: f64,
-    pub base_route: String,
     pub oximeter_id: Uuid,
 }
 
@@ -87,14 +85,8 @@ impl ProducerEndpoint {
             kind: endpoint.kind.into(),
             ip: endpoint.address.ip().into(),
             port: endpoint.address.port().into(),
-            base_route: endpoint.base_route.clone(),
             interval: endpoint.interval.as_secs_f64(),
             oximeter_id,
         }
-    }
-
-    /// Return the route that can be used to request metric data.
-    pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, self.id())
     }
 }
