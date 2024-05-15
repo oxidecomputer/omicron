@@ -259,6 +259,40 @@ impl DataStore {
         .collect())
     }
 
+    /// List all instances with active VMMs in the `Destroyed` state that don't
+    /// have currently-running instance-updater sagas.
+    pub async fn find_instances_with_destroyed_active_vmms(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<InstanceAndActiveVmm> {
+        use db::model::InstanceState as DbInstanceState;
+        use db::schema::instance::dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+        use omicron_common::api::external::InstanceState;
+        let destroyed = DbInstanceState::new(InstanceState::Destroyed);
+        Ok(vmm_dsl::vmm
+            .filter(vmm_dsl::time_deleted.is_not_null())
+            .filter(vmm_dsl::state.eq(destroyed))
+            .inner_join(
+                dsl::instance.on(dsl::active_propolis_id
+                    .eq(vmm_dsl::id.nullable())
+                    .and(dsl::time_deleted.is_null())
+                    .and(dsl::updater_id.is_null())),
+            )
+            .select((Instance::as_select(), Vmm::as_select()))
+            .load_async::<(Instance, Vmm)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|(instance, vmm)| InstanceAndActiveVmm {
+                instance,
+                vmm: Some(vmm),
+            })
+            .collect())
+    }
+
     /// Fetches information about an Instance that the caller has previously
     /// fetched
     ///

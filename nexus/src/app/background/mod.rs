@@ -14,6 +14,7 @@ mod dns_propagation;
 mod dns_servers;
 mod external_endpoints;
 mod init;
+mod instance_updater;
 mod instance_watcher;
 mod inventory_collection;
 mod metrics_producer_gc;
