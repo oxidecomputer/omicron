@@ -595,7 +595,7 @@ mod test {
         assert!(sled_zones.generation_after.unwrap() > Generation::new());
         assert_eq!(sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
-        assert!(matches!(sled_zones.zones[0].kind(), ZoneKind::InternalNtp,));
+        assert!(matches!(sled_zones.zones[0].kind(), ZoneKind::InternalNtp));
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         verify_blueprint(&blueprint3);
@@ -1067,11 +1067,6 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
 
         assert_all_zones_expunged(&diff, expunged_sled_id, "expunged sled");
-        assert_all_zones_expunged(
-            &diff,
-            decommissioned_sled_id,
-            "decommissioned sled",
-        );
 
         // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
         // should get additional Nexus zones. We expect a total of 6 new Nexus
@@ -1273,7 +1268,7 @@ mod test {
             "tests/output/planner_decommissions_sleds_bp2.txt",
             &blueprint2.display().to_string(),
         );
-        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunged {expunged_sled_id}):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_decommissions_sleds_1_2.txt",
@@ -1310,15 +1305,15 @@ mod test {
         // collect zones, so we should still have the sled's expunged zones
         // (even though the sled itself is no longer present in the list of
         // commissioned sleds).
-        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_modified().count(), 0);
-        assert_eq!(diff.sleds_unchanged().count(), DEFAULT_N_SLEDS);
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
 
         logctx.cleanup_successful();
     }

@@ -113,7 +113,7 @@ impl BpSledSubtableRow {
 /// such as omicron zones or physical disks.
 pub trait BpSledSubtableSchema {
     fn table_name(&self) -> &'static str;
-    fn column_names(&self) -> Vec<&'static str>;
+    fn column_names(&self) -> &'static [&'static str];
 }
 
 // Provide data specific to an instance of a [`BpSledSubtable`]
@@ -129,7 +129,7 @@ pub trait BpSledSubtableData {
 /// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
 pub struct BpSledSubtable {
     table_name: &'static str,
-    column_names: Vec<&'static str>,
+    column_names: &'static [&'static str],
     generation: BpGeneration,
     rows: Vec<BpSledSubtableRow>,
 }
@@ -227,8 +227,8 @@ impl BpSledSubtableSchema for BpPhysicalDisksSubtableSchema {
         "physical disks"
     }
 
-    fn column_names(&self) -> Vec<&'static str> {
-        vec!["vendor", "model", "serial"]
+    fn column_names(&self) -> &'static [&'static str] {
+        &["vendor", "model", "serial"]
     }
 }
 
@@ -238,8 +238,8 @@ impl BpSledSubtableSchema for BpOmicronZonesSubtableSchema {
     fn table_name(&self) -> &'static str {
         "omicron zones"
     }
-    fn column_names(&self) -> Vec<&'static str> {
-        vec!["zone type", "zone id", "disposition", "underlay IP"]
+    fn column_names(&self) -> &'static [&'static str] {
+        &["zone type", "zone id", "disposition", "underlay IP"]
     }
 }
 
