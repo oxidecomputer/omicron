@@ -1,11 +1,10 @@
 use crate::{execute, ExecutionError};
-use byteorder::{LittleEndian, ReadBytesExt};
 use camino::Utf8PathBuf;
 use std::ffi::OsString;
-use std::fs::File;
-use std::io::{Seek, SeekFrom};
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 pub const DUMPADM: &str = "/usr/sbin/dumpadm";
 pub const SAVECORE: &str = "/usr/bin/savecore";
@@ -48,11 +47,11 @@ pub enum DumpHdrError {
 /// been a core written there at all, Err(DumpHdrError::InvalidVersion) if the
 /// dumphdr isn't the one we know how to handle (10), or other variants of
 /// DumpHdrError if there are I/O failures while reading the block device.
-pub fn dump_flag_is_valid(
+pub async fn dump_flag_is_valid(
     dump_slice: &Utf8PathBuf,
 ) -> Result<bool, DumpHdrError> {
-    let mut f = File::open(dump_slice).map_err(DumpHdrError::OpenRaw)?;
-    f.seek(SeekFrom::Start(DUMP_OFFSET)).map_err(DumpHdrError::Seek)?;
+    let mut f = File::open(dump_slice).await.map_err(DumpHdrError::OpenRaw)?;
+    f.seek(SeekFrom::Start(DUMP_OFFSET)).await.map_err(DumpHdrError::Seek)?;
 
     // read the first few fields of dumphdr.
     // typedef struct dumphdr {
@@ -62,21 +61,18 @@ pub fn dump_flag_is_valid(
     //     /* [...] */
     // }
 
-    let magic =
-        f.read_u32::<LittleEndian>().map_err(DumpHdrError::ReadMagic)?;
-    if magic != DUMP_MAGIC {
+    let magic = f.read_u32().await.map_err(DumpHdrError::ReadMagic)?;
+    if magic != DUMP_MAGIC.to_be() {
         return Err(DumpHdrError::InvalidMagic(magic));
     }
 
-    let version =
-        f.read_u32::<LittleEndian>().map_err(DumpHdrError::ReadVersion)?;
-    if version != DUMP_VERSION {
+    let version = f.read_u32().await.map_err(DumpHdrError::ReadVersion)?;
+    if version != DUMP_VERSION.to_be() {
         return Err(DumpHdrError::InvalidVersion(version));
     }
 
-    let flags =
-        f.read_u32::<LittleEndian>().map_err(DumpHdrError::ReadFlags)?;
-    Ok((flags & DF_VALID) != 0)
+    let flags = f.read_u32().await.map_err(DumpHdrError::ReadFlags)?;
+    Ok((flags & DF_VALID.to_be()) != 0)
 }
 
 pub enum DumpContentType {
