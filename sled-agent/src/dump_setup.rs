@@ -118,13 +118,13 @@ struct DebugDataset(Utf8PathBuf);
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct CoreDataset(Utf8PathBuf);
 
-#[derive(AsRef, Clone, From)]
+#[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
     mount_config: MountConfig,
     name: ZpoolName,
 }
 
-#[derive(AsRef, Clone, From)]
+#[derive(AsRef, Clone, Debug, From)]
 pub(super) struct DebugZpool {
     mount_config: MountConfig,
     name: ZpoolName,
