@@ -515,6 +515,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::ZoneKind;
+    use typed_rng::TypedUuidRng;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -883,13 +884,16 @@ mod test {
         // one.
         builder.policy_mut().target_nexus_zone_count = 1;
 
-        let new_sled_disk = |policy| nexus_types::deployment::SledDisk {
+        // Make generated disk ids deterministic
+        let mut disk_rng =
+            TypedUuidRng::from_seed(TEST_NAME, "NEW PHYSICAL DISKS");
+        let mut new_sled_disk = |policy| nexus_types::deployment::SledDisk {
             disk_identity: DiskIdentity {
                 vendor: "test-vendor".to_string(),
                 serial: "test-serial".to_string(),
                 model: "test-model".to_string(),
             },
-            disk_id: PhysicalDiskUuid::new_v4(),
+            disk_id: PhysicalDiskUuid::from(disk_rng.next()),
             policy,
             state: nexus_types::external_api::views::PhysicalDiskState::Active,
         };
