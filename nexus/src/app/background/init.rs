@@ -112,6 +112,10 @@ impl BackgroundTasks {
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
+        v2p_watcher: (
+            tokio::sync::watch::Sender<()>,
+            tokio::sync::watch::Receiver<()>,
+        ),
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -340,7 +344,7 @@ impl BackgroundTasks {
                 config.switch_port_settings_manager.period_secs,
                 Box::new(V2PManager::new(datastore.clone())),
                 opctx.child(BTreeMap::new()),
-                vec![],
+                vec![Box::new(v2p_watcher.1)],
             )
         };
 

@@ -1953,7 +1953,7 @@ impl super::Nexus {
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
 pub(crate) async fn notify_instance_updated(
-    Nexus { db_datastore, opctx_alloc, log, background_tasks, .. }: &Nexus,
+    Nexus { db_datastore, opctx_alloc, log, v2p_notification_tx, .. }: &Nexus,
     resolver: &internal_dns::resolver::Resolver,
     opctx: &OpContext,
     instance_id: &Uuid,
@@ -1997,7 +1997,7 @@ pub(crate) async fn notify_instance_updated(
         &authz_instance,
         db_instance.runtime(),
         &new_runtime_state.instance_state,
-        background_tasks,
+        v2p_notification_tx.clone(),
     )
     .await?;
 
