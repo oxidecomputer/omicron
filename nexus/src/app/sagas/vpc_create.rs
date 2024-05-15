@@ -246,7 +246,8 @@ async fn svc_create_v4_route(
     let default_route_id = sagactx.lookup::<Uuid>("default_v4_route_id")?;
     let default_route =
         "0.0.0.0/0".parse().expect("known-valid specifier for a default route");
-    svc_create_route(sagactx, default_route_id, default_route).await
+    svc_create_route(sagactx, default_route_id, default_route, "default_v4")
+        .await
 }
 
 async fn svc_create_v4_route_undo(
@@ -262,7 +263,8 @@ async fn svc_create_v6_route(
     let default_route_id = sagactx.lookup::<Uuid>("default_v6_route_id")?;
     let default_route =
         "::/0".parse().expect("known-valid specifier for a default route");
-    svc_create_route(sagactx, default_route_id, default_route).await
+    svc_create_route(sagactx, default_route_id, default_route, "default_v6")
+        .await
 }
 
 async fn svc_create_v6_route_undo(
@@ -276,6 +278,7 @@ async fn svc_create_route(
     sagactx: NexusActionContext,
     route_id: Uuid,
     default_net: IpNet,
+    name: &str,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -292,7 +295,7 @@ async fn svc_create_route(
         RouterRouteKind::Default,
         params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
-                name: "default".parse().unwrap(),
+                name: name.parse().unwrap(),
                 description: "The default route of a vpc".to_string(),
             },
             target: RouteTarget::InternetGateway("outbound".parse().unwrap()),
@@ -436,20 +439,15 @@ async fn svc_create_subnet_route(
     let system_router_id = sagactx.lookup::<Uuid>("system_router_id")?;
     let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
     let route_id = sagactx.lookup::<Uuid>("default_subnet_route_id")?;
+    let (_, db_subnet) =
+        sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
-    let route = db::model::RouterRoute::new(
+    let route = db::model::RouterRoute::for_subnet(
         route_id,
         system_router_id,
-        RouterRouteKind::Default,
-        params::RouterRouteCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "default".parse().unwrap(),
-                description: "The default route of a vpc".to_string(),
-            },
-            target: RouteTarget::Subnet("default".parse().unwrap()),
-            destination: RouteDestination::Subnet("default".parse().unwrap()),
-        },
-    );
+        db_subnet.identity.name,
+    )
+    .expect("default subnet name is short enough for route naming");
 
     osagactx
         .datastore()

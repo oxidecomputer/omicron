@@ -21,6 +21,7 @@ use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::RouterRoute;
+use crate::db::model::RouterRouteKind;
 use crate::db::model::RouterRouteUpdate;
 use crate::db::model::Sled;
 use crate::db::model::Vni;
@@ -59,11 +60,12 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 impl DataStore {
@@ -146,7 +148,7 @@ impl DataStore {
             let route = RouterRoute::new(
                 uuid,
                 SERVICES_VPC.system_router_id,
-                RouterRouteKind::Default,
+                ExternalRouteKind::Default,
                 nexus_types::external_api::params::RouterRouteCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "default".parse().unwrap(),
@@ -274,23 +276,12 @@ impl DataStore {
                     _ => Err(e),
                 })?;
 
-            let route = RouterRoute::new(
+            let route = RouterRoute::for_subnet(
                 route_id,
                 *SERVICES_VPC_ID,
-                RouterRouteKind::Default,
-                nexus_types::external_api::params::RouterRouteCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "default".parse().unwrap(),
-                        description:
-                            "Default internet gateway route for Oxide Services"
-                                .to_string(),
-                    },
-                    target: RouteTarget::Subnet(vpc_subnet.name().clone()),
-                    destination: RouteDestination::Subnet(
-                        vpc_subnet.name().clone(),
-                    ),
-                },
-            );
+                vpc_subnet.name().clone().into(),
+            )
+            .expect("builtin service names are short enough for route naming");
             self.router_create_route(opctx, &authz_router, route)
                 .await
                 .map(|_| ())
@@ -808,6 +799,9 @@ impl DataStore {
         assert_eq!(authz_vpc.id(), subnet.vpc_id);
 
         let db_subnet = self.vpc_create_subnet_raw(subnet).await?;
+        self.vpc_system_router_ensure_subnet_routes(opctx, authz_vpc.id())
+            .await
+            .map_err(SubnetError::External)?;
         Ok((
             authz::VpcSubnet::new(
                 authz_vpc.clone(),
@@ -888,6 +882,12 @@ impl DataStore {
                 "deletion failed due to concurrent modification",
             ));
         } else {
+            self.vpc_system_router_ensure_subnet_routes(
+                opctx,
+                db_subnet.vpc_id,
+            )
+            .await?;
+
             Ok(())
         }
     }
@@ -901,7 +901,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
 
         use db::schema::vpc_subnet::dsl;
-        diesel::update(dsl::vpc_subnet)
+        let out = diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_subnet.id()))
             .set(updates)
@@ -913,7 +913,11 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByResource(authz_subnet),
                 )
-            })
+            })?;
+
+        self.vpc_system_router_ensure_subnet_routes(opctx, out.vpc_id).await?;
+
+        Ok(out)
     }
 
     pub async fn subnet_list_instance_network_interfaces(
@@ -1097,6 +1101,17 @@ impl DataStore {
         assert_eq!(authz_router.id(), route.vpc_router_id);
         opctx.authorize(authz::Action::CreateChild, authz_router).await?;
 
+        Self::router_create_route_on_connection(
+            route,
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+    }
+
+    pub async fn router_create_route_on_connection(
+        route: RouterRoute,
+        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    ) -> CreateResult<RouterRoute> {
         use db::schema::router_route::dsl;
         let router_id = route.vpc_router_id;
         let name = route.name().clone();
@@ -1105,9 +1120,7 @@ impl DataStore {
             router_id,
             diesel::insert_into(dsl::router_route).values(route),
         )
-        .insert_and_get_result_async(
-            &*self.pool_connection_authorized(opctx).await?,
-        )
+        .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -1258,6 +1271,116 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    /// Ensure the system router for a VPC has the correct set of subnet
+    /// routing rules, after any changes to a subnet.
+    pub async fn vpc_system_router_ensure_subnet_routes(
+        &self,
+        opctx: &OpContext,
+        vpc_id: Uuid,
+    ) -> Result<(), Error> {
+        // These rules are immutable from a user's perspective, and
+        // aren't something which they can meaningfully interact with,
+        // so uuid stability on e.g. VPC rename is not a primary concern.
+        // We make sure only to alter VPC subnet rules here: users may
+        // modify other system routes like internet gateways.
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let log = opctx.log.clone();
+        self.transaction_retry_wrapper("vpc_subnet_route_reconcile")
+            .transaction(&conn, |conn| {
+                let log = log.clone();
+                async move {
+                use db::schema::router_route::dsl;
+                use db::schema::vpc_subnet::dsl as subnet;
+                use db::schema::vpc::dsl as vpc;
+
+                let system_router_id = vpc::vpc
+                    .filter(vpc::id.eq(vpc_id))
+                    .filter(vpc::time_deleted.is_null())
+                    .select(vpc::system_router_id)
+                    .limit(1)
+                    .get_result_async(&conn)
+                    .await?;
+
+                let valid_subnets: Vec<VpcSubnet> = subnet::vpc_subnet
+                    .filter(subnet::id.eq(vpc_id))
+                    .filter(subnet::time_deleted.is_null())
+                    .select(VpcSubnet::as_select())
+                    .load_async(&conn)
+                    .await?;
+
+                let current_rules: Vec<RouterRoute> = dsl::router_route
+                    .filter(dsl::kind.eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)))
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::vpc_router_id.eq(system_router_id))
+                    .select(RouterRoute::as_select())
+                    .load_async(&conn)
+                    .await?;
+
+                // Build the add/delete sets.
+                let expected_names: HashSet<Name> = valid_subnets.iter()
+                    .map(|v| v.identity.name.clone())
+                    .collect();
+
+                let mut found_names = HashSet::new();
+                let mut invalid = Vec::new();
+                for rule in current_rules {
+                    let id = rule.id();
+                    match (rule.kind.0, rule.target.0) {
+                        (ExternalRouteKind::VpcSubnet, RouteTarget::Subnet(n))
+                            if expected_names.contains(Name::ref_cast(&n)) =>
+                                {let _ = found_names.insert(n.into());},
+                        _ => invalid.push(id),
+                    }
+                }
+
+                // Add/Remove routes. Retry if numebr is incorrect due to
+                // concurrent modification.
+                let now = Utc::now();
+                let to_update = invalid.len();
+                let updated_rows = diesel::update(dsl::router_route)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq_any(invalid))
+                    .set(dsl::time_deleted.eq(now))
+                    .execute_async(&conn)
+                    .await?;
+
+                if updated_rows != to_update {
+                    return Err(DieselError::RollbackTransaction);
+                }
+
+                // Duplicate rules are caught here using the UNIQUE constraint
+                // on names in a router. Only nexus can alter the system router,
+                // so there is no risk of collision with user-specified names.
+                for subnet in expected_names.difference(&found_names) {
+                    let route_id = Uuid::new_v4();
+                    // XXX this is fallible as it is based on subnet name.
+                    //     need to control this somewhere sane.
+                    let Ok(route) = db::model::RouterRoute::for_subnet(
+                        route_id,
+                        system_router_id,
+                        subnet.clone(),
+                    ) else {
+                        error!(
+                            log,
+                            "Reconciling VPC routes: name {} in vpc {} is too long",
+                            subnet,
+                            vpc_id,
+                        );
+                        continue;
+                    };
+
+                    match Self::router_create_route_on_connection(route, &conn).await {
+                        Err(Error::Conflict { .. }) => return Err(DieselError::RollbackTransaction),
+                        Err(_) => return Err(DieselError::NotFound),
+                        _ => {},
+                    }
+                }
+
+                Ok(())
+            }}).await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

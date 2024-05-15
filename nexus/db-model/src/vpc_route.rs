@@ -18,7 +18,7 @@ use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "router_route_kind", schema = "public"))]
     pub struct RouterRouteKindEnum;
 
@@ -126,6 +126,27 @@ impl RouterRoute {
             target: RouteTarget(params.target),
             destination: RouteDestination::new(params.destination),
         }
+    }
+
+    pub fn for_subnet(
+        route_id: Uuid,
+        system_router_id: Uuid,
+        subnet: Name,
+    ) -> Result<Self, ()> {
+        let name = format!("subnet_{}", subnet).parse().map_err(|_| ())?;
+        Ok(Self::new(
+            route_id,
+            system_router_id,
+            external::RouterRouteKind::VpcSubnet,
+            params::RouterRouteCreate {
+                identity: external::IdentityMetadataCreateParams {
+                    name,
+                    description: format!("VPC Subnet route for '{subnet}'"),
+                },
+                target: external::RouteTarget::Subnet(subnet.0.clone()),
+                destination: external::RouteDestination::Subnet(subnet.0),
+            },
+        ))
     }
 }
 
