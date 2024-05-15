@@ -407,7 +407,7 @@ rustyline = "14.0.0"
 samael = { version = "0.0.15", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
-semver = { version = "1.0.22", features = ["std", "serde"] }
+semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.116"
