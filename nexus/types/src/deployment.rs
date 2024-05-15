@@ -407,24 +407,22 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
             );
 
             // Construct the zones subtable
-            let zones_table = match self.blueprint.blueprint_zones.get(sled_id)
-            {
+            match self.blueprint.blueprint_zones.get(sled_id) {
                 Some(zones) => {
                     let zones =
                         BlueprintOrCollectionZonesConfig::from(zones.clone());
-                    BpSledSubtable::new(
+                    let zones_tab = BpSledSubtable::new(
                         BpOmicronZonesSubtableSchema {},
                         zones.bp_generation(),
                         zones.rows(BpDiffState::Unchanged).collect(),
-                    )
-                    .to_string()
+                    );
+                    writeln!(
+                        f,
+                        "\n  sled: {sled_id}\n\n{disks_table}\n\n{zones_tab}\n"
+                    )?;
                 }
-                None => "".to_string(),
-            };
-            writeln!(
-                f,
-                "\n  sled: {sled_id}\n\n{disks_table}\n\n{zones_table}\n"
-            )?;
+                None => writeln!(f, "\n  sled: {sled_id}\n\n{disks_table}\n")?,
+            }
             seen_sleds.insert(sled_id);
         }
 
@@ -433,7 +431,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         //
         // This should basically be impossible, so we warn if it occurs.
         for (sled_id, zones) in &self.blueprint.blueprint_zones {
-            if !seen_sleds.contains(sled_id) {
+            if !seen_sleds.contains(sled_id) && !zones.zones.is_empty() {
                 let zones =
                     BlueprintOrCollectionZonesConfig::from(zones.clone());
                 writeln!(
@@ -1199,42 +1197,6 @@ impl BlueprintOrCollectionZoneConfig {
             BlueprintOrCollectionZoneConfig::Blueprint(z) => {
                 z.zone_type == *other
             }
-        }
-    }
-
-    /// We only allow `disposition` to change, otherwise the modification
-    /// is invalid and we return an error message.
-    pub fn is_valid_modification(
-        &self,
-        after: &BlueprintZoneConfig,
-    ) -> Result<(), String> {
-        let mut reason = String::new();
-        if self.kind() != after.kind() {
-            let msg = format!(
-                "mismatched zone kind: before: {}, after: {}\n",
-                self.kind(),
-                after.kind()
-            );
-            reason.push_str(&msg);
-        }
-        if self.underlay_address() != after.underlay_address {
-            let msg = format!(
-                "mismatched underlay address: before: {}, after: {}\n",
-                self.underlay_address(),
-                after.underlay_address
-            );
-            reason.push_str(&msg);
-        }
-        if !self.is_zone_type_equal(&after.zone_type) {
-            let msg =
-                format!("mismatched zone type: after: {:?}\n", after.zone_type);
-            reason.push_str(&msg);
-        }
-
-        if reason.is_empty() {
-            Ok(())
-        } else {
-            Err(reason)
         }
     }
 }

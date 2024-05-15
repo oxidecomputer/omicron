@@ -21,6 +21,7 @@ use crate::deployment::{
     BlueprintOrCollectionZoneConfig, BlueprintOrCollectionZonesConfig,
     BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
     BlueprintZoneDisposition, BlueprintZonesConfig, DiffBeforeMetadata,
+    ZoneSortKey,
 };
 
 /// Diffs for omicron zones on a given sled with a given `BpDiffState`
@@ -66,6 +67,49 @@ impl BpSledSubtableData for BpDiffZoneDetails {
 pub struct ModifiedZone {
     pub prior_disposition: BlueprintZoneDisposition,
     pub zone: BlueprintOrCollectionZoneConfig,
+}
+
+impl ModifiedZone {
+    pub fn new(
+        before: BlueprintOrCollectionZoneConfig,
+        after: BlueprintZoneConfig,
+    ) -> Result<ModifiedZone, BpDiffZoneError> {
+        // Do we have any errors? If so, create a "reason" string.
+        let mut reason = String::new();
+        if before.kind() != after.kind() {
+            let msg = format!(
+                "mismatched zone kind: before: {}, after: {}\n",
+                before.kind(),
+                after.kind()
+            );
+            reason.push_str(&msg);
+        }
+        if before.underlay_address() != after.underlay_address {
+            let msg = format!(
+                "mismatched underlay address: before: {}, after: {}\n",
+                before.underlay_address(),
+                after.underlay_address
+            );
+            reason.push_str(&msg);
+        }
+        if !before.is_zone_type_equal(&after.zone_type) {
+            let msg =
+                format!("mismatched zone type: after: {:?}\n", after.zone_type);
+            reason.push_str(&msg);
+        }
+        if reason.is_empty() {
+            Ok(ModifiedZone {
+                prior_disposition: before.disposition(),
+                zone: after.into(),
+            })
+        } else {
+            Err(BpDiffZoneError {
+                zone_before: before,
+                zone_after: after.into(),
+                reason,
+            })
+        }
+    }
 }
 
 /// Details of modified zones on a given sled
@@ -163,24 +207,11 @@ impl BpDiffZones {
                         } else {
                             // The zones are different. They are only allowed to differ in terms
                             // of `disposition`, otherwise we have an error.
-                            match zone_before.is_valid_modification(&zone_after)
-                            {
-                                Ok(()) => {
-                                    let modified_zone = ModifiedZone {
-                                        prior_disposition: zone_before
-                                            .disposition(),
-                                        zone: zone_after.into(),
-                                    };
-                                    modified.push(modified_zone);
+                            match ModifiedZone::new(zone_before, zone_after) {
+                                Ok(modified_zone) => {
+                                    modified.push(modified_zone)
                                 }
-                                Err(reason) => {
-                                    let error = BpDiffZoneError {
-                                        zone_before,
-                                        zone_after: zone_after.into(),
-                                        reason,
-                                    };
-                                    errors.push(error);
-                                }
+                                Err(error) => errors.push(error),
                             }
                         }
                     } else {
@@ -303,8 +334,7 @@ impl BpDiffZones {
     /// back less.
     ///
     /// Errors are printed in a more freeform manner after the table is
-    // displayed.
-
+    /// displayed.
     pub fn to_bp_sled_subtable(
         &self,
         sled_id: &SledUuid,
@@ -499,7 +529,6 @@ impl BpDiffPhysicalDisks {
     }
 }
 
-// TODO: Make this pub and remove the other from deployment.rs
 /// Summarizes the differences between two blueprints
 #[derive(Debug)]
 pub struct BlueprintDiff {
