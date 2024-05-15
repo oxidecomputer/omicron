@@ -12,7 +12,6 @@ use clap::{Parser, Subcommand};
 
 mod check_workspace_deps;
 mod clippy;
-#[cfg(target_os = "illumos")]
 mod verify_libraries;
 
 #[cfg(target_os = "illumos")]
@@ -37,7 +36,7 @@ enum Cmds {
     Clippy(clippy::ClippyArgs),
     /// Verify we are not leaking library bindings outside of intended
     /// crates
-    VerifyLibraries,
+    VerifyLibraries(verify_libraries::Args),
     /// Manage virtual hardware
     VirtualHardware(virtual_hardware::Args),
 }
@@ -47,14 +46,7 @@ fn main() -> Result<()> {
     match args.cmd {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
-        Cmds::VerifyLibraries => {
-            #[cfg(target_os = "illumos")]
-            return verify_libraries::run_cmd();
-            #[cfg(not(target_os = "illumos"))]
-            unimplemented!(
-                "Library verification is only available on illumos!"
-            );
-        }
+        Cmds::VerifyLibraries(args) => verify_libraries::run_cmd(args),
         Cmds::VirtualHardware(args) => virtual_hardware::run_cmd(args),
     }
 }

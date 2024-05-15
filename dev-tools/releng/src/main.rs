@@ -546,6 +546,15 @@ async fn main() -> Result<()> {
     stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
         .after("host-stamp");
 
+    // Run `cargo xtask verify-libraries --release`. (This was formerly run in
+    // the build-and-test Buildomat job, but this fits better here where we've
+    // already built most of the binaries.)
+    jobs.push_command(
+        "verify-libraries",
+        Command::new(&cargo).args(["xtask", "verify-libraries", "--release"]),
+    )
+    .after("host-stamp");
+
     for (name, base_url) in [
         ("staging", "https://permslip-staging.corp.oxide.computer"),
         ("production", "https://signer-us-west.corp.oxide.computer"),
