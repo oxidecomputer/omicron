@@ -52,7 +52,7 @@ use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
     EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV1,
-    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+    RackNetworkConfigV1, RouteConfig as SledRouteConfig, UplinkAddressConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -923,7 +923,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let mut port_config = PortConfigV1 {
-                        addresses: info.addresses.iter().map(|a| a.address.into()).collect(),
+                        addresses: info.addresses.iter().map(|a|
+			    UplinkAddressConfig {
+				    address: a.address.into(),
+				    vlan_id: a.vlan_id.map(|v| v.into())
+			    }).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1401,7 +1405,14 @@ fn uplinks(
         };
         let config = HostPortConfig {
             port: port.port_name.clone(),
-            addrs: config.addresses.iter().map(|a| a.address.into()).collect(),
+            addrs: config
+                .addresses
+                .iter()
+                .map(|a| UplinkAddressConfig {
+                    address: a.address.into(),
+                    vlan_id: a.vlan_id.map(|v| v.into()),
+                })
+                .collect(),
         };
 
         match uplinks.entry(*location) {

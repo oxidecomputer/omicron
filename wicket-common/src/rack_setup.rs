@@ -16,6 +16,7 @@ use omicron_common::api::internal::shared::BgpPeerConfig;
 use omicron_common::api::internal::shared::PortFec;
 use omicron_common::api::internal::shared::PortSpeed;
 use omicron_common::api::internal::shared::RouteConfig;
+use omicron_common::api::internal::shared::UplinkAddressConfig;
 use omicron_common::update::ArtifactHash;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
@@ -181,7 +182,7 @@ impl UserSpecifiedRackNetworkConfig {
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
-    pub addresses: Vec<IpNet>,
+    pub addresses: Vec<UplinkAddressConfig>,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: PortFec,
     pub autoneg: bool,

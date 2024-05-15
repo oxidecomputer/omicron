@@ -2707,10 +2707,10 @@
         "type": "object",
         "properties": {
           "addrs": {
-            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool).  May also include an optional VLAN ID.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "port": {
@@ -3978,10 +3978,10 @@
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -4441,6 +4441,24 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ]
       },
       "VirtualNetworkInterfaceHost": {
