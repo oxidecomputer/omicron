@@ -210,7 +210,7 @@ mod test {
         instance_id: Uuid,
     ) -> Params {
         let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let (.., authz_instance, instance) =
             LookupPath::new(&opctx, &datastore)
@@ -253,7 +253,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -263,7 +263,7 @@ mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -290,7 +290,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         params: params::InstanceCreate,
     ) -> db::model::Instance {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -304,7 +304,8 @@ mod test {
             .await
             .unwrap();
 
-        let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
         let (.., db_instance) = LookupPath::new(&opctx, &datastore)
             .instance_id(instance_state.instance().id())
             .fetch()
@@ -321,7 +322,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

@@ -882,7 +882,7 @@ pub(crate) mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -893,7 +893,7 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
 
@@ -1033,7 +1033,7 @@ pub(crate) mod test {
         test: &DiskTest,
     ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
             &cptestctx.logctx.log,
@@ -1063,7 +1063,7 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(cptestctx);
@@ -1093,7 +1093,7 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(&cptestctx);
@@ -1111,7 +1111,7 @@ pub(crate) mod test {
     }
 
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let disk_selector = params::DiskSelector {
             project: Some(
@@ -1134,7 +1134,7 @@ pub(crate) mod test {
         let test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
 

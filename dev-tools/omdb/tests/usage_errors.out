@@ -279,6 +279,8 @@ Options:
 
           Possible values:
           - commissioned:           All sleds that are currently part of the control plane cluster
+          - decommissioned:         All sleds that were previously part of the control plane cluster
+            but have been decommissioned
           - discretionary:          Sleds that are eligible for discretionary services
           - in-service:             Sleds that are in service (even if they might not be eligible
             for discretionary services)

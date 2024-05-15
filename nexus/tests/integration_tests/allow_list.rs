@@ -104,7 +104,7 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
     let addrs = vec![IpNet::single(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)))];
     let allowed_ips = AllowedSourceIps::try_from(addrs.clone())
         .expect("Expected a valid IP list");
-    let new_list = params::AllowListUpdate { allowed_ips };
+    let new_list = params::AllowListUpdate { allowed_ips: allowed_ips.clone() };
     let err: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -122,4 +122,9 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
     assert!(err
         .message
         .contains("would prevent access from the current client"));
+
+    // But we _should_ be able to make this self-defeating request through the
+    // techport proxy server.
+    let client = &cptestctx.techport_client;
+    update_list_and_compare(client, allowed_ips).await;
 }

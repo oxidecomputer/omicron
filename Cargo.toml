@@ -377,7 +377,7 @@ postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.19", features = ["verbatim"] }
+prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }

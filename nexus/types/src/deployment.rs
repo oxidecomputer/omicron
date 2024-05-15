@@ -42,15 +42,22 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
+mod network_resources;
 mod planning_input;
+mod tri_map;
 mod zone_type;
 
+pub use network_resources::AddNetworkResourceError;
+pub use network_resources::OmicronZoneExternalFloatingAddr;
+pub use network_resources::OmicronZoneExternalFloatingIp;
+pub use network_resources::OmicronZoneExternalIp;
+pub use network_resources::OmicronZoneExternalIpEntry;
+pub use network_resources::OmicronZoneExternalIpKey;
+pub use network_resources::OmicronZoneExternalSnatIp;
+pub use network_resources::OmicronZoneNetworkResources;
+pub use network_resources::OmicronZoneNic;
+pub use network_resources::OmicronZoneNicEntry;
 pub use planning_input::DiskFilter;
-pub use planning_input::OmicronZoneExternalFloatingAddr;
-pub use planning_input::OmicronZoneExternalFloatingIp;
-pub use planning_input::OmicronZoneExternalIp;
-pub use planning_input::OmicronZoneExternalSnatIp;
-pub use planning_input::OmicronZoneNic;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;

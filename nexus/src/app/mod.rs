@@ -534,6 +534,11 @@ impl Nexus {
         &self.id
     }
 
+    /// Return the rack ID for this Nexus instance.
+    pub fn rack_id(&self) -> Uuid {
+        self.rack_id
+    }
+
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
@@ -651,6 +656,16 @@ impl Nexus {
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
+    pub(crate) async fn get_techport_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.techport_external_server
             .lock()
             .unwrap()
             .as_ref()
