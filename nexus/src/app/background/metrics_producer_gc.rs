@@ -190,7 +190,6 @@ mod tests {
                 id: Uuid::new_v4(),
                 kind: nexus::ProducerKind::Service,
                 address: "[::1]:0".parse().unwrap(), // unused
-                base_route: "/".to_string(),         // unused
                 interval: Duration::from_secs(0),    // unused
             },
             collector_info.id,

@@ -46,6 +46,10 @@ pub struct Collections {
     /// The base route in the producer server used to collect metrics.
     ///
     /// The full route is `{base_route}/{producer_id}`.
+    ///
+    // TODO-cleanup: This is no longer relevant, but removing it entirely
+    // relies on nonexistent functionality for updating timeseries schema. When
+    // that lands, we should remove this.
     pub base_route: String,
     pub datum: Cumulative<u64>,
 }
@@ -98,6 +102,10 @@ pub struct FailedCollections {
     /// The base route in the producer server used to collect metrics.
     ///
     /// The full route is `{base_route}/{producer_id}`.
+    ///
+    // TODO-cleanup: This is no longer relevant, but removing it entirely
+    // relies on nonexistent functionality for updating timeseries schema. When
+    // that lands, we should remove this.
     pub base_route: String,
     /// The reason we could not collect.
     //
@@ -125,7 +133,7 @@ impl CollectionTaskStats {
                 producer_id: producer.id,
                 producer_ip: producer.address.ip(),
                 producer_port: producer.address.port(),
-                base_route: producer.base_route.clone(),
+                base_route: String::new(),
                 datum: Cumulative::new(0),
             },
             failed_collections: BTreeMap::new(),
@@ -203,7 +211,7 @@ mod tests {
             producer_id: uuid::uuid!("718452ab-7cca-42f6-b8b1-1aaaa1b09104"),
             producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
             producer_port: 12345,
-            base_route: String::from("/"),
+            base_route: String::new(),
             datum: Cumulative::new(0),
         }
     }
@@ -213,7 +221,7 @@ mod tests {
             producer_id: uuid::uuid!("718452ab-7cca-42f6-b8b1-1aaaa1b09104"),
             producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
             producer_port: 12345,
-            base_route: String::from("/"),
+            base_route: String::new(),
             reason: FailureReason::Unreachable.as_string(),
             datum: Cumulative::new(0),
         }

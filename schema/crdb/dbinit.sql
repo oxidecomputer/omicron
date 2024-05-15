@@ -1294,8 +1294,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
-    /* TODO: Is this length appropriate? */
-    base_route STRING(512) NOT NULL,
     /* Oximeter collector instance to which this metric producer is assigned. */
     oximeter_id UUID NOT NULL
 );
@@ -3861,7 +3859,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '62.0.0', NULL)
+    (TRUE, NOW(), NOW(), '63.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
