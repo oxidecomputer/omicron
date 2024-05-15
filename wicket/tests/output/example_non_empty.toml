@@ -68,7 +68,7 @@ infra_ip_last = "172.30.0.10"
 
 [rack_network_config.switch0.port0]
 routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
-addresses = ["172.30.0.1/24"]
+addresses = [{ address = "172.30.0.1/24" }]
 uplink_port_speed = "speed400_g"
 uplink_port_fec = "firecode"
 autoneg = true
@@ -107,7 +107,7 @@ enforce_first_as = true
 
 [rack_network_config.switch1.port0]
 routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
-addresses = ["172.32.0.1/24"]
+addresses = [{ address = "172.32.0.1/24" }]
 uplink_port_speed = "speed400_g"
 uplink_port_fec = "firecode"
 autoneg = true

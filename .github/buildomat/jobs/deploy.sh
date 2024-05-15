@@ -246,7 +246,7 @@ infra_ip_last = \"$UPLINK_IP\"
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[\"$UPLINK_IP/24\"\\]
+addresses = \\[{address = \"$UPLINK_IP/24\"} \\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true

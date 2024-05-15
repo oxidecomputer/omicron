@@ -689,6 +689,7 @@ fn build_port_config(
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
 
@@ -703,7 +704,14 @@ fn build_port_config(
                 vlan_id: r.vlan_id,
             })
             .collect(),
-        addresses: config.addresses.clone(),
+        addresses: config
+            .addresses
+            .iter()
+            .map(|a| BaUplinkAddressConfig {
+                address: a.address,
+                vlan_id: a.vlan_id,
+            })
+            .collect(),
         bgp_peers: config
             .bgp_peers
             .iter()

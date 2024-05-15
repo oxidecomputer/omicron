@@ -929,6 +929,7 @@ fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
 mod tests {
     use super::*;
     use omicron_common::api::internal::shared::RouteConfig;
+    use omicron_common::api::internal::shared::UplinkAddressConfig;
     use omicron_test_utils::dev::test_setup_log;
 
     #[test]
@@ -981,7 +982,10 @@ mod tests {
                             nexthop: uplink.gateway_ip.into(),
                             vlan_id: None,
                         }],
-                        addresses: vec![uplink.uplink_cidr.into()],
+                        addresses: vec![UplinkAddressConfig {
+                            address: uplink.uplink_cidr.into(),
+                            vlan_id: None,
+                        }],
                         switch: uplink.switch,
                         port: uplink.uplink_port,
                         uplink_port_speed: uplink.uplink_port_speed,

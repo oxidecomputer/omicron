@@ -549,6 +549,7 @@ impl DataStore {
                                 rsvd_block.id,
                                 address.address.into(),
                                 interface_name.clone(),
+				address.vlan_id
                             ));
 
                         }

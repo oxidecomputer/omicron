@@ -523,7 +523,8 @@ impl super::Nexus {
                 .iter()
                 .map(|a| Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: (*a).into(),
+                    address: a.address.into(),
+                    vlan_id: a.vlan_id,
                 })
                 .collect();
 
@@ -537,7 +538,7 @@ impl super::Nexus {
                 .map(|r| Route {
                     dst: r.destination.into(),
                     gw: r.nexthop,
-                    vid: None,
+                    vid: r.vlan_id,
                 })
                 .collect();
 

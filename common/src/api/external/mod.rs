@@ -2897,6 +2897,9 @@ pub struct SwitchPortAddressConfig {
     /// The IP address and prefix.
     pub address: IpNet,
 
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
+
     /// The interface name this address belongs to.
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
     // Use `Name` instead of `String` for `interface_name` type

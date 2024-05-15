@@ -299,12 +299,81 @@ pub struct RouteConfig {
     pub vlan_id: Option<u16>,
 }
 
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+)]
+pub struct UplinkAddressConfig {
+    pub address: IpNetwork,
+    /// The VLAN id associated with this route.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+impl UplinkAddressConfig {
+    pub fn ip(&self) -> IpAddr {
+        self.address.ip()
+    }
+}
+
+impl std::fmt::Display for UplinkAddressConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.vlan_id {
+            None => write!(f, "{}", self.address),
+            Some(v) => write!(f, "{};{}", self.address, v),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UplinkAddressConfigError(String);
+
+impl std::fmt::Display for UplinkAddressConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse switch location error: {}", self.0)
+    }
+}
+
+/// Convert a string into an UplinkAddressConfig.
+/// 192.168.1.1/24 => UplinkAddressConfig { 192.168.1.1/24, None }
+/// 192.168.1.1/24;200 => UplinkAddressConfig { 192.168.1.1/24, Some(200) }
+impl FromStr for UplinkAddressConfig {
+    type Err = UplinkAddressConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let fields: Vec<&str> = s.split(';').collect();
+        let (address, vlan_id) = match fields.len() {
+            1 => Ok((fields[0], None)),
+            2 => Ok((fields[0], Some(fields[1]))),
+            _ => Err(UplinkAddressConfigError(format!(
+                "not a valid uplink address: {s}"
+            ))),
+        }?;
+        let address = address.parse().map_err(|_| {
+            UplinkAddressConfigError(format!(
+                "not a valid ip address: {address}"
+            ))
+        })?;
+        let vlan_id = match vlan_id {
+            None => Ok(None),
+            Some(v) => match v.parse() {
+                Err(_) => Err(format!("invalid vlan id: {v}")),
+                Ok(vlan_id) if vlan_id > 1 && vlan_id < 4096 => {
+                    Ok(Some(vlan_id))
+                }
+                Ok(vlan_id) => Err(format!("vlan id out of range: {vlan_id}")),
+            },
+        }
+        .map_err(|e| UplinkAddressConfigError(e))?;
+        Ok(UplinkAddressConfig { address, vlan_id })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV1 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
-    /// This port's addresses.
-    pub addresses: Vec<IpNetwork>,
+    /// This port's addresses and optional vlan IDs
+    pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
     pub switch: SwitchLocation,
     /// Nmae of the port this config applies to.
@@ -326,9 +395,12 @@ impl From<UplinkConfig> for PortConfigV1 {
             routes: vec![RouteConfig {
                 destination: "0.0.0.0/0".parse().unwrap(),
                 nexthop: value.gateway_ip.into(),
-                vlan_id: None,
+                vlan_id: value.uplink_vid,
             }],
-            addresses: vec![value.uplink_cidr.into()],
+            addresses: vec![UplinkAddressConfig {
+                address: value.uplink_cidr.into(),
+                vlan_id: value.uplink_vid,
+            }],
             switch: value.switch,
             port: value.uplink_port,
             uplink_port_speed: value.uplink_port_speed,
@@ -372,8 +444,8 @@ pub struct HostPortConfig {
     pub port: String,
 
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub addrs: Vec<IpNetwork>,
+    /// (must be in infra_ip pool).  May also include an optional VLAN ID.
+    pub addrs: Vec<UplinkAddressConfig>,
 }
 
 impl From<PortConfigV1> for HostPortConfig {

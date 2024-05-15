@@ -742,7 +742,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::PortConfigV1 {
                         port: config.port.clone(),
-                        routes: config
+			routes: config
                             .routes
                             .iter()
                             .map(|r| NexusTypes::RouteConfig {
@@ -751,7 +751,14 @@ impl ServiceInner {
                                 vlan_id: r.vlan_id,
                             })
                             .collect(),
-                        addresses: config.addresses.clone(),
+			addresses: config
+			    .addresses
+			    .iter()
+			    .map(|a| NexusTypes::UplinkAddressConfig {
+				    address: a.address,
+				    vlan_id: a.vlan_id
+			    })
+			    .collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
