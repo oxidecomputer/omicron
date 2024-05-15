@@ -381,7 +381,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let apictx = &cptestctx.server.apictx();
+        let apictx = &cptestctx.server.server_context();
         let nexus = &apictx.nexus;
         let sled_agent = &cptestctx.sled_agent.sled_agent;
 
@@ -425,7 +425,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -475,7 +475,7 @@ pub(crate) mod test {
     ) {
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
-        let apictx = &cptestctx.server.apictx();
+        let apictx = &cptestctx.server.server_context();
         let nexus = &apictx.nexus;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -503,7 +503,7 @@ pub(crate) mod test {
     ) {
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
-        let apictx = &cptestctx.server.apictx();
+        let apictx = &cptestctx.server.server_context();
         let nexus = &apictx.nexus;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -534,7 +534,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let apictx = &cptestctx.server.apictx();
+        let apictx = &cptestctx.server.server_context();
         let nexus = &apictx.nexus;
 
         let opctx = test_helpers::test_opctx(cptestctx);

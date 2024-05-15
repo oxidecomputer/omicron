@@ -335,6 +335,39 @@ pub struct BfdStatus {
     pub mode: BfdMode,
 }
 
+/// Opaque object representing link state. The contents of this object are not
+/// yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SwitchLinkState {
+    link: serde_json::Value,
+    monitors: Option<serde_json::Value>,
+}
+
+impl SwitchLinkState {
+    pub fn new(
+        link: serde_json::Value,
+        monitors: Option<serde_json::Value>,
+    ) -> Self {
+        Self { link, monitors }
+    }
+}
+
+impl JsonSchema for SwitchLinkState {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "SwitchLinkState".to_owned()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::Policy;

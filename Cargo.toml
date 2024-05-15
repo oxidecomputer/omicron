@@ -2,7 +2,6 @@
 members = [
     "api_identity",
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -21,6 +20,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
     "end-to-end-tests",
@@ -84,7 +84,6 @@ members = [
 
 default-members = [
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -103,6 +102,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -162,9 +162,51 @@ default-members = [
 ]
 resolver = "2"
 
+#
+# Tree-wide lint configuration.
+# https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-lints-section
+#
+# For a list of Clippy lints, see
+# https://rust-lang.github.io/rust-clippy/master.
+#
+[workspace.lints.clippy]
+# Clippy's style nits are useful, but not worth keeping in CI.
+style = { level = "allow", priority = -1 }
+# But continue to warn on anything in the "disallowed_" namespace.
+disallowed_macros = "warn"
+disallowed_methods = "warn"
+disallowed_names = "warn"
+disallowed_script_idents = "warn"
+disallowed_types = "warn"
+# Warn on some more style lints that are relatively stable and make sense.
+iter_cloned_collect = "warn"
+iter_next_slice = "warn"
+iter_nth = "warn"
+iter_nth_zero = "warn"
+iter_skip_next = "warn"
+len_zero = "warn"
+redundant_field_names = "warn"
+# `declare_interior_mutable_const` is classified as a style lint, but it can
+# identify real bugs (e.g., declarying a `const Atomic` and using it like
+# a `static Atomic`). However, it is also subject to false positives (e.g.,
+# idiomatically declaring a static array of atomics uses `const Atomic`). We
+# warn on this to catch the former, and expect any uses of the latter to allow
+# this locally.
+#
+# Note: any const value with a type containing a `bytes::Bytes` hits this lint,
+# and you should `#![allow]` it for now. This is most likely to be seen with
+# `http::header::{HeaderName, HeaderValue}`. This is a Clippy bug which will be
+# fixed in the Rust 1.80 toolchain (rust-lang/rust-clippy#12691).
+declare_interior_mutable_const = "warn"
+# Also warn on casts, preferring explicit conversions instead.
+#
+# We'd like to warn on lossy casts in the future, but lossless casts are the
+# easiest ones to convert over.
+cast_lossless = "warn"
+
 [workspace.dependencies]
 anyhow = "1.0"
-anstyle = "1.0.6"
+anstyle = "1.0.7"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
@@ -174,7 +216,7 @@ async-trait = "0.1.80"
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
-base64 = "0.22.0"
+base64 = "0.22.1"
 bb8 = "0.8.3"
 bcs = "0.1.6"
 bincode = "1.3.3"
@@ -186,6 +228,7 @@ bytes = "1.6.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
+cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
 ciborium = "0.2.2"
 cfg-if = "1.0"
@@ -220,7 +263,7 @@ either = "1.11.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
-flate2 = "1.0.28"
+flate2 = "1.0.30"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
@@ -293,7 +336,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.46"
-num = { version = "0.4.2", default-features = false, features = [ "libm" ] }
+num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
@@ -325,16 +368,16 @@ p256 = "0.13"
 parse-display = "0.9.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.0.0"
-paste = "1.0.14"
+paste = "1.0.15"
 percent-encoding = "2.3.1"
-peg = "0.8.2"
+peg = "0.8.3"
 pem = "3.0"
-petgraph = "0.6.4"
+petgraph = "0.6.5"
 postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.19", features = ["verbatim"] }
+prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -364,10 +407,10 @@ rustyline = "14.0.0"
 samael = { version = "0.0.15", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
-semver = { version = "1.0.22", features = ["std", "serde"] }
+semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.116"
+serde_json = "1.0.117"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -449,7 +492,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
+zone = { version = "0.3", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
 # depend on std in omicron-uuid-kinds (in case a no-std library wants to access

@@ -148,14 +148,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     sled_state omicron.public.sled_state NOT NULL,
 
     /* Generation number owned and incremented by the sled-agent */
-    sled_agent_gen INT8 NOT NULL DEFAULT 1,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT serial_part_revision_unique UNIQUE (
-      serial_number, part_number, revision
-    )
+    sled_agent_gen INT8 NOT NULL DEFAULT 1
 );
+
+-- Add an index that ensures a given physical sled (identified by serial and
+-- part number) can only be a commissioned member of the control plane once.
+--
+-- TODO Should `sled` reference `hw_baseboard_id` instead of having its own
+-- serial/part columns?
+CREATE UNIQUE INDEX IF NOT EXISTS commissioned_sled_uniqueness
+    ON omicron.public.sled (serial_number, part_number)
+    WHERE sled_state != 'decommissioned';
 
 /* Add an index which lets us look up sleds on a rack */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
@@ -222,7 +225,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     -- The physical identity of the sled
     -- (foreign key into `hw_baseboard_id` table)
-    hw_baseboard_id UUID PRIMARY KEY,
+    hw_baseboard_id UUID,
 
     -- The rack to which a sled is being added
     -- (foreign key into `rack` table)
@@ -240,7 +243,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     -- The octet that extends a /56 rack subnet to a /64 sled subnet
     --
     -- Always between 33 and 255 inclusive
-    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
+    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255),
+
+    PRIMARY KEY (hw_baseboard_id, sled_id)
 );
 
 -- Add an index which allows pagination by {rack_id, sled_id} pairs.
@@ -1289,8 +1294,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
-    /* TODO: Is this length appropriate? */
-    base_route STRING(512) NOT NULL,
     /* Oximeter collector instance to which this metric producer is assigned. */
     oximeter_id UUID NOT NULL
 );
@@ -3262,6 +3265,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+-- state of a sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    sled_state omicron.public.sled_state NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
 -- description of a collection of omicron physical disks stored in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
     -- foreign key into `blueprint` table
@@ -3425,6 +3438,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
 );
+
+CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
+    sled_id
+) WHERE time_deleted IS NULL;
 
 /*
  * A special view of an instance provided to operators for insights into what's
@@ -3909,7 +3926,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '60.0.0', NULL)
+    (TRUE, NOW(), NOW(), '64.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

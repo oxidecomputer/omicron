@@ -12,6 +12,7 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::instance_watcher;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
@@ -29,6 +30,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -96,6 +98,9 @@ pub struct BackgroundTasks {
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
 
+    /// task handle for the task that polls sled agents for instance states.
+    pub task_instance_watcher: common::TaskHandle,
+
     /// task handle for propagation of VPC firewall rules for Omicron services
     /// with external network connectivity,
     pub task_service_firewall_propagation: common::TaskHandle,
@@ -116,6 +121,7 @@ impl BackgroundTasks {
             tokio::sync::watch::Sender<()>,
             tokio::sync::watch::Receiver<()>,
         ),
+        producer_registry: &ProducerRegistry,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -368,6 +374,22 @@ impl BackgroundTasks {
             task
         };
 
+        let task_instance_watcher = {
+            let watcher = instance_watcher::InstanceWatcher::new(
+                datastore.clone(),
+                resolver.clone(),
+                producer_registry,
+                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+            );
+            driver.register(
+                "instance_watcher".to_string(),
+                "periodically checks instance states".to_string(),
+                config.instance_watcher.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
         // Background task: service firewall rule propagation
         let task_service_firewall_propagation = driver.register(
             String::from("service_firewall_rule_propagation"),
@@ -377,7 +399,7 @@ impl BackgroundTasks {
             ),
             config.service_firewall_propagation.period_secs,
             Box::new(service_firewall_rules::ServiceRulePropagator::new(
-                datastore.clone(),
+                datastore,
             )),
             opctx.child(BTreeMap::new()),
             vec![],
@@ -403,6 +425,7 @@ impl BackgroundTasks {
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
+            task_instance_watcher,
             task_service_firewall_propagation,
         }
     }
@@ -503,7 +526,7 @@ pub mod test {
     //     the new DNS configuration
     #[nexus_test(server = crate::Server)]
     async fn test_dns_propagation_basic(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),

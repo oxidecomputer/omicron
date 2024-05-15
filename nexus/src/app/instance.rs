@@ -1521,7 +1521,8 @@ impl super::Nexus {
             instance_id,
             new_runtime_state,
         )
-        .await
+        .await?;
+        Ok(())
     }
 
     /// Returns the requested range of serial console output bytes,
@@ -1950,6 +1951,16 @@ impl super::Nexus {
     }
 }
 
+/// Records what aspects of an instance's state were actually changed in a
+/// [`notify_instance_updated`] call.
+///
+/// This is (presently) used for debugging purposes only.
+#[derive(Copy, Clone)]
+pub(crate) struct InstanceUpdated {
+    pub instance_updated: bool,
+    pub vmm_updated: bool,
+}
+
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
 pub(crate) async fn notify_instance_updated(
@@ -1958,7 +1969,7 @@ pub(crate) async fn notify_instance_updated(
     opctx: &OpContext,
     instance_id: &Uuid,
     new_runtime_state: &nexus::SledInstanceState,
-) -> Result<(), Error> {
+) -> Result<Option<InstanceUpdated>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
     info!(log, "received new runtime state from sled agent";
@@ -2106,7 +2117,7 @@ pub(crate) async fn notify_instance_updated(
                     "propolis_id" => %propolis_id,
                     "instance_updated" => instance_updated,
                     "vmm_updated" => vmm_updated);
-            Ok(())
+            Ok(Some(InstanceUpdated { instance_updated, vmm_updated }))
         }
 
         // The update command should swallow object-not-found errors and
@@ -2117,7 +2128,7 @@ pub(crate) async fn notify_instance_updated(
                     an object not found error";
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id);
-            Ok(())
+            Ok(None)
         }
 
         // If the datastore is unavailable, propagate that to the caller.

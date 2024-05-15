@@ -4,11 +4,15 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 base64.workspace = true
+derive-where.workspace = true
 futures.workspace = true
 humantime.workspace = true
 ipnetwork.workspace = true
@@ -35,3 +39,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 sled-agent-client.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true

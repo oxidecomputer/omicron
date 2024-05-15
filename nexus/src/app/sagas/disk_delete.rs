@@ -201,12 +201,12 @@ pub(crate) mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
     async fn create_disk(cptestctx: &ControlPlaneTestContext) -> Disk {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -232,7 +232,7 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 
@@ -258,7 +258,7 @@ pub(crate) mod test {
         let test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 

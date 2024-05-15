@@ -5,6 +5,9 @@ edition = "2021"
 description = "Crate for producing metric data to be collected by the Oxide control plane"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono.workspace = true
 dropshot.workspace = true

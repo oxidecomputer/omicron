@@ -169,16 +169,15 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::Instance(instance_manager_error) => {
-                match instance_manager_error {
-                    crate::instance_manager::Error::Instance(
-                        instance_error,
-                    ) => match instance_error {
-                        crate::instance::Error::Propolis(propolis_error) => {
-                            // Work around dropshot#693: HttpError::for_status
-                            // only accepts client errors and asserts on server
-                            // errors, so convert server errors by hand.
-                            match propolis_error.status() {
+            Error::Instance(crate::instance_manager::Error::Instance(
+                instance_error,
+            )) => {
+                match instance_error {
+                    crate::instance::Error::Propolis(propolis_error) => {
+                        // Work around dropshot#693: HttpError::for_status
+                        // only accepts client errors and asserts on server
+                        // errors, so convert server errors by hand.
+                        match propolis_error.status() {
                                 None => HttpError::for_internal_error(
                                     propolis_error.to_string(),
                                 ),
@@ -194,18 +193,22 @@ impl From<Error> for dropshot::HttpError {
                                         HttpError::for_internal_error(propolis_error.to_string()),
                                 }
                             }
-                        }
-                        crate::instance::Error::Transition(omicron_error) => {
-                            // Preserve the status associated with the wrapped
-                            // Omicron error so that Nexus will see it in the
-                            // Progenitor client error it gets back.
-                            HttpError::from(omicron_error)
-                        }
-                        e => HttpError::for_internal_error(e.to_string()),
-                    },
+                    }
+                    crate::instance::Error::Transition(omicron_error) => {
+                        // Preserve the status associated with the wrapped
+                        // Omicron error so that Nexus will see it in the
+                        // Progenitor client error it gets back.
+                        HttpError::from(omicron_error)
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
+            Error::Instance(
+                e @ crate::instance_manager::Error::NoSuchInstance(_),
+            ) => HttpError::for_not_found(
+                Some("NO_SUCH_INSTANCE".to_string()),
+                e.to_string(),
+            ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
@@ -976,6 +979,18 @@ impl SledAgent {
         self.inner
             .instances
             .delete_external_ip(instance_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Returns the state of the instance with the provided ID.
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, Error> {
+        self.inner
+            .instances
+            .get_instance_state(instance_id)
             .await
             .map_err(|e| Error::Instance(e))
     }

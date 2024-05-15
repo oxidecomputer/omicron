@@ -527,11 +527,20 @@ impl JsonSchema for RoleName {
 // in the database as an i64.  Constraining it here ensures that we can't fail
 // to serialize the value.
 //
-// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ByteCount(u64);
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;
@@ -1225,6 +1234,13 @@ impl DiskState {
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
+    /// Constructs a new `Ipv4Net` representing a single IP.
+    pub fn single(ip: Ipv4Addr) -> Self {
+        Ipv4Net(
+            ipnetwork::Ipv4Network::new(ip, 32).expect("32 is within range"),
+        )
+    }
+
     /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
     /// address space.
     pub fn is_private(&self) -> bool {
@@ -1291,6 +1307,13 @@ impl Ipv6Net {
 
     /// The prefix length for all VPC Sunets
     pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
+    /// Constructs a new `Ipv6Net` representing a single IPv6 address.
+    pub fn single(ip: Ipv6Addr) -> Self {
+        Ipv6Net(
+            ipnetwork::Ipv6Network::new(ip, 128).expect("128 is within range"),
+        )
+    }
 
     /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
     /// range defined in RFC 4193, e.g., `fd00:/8`
@@ -1427,6 +1450,14 @@ pub enum IpNet {
 }
 
 impl IpNet {
+    /// Constructs a new `IpNet` representing a single IP.
+    pub fn single(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(ip) => IpNet::V4(Ipv4Net::single(ip)),
+            IpAddr::V6(ip) => IpNet::V6(Ipv6Net::single(ip)),
+        }
+    }
+
     /// Return the underlying address.
     pub fn ip(&self) -> IpAddr {
         match self {
@@ -1499,36 +1530,19 @@ impl From<ipnetwork::IpNetwork> for IpNet {
     }
 }
 
+// NOTE: We deliberately do *NOT* implement `From<Ip{v4,v6,}Addr> for IpNet`.
+// This is because there are many ways to convert an address into a network.
+// See https://github.com/oxidecomputer/omicron/issues/5687.
+
 impl From<Ipv4Net> for IpNet {
     fn from(n: Ipv4Net) -> IpNet {
         IpNet::V4(n)
     }
 }
 
-impl From<Ipv4Addr> for IpNet {
-    fn from(n: Ipv4Addr) -> IpNet {
-        IpNet::V4(Ipv4Net(ipnetwork::Ipv4Network::from(n)))
-    }
-}
-
 impl From<Ipv6Net> for IpNet {
     fn from(n: Ipv6Net) -> IpNet {
         IpNet::V6(n)
-    }
-}
-
-impl From<Ipv6Addr> for IpNet {
-    fn from(n: Ipv6Addr) -> IpNet {
-        IpNet::V6(Ipv6Net(ipnetwork::Ipv6Network::from(n)))
-    }
-}
-
-impl From<IpAddr> for IpNet {
-    fn from(n: IpAddr) -> IpNet {
-        match n {
-            IpAddr::V4(v4) => IpNet::from(v4),
-            IpAddr::V6(v6) => IpNet::from(v6),
-        }
     }
 }
 
@@ -2579,7 +2593,7 @@ pub enum LinkSpeed {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkFec {
-    /// Firecode foward error correction.
+    /// Firecode forward error correction.
     Firecode,
     /// No forward error correction.
     None,
@@ -2894,44 +2908,11 @@ pub struct SwitchPortAddressConfig {
     pub interface_name: String,
 }
 
-/// Opaque object representing link state. The contents of this object are not
-/// yet stable.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SwitchLinkState {
-    link: dpd_client::types::Link,
-    monitors: Option<dpd_client::types::Monitors>,
-}
-
-impl SwitchLinkState {
-    pub fn new(
-        link: dpd_client::types::Link,
-        monitors: Option<dpd_client::types::Monitors>,
-    ) -> Self {
-        Self { link, monitors }
-    }
-}
-
-impl JsonSchema for SwitchLinkState {
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        let obj = schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject::default(),
-        );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
-        obj
-    }
-
-    fn schema_name() -> String {
-        "SwitchLinkState".to_owned()
-    }
-}
-
 /// The current state of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum BgpPeerState {
-    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// Initial state. Refuse all incoming BGP connections. No resources
     /// allocated to peer.
     Idle,
 
@@ -2950,7 +2931,7 @@ pub enum BgpPeerState {
     /// Synchronizing with peer.
     SessionSetup,
 
-    /// Session established. Able to exchange update, notification and keepliave
+    /// Session established. Able to exchange update, notification and keepalive
     /// messages with peers.
     Established,
 }

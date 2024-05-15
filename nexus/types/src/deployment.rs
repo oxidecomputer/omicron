@@ -12,6 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
+use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
@@ -41,15 +42,22 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
+mod network_resources;
 mod planning_input;
+mod tri_map;
 mod zone_type;
 
+pub use network_resources::AddNetworkResourceError;
+pub use network_resources::OmicronZoneExternalFloatingAddr;
+pub use network_resources::OmicronZoneExternalFloatingIp;
+pub use network_resources::OmicronZoneExternalIp;
+pub use network_resources::OmicronZoneExternalIpEntry;
+pub use network_resources::OmicronZoneExternalIpKey;
+pub use network_resources::OmicronZoneExternalSnatIp;
+pub use network_resources::OmicronZoneNetworkResources;
+pub use network_resources::OmicronZoneNic;
+pub use network_resources::OmicronZoneNicEntry;
 pub use planning_input::DiskFilter;
-pub use planning_input::OmicronZoneExternalFloatingAddr;
-pub use planning_input::OmicronZoneExternalFloatingIp;
-pub use planning_input::OmicronZoneExternalIp;
-pub use planning_input::OmicronZoneExternalSnatIp;
-pub use planning_input::OmicronZoneNic;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;
@@ -105,11 +113,19 @@ pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
 
-    /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZoneDisposition`] for each zone.
+    /// A map of sled id -> desired state of the sled.
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
+    pub sled_state: BTreeMap<SledUuid, SledState>,
+
+    /// A map of sled id -> zones deployed on each sled, along with the
+    /// [`BlueprintZoneDisposition`] for each zone.
+    ///
+    /// Unlike `sled_state`, this map may contain entries for sleds that are no
+    /// longer a part of the control plane cluster (e.g., sleds that have been
+    /// decommissioned, but still have expunged zones where cleanup has not yet
+    /// completed).
     pub blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
 
     /// A map of sled id -> disks in use on each sled.
