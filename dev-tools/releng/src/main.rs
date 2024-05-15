@@ -544,7 +544,18 @@ async fn main() -> Result<()> {
     jobs.select("host-image").after("host-profile");
 
     stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
-        .after("host-stamp");
+        .after("host-stamp")
+        .after("recovery-stamp");
+
+    // Run `cargo xtask verify-libraries --release`. (This was formerly run in
+    // the build-and-test Buildomat job, but this fits better here where we've
+    // already built most of the binaries.)
+    jobs.push_command(
+        "verify-libraries",
+        Command::new(&cargo).args(["xtask", "verify-libraries", "--release"]),
+    )
+    .after("host-package")
+    .after("recovery-package");
 
     for (name, base_url) in [
         ("staging", "https://permslip-staging.corp.oxide.computer"),
