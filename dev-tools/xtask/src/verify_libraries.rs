@@ -48,9 +48,6 @@ fn verify_executable(
     path: &Utf8Path,
     errors: &mut BTreeMap<String, Vec<LibraryError>>,
 ) -> Result<()> {
-    #[cfg(not(target_os = "illumos"))]
-    unimplemented!("Library verification is only available on illumos!");
-
     let binary = path.file_name().context("basename of executable")?;
 
     let command = Command::new("elfedit")
