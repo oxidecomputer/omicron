@@ -57,10 +57,6 @@ declare_saga_actions! {
         + svc_create_subnet
         - svc_create_subnet_undo
     }
-    VPC_CREATE_SUBNET_ROUTE -> "route" {
-        + svc_create_subnet_route
-        - svc_create_subnet_route_undo
-    }
     VPC_UPDATE_FIREWALL -> "firewall" {
         + svc_update_firewall
         - svc_update_firewall_undo
@@ -98,11 +94,6 @@ pub fn create_dag(
         ACTION_GENERATE_ID.as_ref(),
     ));
     builder.append(Node::action(
-        "default_subnet_route_id",
-        "GenerateDefaultV6RouteId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
-    builder.append(Node::action(
         "default_subnet_id",
         "GenerateDefaultSubnetId",
         ACTION_GENERATE_ID.as_ref(),
@@ -112,7 +103,6 @@ pub fn create_dag(
     builder.append(vpc_create_v4_route_action());
     builder.append(vpc_create_v6_route_action());
     builder.append(vpc_create_subnet_action());
-    builder.append(vpc_create_subnet_route_action());
     builder.append(vpc_update_firewall_action());
     builder.append(vpc_notify_sleds_action());
 
@@ -246,7 +236,7 @@ async fn svc_create_v4_route(
     let default_route_id = sagactx.lookup::<Uuid>("default_v4_route_id")?;
     let default_route =
         "0.0.0.0/0".parse().expect("known-valid specifier for a default route");
-    svc_create_route(sagactx, default_route_id, default_route, "default_v4")
+    svc_create_route(sagactx, default_route_id, default_route, "default-v4")
         .await
 }
 
@@ -263,7 +253,7 @@ async fn svc_create_v6_route(
     let default_route_id = sagactx.lookup::<Uuid>("default_v6_route_id")?;
     let default_route =
         "::/0".parse().expect("known-valid specifier for a default route");
-    svc_create_route(sagactx, default_route_id, default_route, "default_v6")
+    svc_create_route(sagactx, default_route_id, default_route, "default-v6")
         .await
 }
 
@@ -424,56 +414,6 @@ async fn svc_create_subnet_undo(
         .datastore()
         .vpc_delete_subnet(&opctx, &db_subnet, &authz_subnet)
         .await?;
-    Ok(())
-}
-
-async fn svc_create_subnet_route(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let system_router_id = sagactx.lookup::<Uuid>("system_router_id")?;
-    let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
-    let route_id = sagactx.lookup::<Uuid>("default_subnet_route_id")?;
-    let (_, db_subnet) =
-        sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
-
-    let route = db::model::RouterRoute::for_subnet(
-        route_id,
-        system_router_id,
-        db_subnet.identity.name,
-    )
-    .expect("default subnet name is short enough for route naming");
-
-    osagactx
-        .datastore()
-        .router_create_route(&opctx, &authz_router, route)
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn svc_create_subnet_route_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
-    let route_id = sagactx.lookup::<Uuid>("default_subnet_route_id")?;
-    let authz_route = authz::RouterRoute::new(
-        authz_router,
-        route_id,
-        LookupType::ById(route_id),
-    );
-    osagactx.datastore().router_delete_route(&opctx, &authz_route).await?;
     Ok(())
 }
 

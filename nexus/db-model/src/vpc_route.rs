@@ -133,7 +133,7 @@ impl RouterRoute {
         system_router_id: Uuid,
         subnet: Name,
     ) -> Result<Self, ()> {
-        let name = format!("subnet_{}", subnet).parse().map_err(|_| ())?;
+        let name = format!("sn-{}", subnet).parse().map_err(|_| ())?;
         Ok(Self::new(
             route_id,
             system_router_id,

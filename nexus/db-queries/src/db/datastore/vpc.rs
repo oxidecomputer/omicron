@@ -140,18 +140,26 @@ impl DataStore {
 
         // Unwrap safety: these are known valid CIDR blocks.
         let default_ips = [
-            ("0.0.0.0/0".parse().unwrap(), *SERVICES_VPC_DEFAULT_V4_ROUTE_ID),
-            ("::/0".parse().unwrap(), *SERVICES_VPC_DEFAULT_V6_ROUTE_ID),
+            (
+                "default-v4",
+                "0.0.0.0/0".parse().unwrap(),
+                *SERVICES_VPC_DEFAULT_V4_ROUTE_ID,
+            ),
+            (
+                "default-v6",
+                "::/0".parse().unwrap(),
+                *SERVICES_VPC_DEFAULT_V6_ROUTE_ID,
+            ),
         ];
 
-        for (default, uuid) in default_ips {
+        for (name, default, uuid) in default_ips {
             let route = RouterRoute::new(
                 uuid,
                 SERVICES_VPC.system_router_id,
                 ExternalRouteKind::Default,
                 nexus_types::external_api::params::RouterRouteCreate {
                     identity: IdentityMetadataCreateParams {
-                        name: "default".parse().unwrap(),
+                        name: name.parse().unwrap(),
                         description:
                             "Default internet gateway route for Oxide Services"
                                 .to_string(),
@@ -1036,6 +1044,18 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_router),
                 )
             })?;
+
+        // All child routes are deleted.
+        use db::schema::router_route::dsl as rr;
+        let now = Utc::now();
+        diesel::update(rr::router_route)
+            .filter(rr::time_deleted.is_null())
+            .filter(rr::vpc_router_id.eq(authz_router.id()))
+            .set(rr::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -1291,6 +1311,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let log = log.clone();
                 async move {
+
                 use db::schema::router_route::dsl;
                 use db::schema::vpc_subnet::dsl as subnet;
                 use db::schema::vpc::dsl as vpc;
@@ -1304,7 +1325,7 @@ impl DataStore {
                     .await?;
 
                 let valid_subnets: Vec<VpcSubnet> = subnet::vpc_subnet
-                    .filter(subnet::id.eq(vpc_id))
+                    .filter(subnet::vpc_id.eq(vpc_id))
                     .filter(subnet::time_deleted.is_null())
                     .select(VpcSubnet::as_select())
                     .load_async(&conn)

@@ -114,7 +114,6 @@ impl super::Nexus {
             .await
     }
 
-    // TODO: When a router is deleted all its routes should be deleted
     // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
     //       or trigger an error
     pub(crate) async fn vpc_delete_router(
