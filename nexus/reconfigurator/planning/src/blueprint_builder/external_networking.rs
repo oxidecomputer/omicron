@@ -127,6 +127,10 @@ impl<'a> BuilderExternalNetworking<'a> {
         for external_ip_entry in
             input.network_resources().omicron_zone_external_ips()
         {
+            // As above, ignore localhost (used by the test suite).
+            if external_ip_entry.ip.ip().is_loopback() {
+                continue;
+            }
             if !used_external_ips.contains(&external_ip_entry.ip.ip()) {
                 bail!(
                     "planning input contains unexpected external IP \
