@@ -10,10 +10,10 @@ use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
-use illumos_utils::zone::{AddressRequest, Zones};
+use illumos_utils::zone::Zones;
+use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_common::backoff::{self, BackoffError};
 use serde_json::Value;
 // use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
@@ -498,11 +498,10 @@ async fn do_run() -> Result<(), CmdError> {
                     Arg::new("link_local_links")
                     .short('l')
                     .long("link_local_links")
-                    .num_args(1..)
+                    .num_args(0..)
                     .value_delimiter(' ')
                     .value_parser(value_parser!(String))
                     .help("List of links that require link local addresses")
-                    .required(true)
                 ),
         )
         .subcommand(
@@ -567,10 +566,17 @@ async fn switch_zone_setup(
     let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
     let gz_local_link_addr: &Ipv6Addr =
         matches.get_one("gz_local_link_addr").unwrap();
-    let links = matches
-        .get_many::<String>("link_local_links")
-        .unwrap()
-        .collect::<Vec<_>>();
+    //let links = matches
+    //    .get_many::<String>("link_local_links")
+    //    .unwrap()
+    //    .collect::<Vec<_>>();
+
+    let links = if let Some(l) = matches.get_many::<String>("link_local_links")
+    {
+        Some(l.collect::<Vec<_>>())
+    } else {
+        None
+    };
 
     info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
     generate_switch_zone_baseboard_file(file, info)?;
@@ -602,18 +608,19 @@ async fn switch_zone_setup(
         u.setup_switch_zone_user(&log)?;
     }
 
-    // Clap only checks if a flag is present or not. In this case, an
-    // empty list could sneak through if the flag is set without a value
-    // like `-l ""`.
-    if links.is_empty() {
-        return Err(CmdError::Failure(anyhow!(
-            "At least one link local link must be provided"
-        )));
-    } else {
+    // // Clap only checks if a flag is present or not. In this case, an
+    // // empty list could sneak through if the flag is set without a value
+    // // like `-l ""`.
+    // if links.is_empty() {
+    //     return Err(CmdError::Failure(anyhow!(
+    //         "At least one link local link must be provided"
+    //     )));
+    // } else {
+    if let Some(links) = links {
         info!(&log, "Ensuring link local links"; "links" => ?links, "zone name" => ?zone_name);
         for link in &links {
-          //  println!("{link}");
-          //  println!("{zone_name}");
+            //  println!("{link}");
+            //  println!("{zone_name}");
             Zones::ensure_has_link_local_v6_address(
                 None,
                 &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
@@ -626,48 +633,51 @@ async fn switch_zone_setup(
                 ))
             })?;
         }
+    } else {
+        info!(&log, "No link local links to be configured");
     };
+    // };
 
-// TODO: This CANNOT happen inside the zone as the vnics live in the global zone
+    // TODO: This CANNOT happen inside the zone as the vnics live in the global zone
 
     info!(&log, "Ensuring bootstrap address exists in zone";
     "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic, "bootstrap address" => ?bootstrap_addr);
-//    let addrtype =
-//        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
-//    let addrobj_name = "bootstrap6";
-//    let addrobj =
-//        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
-//            CmdError::Failure(anyhow!(
-//                "Could not create new addrobj {:?}: {}",
-//                addrobj_name,
-//                err
-//            ))
-//        })?;
-//    // TODO: Fix error
-//    // root@oxz_switch:~# /usr/sbin/ipadm create-addr -t -T static -a fdb0:a8a1:59c7:4e85::2/64 oxBootstrap0/bootstrap6
-//    // ipadm: Could not create address: Can't assign requested address
-//    let _ = Zones::ensure_address(None, &addrobj, addrtype)
-//        .map_err(|err| {
-//            CmdError::Failure(anyhow!(
-//                "Could not ensure address {} {:?}: {}",
-//                addrobj,
-//                addrtype,
-//                err
-//            ))
-//        })?;
-//
+    //    let addrtype =
+    //        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
+    //    let addrobj_name = "bootstrap6";
+    //    let addrobj =
+    //        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
+    //            CmdError::Failure(anyhow!(
+    //                "Could not create new addrobj {:?}: {}",
+    //                addrobj_name,
+    //                err
+    //            ))
+    //        })?;
+    //    // TODO: Fix error
+    //    // root@oxz_switch:~# /usr/sbin/ipadm create-addr -t -T static -a fdb0:a8a1:59c7:4e85::2/64 oxBootstrap0/bootstrap6
+    //    // ipadm: Could not create address: Can't assign requested address
+    //    let _ = Zones::ensure_address(None, &addrobj, addrtype)
+    //        .map_err(|err| {
+    //            CmdError::Failure(anyhow!(
+    //                "Could not ensure address {} {:?}: {}",
+    //                addrobj,
+    //                addrtype,
+    //                err
+    //            ))
+    //        })?;
+    //
     info!(
         &log,
         "Forwarding bootstrap traffic via {} to {}",
         bootstrap_name,
         gz_local_link_addr
     );
-//    Route::add_bootstrap_route(
-//        BOOTSTRAP_PREFIX,
-//        *gz_local_link_addr,
-//        &bootstrap_name,
-//    )
-//    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    //    Route::add_bootstrap_route(
+    //        BOOTSTRAP_PREFIX,
+    //        *gz_local_link_addr,
+    //        &bootstrap_name,
+    //    )
+    //    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
@@ -947,7 +957,7 @@ async fn common_nw_set_up(
     Ipadm::set_interface_mtu(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    // TODO: Log if there are no addresses, or add a flag so that this doesn't run on the switch zone 
+    // TODO: Log if there are no addresses, or add a flag so that this doesn't run on the switch zone
     for addr in &static_addrs {
         if **addr != Ipv6Addr::LOCALHOST {
             info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
@@ -956,22 +966,20 @@ async fn common_nw_set_up(
         }
     }
 
-
     // TODO: Run this enough times to make sure this implementation is solid
     // perhaps somehow find out a way to know when the gateway is up?
     // perhaps configure this for the switch zone separately?
-    backoff::retry_notify(
+    retry_notify(
         // TODO: Is this the best retry policy?
-        backoff::retry_policy_local(),
+        retry_policy_local(),
         || async {
             info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
             Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
-            .or_else(|err| {
+            .map_err(|err| {
                 // TODO: Only make transient for the following error:
                 // executed and failed with status: exit status: 128 stdout: add net default: gateway fd00:1122:3344:101::1: Network is unreachable\n  stderr: 
-                Err(backoff::BackoffError::transient(
+                BackoffError::transient(
                     CmdError::Failure(anyhow!(err)),
-                )
             )})
         },
         |err, delay| {
@@ -986,9 +994,9 @@ async fn common_nw_set_up(
     .await?;
 
     // TODO: Route must come after bootstrap
- //   info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
- //   Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
- //       .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    //   info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
+    //   Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
+    //       .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
     let mut hosts_contents = String::from(

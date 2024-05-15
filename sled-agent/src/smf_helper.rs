@@ -132,7 +132,11 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
-    pub fn addpropvalue_default_instance<P, V>(&self, prop: P, val: V) -> Result<(), Error>
+    pub fn addpropvalue_default_instance<P, V>(
+        &self,
+        prop: P,
+        val: V,
+    ) -> Result<(), Error>
     where
         P: ToString,
         V: ToString,
@@ -225,7 +229,11 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
-    pub fn delpropvalue_default_instance<P, V>(&self, prop: P, val: V) -> Result<(), Error>
+    pub fn delpropvalue_default_instance<P, V>(
+        &self,
+        prop: P,
+        val: V,
+    ) -> Result<(), Error>
     where
         P: ToString,
         V: ToString,
