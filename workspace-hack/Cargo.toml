@@ -45,7 +45,8 @@ digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.11.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.0.28" }
+flate2 = { version = "1.0.30" }
+fs-err = { version = "2.11.0", default-features = false, features = ["tokio"] }
 futures = { version = "0.3.30" }
 futures-channel = { version = "0.3.30", features = ["sink"] }
 futures-core = { version = "0.3.30" }
@@ -74,18 +75,15 @@ memchr = { version = "2.7.1" }
 nom = { version = "7.1.3" }
 num-bigint = { version = "0.4.4", features = ["rand"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
-num-iter = { version = "0.1.44", default-features = false, features = ["i128"] }
-num-traits = { version = "0.2.18", features = ["i128", "libm"] }
+num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
+num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
-petgraph = { version = "0.6.4", features = ["serde-1"] }
+petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
-proc-macro2 = { version = "1.0.81" }
-rand = { version = "0.8.5" }
-rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
+proc-macro2 = { version = "1.0.82" }
 regex = { version = "1.10.4" }
 regex-automata = { version = "0.4.5", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.2" }
@@ -121,7 +119,6 @@ uuid = { version = "1.8.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.32", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
-zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.8" }
@@ -152,7 +149,8 @@ digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.11.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.0.28" }
+flate2 = { version = "1.0.30" }
+fs-err = { version = "2.11.0", default-features = false, features = ["tokio"] }
 futures = { version = "0.3.30" }
 futures-channel = { version = "0.3.30", features = ["sink"] }
 futures-core = { version = "0.3.30" }
@@ -181,18 +179,15 @@ memchr = { version = "2.7.1" }
 nom = { version = "7.1.3" }
 num-bigint = { version = "0.4.4", features = ["rand"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
-num-iter = { version = "0.1.44", default-features = false, features = ["i128"] }
-num-traits = { version = "0.2.18", features = ["i128", "libm"] }
+num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
+num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
-petgraph = { version = "0.6.4", features = ["serde-1"] }
+petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
-proc-macro2 = { version = "1.0.81" }
-rand = { version = "0.8.5" }
-rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
+proc-macro2 = { version = "1.0.82" }
 regex = { version = "1.10.4" }
 regex-automata = { version = "0.4.5", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.2" }
@@ -229,7 +224,6 @@ uuid = { version = "1.8.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.32", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
-zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.2", default-features = false, features = ["std"] }

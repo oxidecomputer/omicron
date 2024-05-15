@@ -21,6 +21,7 @@ use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use crate::db::identity::Asset;
+use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::PhysicalDisk;
@@ -41,6 +42,7 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
+use nexus_db_model::SledState;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
@@ -183,8 +185,8 @@ impl From<RackInitError> for Error {
 pub enum SledUnderlayAllocationResult {
     /// A new allocation was created
     New(SledUnderlaySubnetAllocation),
-    /// A prior allocation was found
-    Existing(SledUnderlaySubnetAllocation),
+    /// A prior allocation associated with a commissioned sled was found
+    CommissionedSled(SledUnderlaySubnetAllocation),
 }
 
 impl DataStore {
@@ -327,8 +329,44 @@ impl DataStore {
         };
         for allocation in allocations {
             if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
-                // We already have an allocation for this sled.
-                return Ok(SledUnderlayAllocationResult::Existing(allocation));
+                // We already have an allocation for this sled, but we need to
+                // check whether this allocation matches a sled that has been
+                // decommissioned. (The same physical sled, tracked by
+                // `hw_baseboard_id`, can be logically removed from the control
+                // plane via decommissioning, then added back again later, which
+                // requires allocating a new subnet.)
+                match LookupPath::new(opctx, self)
+                    .sled_id(allocation.sled_id.into_untyped_uuid())
+                    .optional_fetch_for(authz::Action::Read)
+                    .await?
+                    .map(|(_, sled)| sled.state())
+                {
+                    Some(SledState::Active) => {
+                        // This allocation is for an active sled; return the
+                        // existing allocation.
+                        return Ok(
+                            SledUnderlayAllocationResult::CommissionedSled(
+                                allocation,
+                            ),
+                        );
+                    }
+                    Some(SledState::Decommissioned) => {
+                        // This allocation was for a now-decommissioned sled;
+                        // ignore it and keep searching.
+                    }
+                    None => {
+                        // This allocation is still "new" in the sense that it
+                        // is assigned to a sled that has not yet upserted
+                        // itself to join the control plane. We must return
+                        // `::New(_)` here to ensure idempotence of allocation
+                        // (e.g., if we allocate a sled, but its sled-agent
+                        // crashes before it can upsert itself, we need to be
+                        // able to get the same allocation back again).
+                        return Ok(SledUnderlayAllocationResult::New(
+                            allocation,
+                        ));
+                    }
+                }
             }
             if allocation.subnet_octet == new_allocation.subnet_octet {
                 bail_unless!(
@@ -962,7 +1000,6 @@ mod test {
     };
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::Discoverability;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -1190,8 +1227,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    async fn create_test_sled(db: &DataStore) -> Sled {
-        let sled_id = Uuid::new_v4();
+    async fn create_test_sled(db: &DataStore, sled_id: Uuid) -> Sled {
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
         let sled_update = SledUpdate::new(
             sled_id,
@@ -1270,9 +1306,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled1 = create_test_sled(&datastore).await;
-        let sled2 = create_test_sled(&datastore).await;
-        let sled3 = create_test_sled(&datastore).await;
+        let sled1 = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled2 = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled3 = create_test_sled(&datastore, Uuid::new_v4()).await;
 
         let service_ip_pool_ranges = vec![IpRange::try_from((
             Ipv4Addr::new(1, 2, 3, 4),
@@ -1621,7 +1657,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
 
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
@@ -1904,7 +1940,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
 
         let mut system = SystemDescription::new();
         system
@@ -2000,7 +2036,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let service_ip_pool_ranges = vec![IpRange::from(ip)];
@@ -2256,7 +2292,9 @@ mod test {
                     SledUnderlayAllocationResult::New(allocation) => {
                         allocation.subnet_octet
                     }
-                    SledUnderlayAllocationResult::Existing(allocation) => {
+                    SledUnderlayAllocationResult::CommissionedSled(
+                        allocation,
+                    ) => {
                         panic!("unexpected allocation {allocation:?}");
                     }
                 },
@@ -2276,9 +2314,9 @@ mod test {
         );
 
         // If we attempt to insert the same baseboards again, we should get the
-        // existing allocations back.
-        for (hw_baseboard_id, expected_octet) in
-            hw_baseboard_ids.into_iter().zip(expected)
+        // same new allocations back.
+        for (&hw_baseboard_id, prev_allocation) in
+            hw_baseboard_ids.iter().zip(&allocations)
         {
             match datastore
                 .allocate_sled_underlay_subnet_octets(
@@ -2290,15 +2328,132 @@ mod test {
                 .unwrap()
             {
                 SledUnderlayAllocationResult::New(allocation) => {
+                    assert_eq!(allocation, *prev_allocation);
+                }
+                SledUnderlayAllocationResult::CommissionedSled(allocation) => {
                     panic!("unexpected allocation {allocation:?}");
                 }
-                SledUnderlayAllocationResult::Existing(allocation) => {
-                    assert_eq!(
-                        allocation.subnet_octet, expected_octet,
-                        "unexpected octet for {allocation:?}"
-                    );
+            }
+        }
+
+        // Pick one of the hw_baseboard_ids and insert a sled record. We should
+        // get back the `CommissionedSled` allocation result if we retry
+        // allocation of that baseboard.
+        create_test_sled(
+            &datastore,
+            allocations[0].sled_id.into_untyped_uuid(),
+        )
+        .await;
+        match datastore
+            .allocate_sled_underlay_subnet_octets(
+                &opctx,
+                rack_id,
+                hw_baseboard_ids[0],
+            )
+            .await
+            .unwrap()
+        {
+            SledUnderlayAllocationResult::New(allocation) => {
+                panic!("unexpected allocation {allocation:?}");
+            }
+            SledUnderlayAllocationResult::CommissionedSled(allocation) => {
+                assert_eq!(allocation, allocations[0]);
+            }
+        }
+
+        // If we attempt to insert the same baseboard again and that baseboard
+        // is only assigned to decommissioned sleds, we should get a new
+        // allocation. We'll pick one hw baseboard ID, create a `Sled` for it,
+        // decommission that sled, and confirm we get a new octet, five times in
+        // a loop (to emulate the same sled being added and decommissioned
+        // multiple times).
+        let mut next_expected_octet = *expected.last().unwrap() + 1;
+        let mut prior_allocation = allocations.last().unwrap().clone();
+        let target_hw_baseboard_id = *hw_baseboard_ids.last().unwrap();
+        for _ in 0..5 {
+            // Commission the sled.
+            let sled = create_test_sled(
+                &datastore,
+                prior_allocation.sled_id.into_untyped_uuid(),
+            )
+            .await;
+
+            // If we attempt this same baseboard again, we get the existing
+            // allocation back.
+            match datastore
+                .allocate_sled_underlay_subnet_octets(
+                    &opctx,
+                    rack_id,
+                    target_hw_baseboard_id,
+                )
+                .await
+                .unwrap()
+            {
+                SledUnderlayAllocationResult::New(allocation) => {
+                    panic!("unexpected allocation {allocation:?}");
+                }
+                SledUnderlayAllocationResult::CommissionedSled(existing) => {
+                    assert_eq!(existing, prior_allocation);
                 }
             }
+
+            // Decommission the sled.
+            let (authz_sled,) = LookupPath::new(&opctx, &datastore)
+                .sled_id(sled.id())
+                .lookup_for(authz::Action::Modify)
+                .await
+                .expect("found target sled ID");
+            datastore
+                .sled_set_policy_to_expunged(&opctx, &authz_sled)
+                .await
+                .expect("expunged sled");
+            datastore
+                .sled_set_state_to_decommissioned(&opctx, &authz_sled)
+                .await
+                .expect("decommissioned sled");
+
+            // Attempt a new allocation for the same hw_baseboard_id.
+            let allocation = match datastore
+                .allocate_sled_underlay_subnet_octets(
+                    &opctx,
+                    rack_id,
+                    target_hw_baseboard_id,
+                )
+                .await
+                .unwrap()
+            {
+                SledUnderlayAllocationResult::New(allocation) => allocation,
+                SledUnderlayAllocationResult::CommissionedSled(allocation) => {
+                    panic!("unexpected existing allocation {allocation:?}");
+                }
+            };
+
+            // We should get the next octet with a new sled ID.
+            assert_eq!(allocation.subnet_octet, next_expected_octet);
+            assert_ne!(allocation.sled_id.into_untyped_uuid(), sled.id());
+            prior_allocation = allocation;
+
+            // Ensure if we attempt this same baseboard again, we get the
+            // same allocation back (the sled hasn't been commissioned yet).
+            match datastore
+                .allocate_sled_underlay_subnet_octets(
+                    &opctx,
+                    rack_id,
+                    target_hw_baseboard_id,
+                )
+                .await
+                .unwrap()
+            {
+                SledUnderlayAllocationResult::New(allocation) => {
+                    assert_eq!(prior_allocation, allocation);
+                }
+                SledUnderlayAllocationResult::CommissionedSled(existing) => {
+                    panic!("unexpected allocation {existing:?}");
+                }
+            }
+
+            // Bump our expectations for the next iteration.
+            next_expected_octet += 1;
         }
 
         db.cleanup().await.unwrap();

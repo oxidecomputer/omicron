@@ -32,7 +32,9 @@ use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -146,7 +148,8 @@ impl ReconfiguratorSim {
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
                 let nic = OmicronZoneNic {
-                    id: nic.id,
+                    // TODO-cleanup use `TypedUuid` everywhere
+                    id: VnicUuid::from_untyped_uuid(nic.id),
                     mac: nic.mac,
                     ip: nic.ip,
                     slot: nic.slot,

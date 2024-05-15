@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
@@ -45,7 +46,12 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct NexusArgs {
     /// URL of the Nexus internal API
-    #[clap(long, env("OMDB_NEXUS_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_NEXUS_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     nexus_internal_url: Option<String>,
 
     #[command(subcommand)]

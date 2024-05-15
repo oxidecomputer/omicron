@@ -18,10 +18,14 @@ Commands:
   help            Print this message or the help of the given subcommand(s)
 
 Options:
-      --log-level <LOG_LEVEL>    log level filter [env: LOG_LEVEL=] [default: warn]
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help (see more with '--help')
+
+Connection Options:
       --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
-  -w, --destructive              Allow potentially-destructive subcommands
-  -h, --help                     Print help (see more with '--help')
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["--help"]
 termination: Exited(0)
@@ -50,14 +54,16 @@ Options:
           [env: LOG_LEVEL=]
           [default: warn]
 
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
       --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
+Safety Options:
   -w, --destructive
           Allow potentially-destructive subcommands
-
-  -h, --help
-          Print help (see a summary with '-h')
 ---------------------------------------------
 stderr:
 =============================================
@@ -109,12 +115,21 @@ Commands:
   help                 Print this message or the help of the given subcommand(s)
 
 Options:
-      --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
                                    OMDB_FETCH_LIMIT=] [default: 500]
       --include-deleted            whether to include soft-deleted records when enumerating objects
                                    that can be soft-deleted
-  -h, --help                       Print help
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["db", "--help"]
 termination: Exited(0)
@@ -138,12 +153,21 @@ Commands:
   help                 Print this message or the help of the given subcommand(s)
 
 Options:
-      --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
                                    OMDB_FETCH_LIMIT=] [default: 500]
       --include-deleted            whether to include soft-deleted records when enumerating objects
                                    that can be soft-deleted
-  -h, --help                       Print help
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
@@ -155,7 +179,7 @@ stdout:
 stderr:
 Print information about disks
 
-Usage: omdb db disks <COMMAND>
+Usage: omdb db disks [OPTIONS] <COMMAND>
 
 Commands:
   info      Get info for a specific disk
@@ -164,7 +188,21 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns"]
 termination: Exited(2)
@@ -174,7 +212,7 @@ stdout:
 stderr:
 Print information about internal and external DNS
 
-Usage: omdb db dns <COMMAND>
+Usage: omdb db dns [OPTIONS] <COMMAND>
 
 Commands:
   show   Summarize current version of all DNS zones
@@ -183,7 +221,21 @@ Commands:
   help   Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "diff"]
 termination: Exited(2)
@@ -227,6 +279,8 @@ Options:
 
           Possible values:
           - commissioned:           All sleds that are currently part of the control plane cluster
+          - decommissioned:         All sleds that were previously part of the control plane cluster
+            but have been decommissioned
           - discretionary:          Sleds that are eligible for discretionary services
           - in-service:             Sleds that are in service (even if they might not be eligible
             for discretionary services)
@@ -234,8 +288,37 @@ Options:
           - reservation-create:     Sleds on which reservations can be created
           - vpc-firewall:           Sleds which should be sent VPC firewall rules
 
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
   -h, --help
           Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
@@ -247,7 +330,7 @@ stdout:
 stderr:
 Print information about snapshots
 
-Usage: omdb db snapshots <COMMAND>
+Usage: omdb db snapshots [OPTIONS] <COMMAND>
 
 Commands:
   info  Get info for a specific snapshot
@@ -255,7 +338,21 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["db", "network"]
 termination: Exited(2)
@@ -273,8 +370,22 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --verbose  Print out raw data structures from the data store
-  -h, --help     Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --verbose                Print out raw data structures from the data store
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["mgs"]
 termination: Exited(2)
@@ -293,8 +404,15 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --mgs-url <MGS_URL>  URL of an MGS instance to query [env: OMDB_MGS_URL=]
-  -h, --help               Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --mgs-url <MGS_URL>        URL of an MGS instance to query [env: OMDB_MGS_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["nexus"]
 termination: Exited(2)
@@ -313,9 +431,16 @@ Commands:
   help              Print this message or the help of the given subcommand(s)
 
 Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
                                                  OMDB_NEXUS_URL=]
-  -h, --help                                     Print help
+      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks"]
 termination: Exited(2)
@@ -325,7 +450,7 @@ stdout:
 stderr:
 print information about background tasks
 
-Usage: omdb nexus background-tasks <COMMAND>
+Usage: omdb nexus background-tasks [OPTIONS] <COMMAND>
 
 Commands:
   doc       Show documentation about background tasks
@@ -335,7 +460,16 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
+                                                 OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "blueprints"]
 termination: Exited(2)
@@ -345,7 +479,7 @@ stdout:
 stderr:
 interact with blueprints
 
-Usage: omdb nexus blueprints <COMMAND>
+Usage: omdb nexus blueprints [OPTIONS] <COMMAND>
 
 Commands:
   list        List all blueprints
@@ -358,7 +492,16 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
+                                                 OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "sleds"]
 termination: Exited(2)
@@ -368,7 +511,7 @@ stdout:
 stderr:
 interact with sleds
 
-Usage: omdb nexus sleds <COMMAND>
+Usage: omdb nexus sleds [OPTIONS] <COMMAND>
 
 Commands:
   list-uninitialized  List all uninitialized sleds
@@ -377,7 +520,16 @@ Commands:
   help                Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
+                                                 OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent"]
 termination: Exited(2)
@@ -396,8 +548,15 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
       --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-  -h, --help                             Print help
+      --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent", "zones"]
 termination: Exited(2)
@@ -407,14 +566,22 @@ stdout:
 stderr:
 print information about zones
 
-Usage: omdb sled-agent zones <COMMAND>
+Usage: omdb sled-agent zones [OPTIONS] <COMMAND>
 
 Commands:
   list  Print list of all running control plane zones
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+      --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================
 EXECUTING COMMAND: omdb ["sled-agent", "zpools"]
 termination: Exited(2)
@@ -424,12 +591,20 @@ stdout:
 stderr:
 print information about zpools
 
-Usage: omdb sled-agent zpools <COMMAND>
+Usage: omdb sled-agent zpools [OPTIONS] <COMMAND>
 
 Commands:
   list  Print list of all zpools managed by the sled agent
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+      --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 =============================================

@@ -2,7 +2,6 @@
 members = [
     "api_identity",
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -21,6 +20,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
     "end-to-end-tests",
@@ -84,7 +84,6 @@ members = [
 
 default-members = [
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -103,6 +102,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -228,6 +228,7 @@ bytes = "1.6.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
+cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
 ciborium = "0.2.2"
 cfg-if = "1.0"
@@ -262,7 +263,7 @@ either = "1.11.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
-flate2 = "1.0.28"
+flate2 = "1.0.30"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
@@ -335,7 +336,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.46"
-num = { version = "0.4.2", default-features = false, features = [ "libm" ] }
+num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
@@ -367,16 +368,16 @@ p256 = "0.13"
 parse-display = "0.9.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.0.0"
-paste = "1.0.14"
+paste = "1.0.15"
 percent-encoding = "2.3.1"
 peg = "0.8.3"
 pem = "3.0"
-petgraph = "0.6.4"
+petgraph = "0.6.5"
 postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.19", features = ["verbatim"] }
+prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -491,7 +492,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
+zone = { version = "0.3", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
 # depend on std in omicron-uuid-kinds (in case a no-std library wants to access

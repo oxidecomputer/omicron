@@ -75,7 +75,7 @@ type ControlPlaneTestContext =
 
 #[nexus_test(server = crate::Server)]
 async fn test_saga_stuck(cptestctx: &ControlPlaneTestContext) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let params = Params {};
     let dag = create_saga_dag::<SagaTest>(params).unwrap();
     let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
