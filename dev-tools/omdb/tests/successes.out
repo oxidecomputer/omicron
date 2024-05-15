@@ -80,7 +80,7 @@ stdout:
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
-note: listing all sleds (use -F to filter, e.g. -F in-service)
+note: listing all commissioned sleds (use -F to filter, e.g. -F in-service)
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
@@ -249,6 +249,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_watcher"
+    periodically checks instance states
+
+
 task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
@@ -395,6 +399,18 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "instance_watcher"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances checked: 0
+    checks completed: 0
+       successful checks: 0
+       failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
 
 task: "inventory_collection"
   configured period: every 10m

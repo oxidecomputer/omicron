@@ -26,7 +26,7 @@
 //! "certificate resolver" object that impls
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
-use crate::ServerContext;
+use crate::context::ApiContext;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
@@ -674,7 +674,7 @@ impl super::Nexus {
     /// case, we'll choose an arbitrary Silo.
     pub fn endpoint_for_request(
         &self,
-        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+        rqctx: &dropshot::RequestContext<ApiContext>,
     ) -> Result<Arc<ExternalEndpoint>, Error> {
         let log = &rqctx.log;
         let rqinfo = &rqctx.request;

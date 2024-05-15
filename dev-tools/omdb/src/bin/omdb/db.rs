@@ -15,6 +15,8 @@
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
+use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -163,7 +165,12 @@ pub struct DbArgs {
 #[derive(Debug, Args)]
 pub struct DbUrlOptions {
     /// URL of the database SQL interface
-    #[clap(long, env("OMDB_DB_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_DB_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     db_url: Option<PostgresConfigWithUrl>,
 }
 
@@ -231,13 +238,20 @@ pub struct DbFetchOptions {
     #[clap(
         long = "fetch-limit",
         default_value_t = NonZeroU32::new(500).unwrap(),
-        env("OMDB_FETCH_LIMIT"),
+        env = "OMDB_FETCH_LIMIT",
+        global = true,
+        help_heading = DATABASE_OPTIONS_HEADING,
     )]
     fetch_limit: NonZeroU32,
 
     /// whether to include soft-deleted records when enumerating objects that
     /// can be soft-deleted
-    #[clap(long, default_value_t = false)]
+    #[clap(
+        long,
+        default_value_t = false,
+        global = true,
+        help_heading = DATABASE_OPTIONS_HEADING,
+    )]
     include_deleted: bool,
 }
 
@@ -413,7 +427,7 @@ struct NetworkArgs {
     command: NetworkCommands,
 
     /// Print out raw data structures from the data store.
-    #[clap(long)]
+    #[clap(long, global = true)]
     verbose: bool,
 }
 
@@ -1436,8 +1450,11 @@ async fn cmd_db_sleds(
     let filter = match args.filter {
         Some(filter) => filter,
         None => {
-            eprintln!("note: listing all sleds (use -F to filter, e.g. -F in-service)");
-            SledFilter::All
+            eprintln!(
+                "note: listing all commissioned sleds \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            SledFilter::Commissioned
         }
     };
 

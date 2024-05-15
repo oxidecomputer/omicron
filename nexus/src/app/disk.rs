@@ -488,10 +488,10 @@ impl super::Nexus {
             // that user's program can act accordingly. In a way, the user's
             // program is an externally driven saga instead.
 
-            let client = crucible_pantry_client::Client::new(&format!(
-                "http://{}",
-                endpoint
-            ));
+            let client = crucible_pantry_client::Client::new_with_client(
+                &format!("http://{}", endpoint),
+                self.reqwest_client.clone(),
+            );
             let request = crucible_pantry_client::types::BulkWriteRequest {
                 offset: param.offset,
                 base64_encoded_data: param.base64_encoded_data,

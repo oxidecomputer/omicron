@@ -33,6 +33,7 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
+use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
 use nexus_types::internal_api::params::DatasetKind;
@@ -103,6 +104,7 @@ pub const TEST_SUITE_PASSWORD: &str = "oxide";
 pub struct ControlPlaneTestContext<N> {
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub external_client: ClientTestContext,
+    pub techport_client: ClientTestContext,
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
@@ -256,6 +258,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub logctx: LogContext,
 
     pub external_client: Option<ClientTestContext>,
+    pub techport_client: Option<ClientTestContext>,
     pub internal_client: Option<ClientTestContext>,
 
     pub server: Option<N>,
@@ -306,6 +309,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             start_time,
             logctx,
             external_client: None,
+            techport_client: None,
             internal_client: None,
             server: None,
             database: None,
@@ -754,18 +758,21 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let blueprint = {
             let mut blueprint_zones = BTreeMap::new();
+            let mut sled_state = BTreeMap::new();
             for (maybe_sled_agent, zones) in [
                 (self.sled_agent.as_ref(), &self.blueprint_zones),
                 (self.sled_agent2.as_ref(), &self.blueprint_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
+                    let sled_id = SledUuid::from_untyped_uuid(sa.sled_agent.id);
                     blueprint_zones.insert(
-                        SledUuid::from_untyped_uuid(sa.sled_agent.id),
+                        sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
                             zones: zones.clone(),
                         },
                     );
+                    sled_state.insert(sled_id, SledState::Active);
                 }
             }
             Blueprint {
@@ -776,6 +783,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 //
                 // However, for now, this isn't necessary.
                 blueprint_disks: BTreeMap::new(),
+                sled_state,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation
@@ -827,6 +835,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let external_server_addr =
             server.get_http_server_external_address().await;
+        let techport_external_server_addr =
+            server.get_http_server_techport_address().await;
         let internal_server_addr =
             server.get_http_server_internal_address().await;
         let testctx_external = ClientTestContext::new(
@@ -834,6 +844,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             self.logctx
                 .log
                 .new(o!("component" => "external client test context")),
+        );
+        let testctx_techport = ClientTestContext::new(
+            techport_external_server_addr,
+            self.logctx.log.new(
+                o!("component" => "techport external client test context"),
+            ),
         );
         let testctx_internal = ClientTestContext::new(
             internal_server_addr,
@@ -844,6 +860,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         self.external_dns_zone_name = Some(external_dns_zone_name);
         self.external_client = Some(testctx_external);
+        self.techport_client = Some(testctx_techport);
         self.internal_client = Some(testctx_internal);
         self.silo_name = Some(silo_name);
         self.user_name = Some(user_name);
@@ -1081,6 +1098,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             start_time: self.start_time,
             server: self.server.unwrap(),
             external_client: self.external_client.unwrap(),
+            techport_client: self.techport_client.unwrap(),
             internal_client: self.internal_client.unwrap(),
             database: self.database.unwrap(),
             clickhouse: self.clickhouse.unwrap(),

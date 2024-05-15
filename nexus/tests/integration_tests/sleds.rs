@@ -106,7 +106,7 @@ async fn test_physical_disk_create_list_delete(
     let disks_initial = physical_disks_list(&external_client, &disks_url).await;
 
     // Inject a disk into the database, observe it in the external API
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
     let physical_disk = DbPhysicalDisk::new(

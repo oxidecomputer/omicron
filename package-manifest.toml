@@ -575,8 +575,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "daab8580d6994c29f3c45ffa5a76b1de765b30da"
-source.sha256 = "15a9068fdd4521a77f7d32c80d1e6d3a6a4ad15accab77641ed8f14175ae0db6"
+source.commit = "30e5d89fae9190c69258ca77d5d5a1acec064742"
+source.sha256 = "f58bfd1b77748544b5b1a99a07e52bab8dc5673b9bd3a745ebbfdd614d492328"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -592,7 +592,7 @@ only_for_targets.image = "standard"
 only_for_targets.switch = "asic"
 
 [package.pumpkind-gz]
-service_name = "pumpkind-gz"
+service_name = "pumpkind"
 source.type = "prebuilt"
 source.repo = "pumpkind"
 source.commit = "3fe9c306590fb2f28f54ace7fd18b3c126323683"

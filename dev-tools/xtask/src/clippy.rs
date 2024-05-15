@@ -13,6 +13,9 @@ pub struct ClippyArgs {
     /// Automatically apply lint suggestions.
     #[clap(long)]
     fix: bool,
+    /// Error format passed to `cargo clippy`.
+    #[clap(long, value_name = "FMT")]
+    message_format: Option<String>,
 }
 
 pub fn run_cmd(args: ClippyArgs) -> Result<()> {
@@ -23,6 +26,17 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
 
     if args.fix {
         command.arg("--fix");
+    }
+
+    // Pass along the `--message-format` flag if it was provided.
+    //
+    // We don't really care about validating that it's a valid argument to
+    // `cargo check --message-format`, because `cargo check` will error out if
+    // it's unrecognized, and repeating the validation here just presents an
+    // opportunity to get out of sync with what Cargo actually accepts should a
+    // new message format be added.
+    if let Some(fmt) = args.message_format {
+        command.args(["--message-format", &fmt]);
     }
 
     command

@@ -480,6 +480,7 @@ mod test {
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -557,6 +558,10 @@ mod test {
         // `BlueprintZonesConfig`. This is going to get more painful over time
         // as we add to blueprints, but for now we can make this work.
         let mut blueprint_zones = BTreeMap::new();
+
+        // Also assume any sled in the collection is active.
+        let mut sled_state = BTreeMap::new();
+
         for (sled_id, zones_config) in collection.omicron_zones {
             blueprint_zones.insert(
                 sled_id,
@@ -580,6 +585,7 @@ mod test {
                         .collect(),
                 },
             );
+            sled_state.insert(sled_id, SledState::Active);
         }
 
         let dns_empty = dns_config_empty();
@@ -589,6 +595,7 @@ mod test {
             id: Uuid::new_v4(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            sled_state,
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
@@ -1119,7 +1126,7 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
@@ -1187,7 +1194,7 @@ mod test {
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
         let sled_rows = datastore
-            .sled_list_all_batched(&opctx, SledFilter::All)
+            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
             .await
             .unwrap();
         let zpool_rows =

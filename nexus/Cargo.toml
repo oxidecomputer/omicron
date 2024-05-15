@@ -42,6 +42,7 @@ itertools.workspace = true
 macaddr.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
+nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-networking.workspace = true
 nexus-test-interface.workspace = true

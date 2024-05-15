@@ -533,7 +533,7 @@ mod test {
     // activated
     #[nexus_test(server = crate::Server)]
     async fn test_driver_basic(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
@@ -698,7 +698,7 @@ mod test {
     // activated.
     #[nexus_test(server = crate::Server)]
     async fn test_activation_in_progress(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
@@ -843,7 +843,7 @@ mod test {
 
     #[nexus_test(server = crate::Server)]
     async fn test_saga_request_flow(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),

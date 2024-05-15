@@ -524,6 +524,8 @@ impl DeserializedFileArtifactSource {
 pub enum DeserializedControlPlaneZoneSource {
     File {
         path: Utf8PathBuf,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file_name: Option<String>,
     },
     Fake {
         name: String,
@@ -542,12 +544,15 @@ impl DeserializedControlPlaneZoneSource {
         F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,
     {
         let (name, data, mtime_source) = match self {
-            DeserializedControlPlaneZoneSource::File { path } => {
+            DeserializedControlPlaneZoneSource::File { path, file_name } => {
                 let data = std::fs::read(path)
                     .with_context(|| format!("failed to read {path}"))?;
-                let name = path.file_name().with_context(|| {
-                    format!("zone path missing file name: {path}")
-                })?;
+                let name = file_name
+                    .as_deref()
+                    .or_else(|| path.file_name())
+                    .with_context(|| {
+                        format!("zone path missing file name: {path}")
+                    })?;
                 // For now, always use the current time as the source. (Maybe
                 // change this to use the mtime on disk in the future?)
                 (name, data, MtimeSource::Now)

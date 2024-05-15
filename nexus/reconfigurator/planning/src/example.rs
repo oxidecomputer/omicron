@@ -13,7 +13,9 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
 pub struct ExampleSystem {
@@ -51,7 +53,7 @@ impl ExampleSystem {
 
         // Start with an empty blueprint containing only our sleds, no zones.
         let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::All),
+            base_input.all_sled_ids(SledFilter::Commissioned),
             "test suite",
             (test_name, "ExampleSystem initial"),
         );
@@ -66,7 +68,7 @@ impl ExampleSystem {
         .unwrap();
         builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
         for (sled_id, sled_resources) in
-            base_input.all_sled_resources(SledFilter::All)
+            base_input.all_sled_resources(SledFilter::Commissioned)
         {
             let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
             let _ = builder
@@ -105,7 +107,8 @@ impl ExampleSystem {
                         .add_omicron_zone_nic(
                             service_id,
                             OmicronZoneNic {
-                                id: nic.id,
+                                // TODO-cleanup use `TypedUuid` everywhere
+                                id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
                                 ip: nic.ip,
                                 slot: nic.slot,
