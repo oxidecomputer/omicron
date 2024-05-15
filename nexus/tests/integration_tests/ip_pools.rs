@@ -791,7 +791,7 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
     // allowed. It's worth doing because we want this code to correctly handle
     // IPv6 ranges when they are allowed again.
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let log = cptestctx.logctx.log.new(o!());
     let opctx = OpContext::for_tests(log, datastore.clone());
@@ -1147,7 +1147,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let ip_pools_url = "/v1/system/ip-pools";
     let pool_name = "mypool";

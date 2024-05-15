@@ -8,7 +8,7 @@ use omicron_uuid_kinds::SledKind;
 use uuid::Uuid;
 
 /// Underlay allocation for a sled added to an initialized rack
-#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[derive(Queryable, Insertable, Debug, Clone, PartialEq, Eq, Selectable)]
 #[diesel(table_name = sled_underlay_subnet_allocation)]
 pub struct SledUnderlaySubnetAllocation {
     pub rack_id: Uuid,

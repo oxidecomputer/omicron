@@ -8,7 +8,20 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 
-use crate::ServerContext;
+// `HeaderName` and `HeaderValue` contain `bytes::Bytes`, which trips
+// the `declare_interior_mutable_const` lint. But in a `const fn`
+// context, the `AtomicPtr` that is used in `Bytes` only ever points
+// to a `&'static str`, so does not have interior mutability in that
+// context.
+//
+// A Clippy bug means that even if you ignore interior mutability of
+// `Bytes` (the default behavior), it will still not ignore it for types
+// where the only interior mutability is through `Bytes`. This is fixed
+// in rust-lang/rust-clippy#12691, which should land in the Rust 1.80
+// toolchain; we can remove this attribute then.
+#![allow(clippy::declare_interior_mutable_const)]
+
+use crate::context::ApiContext;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{
@@ -43,7 +56,6 @@ use serde_urlencoded;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::str::FromStr;
-use std::sync::Arc;
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -226,7 +238,7 @@ impl RelayState {
    unpublished = true,
 }]
 pub(crate) async fn login_saml_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     _path_params: Path<LoginToProviderPathParam>,
     _query_params: Query<LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
@@ -245,13 +257,13 @@ pub(crate) async fn login_saml_begin(
    unpublished = true,
 }]
 pub(crate) async fn login_saml_redirect(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<LoginToProviderPathParam>,
     query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let nexus = &apictx.nexus;
+        let nexus = &apictx.context.nexus;
         let path_params = path_params.into_inner();
 
         // Use opctx_external_authn because this request will be
@@ -290,7 +302,11 @@ pub(crate) async fn login_saml_redirect(
         }
     };
 
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 /// Authenticate a user via SAML
@@ -300,13 +316,13 @@ pub(crate) async fn login_saml_redirect(
    tags = ["login"],
 }]
 pub(crate) async fn login_saml(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
 ) -> Result<HttpResponseSeeOther, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let nexus = &apictx.nexus;
+        let nexus = &apictx.context.nexus;
         let path_params = path_params.into_inner();
 
         // By definition, this request is not authenticated.  These operations
@@ -366,14 +382,18 @@ pub(crate) async fn login_saml(
                 // use absolute timeout even though session might idle out first.
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
-                apictx.session_absolute_timeout(),
-                apictx.external_tls_enabled,
+                apictx.context.session_absolute_timeout(),
+                apictx.context.external_tls_enabled,
             )?;
             headers.append(header::SET_COOKIE, cookie);
         }
         Ok(response)
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -388,14 +408,14 @@ pub struct LoginPathParam {
    unpublished = true,
 }]
 pub(crate) async fn login_local_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     _path_params: Path<LoginPathParam>,
     _query_params: Query<LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: figure out why instrumenting doesn't work
     // let apictx = rqctx.context();
     // let handler = async { serve_console_index(rqctx.context()).await };
-    // apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    // apictx.context.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
     serve_console_index(rqctx).await
 }
 
@@ -406,13 +426,13 @@ pub(crate) async fn login_local_begin(
    tags = ["login"],
 }]
 pub(crate) async fn login_local(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let nexus = &apictx.nexus;
+        let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
         let credentials = credentials.into_inner();
         let silo = path.silo_name.into();
@@ -435,22 +455,26 @@ pub(crate) async fn login_local(
                 // use absolute timeout even though session might idle out first.
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
-                apictx.session_absolute_timeout(),
-                apictx.external_tls_enabled,
+                apictx.context.session_absolute_timeout(),
+                apictx.context.external_tls_enabled,
             )?;
             headers.append(header::SET_COOKIE, cookie);
         }
         Ok(response)
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 async fn create_session(
     opctx: &OpContext,
-    apictx: &ServerContext,
+    apictx: &ApiContext,
     user: Option<nexus_db_queries::db::model::SiloUser>,
 ) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
-    let nexus = &apictx.nexus;
+    let nexus = &apictx.context.nexus;
     let session = match user {
         Some(user) => nexus.session_create(&opctx, user.id()).await?,
         None => Err(Error::Unauthenticated {
@@ -470,12 +494,12 @@ async fn create_session(
    tags = ["hidden"],
 }]
 pub(crate) async fn logout(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     cookies: Cookies,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let nexus = &apictx.nexus;
+        let nexus = &apictx.context.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await;
         let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
@@ -500,14 +524,20 @@ pub(crate) async fn logout(
             let headers = response.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                clear_session_cookie_header_value(apictx.external_tls_enabled)?,
+                clear_session_cookie_header_value(
+                    apictx.context.external_tls_enabled,
+                )?,
             );
         };
 
         Ok(response)
     };
 
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -561,10 +591,10 @@ pub struct LoginUrlQuery {
 /// `redirect_uri` represents the URL to send the user back to after successful
 /// login, and is included in `state` query param if present
 async fn get_login_url(
-    rqctx: &RequestContext<Arc<ServerContext>>,
+    rqctx: &RequestContext<ApiContext>,
     redirect_uri: Option<RelativeUri>,
 ) -> Result<String, Error> {
-    let nexus = &rqctx.context().nexus;
+    let nexus = &rqctx.context().context.nexus;
     let endpoint = nexus.endpoint_for_request(rqctx)?;
     let silo = endpoint.silo();
 
@@ -630,7 +660,7 @@ async fn get_login_url(
    unpublished = true,
 }]
 pub(crate) async fn login_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
@@ -639,11 +669,15 @@ pub(crate) async fn login_begin(
         let login_url = get_login_url(&rqctx, query.redirect_uri).await?;
         http_response_found(login_url)
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 pub(crate) async fn console_index_or_login_redirect(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = crate::context::op_context_for_external_api(&rqctx).await;
 
@@ -679,7 +713,7 @@ macro_rules! console_page {
     ($name:ident, $path:literal) => {
         #[endpoint { method = GET, path = $path, unpublished = true, }]
         pub(crate) async fn $name(
-            rqctx: RequestContext<Arc<ServerContext>>,
+            rqctx: RequestContext<ApiContext>,
         ) -> Result<Response<Body>, HttpError> {
             console_index_or_login_redirect(rqctx).await
         }
@@ -691,7 +725,7 @@ macro_rules! console_page_wildcard {
     ($name:ident, $path:literal) => {
         #[endpoint { method = GET, path = $path, unpublished = true, }]
         pub(crate) async fn $name(
-            rqctx: RequestContext<Arc<ServerContext>>,
+            rqctx: RequestContext<ApiContext>,
             _path_params: Path<RestPathParam>,
         ) -> Result<Response<Body>, HttpError> {
             console_index_or_login_redirect(rqctx).await
@@ -771,12 +805,13 @@ const WEB_SECURITY_HEADERS: [(HeaderName, HeaderValue); 3] = [
 /// file is present in the directory and `gzip` is listed in the request's
 /// `Accept-Encoding` header.
 async fn serve_static(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path: &Utf8Path,
     cache_control: HeaderValue,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let static_dir = apictx
+        .context
         .console_config
         .static_dir
         .as_deref()
@@ -841,7 +876,7 @@ async fn serve_static(
    unpublished = true,
 }]
 pub(crate) async fn asset(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     // asset URLs contain hashes, so cache for 1 year
@@ -855,7 +890,7 @@ pub(crate) async fn asset(
 
 /// Serve `<static_dir>/index.html` via [`serve_static`]. Disallow caching.
 pub(crate) async fn serve_console_index(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
     // do not cache this response in browser
     const CACHE_CONTROL: HeaderValue = HeaderValue::from_static("no-store");

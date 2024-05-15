@@ -14,6 +14,7 @@ use chrono::Utc;
 use oximeter::FieldType;
 use oximeter::FieldValue;
 use regex::Regex;
+use std::borrow::Borrow;
 use std::fmt;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -127,20 +128,24 @@ impl Literal {
             (FieldValue::Bool(lhs), Literal::Boolean(rhs)) => {
                 generate_cmp_match!(rhs, lhs)
             }
-            (FieldValue::String(lhs), Literal::String(rhs)) => match cmp {
-                Comparison::Eq => Ok(Some(lhs == rhs)),
-                Comparison::Ne => Ok(Some(lhs != rhs)),
-                Comparison::Gt => Ok(Some(lhs > rhs)),
-                Comparison::Ge => Ok(Some(lhs >= rhs)),
-                Comparison::Lt => Ok(Some(lhs < rhs)),
-                Comparison::Le => Ok(Some(lhs <= rhs)),
-                Comparison::Like => {
-                    let re = Regex::new(rhs).context(
-                        "failed to create regex for string matching",
-                    )?;
-                    Ok(Some(re.is_match(lhs)))
+            (FieldValue::String(lhs), Literal::String(rhs)) => {
+                let lhs = lhs.borrow();
+                let rhs = rhs.as_ref();
+                match cmp {
+                    Comparison::Eq => Ok(Some(lhs == rhs)),
+                    Comparison::Ne => Ok(Some(lhs != rhs)),
+                    Comparison::Gt => Ok(Some(lhs > rhs)),
+                    Comparison::Ge => Ok(Some(lhs >= rhs)),
+                    Comparison::Lt => Ok(Some(lhs < rhs)),
+                    Comparison::Le => Ok(Some(lhs <= rhs)),
+                    Comparison::Like => {
+                        let re = Regex::new(rhs).context(
+                            "failed to create regex for string matching",
+                        )?;
+                        Ok(Some(re.is_match(lhs)))
+                    }
                 }
-            },
+            }
             (FieldValue::IpAddr(lhs), Literal::IpAddr(rhs)) => {
                 generate_cmp_match!(rhs, lhs)
             }
@@ -377,7 +382,8 @@ mod tests {
 
     #[test]
     fn test_literal_compare_field_wrong_type() {
-        let value = FieldValue::String(String::from("foo"));
+        let value =
+            FieldValue::String(std::borrow::Cow::Owned(String::from("foo")));
         let lit = Literal::Integer(4);
         assert!(lit.compare_field(&value, Comparison::Eq).is_err());
     }

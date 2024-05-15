@@ -41,3 +41,9 @@ impl From<SledInstance> for views::SledInstance {
         }
     }
 }
+
+impl SledInstance {
+    pub fn instance_id(&self) -> Uuid {
+        self.identity.id
+    }
+}

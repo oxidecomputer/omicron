@@ -46,6 +46,7 @@ use tokio::net::TcpSocket;
 
 mod crucible_agent;
 mod db;
+mod helpers;
 mod mgs;
 mod nexus;
 mod oximeter;
@@ -84,14 +85,25 @@ struct Omdb {
         long,
         value_parser = parse_dropshot_log_level,
         default_value = "warn",
+        global = true,
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
-    #[arg(env = "OMDB_DNS_SERVER", long)]
+    #[arg(
+        long,
+        env = "OMDB_DNS_SERVER",
+        global = true,
+        help_heading = helpers::CONNECTION_OPTIONS_HEADING,
+    )]
     dns_server: Option<SocketAddr>,
 
     /// Allow potentially-destructive subcommands.
-    #[arg(short = 'w', long = "destructive")]
+    #[arg(
+        short = 'w',
+        long = "destructive",
+        global = true,
+        help_heading = helpers::SAFETY_OPTIONS_HEADING,
+    )]
     allow_destructive: bool,
 
     #[command(subcommand)]

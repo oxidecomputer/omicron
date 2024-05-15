@@ -153,7 +153,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // automatically linked to current silo
-    create_default_ip_pool(&client).await;
+    let default_pool = create_default_ip_pool(&client).await;
 
     assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
 
@@ -162,7 +162,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
             .unwrap(),
     );
     // not automatically linked to currently silo. see below
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    let (other_pool, ..) =
+        create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
 
     assert_ip_pool_utilization(client, "other-pool", 0, 5, 0, 0).await;
 
@@ -182,6 +183,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)));
+    assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
     assert_ip_pool_utilization(client, "default", 1, 65536, 0, 0).await;
 
@@ -200,6 +202,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+    assert_eq!(fip.ip_pool_id, default_pool.identity.id);
 
     assert_ip_pool_utilization(client, "default", 2, 65536, 0, 0).await;
 
@@ -230,10 +233,11 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
+    assert_eq!(fip.ip_pool_id, other_pool.identity.id);
 
     assert_ip_pool_utilization(client, "other-pool", 1, 5, 0, 0).await;
 
-    // Create with chosen IP from fleet-scoped named pool.
+    // Create with chosen IP from non-default pool.
     let fip_name = FIP_NAMES[3];
     let ip_addr = "10.1.0.5".parse().unwrap();
     let fip = create_floating_ip(
@@ -248,6 +252,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+    assert_eq!(fip.ip_pool_id, other_pool.identity.id);
 
     assert_ip_pool_utilization(client, "other-pool", 2, 5, 0, 0).await;
 }
@@ -623,7 +628,7 @@ async fn test_floating_ip_create_attachment(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
@@ -720,7 +725,7 @@ async fn test_external_ip_live_attach_detach(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
@@ -929,7 +934,7 @@ async fn test_floating_ip_attach_fail_between_projects(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let _nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
@@ -1004,7 +1009,7 @@ async fn test_external_ip_attach_fail_if_in_use_by_other(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     create_default_ip_pool(&client).await;
