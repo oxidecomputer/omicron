@@ -346,21 +346,6 @@ mod tests {
                 .expect("new zone ID should be present");
         }
 
-        // TODO: FIXME: AJS - Delete use of the control sled? - We don't
-        // actually compute changes based on generation number anymore. Zones or
-        // physical disks must change for a sled to be modified. It's not clear
-        // to me that the way we use this in this test is actually useful.
-        //
-        // Also call change_sled_zones without making any changes. This
-        // currently bumps the generation number, but in the future might
-        // become smarter and not do so (in which case this test will break).
-        let control_sled_id = example
-            .input
-            .all_sled_ids(SledFilter::Commissioned)
-            .nth(2)
-            .expect("at least 2 sleds present");
-        _ = builder.zones.change_sled_zones(control_sled_id);
-
         // Attempt to expunge the newly added Oximeter zone. This should fail
         // because we only support expunging zones that are unchanged from the
         // parent blueprint.
