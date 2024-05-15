@@ -2,7 +2,6 @@
 members = [
     "api_identity",
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -21,6 +20,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
     "end-to-end-tests",
@@ -84,7 +84,6 @@ members = [
 
 default-members = [
     "bootstore",
-    "caboose-util",
     "certificates",
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
@@ -103,6 +102,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/releng",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -228,6 +228,7 @@ bytes = "1.6.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
+cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
 ciborium = "0.2.2"
 cfg-if = "1.0"

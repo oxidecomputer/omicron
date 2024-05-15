@@ -786,15 +786,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "caboose-util"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hubtools",
- "omicron-workspace-hack",
-]
-
-[[package]]
 name = "camino"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2547,6 +2538,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
 dependencies = [
  "autocfg",
+ "tokio",
 ]
 
 [[package]]
@@ -5593,6 +5585,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-releng"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "camino-tempfile",
+ "cargo_metadata",
+ "chrono",
+ "clap",
+ "fs-err",
+ "futures",
+ "hex",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "omicron-zone-package",
+ "once_cell",
+ "reqwest",
+ "semver 1.0.22",
+ "serde",
+ "sha2",
+ "shell-words",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tar",
+ "tokio",
+ "toml 0.8.12",
+ "tufaceous-lib",
+]
+
+[[package]]
 name = "omicron-rpaths"
 version = "0.1.0"
 dependencies = [
@@ -5778,6 +5801,7 @@ dependencies = [
  "elliptic-curve",
  "ff",
  "flate2",
+ "fs-err",
  "futures",
  "futures-channel",
  "futures-core",
@@ -5815,11 +5839,8 @@ dependencies = [
  "pem-rfc7468",
  "petgraph",
  "postgres-types",
- "ppv-lite86",
  "predicates",
  "proc-macro2",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
  "regex",
  "regex-automata 0.4.5",
  "regex-syntax 0.8.2",
@@ -5859,7 +5880,6 @@ dependencies = [
  "yasna",
  "zerocopy 0.7.32",
  "zeroize",
- "zip",
 ]
 
 [[package]]

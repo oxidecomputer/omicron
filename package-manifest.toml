@@ -592,7 +592,7 @@ only_for_targets.image = "standard"
 only_for_targets.switch = "asic"
 
 [package.pumpkind-gz]
-service_name = "pumpkind-gz"
+service_name = "pumpkind"
 source.type = "prebuilt"
 source.repo = "pumpkind"
 source.commit = "3fe9c306590fb2f28f54ace7fd18b3c126323683"
