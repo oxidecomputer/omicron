@@ -92,6 +92,10 @@ impl<T: TriMapEntry> TriMap<T> {
         }
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.entries.iter()
+    }
+
     /// Checks general invariants of the map.
     ///
     /// The code below always upholds these invariants, but it's useful to have

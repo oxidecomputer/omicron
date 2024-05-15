@@ -1044,10 +1044,12 @@ pub mod test {
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
+    use std::mem;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
@@ -1332,6 +1334,14 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
         let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let input = {
+            // Clear out the external networking records from `input`, since
+            // we're building an empty blueprint.
+            let mut builder = input.into_builder();
+            *builder.network_resources_mut() =
+                OmicronZoneNetworkResources::new();
+            builder.build()
+        };
 
         // Start with an empty blueprint (sleds with no zones).
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
@@ -1380,6 +1390,14 @@ pub mod test {
         // Discard the example blueprint and start with an empty one.
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let input = {
+            // Clear out the external networking records from `input`, since
+            // we're building an empty blueprint.
+            let mut builder = input.into_builder();
+            *builder.network_resources_mut() =
+                OmicronZoneNetworkResources::new();
+            builder.build()
+        };
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::Commissioned),
             "test",
@@ -1421,7 +1439,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input, mut parent) =
+        let (mut collection, mut input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Remove the Nexus zone from one of the sleds so that
@@ -1435,12 +1453,51 @@ pub mod test {
                 if zones.zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
+                    let mut removed_nexus = None;
                     parent
                         .blueprint_zones
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
-                        .retain(|z| !z.zone_type.is_nexus());
+                        .retain(|z| match &z.zone_type {
+                            BlueprintZoneType::Nexus(z) => {
+                                removed_nexus = Some(z.clone());
+                                false
+                            }
+                            _ => true,
+                        });
+                    let removed_nexus =
+                        removed_nexus.expect("removed Nexus from blueprint");
+
+                    // Also remove this Nexus's external networking resources
+                    // from `input`.
+                    let mut builder = input.into_builder();
+                    let mut new_network_resources =
+                        OmicronZoneNetworkResources::new();
+                    let old_network_resources = builder.network_resources_mut();
+                    for ip in old_network_resources.omicron_zone_external_ips()
+                    {
+                        if ip.ip.id() != removed_nexus.external_ip.id {
+                            new_network_resources
+                                .add_external_ip(ip.zone_id, ip.ip)
+                                .expect("copied IP to new input");
+                        }
+                    }
+                    for nic in old_network_resources.omicron_zone_nics() {
+                        if nic.nic.id.into_untyped_uuid()
+                            != removed_nexus.nic.id
+                        {
+                            new_network_resources
+                                .add_nic(nic.zone_id, nic.nic)
+                                .expect("copied NIC to new input");
+                        }
+                    }
+                    mem::swap(
+                        old_network_resources,
+                        &mut new_network_resources,
+                    );
+                    input = builder.build();
+
                     break;
                 }
             }

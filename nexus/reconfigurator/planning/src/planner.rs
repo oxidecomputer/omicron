@@ -504,6 +504,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::DiffSledModified;
+    use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -511,9 +512,11 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
+    use std::mem;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -722,6 +725,42 @@ mod test {
             assert_eq!(collection.sled_agents.len(), 1);
             assert_eq!(collection.omicron_zones.len(), 1);
             blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
+
+            // Also remove all the networking resources for the zones we just
+            // stripped out; i.e., only keep those for `keep_sled_id`.
+            let mut new_network_resources = OmicronZoneNetworkResources::new();
+            let old_network_resources = builder.network_resources_mut();
+            for old_ip in old_network_resources.omicron_zone_external_ips() {
+                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
+                    |(_, zone)| {
+                        zone.zone_type
+                            .external_networking()
+                            .map(|(ip, _nic)| ip.id() == old_ip.ip.id())
+                            .unwrap_or(false)
+                    },
+                ) {
+                    new_network_resources
+                        .add_external_ip(old_ip.zone_id, old_ip.ip)
+                        .expect("copied IP to new input");
+                }
+            }
+            for old_nic in old_network_resources.omicron_zone_nics() {
+                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
+                    |(_, zone)| {
+                        zone.zone_type
+                            .external_networking()
+                            .map(|(_ip, nic)| {
+                                nic.id == old_nic.nic.id.into_untyped_uuid()
+                            })
+                            .unwrap_or(false)
+                    },
+                ) {
+                    new_network_resources
+                        .add_nic(old_nic.zone_id, old_nic.nic)
+                        .expect("copied NIC to new input");
+                }
+            }
+            mem::swap(old_network_resources, &mut &mut new_network_resources);
 
             (keep_sled_id, blueprint, collection, builder.build())
         };

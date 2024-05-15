@@ -59,6 +59,18 @@ impl OmicronZoneNetworkResources {
         }
     }
 
+    pub fn omicron_zone_external_ips(
+        &self,
+    ) -> impl Iterator<Item = OmicronZoneExternalIpEntry> + '_ {
+        self.omicron_zone_external_ips.iter().copied()
+    }
+
+    pub fn omicron_zone_nics(
+        &self,
+    ) -> impl Iterator<Item = OmicronZoneNicEntry> + '_ {
+        self.omicron_zone_nics.iter().copied()
+    }
+
     pub fn add_external_ip(
         &mut self,
         zone_id: OmicronZoneUuid,
@@ -79,7 +91,7 @@ impl OmicronZoneNetworkResources {
         zone_id: OmicronZoneUuid,
         nic: OmicronZoneNic,
     ) -> Result<(), AddNetworkResourceError> {
-        let entry = OmicronZoneNicEntry { zone_id, nic: nic.clone() };
+        let entry = OmicronZoneNicEntry { zone_id, nic };
         self.omicron_zone_nics.insert_no_dups(entry).map_err(|err| {
             AddNetworkResourceError::DuplicateOmicronZoneNic {
                 zone_id,
@@ -221,7 +233,7 @@ pub struct OmicronZoneExternalSnatIp {
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
@@ -233,7 +245,7 @@ pub struct OmicronZoneNic {
 /// A pair of an Omicron zone ID and an external IP.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct OmicronZoneExternalIpEntry {
     pub zone_id: OmicronZoneUuid,
     pub ip: OmicronZoneExternalIp,
@@ -264,10 +276,10 @@ impl TriMapEntry for OmicronZoneExternalIpEntry {
 /// A pair of an Omicron zone ID and a network interface.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct OmicronZoneNicEntry {
-    zone_id: OmicronZoneUuid,
-    nic: OmicronZoneNic,
+    pub zone_id: OmicronZoneUuid,
+    pub nic: OmicronZoneNic,
 }
 
 impl TriMapEntry for OmicronZoneNicEntry {

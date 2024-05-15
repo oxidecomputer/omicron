@@ -10,8 +10,12 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlanningInput;
+use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
+use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
+use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
 use std::collections::HashSet;
@@ -113,6 +117,64 @@ impl<'a> BuilderExternalNetworking<'a> {
 
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
+                }
+            }
+        }
+
+        // Check the planning input: there shouldn't be any external networking
+        // resources in the database (the source of `input`) that we don't know
+        // about from the parent blueprint.
+        for external_ip_entry in
+            input.network_resources().omicron_zone_external_ips()
+        {
+            if !used_external_ips.contains(&external_ip_entry.ip.ip()) {
+                bail!(
+                    "planning input contains unexpected external IP \
+                     (IP not found in parent blueprint): {external_ip_entry:?}"
+                );
+            }
+        }
+        for nic_entry in input.network_resources().omicron_zone_nics() {
+            if !used_macs.contains(&nic_entry.nic.mac) {
+                bail!(
+                    "planning input contains unexpected NIC \
+                     (MAC not found in parent blueprint): {nic_entry:?}"
+                );
+            }
+            match nic_entry.nic.ip {
+                IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
+                    if !existing_nexus_v4_ips.contains(&ip) {
+                        bail!(
+                            "planning input contains unexpected NIC \
+                             (IP not found in parent blueprint): {nic_entry:?}"
+                        );
+                    }
+                }
+                IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
+                    // TODO check existing_ntp_v4_ips, once it exists
+                }
+                IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
+                    // TODO check existing_dns_v4_ips, once it exists
+                }
+                IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
+                    if !existing_nexus_v6_ips.contains(&ip) {
+                        bail!(
+                            "planning input contains unexpected NIC \
+                             (IP not found in parent blueprint): {nic_entry:?}"
+                        );
+                    }
+                }
+                IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
+                    // TODO check existing_ntp_v6_ips, once it exists
+                }
+                IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
+                    // TODO check existing_dns_v6_ips, once it exists
+                }
+                _ => {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not contained in known OPTE subnet): {nic_entry:?}"
+                    )
                 }
             }
         }
