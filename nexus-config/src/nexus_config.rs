@@ -806,6 +806,7 @@ mod test {
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             instance_watcher.period_secs = 30
+            instance_updater.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
