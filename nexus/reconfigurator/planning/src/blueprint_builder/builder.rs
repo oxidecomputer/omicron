@@ -7,12 +7,9 @@
 use crate::ip_allocator::IpAllocator;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
-use anyhow::bail;
-use debug_ignore::DebugIgnore;
 use internal_dns::config::Host;
 use internal_dns::config::Zone;
 use ipnet::IpAdd;
-use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
@@ -35,13 +32,9 @@ use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
-use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
-use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::IpNet;
-use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -64,13 +57,14 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
 
+use super::external_networking::BuilderExternalNetworking;
+use super::external_networking::ExternalNetworkingChoice;
 use super::zones::is_already_expunged;
 use super::zones::BuilderZoneState;
 use super::zones::BuilderZonesConfig;
@@ -142,9 +136,10 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
-    // These fields are used to allocate resources from sleds.
+    // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
+    external_networking: BuilderExternalNetworking<'a>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -154,16 +149,6 @@ pub struct BlueprintBuilder<'a> {
 
     creator: String,
     comments: Vec<String>,
-
-    // These fields mirror how RSS chooses addresses for zone NICs.
-    nexus_v4_ips: AvailableIterator<'static, Ipv4Addr>,
-    nexus_v6_ips: AvailableIterator<'static, Ipv6Addr>,
-
-    // Iterator of available external IPs for service zones
-    available_external_ips: AvailableIterator<'a, IpAddr>,
-
-    // Iterator of available MAC addresses in the system address range
-    available_system_macs: AvailableIterator<'a, MacAddr>,
 
     // Random number generator for new UUIDs
     rng: BlueprintBuilderRng,
@@ -242,111 +227,8 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
-        // Scan through the parent blueprint and build several sets of "used
-        // resources". When adding new control plane zones to a sled, we may
-        // need to allocate new resources to that zone. However, allocation at
-        // this point is entirely optimistic and theoretical: our caller may
-        // discard the blueprint we create without ever making it the new
-        // target, or it might be an arbitrarily long time before it becomes
-        // the target. We need to be able to make allocation decisions that we
-        // expect the blueprint executor to be able to realize successfully if
-        // and when we become the target, but we cannot _actually_ perform
-        // resource allocation.
-        //
-        // To do this, we look at our parent blueprint's used resources, and
-        // then choose new resources that aren't already in use (if possible;
-        // if we need to allocate a new resource and the parent blueprint
-        // appears to be using all the resources of that kind, our blueprint
-        // generation will fail).
-        //
-        // For example, RSS assigns Nexus NIC IPs by stepping through a list of
-        // addresses based on `NEXUS_OPTE_IPVx_SUBNET` (as in the iterators
-        // below). We use the same list of addresses, but additionally need to
-        // filter out the existing IPs for any Nexus instances that already
-        // exist.
-        //
-        // Note that by building these iterators up front based on
-        // `parent_blueprint`, we cannot reuse resources in a case where we
-        // remove a zone that used a resource and then add another zone that
-        // wants the same kind of resource. That is mostly okay, but there are
-        // some cases in which we may have to do that -- particularly external
-        // DNS zones, which tend to have a small number of fixed IPs. Solving
-        // that is a TODO.
-        //
-        // Also note that currently, we don't perform any kind of garbage
-        // collection on sleds and zones that no longer have any attached
-        // resources. Once a sled or zone is marked expunged, it will always
-        // stay in that state.
-        // https://github.com/oxidecomputer/omicron/issues/5552 tracks
-        // implementing this kind of garbage collection, and we should do it
-        // very soon.
-
-        let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
-        let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
-        let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
-        let mut used_macs: HashSet<MacAddr> = HashSet::new();
-
-        for (_, z) in
-            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
-        {
-            let zone_type = &z.zone_type;
-            if let BlueprintZoneType::Nexus(nexus) = zone_type {
-                match nexus.nic.ip {
-                    IpAddr::V4(ip) => {
-                        if !existing_nexus_v4_ips.insert(ip) {
-                            bail!("duplicate Nexus NIC IP: {ip}");
-                        }
-                    }
-                    IpAddr::V6(ip) => {
-                        if !existing_nexus_v6_ips.insert(ip) {
-                            bail!("duplicate Nexus NIC IP: {ip}");
-                        }
-                    }
-                }
-            }
-
-            if let Some((external_ip, nic)) = zone_type.external_networking() {
-                // For the test suite, ignore localhost.  It gets reused many
-                // times and that's okay.  We don't expect to see localhost
-                // outside the test suite.
-                if !external_ip.ip().is_loopback()
-                    && !used_external_ips.insert(external_ip.ip())
-                {
-                    bail!("duplicate external IP: {external_ip:?}");
-                }
-
-                if !used_macs.insert(nic.mac) {
-                    bail!("duplicate service vNIC MAC: {}", nic.mac);
-                }
-            }
-        }
-
-        // TODO-performance Building these iterators as "walk through the list
-        // and skip anything we've used already" is fine as long as we're
-        // talking about a small number of resources (e.g., single-digit number
-        // of Nexus instances), but wouldn't be ideal if we have many resources
-        // we need to skip. We could do something smarter here based on the sets
-        // of used resources we built above if needed.
-        let nexus_v4_ips = AvailableIterator::new(
-            NEXUS_OPTE_IPV4_SUBNET
-                .0
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
-            existing_nexus_v4_ips,
-        );
-        let nexus_v6_ips = AvailableIterator::new(
-            NEXUS_OPTE_IPV6_SUBNET
-                .0
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
-            existing_nexus_v6_ips,
-        );
-        let available_external_ips = AvailableIterator::new(
-            input.service_ip_pool_ranges().iter().flat_map(|r| r.iter()),
-            used_external_ips,
-        );
-        let available_system_macs =
-            AvailableIterator::new(MacAddr::iter_system(), used_macs);
+        let external_networking =
+            BuilderExternalNetworking::new(parent_blueprint, input)?;
 
         // Prefer the sled state from our parent blueprint for sleds
         // that were in it; there may be new sleds in `input`, in which
@@ -378,15 +260,12 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint,
             input,
             sled_ip_allocators: BTreeMap::new(),
+            external_networking,
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
             sled_state,
             creator: creator.to_owned(),
             comments: Vec::new(),
-            nexus_v4_ips,
-            nexus_v6_ips,
-            available_external_ips,
-            available_system_macs,
             rng: BlueprintBuilderRng::new(),
         })
     }
@@ -806,44 +685,27 @@ impl<'a> BlueprintBuilder<'a> {
 
         for _ in 0..num_nexus_to_add {
             let nexus_id = self.rng.zone_rng.next();
+            let ExternalNetworkingChoice {
+                external_ip,
+                nic_ip,
+                nic_subnet,
+                nic_mac,
+            } = self.external_networking.for_new_nexus()?;
             let external_ip = OmicronZoneExternalFloatingIp {
                 id: self.rng.external_ip_rng.next(),
-                ip: self
-                    .available_external_ips
-                    .next()
-                    .ok_or(Error::NoExternalServiceIpAvailable)?,
+                ip: external_ip,
             };
 
             let nic = {
-                let (ip, subnet) = match external_ip.ip {
-                    IpAddr::V4(_) => (
-                        self.nexus_v4_ips
-                            .next()
-                            .ok_or(Error::ExhaustedNexusIps)?
-                            .into(),
-                        IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-                    ),
-                    IpAddr::V6(_) => (
-                        self.nexus_v6_ips
-                            .next()
-                            .ok_or(Error::ExhaustedNexusIps)?
-                            .into(),
-                        IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
-                    ),
-                };
-                let mac = self
-                    .available_system_macs
-                    .next()
-                    .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
                     id: self.rng.network_interface_rng.next(),
                     kind: NetworkInterfaceKind::Service {
                         id: nexus_id.into_untyped_uuid(),
                     },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
-                    ip,
-                    mac,
-                    subnet,
+                    ip: nic_ip,
+                    mac: nic_mac,
+                    subnet: nic_subnet,
                     vni: Vni::SERVICES_VNI,
                     primary: true,
                     slot: 0,
@@ -939,45 +801,6 @@ impl<'a> BlueprintBuilder<'a> {
                 sled_id
             ))
         })
-    }
-}
-
-/// Combines a base iterator with an `in_use` set, filtering out any elements
-/// that are in the "in_use" set.
-///
-/// This can be done with a chained `.filter` on the iterator, but
-/// `AvailableIterator` also allows for inspection of the `in_use` set.
-///
-/// Note that this is a stateful iterator -- i.e. it implements `Iterator`, not
-/// `IntoIterator`. That's what we currently need in the planner.
-#[derive(Debug)]
-pub struct AvailableIterator<'a, T> {
-    base: DebugIgnore<Box<dyn Iterator<Item = T> + Send + 'a>>,
-    in_use: HashSet<T>,
-}
-
-impl<'a, T: Hash + Eq> AvailableIterator<'a, T> {
-    /// Creates a new `AvailableIterator` from a base iterator and a set of
-    /// elements that are in use.
-    pub fn new<I>(base: I, in_use: impl IntoIterator<Item = T>) -> Self
-    where
-        I: Iterator<Item = T> + Send + 'a,
-    {
-        let in_use = in_use.into_iter().collect();
-        AvailableIterator { base: DebugIgnore(Box::new(base)), in_use }
-    }
-
-    /// Returns the in-use set.
-    pub fn in_use(&self) -> &HashSet<T> {
-        &self.in_use
-    }
-}
-
-impl<T: Hash + Eq> Iterator for AvailableIterator<'_, T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        self.base.find(|item| !self.in_use.contains(item))
     }
 }
 
@@ -1230,11 +1053,12 @@ pub mod test {
     use expectorate::assert_contents;
     use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
-    use test_strategy::proptest;
+    use std::mem;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
@@ -1535,6 +1359,14 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
         let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let input = {
+            // Clear out the external networking records from `input`, since
+            // we're building an empty blueprint.
+            let mut builder = input.into_builder();
+            *builder.network_resources_mut() =
+                OmicronZoneNetworkResources::new();
+            builder.build()
+        };
 
         // Start with an empty blueprint (sleds with no zones).
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
@@ -1583,6 +1415,14 @@ pub mod test {
         // Discard the example blueprint and start with an empty one.
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let input = {
+            // Clear out the external networking records from `input`, since
+            // we're building an empty blueprint.
+            let mut builder = input.into_builder();
+            *builder.network_resources_mut() =
+                OmicronZoneNetworkResources::new();
+            builder.build()
+        };
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::Commissioned),
             "test",
@@ -1624,7 +1464,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, input, mut parent) =
+        let (mut collection, mut input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Remove the Nexus zone from one of the sleds so that
@@ -1638,12 +1478,51 @@ pub mod test {
                 if zones.zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
+                    let mut removed_nexus = None;
                     parent
                         .blueprint_zones
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
-                        .retain(|z| !z.zone_type.is_nexus());
+                        .retain(|z| match &z.zone_type {
+                            BlueprintZoneType::Nexus(z) => {
+                                removed_nexus = Some(z.clone());
+                                false
+                            }
+                            _ => true,
+                        });
+                    let removed_nexus =
+                        removed_nexus.expect("removed Nexus from blueprint");
+
+                    // Also remove this Nexus's external networking resources
+                    // from `input`.
+                    let mut builder = input.into_builder();
+                    let mut new_network_resources =
+                        OmicronZoneNetworkResources::new();
+                    let old_network_resources = builder.network_resources_mut();
+                    for ip in old_network_resources.omicron_zone_external_ips()
+                    {
+                        if ip.ip.id() != removed_nexus.external_ip.id {
+                            new_network_resources
+                                .add_external_ip(ip.zone_id, ip.ip)
+                                .expect("copied IP to new input");
+                        }
+                    }
+                    for nic in old_network_resources.omicron_zone_nics() {
+                        if nic.nic.id.into_untyped_uuid()
+                            != removed_nexus.nic.id
+                        {
+                            new_network_resources
+                                .add_nic(nic.zone_id, nic.nic)
+                                .expect("copied NIC to new input");
+                        }
+                    }
+                    mem::swap(
+                        old_network_resources,
+                        &mut new_network_resources,
+                    );
+                    input = builder.build();
+
                     break;
                 }
             }
@@ -1886,32 +1765,5 @@ pub mod test {
         };
 
         logctx.cleanup_successful();
-    }
-
-    /// Test that `AvailableIterator` correctly filters out items that are in
-    /// use.
-    #[proptest]
-    fn test_available_iterator(items: HashSet<(i32, bool)>) {
-        let mut in_use_map = HashSet::new();
-        let mut expected_available = Vec::new();
-        let items: Vec<_> = items
-            .into_iter()
-            .map(|(item, in_use)| {
-                if in_use {
-                    in_use_map.insert(item);
-                } else {
-                    expected_available.push(item);
-                }
-                item
-            })
-            .collect();
-
-        let available = AvailableIterator::new(items.into_iter(), in_use_map);
-        let actual_available = available.collect::<Vec<_>>();
-
-        assert_eq!(
-            expected_available, actual_available,
-            "available items match"
-        );
     }
 }

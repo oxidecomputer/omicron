@@ -5,6 +5,7 @@
 //! Low-level facility for generating Blueprints
 
 mod builder;
+mod external_networking;
 mod zones;
 
 pub use builder::*;
