@@ -304,7 +304,10 @@ impl BpSledSubtableData for &OmicronPhysicalDisksConfig {
             self.disks.iter().map(|d| d.identity.clone()).collect();
 
         sorted_disk_ids.into_iter().map(move |d| {
-            BpSledSubtableRow::new(state, vec![d.vendor, d.model, d.serial])
+            BpSledSubtableRow::from_strings(
+                state,
+                vec![d.vendor, d.model, d.serial],
+            )
         })
     }
 }
@@ -319,7 +322,7 @@ impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
         state: BpDiffState,
     ) -> impl Iterator<Item = BpSledSubtableRow> {
         self.zones().map(move |zone| {
-            BpSledSubtableRow::new(
+            BpSledSubtableRow::from_strings(
                 state,
                 vec![
                     zone.kind().to_string(),
