@@ -344,10 +344,7 @@ impl BackgroundTasks {
             driver.register(
                 "v2p_manager".to_string(),
                 String::from("manages opte v2p mappings for vpc networking"),
-                // TODO add custom config?
-                // should we create a general setting that can be shared across
-                // multiple tasks? A lot of these have the same values...
-                config.switch_port_settings_manager.period_secs,
+                config.v2p_mapping_propagation.period_secs,
                 Box::new(V2PManager::new(datastore.clone())),
                 opctx.child(BTreeMap::new()),
                 vec![Box::new(v2p_watcher.1)],
