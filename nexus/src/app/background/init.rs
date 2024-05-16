@@ -14,6 +14,7 @@ use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
 use super::instance_watcher;
+use super::instance_updater;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
@@ -398,7 +399,7 @@ impl BackgroundTasks {
         };
 
         let task_instance_updater = {
-            let watcher = instance_updater::InstanceUpdater::new(
+            let updater = instance_updater::InstanceUpdater::new(
                 datastore.clone(),
                 saga_request.clone(),
             );
@@ -407,7 +408,7 @@ impl BackgroundTasks {
                 "detects if instances require update sagas and schedules them"
                     .to_string(),
                 config.instance_updater.period_secs,
-                Box::new(watcher),
+                Box::new(updater),
                 opctx.child(BTreeMap::new()),
                 vec![],
             )

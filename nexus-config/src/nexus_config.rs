@@ -940,7 +940,7 @@ mod test {
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
-                        instance_watcher: InstanceWatcherConfig {
+                        instance_updater: InstanceUpdaterConfig {
                             period_secs: Duration::from_secs(30),
                         },
                         service_firewall_propagation:
