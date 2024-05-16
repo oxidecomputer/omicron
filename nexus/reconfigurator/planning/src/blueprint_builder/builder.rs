@@ -47,6 +47,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use sled_agent_client::ZoneKind;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -614,15 +615,19 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Ensure::Added)
     }
 
-    /// Return the number of Nexus zones that would be configured to run on the
-    /// given sled if this builder generated a blueprint
+    /// Return the number of zones of a given kind that would be configured to
+    /// run on the given sled if this builder generated a blueprint
     ///
     /// This value may change before a blueprint is actually generated if
     /// further changes are made to the builder.
-    pub fn sled_num_nexus_zones(&self, sled_id: SledUuid) -> usize {
+    pub fn sled_num_zones_of_kind(
+        &self,
+        sled_id: SledUuid,
+        kind: ZoneKind,
+    ) -> usize {
         self.zones
             .current_sled_zones(sled_id)
-            .filter(|(z, _)| z.zone_type.is_nexus())
+            .filter(|(z, _)| z.zone_type.kind() == kind)
             .count()
     }
 
@@ -669,7 +674,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_dns_servers: Vec<IpAddr>,
     ) -> Result<EnsureMultiple, Error> {
         // How many Nexus zones do we need to add?
-        let nexus_count = self.sled_num_nexus_zones(sled_id);
+        let nexus_count = self.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
         let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
         {
             Some(0) => return Ok(EnsureMultiple::NotNeeded),

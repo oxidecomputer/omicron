@@ -20,6 +20,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -342,7 +343,8 @@ impl<'a> Planner<'a> {
         // but will not include sleds that have been expunged or decommissioned.
         let mut num_total_nexus = 0;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
+            let num_nexus =
+                self.blueprint.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
             num_total_nexus += num_nexus;
         }
 
@@ -423,8 +425,9 @@ impl<'a> Planner<'a> {
             // total Nexus zones go on a given sled, but we have a count of how
             // many we want to add. Construct a new target count. Maybe the
             // builder should provide a different interface here?
-            let new_nexus_count = self.blueprint.sled_num_nexus_zones(sled_id)
-                + additional_nexus_count;
+            let new_nexus_count =
+                self.blueprint.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus)
+                    + additional_nexus_count;
             match self
                 .blueprint
                 .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
