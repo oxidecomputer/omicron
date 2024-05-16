@@ -268,7 +268,7 @@ impl fmt::Display for BpSledSubtable {
                 for (i, (column, width)) in
                     row.columns.iter().zip(&widths).enumerate()
                 {
-                    // Write the before columns or nothing
+                    // Write the after columns or nothing
                     let column = if let BpSledSubtableColumn::Diff {
                         after,
                         ..
