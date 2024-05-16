@@ -71,7 +71,7 @@ impl NexusSaga for SagaVmmDestroyed {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(delete_sled_resource_action());
