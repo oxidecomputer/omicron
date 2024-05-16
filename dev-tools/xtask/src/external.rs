@@ -34,23 +34,27 @@ pub struct External {
     #[clap(trailing_var_arg(true), allow_hyphen_values(true))]
     args: Vec<OsString>,
 
-    #[clap(skip)]
-    command: Option<Command>,
+    // This stores an in-progress Command builder. `cargo_args` appends args
+    // to it, and `exec` consumes it. Clap does not treat this as a command
+    // (`skip`), but fills in this field by calling `new_command`.
+    #[clap(skip = new_command())]
+    command: Command,
 }
 
 impl External {
+    /// Add additional arguments to `cargo run` (for instance, to run the
+    /// external xtask in release mode).
     pub fn cargo_args(
         mut self,
         args: impl IntoIterator<Item = impl AsRef<OsStr>>,
     ) -> External {
-        self.command.get_or_insert_with(default_command).args(args);
+        self.command.args(args);
         self
     }
 
-    pub fn exec(self, bin_target: impl AsRef<OsStr>) -> Result<()> {
+    pub fn exec(mut self, bin_target: impl AsRef<OsStr>) -> Result<()> {
         let error = self
             .command
-            .unwrap_or_else(default_command)
             .arg("--bin")
             .arg(bin_target)
             .arg("--")
@@ -60,7 +64,7 @@ impl External {
     }
 }
 
-fn default_command() -> Command {
+fn new_command() -> Command {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut command = Command::new(cargo);
     command.arg("run");
