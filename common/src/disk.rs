@@ -22,6 +22,6 @@ use serde::{Deserialize, Serialize};
 )]
 pub struct DiskIdentity {
     pub vendor: String,
-    pub serial: String,
     pub model: String,
+    pub serial: String,
 }

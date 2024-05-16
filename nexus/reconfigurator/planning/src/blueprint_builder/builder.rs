@@ -45,7 +45,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -807,7 +807,7 @@ impl<'a> BlueprintBuilder<'a> {
         for _ in 0..num_nexus_to_add {
             let nexus_id = self.rng.zone_rng.next();
             let external_ip = OmicronZoneExternalFloatingIp {
-                id: ExternalIpUuid::new_v4(),
+                id: self.rng.external_ip_rng.next(),
                 ip: self
                     .available_external_ips
                     .next()
@@ -992,6 +992,7 @@ struct BlueprintBuilderRng {
     blueprint_rng: UuidRng,
     zone_rng: TypedUuidRng<OmicronZoneKind>,
     network_interface_rng: UuidRng,
+    external_ip_rng: TypedUuidRng<ExternalIpKind>,
 }
 
 impl BlueprintBuilderRng {
@@ -1004,8 +1005,15 @@ impl BlueprintBuilderRng {
         let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
         let network_interface_rng =
             UuidRng::from_parent_rng(&mut parent, "network_interface");
+        let external_ip_rng =
+            TypedUuidRng::from_parent_rng(&mut parent, "external_ip");
 
-        BlueprintBuilderRng { blueprint_rng, zone_rng, network_interface_rng }
+        BlueprintBuilderRng {
+            blueprint_rng,
+            zone_rng,
+            network_interface_rng,
+            external_ip_rng,
+        }
     }
 
     fn set_seed<H: Hash>(&mut self, seed: H) {
@@ -1220,6 +1228,7 @@ pub mod test {
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
+    use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
@@ -1260,8 +1269,7 @@ pub mod test {
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         verify_blueprint(&blueprint_initial);
 
-        let diff =
-            blueprint_initial.diff_since_collection(&collection).unwrap();
+        let diff = blueprint_initial.diff_since_collection(&collection);
         // There are some differences with even a no-op diff between a
         // collection and a blueprint, such as new data being added to
         // blueprints like DNS generation numbers.
@@ -1274,9 +1282,9 @@ pub mod test {
             "tests/output/blueprint_builder_initial_diff.txt",
             &diff.display().to_string(),
         );
-        assert_eq!(diff.sleds_added().len(), 0);
-        assert_eq!(diff.sleds_removed().len(), 0);
-        assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
 
         // Test a no-op blueprint.
         let builder = BlueprintBuilder::new_based_on(
@@ -1288,14 +1296,14 @@ pub mod test {
         .expect("failed to create builder");
         let blueprint = builder.build();
         verify_blueprint(&blueprint);
-        let diff = blueprint.diff_since_blueprint(&blueprint_initial).unwrap();
+        let diff = blueprint.diff_since_blueprint(&blueprint_initial);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added().len(), 0);
-        assert_eq!(diff.sleds_removed().len(), 0);
-        assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
 
         logctx.cleanup_successful();
     }
@@ -1331,14 +1339,14 @@ pub mod test {
 
         let blueprint2 = builder.build();
         verify_blueprint(&blueprint2);
-        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added().len(), 0);
-        assert_eq!(diff.sleds_removed().len(), 0);
-        assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
 
         // The next step is adding these zones to a new sled.
         let new_sled_id = example.sled_rng.next();
@@ -1361,35 +1369,43 @@ pub mod test {
 
         let blueprint3 = builder.build();
         verify_blueprint(&blueprint3);
-        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("expecting new NTP and Crucible zones:\n{}", diff.display());
 
         // No sleds were changed or removed.
-        assert_eq!(diff.sleds_modified().count(), 0);
-        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
 
         // One sled was added.
-        let sleds: Vec<_> = diff.sleds_added().collect();
-        assert_eq!(sleds.len(), 1);
-        let (sled_id, new_sled_zones) = sleds[0];
-        assert_eq!(sled_id, new_sled_id);
+        assert_eq!(diff.sleds_added.len(), 1);
+        let sled_id = diff.sleds_added.first().unwrap();
+        let new_sled_zones = diff.zones.added.get(sled_id).unwrap();
+        assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
-        assert!(new_sled_zones.generation > Generation::new());
+        assert!(new_sled_zones.generation_after.unwrap() > Generation::new());
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
             assert!(new_sled_resources
                 .subnet
                 .net()
-                .contains(z.underlay_address));
+                .contains(z.underlay_address()));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the
         // sled's subnet.
         assert!(new_sled_zones.zones.iter().any(|z| {
-            if let BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp { address, .. },
-            ) = &z.zone_type
+            if let BlueprintOrCollectionZoneConfig::Blueprint(
+                BlueprintZoneConfig {
+                    zone_type:
+                        BlueprintZoneType::InternalNtp(
+                            blueprint_zone_type::InternalNtp {
+                                address, ..
+                            },
+                        ),
+                    ..
+                },
+            ) = &z
             {
                 assert!(new_sled_resources
                     .subnet
@@ -1404,9 +1420,18 @@ pub mod test {
             .zones
             .iter()
             .filter_map(|z| {
-                if let BlueprintZoneType::Crucible(
-                    blueprint_zone_type::Crucible { address, dataset },
-                ) = &z.zone_type
+                if let BlueprintOrCollectionZoneConfig::Blueprint(
+                    BlueprintZoneConfig {
+                        zone_type:
+                            BlueprintZoneType::Crucible(
+                                blueprint_zone_type::Crucible {
+                                    address,
+                                    dataset,
+                                },
+                            ),
+                        ..
+                    },
+                ) = &z
                 {
                     let ip = address.ip();
                     assert!(new_sled_resources.subnet.net().contains(*ip));

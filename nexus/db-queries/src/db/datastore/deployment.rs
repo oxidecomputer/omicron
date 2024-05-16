@@ -1658,7 +1658,7 @@ mod tests {
         let blueprint2 = builder.build();
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("b1 -> b2: {}", diff.display());
         println!("b1 disks: {:?}", blueprint1.blueprint_disks);
         println!("b2 disks: {:?}", blueprint2.blueprint_disks);
@@ -1699,9 +1699,7 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        let diff = blueprint_read
-            .diff_since_blueprint(&blueprint2)
-            .expect("failed to diff blueprints");
+        let diff = blueprint_read.diff_since_blueprint(&blueprint2);
         println!("diff: {}", diff.display());
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
