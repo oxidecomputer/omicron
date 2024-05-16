@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 mod check_workspace_deps;
 mod clippy;
+#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 
 #[cfg(target_os = "illumos")]
