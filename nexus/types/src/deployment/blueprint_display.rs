@@ -235,10 +235,10 @@ impl fmt::Display for BpSledSubtable {
         for (i, (column, width)) in
             self.column_names.iter().zip(&widths).enumerate()
         {
-            if i != 0 {
-                write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
-            } else {
+            if i == 0 {
                 write!(f, "{column:<width$}")?;
+            } else {
+                write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
             }
         }
 
@@ -263,10 +263,10 @@ impl fmt::Display for BpSledSubtable {
                 };
                 multiline_row |= needs_multiline;
 
-                if i != 0 {
-                    write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
-                } else {
+                if i == 0 {
                     write!(f, "{column:<width$}")?;
+                } else {
+                    write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
                 }
             }
             write!(f, "\n")?;
@@ -290,13 +290,13 @@ impl fmt::Display for BpSledSubtable {
                         "".to_string()
                     };
 
-                    if i != 0 {
-                        write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
-                    } else {
+                    if i == 0 {
                         // First column should never be modifiable
                         assert!(column.is_empty());
                         let column = format!(" {SUB_LAST}");
                         write!(f, "{column:<width$}")?;
+                    } else {
+                        write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
                     }
                 }
                 write!(f, "\n")?;
