@@ -7,8 +7,8 @@
 use super::blueprint_display::{
     constants::*, linear_table_modified, linear_table_unchanged, BpDiffState,
     BpGeneration, BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
-    BpSledSubtable, BpSledSubtableData, BpSledSubtableRow, KvListWithHeading,
-    KvPair,
+    BpSledSubtable, BpSledSubtableColumn, BpSledSubtableData,
+    BpSledSubtableRow, KvListWithHeading, KvPair,
 };
 use super::zone_sort_key;
 use omicron_common::api::external::Generation;
@@ -48,7 +48,7 @@ impl BpSledSubtableData for BpDiffZoneDetails {
         state: BpDiffState,
     ) -> impl Iterator<Item = BpSledSubtableRow> {
         self.zones.iter().map(move |zone| {
-            BpSledSubtableRow::new(
+            BpSledSubtableRow::from_strings(
                 state,
                 vec![
                     zone.kind().to_string(),
@@ -149,18 +149,18 @@ impl BpSledSubtableData for BpDiffZonesModified {
         state: BpDiffState,
     ) -> impl Iterator<Item = BpSledSubtableRow> {
         self.zones.iter().map(move |zone| {
-            let disposition = format!(
-                "{} {ARROW} {}",
-                zone.prior_disposition,
-                zone.zone.disposition()
-            );
             BpSledSubtableRow::new(
                 state,
                 vec![
-                    zone.zone.kind().to_string(),
-                    zone.zone.id().to_string(),
-                    disposition,
-                    zone.zone.underlay_address().to_string(),
+                    BpSledSubtableColumn::value(zone.zone.kind().to_string()),
+                    BpSledSubtableColumn::value(zone.zone.id().to_string()),
+                    BpSledSubtableColumn::diff(
+                        zone.prior_disposition.to_string(),
+                        zone.zone.disposition().to_string(),
+                    ),
+                    BpSledSubtableColumn::value(
+                        zone.zone.underlay_address().to_string(),
+                    ),
                 ],
             )
         })
@@ -421,7 +421,7 @@ impl BpSledSubtableData for DiffPhysicalDisksDetails {
         state: BpDiffState,
     ) -> impl Iterator<Item = BpSledSubtableRow> {
         self.disks.iter().map(move |d| {
-            BpSledSubtableRow::new(
+            BpSledSubtableRow::from_strings(
                 state,
                 vec![d.vendor.clone(), d.model.clone(), d.serial.clone()],
             )

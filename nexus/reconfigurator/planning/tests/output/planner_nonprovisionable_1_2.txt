@@ -60,21 +60,33 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
 
     omicron zones generation 2 -> 3:
-    -----------------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition              underlay IP           
-    -----------------------------------------------------------------------------------------------------
-*   crucible       094f27af-1acb-4d1e-ba97-1fc1377d4bf2   in service -> expunged   fd00:1122:3344:103::2c
-*   crucible       0dcfdfc5-481e-4153-b97c-11cf02b648ea   in service -> expunged   fd00:1122:3344:103::25
-*   crucible       2f5e8010-a94d-43a4-9c5c-3f52832f5f7f   in service -> expunged   fd00:1122:3344:103::27
-*   crucible       4a9a0a9d-87f0-4f1d-9181-27f6b435e637   in service -> expunged   fd00:1122:3344:103::28
-*   crucible       56ac1706-9e2a-49ba-bd6f-a99c44cb2ccb   in service -> expunged   fd00:1122:3344:103::24
-*   crucible       67622d61-2df4-414d-aa0e-d1277265f405   in service -> expunged   fd00:1122:3344:103::23
-*   crucible       b91b271d-8d80-4f49-99a0-34006ae86063   in service -> expunged   fd00:1122:3344:103::2a
-*   crucible       d6ee1338-3127-43ec-9aaa-b973ccf05496   in service -> expunged   fd00:1122:3344:103::26
-*   crucible       e39d7c9e-182b-48af-af87-58079d723583   in service -> expunged   fd00:1122:3344:103::29
-*   crucible       f69f92a1-5007-4bb0-a85b-604dc217154b   in service -> expunged   fd00:1122:3344:103::2b
-*   internal_ntp   67d913e0-0005-4599-9b28-0abbf6cc2916   in service -> expunged   fd00:1122:3344:103::21
-*   nexus          2aa0ea4f-3561-4989-a98c-9ab7d9a240fb   in service -> expunged   fd00:1122:3344:103::22
+    ------------------------------------------------------------------------------------------
+    zone type      zone id                                disposition   underlay IP           
+    ------------------------------------------------------------------------------------------
+*   crucible       094f27af-1acb-4d1e-ba97-1fc1377d4bf2   - in service   fd00:1122:3344:103::2c
+     └─                                                   + expunged                          
+*   crucible       0dcfdfc5-481e-4153-b97c-11cf02b648ea   - in service   fd00:1122:3344:103::25
+     └─                                                   + expunged                          
+*   crucible       2f5e8010-a94d-43a4-9c5c-3f52832f5f7f   - in service   fd00:1122:3344:103::27
+     └─                                                   + expunged                          
+*   crucible       4a9a0a9d-87f0-4f1d-9181-27f6b435e637   - in service   fd00:1122:3344:103::28
+     └─                                                   + expunged                          
+*   crucible       56ac1706-9e2a-49ba-bd6f-a99c44cb2ccb   - in service   fd00:1122:3344:103::24
+     └─                                                   + expunged                          
+*   crucible       67622d61-2df4-414d-aa0e-d1277265f405   - in service   fd00:1122:3344:103::23
+     └─                                                   + expunged                          
+*   crucible       b91b271d-8d80-4f49-99a0-34006ae86063   - in service   fd00:1122:3344:103::2a
+     └─                                                   + expunged                          
+*   crucible       d6ee1338-3127-43ec-9aaa-b973ccf05496   - in service   fd00:1122:3344:103::26
+     └─                                                   + expunged                          
+*   crucible       e39d7c9e-182b-48af-af87-58079d723583   - in service   fd00:1122:3344:103::29
+     └─                                                   + expunged                          
+*   crucible       f69f92a1-5007-4bb0-a85b-604dc217154b   - in service   fd00:1122:3344:103::2b
+     └─                                                   + expunged                          
+*   internal_ntp   67d913e0-0005-4599-9b28-0abbf6cc2916   - in service   fd00:1122:3344:103::21
+     └─                                                   + expunged                          
+*   nexus          2aa0ea4f-3561-4989-a98c-9ab7d9a240fb   - in service   fd00:1122:3344:103::22
+     └─                                                   + expunged                          
 
 
   sled 68d24ac5-f341-49ea-a92a-0381b52ab387:

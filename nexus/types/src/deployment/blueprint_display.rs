@@ -13,6 +13,10 @@ pub mod constants {
     pub(super) const MODIFIED_PREFIX: char = '*';
     pub(super) const UNCHANGED_PREFIX: char = ' ';
 
+    #[allow(unused)]
+    pub(super) const SUB_NOT_LAST: &str = "├─";
+    pub(super) const SUB_LAST: &str = "└─";
+
     pub const ARROW: &str = "->";
     pub const METADATA_HEADING: &str = "METADATA";
     pub const CREATED_BY: &str = "created by";
@@ -97,15 +101,49 @@ impl fmt::Display for BpGeneration {
     }
 }
 
+pub enum BpSledSubtableColumn {
+    Value(String),
+    Diff { before: String, after: String },
+}
+
+impl BpSledSubtableColumn {
+    pub fn value(s: String) -> BpSledSubtableColumn {
+        BpSledSubtableColumn::Value(s)
+    }
+
+    pub fn diff(before: String, after: String) -> BpSledSubtableColumn {
+        BpSledSubtableColumn::Diff { before, after }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            BpSledSubtableColumn::Value(s) => s.len(),
+            BpSledSubtableColumn::Diff { before, after } => {
+                usize::max(before.len(), after.len())
+            }
+        }
+    }
+}
+
 /// A row in a [`BpSledSubtable`]
 pub struct BpSledSubtableRow {
     state: BpDiffState,
-    columns: Vec<String>,
+    columns: Vec<BpSledSubtableColumn>,
 }
 
 impl BpSledSubtableRow {
-    pub fn new(state: BpDiffState, columns: Vec<String>) -> Self {
+    pub fn new(state: BpDiffState, columns: Vec<BpSledSubtableColumn>) -> Self {
         BpSledSubtableRow { state, columns }
+    }
+
+    pub fn from_strings(state: BpDiffState, columns: Vec<String>) -> Self {
+        BpSledSubtableRow {
+            state,
+            columns: columns
+                .into_iter()
+                .map(BpSledSubtableColumn::Value)
+                .collect(),
+        }
     }
 }
 
@@ -204,9 +242,18 @@ impl fmt::Display for BpSledSubtable {
         for row in &self.rows {
             let prefix = row.state.prefix();
             write!(f, "{prefix:<SUBTABLE_INDENT$}")?;
+            let mut multiline_row = false;
             for (i, (column, width)) in
                 row.columns.iter().zip(&widths).enumerate()
             {
+                let (column, needs_multiline) = match column {
+                    BpSledSubtableColumn::Value(s) => (s.clone(), false),
+                    BpSledSubtableColumn::Diff { before, .. } => {
+                        (format!("{REMOVED_PREFIX} {before}"), true)
+                    }
+                };
+                multiline_row |= needs_multiline;
+
                 if i != 0 {
                     write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
                 } else {
@@ -214,6 +261,35 @@ impl fmt::Display for BpSledSubtable {
                 }
             }
             write!(f, "\n")?;
+
+            // Do we need any multiline output?
+            if multiline_row {
+                write!(f, "{UNCHANGED_PREFIX:<SUBTABLE_INDENT$}")?;
+                for (i, (column, width)) in
+                    row.columns.iter().zip(&widths).enumerate()
+                {
+                    // Write the before columns or nothing
+                    let column = if let BpSledSubtableColumn::Diff {
+                        after,
+                        ..
+                    } = column
+                    {
+                        format!("{ADDED_PREFIX} {after}")
+                    } else {
+                        "".to_string()
+                    };
+
+                    if i != 0 {
+                        write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
+                    } else {
+                        // First column should never be modifiable
+                        assert!(column.is_empty());
+                        let column = format!(" {SUB_LAST}");
+                        write!(f, "{column:<width$}")?;
+                    }
+                }
+                write!(f, "\n")?;
+            }
         }
 
         Ok(())
