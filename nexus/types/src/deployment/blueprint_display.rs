@@ -119,7 +119,14 @@ impl BpSledSubtableColumn {
         match self {
             BpSledSubtableColumn::Value(s) => s.len(),
             BpSledSubtableColumn::Diff { before, after } => {
-                usize::max(before.len(), after.len())
+                // Add 1 for the added/removed prefix and 1 for a space
+                //
+                // This will need to change if we change how we render diffs in
+                // the `Display` impl for `BpSledSubtable`. However, putting it
+                // here allows to minimize any extra horizontal spacing in case
+                // other values for the same column are already longer than the
+                // the before or after values + 2.
+                usize::max(before.len(), after.len()) + 2
             }
         }
     }
@@ -249,6 +256,8 @@ impl fmt::Display for BpSledSubtable {
                 let (column, needs_multiline) = match column {
                     BpSledSubtableColumn::Value(s) => (s.clone(), false),
                     BpSledSubtableColumn::Diff { before, .. } => {
+                        // If we remove the prefix and space, we'll need to also
+                        // modify `BpSledSubtableColumn::len` to reflect this.
                         (format!("{REMOVED_PREFIX} {before}"), true)
                     }
                 };
@@ -274,6 +283,8 @@ impl fmt::Display for BpSledSubtable {
                         ..
                     } = column
                     {
+                        // If we remove the prefix and space, we'll need to also
+                        // modify `BpSledSubtableColumn::len` to reflect this.
                         format!("{ADDED_PREFIX} {after}")
                     } else {
                         "".to_string()

@@ -124,20 +124,20 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
 
     omicron zones at generation 2:
-    ---------------------------------------------------------------------------------------
-    zone type   zone id                                disposition   underlay IP           
-    ---------------------------------------------------------------------------------------
-    crucible    6b53ab2e-d98c-485f-87a3-4d5df595390f   in service    fd00:1122:3344:105::27
-    crucible    93b137a1-a1d6-4b5b-b2cb-21a9f11e2883   in service    fd00:1122:3344:105::23
-    crucible    9f0abbad-dbd3-4d43-9675-78092217ffd9   in service    fd00:1122:3344:105::25
-    crucible    b0c63f48-01ea-4aae-bb26-fb0dd59d1662   in service    fd00:1122:3344:105::28
-    crucible    c406da50-34b9-4bb4-a460-8f49875d2a6a   in service    fd00:1122:3344:105::24
-    crucible    d660d7ed-28c0-45ae-9ace-dc3ecf7e8786   in service    fd00:1122:3344:105::2a
-    crucible    e98cc0de-abf6-4da4-a20d-d05c7a9bb1d7   in service    fd00:1122:3344:105::2b
-    crucible    f55e6aaf-e8fc-4913-9e3c-8cd1bd4bdad3   in service    fd00:1122:3344:105::29
--   crucible    4f1ce8a2-d3a5-4a38-be4c-9817de52db37   in service    fd00:1122:3344:105::2c
+    ----------------------------------------------------------------------------------------
+    zone type   zone id                                disposition    underlay IP           
+    ----------------------------------------------------------------------------------------
+    crucible    6b53ab2e-d98c-485f-87a3-4d5df595390f   in service     fd00:1122:3344:105::27
+    crucible    93b137a1-a1d6-4b5b-b2cb-21a9f11e2883   in service     fd00:1122:3344:105::23
+    crucible    9f0abbad-dbd3-4d43-9675-78092217ffd9   in service     fd00:1122:3344:105::25
+    crucible    b0c63f48-01ea-4aae-bb26-fb0dd59d1662   in service     fd00:1122:3344:105::28
+    crucible    c406da50-34b9-4bb4-a460-8f49875d2a6a   in service     fd00:1122:3344:105::24
+    crucible    d660d7ed-28c0-45ae-9ace-dc3ecf7e8786   in service     fd00:1122:3344:105::2a
+    crucible    e98cc0de-abf6-4da4-a20d-d05c7a9bb1d7   in service     fd00:1122:3344:105::2b
+    crucible    f55e6aaf-e8fc-4913-9e3c-8cd1bd4bdad3   in service     fd00:1122:3344:105::29
+-   crucible    4f1ce8a2-d3a5-4a38-be4c-9817de52db37   in service     fd00:1122:3344:105::2c
 *   crucible    19fbc4f8-a683-4f22-8f5a-e74782b935be   - in service   fd00:1122:3344:105::26
-     └─                                                + quiesced                          
+     └─                                                + quiesced                           
 
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d:
