@@ -5,9 +5,9 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use crate::app::instance_network;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::ActionError;
+use db::lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_queries::db::identity::Resource;
@@ -21,8 +21,6 @@ use slog::info;
 /// Parameters to the instance update VMM destroyed sub-saga.
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
-    pub(crate) authz_instance: authz::Instance,
-
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
@@ -198,26 +196,25 @@ async fn siud_delete_nat_entries(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params {
-        ref serialized_authn,
-        ref authz_instance,
-        ref vmm,
-        ref instance,
-        ..
-    } = sagactx.saga_params::<Params>()?;
+    let Params { ref serialized_authn, ref vmm, ref instance, .. } =
+        sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    let log = osagactx.log();
 
     info!(
-        log,
+        osagactx.log(),
         "instance update (VMM destroyed): deleting NAT entries";
         "instance_id" => %instance.id(),
         "propolis_id" => %vmm.id,
         "instance_update" => %"VMM destroyed",
     );
 
+    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(instance.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
     osagactx
         .nexus()
         .instance_delete_dpd_config(&opctx, &authz_instance)

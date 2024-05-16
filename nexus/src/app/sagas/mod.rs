@@ -142,6 +142,9 @@ fn make_action_registry() -> ActionRegistry {
     <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
         &mut registry,
     );
+    <instance_update::SagaInstanceUpdate as NexusSaga>::register_actions(
+        &mut registry,
+    );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
         &mut registry,
     );
@@ -320,6 +323,10 @@ pub enum SagaRequest {
 
     RegionReplacementStart {
         params: region_replacement_start::Params,
+    },
+
+    InstanceUpdate {
+        params: instance_update::Params,
     },
 }
 

@@ -23,6 +23,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_types::identity::Resource;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -949,6 +950,35 @@ impl Nexus {
 
                         Err(e) => {
                             warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::InstanceUpdate { params } => {
+                let nexus = self.clone();
+                let log = slog::Logger::new(
+                    &self.log,
+                    o!(
+                        "saga" => "instance_update",
+                        "instance_id" => params.state.instance.id().to_string(),
+                    ),
+                );
+                tokio::spawn(async move {
+                    debug!(
+                        log,
+                        "starting instance update saga...";
+                        "params" => ?params
+                    );
+                    match nexus
+                        .execute_saga::<sagas::instance_update::SagaInstanceUpdate>(
+                            params,
+                        )
+                        .await
+                    {
+                        Ok(_) => info!(log, "instance update saga completed"),
+                        Err(e) => {
+                            warn!(log, "instance update saga failed"; "error" => %e)
                         }
                     }
                 });
