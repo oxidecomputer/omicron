@@ -25,7 +25,16 @@ use crate::config::MountConfig;
 use crate::dataset;
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,

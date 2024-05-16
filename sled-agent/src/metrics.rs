@@ -169,7 +169,6 @@ fn start_producer_server(
             id: registry.producer_id(),
             kind: ProducerKind::SledAgent,
             address,
-            base_route: String::new(), // Unused, will be removed.
             interval: METRIC_COLLECTION_INTERVAL,
         },
         registration_address,

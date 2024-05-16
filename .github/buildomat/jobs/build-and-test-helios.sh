@@ -3,7 +3,7 @@
 #: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.72.1"
+#: rust_toolchain = "1.77.2"
 #: output_rules = [
 #:	"%/work/*",
 #:	"%/var/tmp/omicron_tmp/*",
