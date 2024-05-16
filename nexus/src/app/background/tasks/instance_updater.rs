@@ -103,6 +103,7 @@ impl BackgroundTask for InstanceUpdater {
                         "destroyed_active_vmms" => stats.destroyed_active_vmms,
                         "sagas_started" => stats.sagas_started,
                     );
+                    None
                 }
                 Err(error) => {
                     slog::warn!(
