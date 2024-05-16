@@ -886,7 +886,7 @@ mod test {
 
         // Make generated disk ids deterministic
         let mut disk_rng =
-            TypedUuidRng::from_seed(TEST_NAME, "NEW PHYSICAL DISKS");
+            TypedUuidRng::from_seed(TEST_NAME, "NewPhysicalDisks");
         let mut new_sled_disk = |policy| nexus_types::deployment::SledDisk {
             disk_identity: DiskIdentity {
                 vendor: "test-vendor".to_string(),
@@ -908,15 +908,16 @@ mod test {
         const NEW_IN_SERVICE_DISKS: usize = 2;
         const NEW_EXPUNGED_DISKS: usize = 1;
 
+        let mut zpool_rng = TypedUuidRng::from_seed(TEST_NAME, "NewZpools");
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
-                ZpoolUuid::new_v4(),
+                ZpoolUuid::from(zpool_rng.next()),
                 new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
-                ZpoolUuid::new_v4(),
+                ZpoolUuid::from(zpool_rng.next()),
                 new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::Expunged),
             );
         }

@@ -300,15 +300,11 @@ impl BpSledSubtableData for &OmicronPhysicalDisksConfig {
         &self,
         state: BpDiffState,
     ) -> impl Iterator<Item = BpSledSubtableRow> {
-        self.disks.iter().map(move |d| {
-            BpSledSubtableRow::new(
-                state,
-                vec![
-                    d.identity.vendor.clone(),
-                    d.identity.model.clone(),
-                    d.identity.serial.clone(),
-                ],
-            )
+        let sorted_disk_ids: BTreeSet<DiskIdentity> =
+            self.disks.iter().map(|d| d.identity.clone()).collect();
+
+        sorted_disk_ids.into_iter().map(move |d| {
+            BpSledSubtableRow::new(state, vec![d.vendor, d.model, d.serial])
         })
     }
 }

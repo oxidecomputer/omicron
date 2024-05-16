@@ -45,7 +45,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -807,7 +807,7 @@ impl<'a> BlueprintBuilder<'a> {
         for _ in 0..num_nexus_to_add {
             let nexus_id = self.rng.zone_rng.next();
             let external_ip = OmicronZoneExternalFloatingIp {
-                id: ExternalIpUuid::new_v4(),
+                id: self.rng.external_ip_rng.next(),
                 ip: self
                     .available_external_ips
                     .next()
@@ -992,6 +992,7 @@ struct BlueprintBuilderRng {
     blueprint_rng: UuidRng,
     zone_rng: TypedUuidRng<OmicronZoneKind>,
     network_interface_rng: UuidRng,
+    external_ip_rng: TypedUuidRng<ExternalIpKind>,
 }
 
 impl BlueprintBuilderRng {
@@ -1004,8 +1005,15 @@ impl BlueprintBuilderRng {
         let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
         let network_interface_rng =
             UuidRng::from_parent_rng(&mut parent, "network_interface");
+        let external_ip_rng =
+            TypedUuidRng::from_parent_rng(&mut parent, "external_ip");
 
-        BlueprintBuilderRng { blueprint_rng, zone_rng, network_interface_rng }
+        BlueprintBuilderRng {
+            blueprint_rng,
+            zone_rng,
+            network_interface_rng,
+            external_ip_rng,
+        }
     }
 
     fn set_seed<H: Hash>(&mut self, seed: H) {
