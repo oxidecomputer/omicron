@@ -7,9 +7,11 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::db::datastore::InstanceSnapshot;
+use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_model::Generation;
 use nexus_db_queries::{authn, authz};
+use nexus_types::identity::Resource;
 use omicron_common::api::external::InstanceState;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node, SagaName};
@@ -19,8 +21,6 @@ mod destroyed;
 /// Parameters to the instance update saga.
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
-    pub authz_instance: authz::Instance,
-
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
@@ -77,16 +77,15 @@ impl NexusSaga for SagaInstanceUpdate {
         // and the VMMs associated with it.
         match params.state {
             // VMM destroyed subsaga
-            InstanceSnapshot { instance, active_vmm: Some(vmm), .. }
-                if vmm.runtime.state.state() == &InstanceState::Destroyed =>
-            {
+            InstanceSnapshot {
+                instance, active_vmm: Some(ref vmm), ..
+            } if vmm.runtime.state.state() == &VmmState::Destroyed => {
                 const DESTROYED_SUBSAGA_PARAMS: &str =
                     "params_for_vmm_destroyed_subsaga";
                 let subsaga_params = destroyed::Params {
                     serialized_authn: params.serialized_authn.clone(),
                     instance: instance.clone(),
-                    authz_instance: params.authz_instance.clone(),
-                    vmm,
+                    vmm: vmm.clone(),
                 };
                 let subsaga_dag = {
                     let subsaga_builder = DagBuilder::new(SagaName::new(
@@ -131,16 +130,21 @@ async fn siu_lock_instance(
     sagactx: NexusActionContext,
 ) -> Result<Generation, ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref authz_instance, ref serialized_authn, ref state, .. } =
+    let Params { ref serialized_authn, ref state, .. } =
         sagactx.saga_params::<Params>()?;
-
+    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    let datastore = osagactx.datastore();
+
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(state.instance.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     // try to acquire the instance updater lock
-    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
-    osagactx
-        .datastore()
+    datastore
         .instance_updater_try_lock(
             &opctx,
             &authz_instance,
@@ -160,11 +164,10 @@ async fn siu_unlock_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let Params { ref authz_instance, ref serialized_authn, .. } =
+    let Params { ref serialized_authn, ref state, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let gen = sagactx.lookup::<Generation>(INSTANCE_LOCK_GEN)?;
-
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     osagactx
@@ -179,14 +182,21 @@ async fn siu_lock_instance_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let Params { ref authz_instance, ref serialized_authn, ref state, .. } =
+    let Params { ref serialized_authn, ref state, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    let datastore = osagactx.datastore();
+
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(state.instance.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let updater_gen = state.instance.runtime_state.updater_gen.next().into();
-    osagactx
-        .datastore()
+    datastore
         .instance_updater_unlock(&opctx, &authz_instance, &lock_id, updater_gen)
         .await?;
     Ok(())
