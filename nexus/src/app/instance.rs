@@ -15,7 +15,6 @@ use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::cidata::InstanceCiData;
 use crate::external_api::params;
-use crate::Nexus;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -29,6 +28,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::DataStore;
 use nexus_types::external_api::views;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -1515,11 +1515,14 @@ impl super::Nexus {
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         notify_instance_updated(
-            &self,
+            &self.datastore(),
             &self.resolver().await,
+            &self.opctx_alloc,
             opctx,
+            &self.log,
             instance_id,
             new_runtime_state,
+            self.v2p_notification_tx.clone(),
         )
         .await?;
         Ok(())
@@ -1963,12 +1966,16 @@ pub(crate) struct InstanceUpdated {
 
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
+#[allow(clippy::too_many_arguments)] // :(
 pub(crate) async fn notify_instance_updated(
-    Nexus { db_datastore, opctx_alloc, log, v2p_notification_tx, .. }: &Nexus,
+    datastore: &DataStore,
     resolver: &internal_dns::resolver::Resolver,
+    opctx_alloc: &OpContext,
     opctx: &OpContext,
+    log: &slog::Logger,
     instance_id: &Uuid,
     new_runtime_state: &nexus::SledInstanceState,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 ) -> Result<Option<InstanceUpdated>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
@@ -1980,11 +1987,10 @@ pub(crate) async fn notify_instance_updated(
 
     // Grab the current state of the instance in the DB to reason about
     // whether this update is stale or not.
-    let (.., authz_instance, db_instance) =
-        LookupPath::new(&opctx, &db_datastore)
-            .instance_id(*instance_id)
-            .fetch()
-            .await?;
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(*instance_id)
+        .fetch()
+        .await?;
 
     // Update OPTE and Dendrite if the instance's active sled assignment
     // changed or a migration was retired. If these actions fail, sled agent
@@ -2000,7 +2006,7 @@ pub(crate) async fn notify_instance_updated(
     // In the future, this should be replaced by a call to trigger a
     // networking state update RPW.
     super::instance_network::ensure_updated_instance_network_config(
-        db_datastore,
+        datastore,
         log,
         resolver,
         opctx,
@@ -2023,7 +2029,7 @@ pub(crate) async fn notify_instance_updated(
     // will try to create its own virtual provisioning charges, which will
     // race with this operation.
     if new_runtime_state.instance_state.propolis_id.is_none() {
-        db_datastore
+        datastore
             .virtual_provisioning_collection_delete_instance(
                 opctx,
                 *instance_id,
@@ -2047,20 +2053,15 @@ pub(crate) async fn notify_instance_updated(
         // an instance's state changes.
         //
         // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-        super::oximeter::unassign_producer(
-            db_datastore,
-            log,
-            opctx,
-            instance_id,
-        )
-        .await?;
+        super::oximeter::unassign_producer(datastore, log, opctx, instance_id)
+            .await?;
     }
 
     // Write the new instance and VMM states back to CRDB. This needs to be
     // done before trying to clean up the VMM, since the datastore will only
     // allow a VMM to be marked as deleted if it is already in a terminal
     // state.
-    let result = db_datastore
+    let result = datastore
         .instance_and_vmm_update_runtime(
             instance_id,
             &db::model::InstanceRuntimeState::from(
@@ -2099,9 +2100,9 @@ pub(crate) async fn notify_instance_updated(
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id);
 
-            db_datastore.sled_reservation_delete(opctx, propolis_id).await?;
+            datastore.sled_reservation_delete(opctx, propolis_id).await?;
 
-            if !db_datastore.vmm_mark_deleted(opctx, &propolis_id).await? {
+            if !datastore.vmm_mark_deleted(opctx, &propolis_id).await? {
                 warn!(log, "failed to mark vmm record as deleted";
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id,

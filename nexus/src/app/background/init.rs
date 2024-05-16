@@ -380,6 +380,7 @@ impl BackgroundTasks {
                 resolver.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                v2p_watcher.0,
             );
             driver.register(
                 "instance_watcher".to_string(),
