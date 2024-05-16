@@ -59,8 +59,8 @@ use uuid::Uuid;
 /// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
 #[derive(Clone, Debug)]
 pub struct InstanceAndActiveVmm {
-    instance: Instance,
-    vmm: Option<Vmm>,
+    pub instance: Instance,
+    pub vmm: Option<Vmm>,
 }
 
 impl InstanceAndActiveVmm {
@@ -301,14 +301,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<InstanceAndActiveVmm> {
-        use db::model::InstanceState as DbInstanceState;
+        use db::model::VmmState;
         use db::schema::instance::dsl;
         use db::schema::vmm::dsl as vmm_dsl;
-        use omicron_common::api::external::InstanceState;
-        let destroyed = DbInstanceState::new(InstanceState::Destroyed);
         Ok(vmm_dsl::vmm
             .filter(vmm_dsl::time_deleted.is_not_null())
-            .filter(vmm_dsl::state.eq(destroyed))
+            .filter(vmm_dsl::state.eq(VmmState::Destroyed))
             .inner_join(
                 dsl::instance.on(dsl::active_propolis_id
                     .eq(vmm_dsl::id.nullable())

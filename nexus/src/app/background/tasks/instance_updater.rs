@@ -7,10 +7,14 @@
 //! TODO this is currently a placeholder for a future PR
 
 use super::common::BackgroundTask;
-use crate::app::sagas::SagaRequest;
+use crate::app::authn;
+use crate::app::sagas::{self, SagaRequest};
+use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::InstanceSnapshot;
 use nexus_db_queries::db::DataStore;
 use serde_json::json;
 use std::sync::Arc;
@@ -32,9 +36,8 @@ impl InstanceUpdater {
     async fn activate2(
         &mut self,
         opctx: &OpContext,
-    ) -> Result<Updated, anyhow::Error> {
-        let mut updated = Updated::default();
-
+        stats: &mut ActivationStats,
+    ) -> Result<(), anyhow::Error> {
         let log = &opctx.log;
 
         slog::debug!(
@@ -54,18 +57,33 @@ impl InstanceUpdater {
             "count" => destroyed_active_vmms.len(),
         );
 
-        updated.destroyed_active_vmms = destroyed_active_vmms.len();
+        stats.destroyed_active_vmms = destroyed_active_vmms.len();
 
-        for (instance, vmm) in destroyed_active_vmms {
-            let saga = SagaRequest::InstanceUpdate {};
+        for InstanceAndActiveVmm { instance, vmm } in destroyed_active_vmms {
+            let saga = SagaRequest::InstanceUpdate {
+                params: sagas::instance_update::Params {
+                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                    state: InstanceSnapshot {
+                        instance,
+                        active_vmm: vmm,
+                        target_vmm: None,
+                        migration: None, // TODO(eliza)
+                    },
+                },
+            };
+            self.saga_req
+                .send(saga)
+                .await
+                .context("SagaRequest receiver missing")?;
+            stats.sagas_started += 1;
         }
 
-        Ok(updated)
+        Ok(())
     }
 }
 
 #[derive(Default)]
-struct Updated {
+struct ActivationStats {
     destroyed_active_vmms: usize,
     sagas_started: usize,
 }
@@ -76,23 +94,32 @@ impl BackgroundTask for InstanceUpdater {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            match self.activate2(opctx).await {
-                Ok(updated) => json!({
-                    "destroyed_active_vmms": updated.destroyed_active_vmms,
-                    "error": None,
-                }),
-                Err(error) => {
-                    slog::error!(
-                        opctx.log,
-                        "failed to start instance update saga(s)";
-                        "error" => ?error,
+            let mut stats = ActivationStats::default();
+            let error = match self.activate2(opctx, &mut stats).await {
+                Ok(()) => {
+                    slog::info!(
+                        &opctx.log,
+                        "instance updater activation completed";
+                        "destroyed_active_vmms" => stats.destroyed_active_vmms,
+                        "sagas_started" => stats.sagas_started,
                     );
-                    json!({
-                        "destroyed_active_vmms": 0,
-                        "error": error.to_string(),
-                    })
                 }
-            }
+                Err(error) => {
+                    slog::warn!(
+                        &opctx.log,
+                        "instance updater activation failed!";
+                        "error" => %error,
+                        "destroyed_active_vmms" => stats.destroyed_active_vmms,
+                        "sagas_started" => stats.sagas_started,
+                    );
+                    Some(error.to_string())
+                }
+            };
+            json!({
+                "destroyed_active_vmms": stats.destroyed_active_vmms,
+                "sagas_started": stats.sagas_started,
+                "error": error,
+            })
         }
         .boxed()
     }

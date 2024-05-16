@@ -119,3 +119,8 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
         }
     }
 }
+
+impl diesel::query_builder::QueryId for VmmStateEnum {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
