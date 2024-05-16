@@ -104,7 +104,7 @@ static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
 /// Note that `--host-dataset` and `--recovery-dataset` must be set to different
 /// values to build the two OS images in parallel. This is strongly recommended.
 #[derive(Parser)]
-#[command(name = "cargo xtask releng")]
+#[command(name = "cargo xtask releng", bin_name = "cargo xtask releng")]
 struct Args {
     /// ZFS dataset to use for `helios-build` when building the host image
     #[clap(long, default_value_t = Self::default_dataset("host"))]

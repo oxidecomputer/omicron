@@ -21,7 +21,11 @@ mod verify_libraries;
 mod virtual_hardware;
 
 #[derive(Parser)]
-#[command(name = "cargo xtask", about = "Workspace-related developer tools")]
+#[command(
+    name = "cargo xtask",
+    bin_name = "cargo xtask",
+    about = "Workspace-related developer tools"
+)]
 struct Args {
     #[command(subcommand)]
     cmd: Cmds,
