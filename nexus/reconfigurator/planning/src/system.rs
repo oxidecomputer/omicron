@@ -28,7 +28,6 @@ use nexus_types::inventory::SpType;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::COCKROACHDB_REDUNDANCY;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -123,7 +122,10 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
-        let target_cockroachdb_zone_count = COCKROACHDB_REDUNDANCY;
+        // TODO-cleanup This is wrong, but we don't currently set up any CRDB
+        // nodes in our fake system, so this prevents downstream test issues
+        // with the planner thinking our system is out of date from the gate.
+        let target_cockroachdb_zone_count = 0;
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),

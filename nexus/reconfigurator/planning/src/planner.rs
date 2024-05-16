@@ -20,7 +20,6 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -329,37 +328,53 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.ensure_correct_number_of_nexus_zones(&sleds_waiting_for_ntp_zone)?;
+        for kind in [
+            DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::CockroachDb,
+        ] {
+            self.ensure_correct_number_of_discretionary_zones(
+                &sleds_waiting_for_ntp_zone,
+                kind,
+            )?;
+        }
 
         Ok(())
     }
 
-    fn ensure_correct_number_of_nexus_zones(
+    fn ensure_correct_number_of_discretionary_zones(
         &mut self,
         sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+        kind: DiscretionaryOmicronZone,
     ) -> Result<(), Error> {
-        // Count the number of Nexus zones on all in-service sleds. This will
+        // Count the number of `kind` zones on all in-service sleds. This will
         // include sleds that are in service but not eligible for new services,
         // but will not include sleds that have been expunged or decommissioned.
-        let mut num_total_nexus = 0;
+        let mut num_existing_kind_zones = 0;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_nexus =
-                self.blueprint.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
-            num_total_nexus += num_nexus;
+            let num_zones_of_kind =
+                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into());
+            num_existing_kind_zones += num_zones_of_kind;
         }
 
-        // TODO-correctness What should we do if we have _too many_ Nexus
-        // instances? For now, just log it the number of zones any time we have
-        // at least the minimum number.
-        let mut nexus_to_add = self
-            .input
-            .target_nexus_zone_count()
-            .saturating_sub(num_total_nexus);
-        if nexus_to_add == 0 {
+        let target_count = match kind {
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::CockroachDb => {
+                self.input.target_cockroachdb_zone_count()
+            }
+        };
+
+        // TODO-correctness What should we do if we have _too many_ instances?
+        // For now, just log it the number of zones any time we have at least
+        // the minimum number.
+        let mut num_zones_to_add =
+            target_count.saturating_sub(num_existing_kind_zones);
+        if num_zones_to_add == 0 {
             info!(
-                self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.input.target_nexus_zone_count(),
-                "current_count" => num_total_nexus,
+                self.log, "sufficient {kind:?} zones exist in plan";
+                "desired_count" => target_count,
+                "current_count" => num_existing_kind_zones,
             );
             return Ok(());
         }
@@ -389,11 +404,11 @@ impl<'a> Planner<'a> {
                 }),
         );
 
-        // Build a map of sled -> new nexus zones to add.
+        // Build a map of sled -> new zones to add.
         let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
-        for i in 0..nexus_to_add {
-            match zone_placement.place_zone(DiscretionaryOmicronZone::Nexus) {
+        for i in 0..num_zones_to_add {
+            match zone_placement.place_zone(kind) {
                 Ok(sled_id) => {
                     *sleds_to_change.entry(sled_id).or_default() += 1;
                 }
@@ -404,14 +419,14 @@ impl<'a> Planner<'a> {
                     // able to produce blueprints to achieve that status.
                     warn!(
                         self.log,
-                        "failed to place all new desired Nexus instances";
+                        "failed to place all new desired {kind:?} instances";
                         "placed" => i,
-                        "wanted_to_place" => nexus_to_add,
+                        "wanted_to_place" => num_zones_to_add,
                     );
 
-                    // Adjust `nexus_to_add` downward so it's consistent with
-                    // the number of Nexuses we're actually adding.
-                    nexus_to_add = i;
+                    // Adjust `num_zones_to_add` downward so it's consistent
+                    // with the number of zones we're actually adding.
+                    num_zones_to_add = i;
 
                     break;
                 }
@@ -419,31 +434,43 @@ impl<'a> Planner<'a> {
         }
 
         // For each sled we need to change, actually do so.
-        let mut total_added = 0;
-        for (sled_id, additional_nexus_count) in sleds_to_change {
+        let mut new_zones_added = 0;
+        for (sled_id, additional_zone_count) in sleds_to_change {
             // TODO-cleanup This is awkward: the builder wants to know how many
-            // total Nexus zones go on a given sled, but we have a count of how
-            // many we want to add. Construct a new target count. Maybe the
-            // builder should provide a different interface here?
-            let new_nexus_count =
-                self.blueprint.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus)
-                    + additional_nexus_count;
-            match self
-                .blueprint
-                .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
-            {
+            // total zones go on a given sled, but we have a count of how many
+            // we want to add. Construct a new target count. Maybe the builder
+            // should provide a different interface here?
+            let new_total_zone_count =
+                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into())
+                    + additional_zone_count;
+
+            let result = match kind {
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+            };
+            match result {
                 EnsureMultiple::Added(n) => {
                     info!(
-                        self.log, "will add {n} Nexus zone(s) to sled";
+                        self.log, "will add {n} {kind:?} zone(s) to sled";
                         "sled_id" => %sled_id,
                     );
-                    total_added += n;
+                    new_zones_added += n;
                 }
                 // This is only possible if we asked the sled to ensure the same
                 // number of zones it already has, but that's impossible based
                 // on the way we built up `sleds_to_change`.
                 EnsureMultiple::NotNeeded => unreachable!(
-                    "sled on which we added Nexus zones did not add any"
+                    "sled on which we added {kind:?} zones did not add any"
                 ),
             }
         }
@@ -452,8 +479,8 @@ impl<'a> Planner<'a> {
         // arrived here, we think we've added the number of Nexus zones we
         // needed to.
         assert_eq!(
-            total_added, nexus_to_add,
-            "internal error counting Nexus zones"
+            new_zones_added, num_zones_to_add,
+            "internal error counting {kind:?} zones"
         );
 
         Ok(())
