@@ -636,22 +636,20 @@ impl BackgroundTasksInitializer {
         // Background task: schedule update sagas for instances in need of
         // state updates.
         {
-            let updater = {
-                let updater = instance_updater::InstanceUpdater::new(
-                    datastore.clone(),
-                    saga_request.clone(),
-                );
-                driver.register(
-                    "instance_updater".to_string(),
-                    "detects if instances require update sagas and schedules them"
-                        .to_string(),
-                    config.instance_updater.period_secs,
-                    Box::new(updater),
-                    opctx.child(BTreeMap::new()),
-                    vec![],
-                    task_instance_updaterm
-                );
-            };
+            let updater = instance_updater::InstanceUpdater::new(
+                datastore.clone(),
+                saga_request.clone(),
+            );
+            driver.register(
+                "instance_updater".to_string(),
+                "detects if instances require update sagas and schedules them"
+                    .to_string(),
+                config.instance_updater.period_secs,
+                Box::new(updater),
+                opctx.child(BTreeMap::new()),
+                vec![],
+                task_instance_updaterm,
+            );
         }
 
         // Background task: service firewall rule propagation
