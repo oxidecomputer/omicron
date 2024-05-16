@@ -490,6 +490,7 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::COCKROACHDB_REDUNDANCY;
     use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
@@ -1225,6 +1226,7 @@ mod test {
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
+                target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 log,
             }
             .build()

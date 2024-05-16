@@ -28,6 +28,7 @@ use nexus_types::inventory::SpType;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::COCKROACHDB_REDUNDANCY;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -74,6 +75,7 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
+    target_cockroachdb_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -121,6 +123,7 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        let target_cockroachdb_zone_count = COCKROACHDB_REDUNDANCY;
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -135,6 +138,7 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_nexus_zone_count,
+            target_cockroachdb_zone_count,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -301,6 +305,7 @@ impl SystemDescription {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

@@ -447,6 +447,9 @@ pub struct Policy {
 
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
+
+    /// desired total number of deployed CockroachDB zones
+    pub target_cockroachdb_zone_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -494,6 +497,7 @@ impl PlanningInputBuilder {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
                 target_nexus_zone_count: 0,
+                target_cockroachdb_zone_count: 0,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
