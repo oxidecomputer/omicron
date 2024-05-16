@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 
-use self::omicron_zone_placement::DiscretionaryOmicronZone;
+pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 
