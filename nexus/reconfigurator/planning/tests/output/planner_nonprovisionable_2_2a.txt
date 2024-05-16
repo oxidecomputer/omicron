@@ -161,13 +161,57 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
 ERRORS:
 
-
   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9
 
     zone diff errors: before gen 2, after gen 2
 
       zone id: 6dff7633-66bb-4924-a6ff-2c896e66964b
-      reason: mismatched zone type: after: Nexus(Nexus { internal_address: [fd01:1122:3344:105::22]:12221, external_ip: OmicronZoneExternalFloatingIp { id: cd63774a-2e2f-49ce-a3df-33e3b5d02650 (external_ip), ip: 192.0.2.2 }, nic: NetworkInterface { id: 99402426-92dd-4975-9347-907e130d6b79, kind: Service { id: 6dff7633-66bb-4924-a6ff-2c896e66964b }, name: Name("nexus-6dff7633-66bb-4924-a6ff-2c896e66964b"), ip: 172.30.2.5, mac: MacAddr(MacAddr6([168, 64, 37, 255, 128, 0])), subnet: V4(Ipv4Net(Ipv4Network { addr: 172.30.2.0, prefix: 24 })), vni: Vni(100), primary: true, slot: 0 }, external_tls: false, external_dns_servers: [] })
+      reason: mismatched zone type: after: Nexus(
+    Nexus {
+        internal_address: [fd01:1122:3344:105::22]:12221,
+        external_ip: OmicronZoneExternalFloatingIp {
+            id: cd63774a-2e2f-49ce-a3df-33e3b5d02650 (external_ip),
+            ip: 192.0.2.2,
+        },
+        nic: NetworkInterface {
+            id: 99402426-92dd-4975-9347-907e130d6b79,
+            kind: Service {
+                id: 6dff7633-66bb-4924-a6ff-2c896e66964b,
+            },
+            name: Name(
+                "nexus-6dff7633-66bb-4924-a6ff-2c896e66964b",
+            ),
+            ip: 172.30.2.5,
+            mac: MacAddr(
+                MacAddr6(
+                    [
+                        168,
+                        64,
+                        37,
+                        255,
+                        128,
+                        0,
+                    ],
+                ),
+            ),
+            subnet: V4(
+                Ipv4Net(
+                    Ipv4Network {
+                        addr: 172.30.2.0,
+                        prefix: 24,
+                    },
+                ),
+            ),
+            vni: Vni(
+                100,
+            ),
+            primary: true,
+            slot: 0,
+        },
+        external_tls: false,
+        external_dns_servers: [],
+    },
+)
 
       zone id: 7f4e9f9f-08f8-4d14-885d-e977c05525ad
       reason: mismatched underlay address: before: fd00:1122:3344:105::21, after: fd01:1122:3344:105::21

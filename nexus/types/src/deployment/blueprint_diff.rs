@@ -107,8 +107,10 @@ impl ModifiedZone {
             reason.push_str(&msg);
         }
         if !before.is_zone_type_equal(&after.zone_type) {
-            let msg =
-                format!("mismatched zone type: after: {:?}\n", after.zone_type);
+            let msg = format!(
+                "mismatched zone type: after: {:#?}\n",
+                after.zone_type
+            );
             reason.push_str(&msg);
         }
         if reason.is_empty() {
@@ -828,7 +830,7 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
 
         // Write out zone errors.
         if !diff.zones.errors.is_empty() {
-            writeln!(f, "ERRORS:\n")?;
+            writeln!(f, "ERRORS:")?;
             for (sled_id, errors) in &diff.zones.errors {
                 writeln!(f, "\n  sled {sled_id}\n")?;
                 writeln!(
