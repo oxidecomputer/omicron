@@ -102,6 +102,9 @@ pub struct BackgroundTasks {
     /// task handle for the task that polls sled agents for instance states.
     pub task_instance_watcher: common::TaskHandle,
 
+    /// task handle for the task that schedules isntance update sagas as needed.
+    pub task_instance_updater: common::TaskHandle,
+
     /// task handle for propagation of VPC firewall rules for Omicron services
     /// with external network connectivity,
     pub task_service_firewall_propagation: common::TaskHandle,
@@ -393,6 +396,23 @@ impl BackgroundTasks {
                 vec![],
             )
         };
+
+        let task_instance_updater = {
+            let watcher = instance_updater::InstanceUpdater::new(
+                datastore.clone(),
+                saga_request.clone(),
+            );
+            driver.register(
+                "instance_updater".to_string(),
+                "detects if instances require update sagas and schedules them"
+                    .to_string(),
+                config.instance_updater.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         // Background task: service firewall rule propagation
         let task_service_firewall_propagation = driver.register(
             String::from("service_firewall_rule_propagation"),
@@ -443,6 +463,7 @@ impl BackgroundTasks {
             task_v2p_manager,
             task_region_replacement,
             task_instance_watcher,
+            task_instance_updater,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
         }
