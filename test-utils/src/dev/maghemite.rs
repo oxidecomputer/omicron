@@ -137,8 +137,7 @@ async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
 }
 
 async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
-    let re =
-        regex::Regex::new(r#""local_addr":"\[::?(1)\]:?([0-9]+)""#).unwrap();
+    let re = regex::Regex::new(r#""local_addr":"\[::1?\]:([0-9]+)""#).unwrap();
     let reader = BufReader::new(File::open(logfile).await?);
     let mut lines = reader.lines();
     loop {
