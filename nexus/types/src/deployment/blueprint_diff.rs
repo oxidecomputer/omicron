@@ -83,6 +83,7 @@ impl ZoneSortKey for ModifiedZone {
 }
 
 impl ModifiedZone {
+    #[allow(clippy::result_large_err)]
     pub fn new(
         before: BlueprintOrCollectionZoneConfig,
         after: BlueprintZoneConfig,
