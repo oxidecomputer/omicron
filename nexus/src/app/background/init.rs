@@ -22,6 +22,7 @@ use super::region_replacement;
 use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
+use super::vpc_routes;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
@@ -100,6 +101,9 @@ pub struct BackgroundTasks {
     /// task handle for propagation of VPC firewall rules for Omicron services
     /// with external network connectivity,
     pub task_service_firewall_propagation: common::TaskHandle,
+
+    /// task handle for propagation of VPC router rules to all OPTE ports
+    pub task_vpc_route_manager: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -368,6 +372,7 @@ impl BackgroundTasks {
                 vec![],
             )
         };
+
         // Background task: service firewall rule propagation
         let task_service_firewall_propagation = driver.register(
             String::from("service_firewall_rule_propagation"),
@@ -377,11 +382,23 @@ impl BackgroundTasks {
             ),
             config.service_firewall_propagation.period_secs,
             Box::new(service_firewall_rules::ServiceRulePropagator::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx.child(BTreeMap::new()),
             vec![],
         );
+
+        let task_vpc_route_manager = {
+            let watcher = vpc_routes::VpcRouteManager::new(datastore);
+            driver.register(
+                "vpc_route_manager".to_string(),
+                "propagates updated VPC routes to all OPTE ports".into(),
+                config.switch_port_settings_manager.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
 
         BackgroundTasks {
             driver,
@@ -404,6 +421,7 @@ impl BackgroundTasks {
             task_region_replacement,
             task_instance_watcher,
             task_service_firewall_propagation,
+            task_vpc_route_manager,
         }
     }
 

@@ -51,7 +51,7 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig,
+    HostPortConfig, RackNetworkConfig, ReifiedVpcRouteSet,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -1089,6 +1089,14 @@ impl SledAgent {
 
     pub fn bootstore(&self) -> bootstore::NodeHandle {
         self.inner.bootstore.clone()
+    }
+
+    pub fn list_vpc_routes(&self) -> Vec<ReifiedVpcRouteSet> {
+        self.inner.port_manager.vpc_routes_list()
+    }
+
+    pub fn set_vpc_routes(&self, routes: Vec<ReifiedVpcRouteSet>) {
+        self.inner.port_manager.vpc_routes_ensure(routes)
     }
 
     /// Return the metric producer registry.

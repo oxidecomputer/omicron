@@ -6,13 +6,13 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name, Vni},
 };
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
@@ -588,6 +588,43 @@ impl TryFrom<&[IpNetwork]> for IpAllowList {
         }
         Ok(Self(list.iter().copied().map(Into::into).collect()))
     }
+}
+
+/// A VPC route resolved into a concrete target.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct ReifiedVpcRoute {
+    pub dest: IpNet,
+    pub target: RouterTarget,
+}
+
+/// The target for a given router entry.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case", content = "value")]
+pub enum RouterTarget {
+    Drop,
+    InternetGateway,
+    Ip(IpAddr),
+    VpcSubnet(IpNet),
+}
+
+/// XX
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct RouterId {
+    pub vni: Vni,
+    pub subnet: Option<IpNet>,
+}
+
+/// XX
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ReifiedVpcRouteSet {
+    pub id: RouterId,
+    pub routes: HashSet<ReifiedVpcRoute>,
 }
 
 #[cfg(test)]

@@ -953,6 +953,63 @@
         }
       }
     },
+    "/vpc-routes": {
+      "get": {
+        "summary": "Get the current state of VPC routing rules.",
+        "operationId": "list_vpc_routes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ReifiedVpcRouteSet",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReifiedVpcRouteSet"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update VPC routing rules.",
+        "operationId": "set_vpc_routes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_ReifiedVpcRouteSet",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ReifiedVpcRouteSet"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zones": {
       "get": {
         "summary": "List the zones that are currently managed by the sled agent.",
@@ -4252,6 +4309,42 @@
           "rack_subnet"
         ]
       },
+      "ReifiedVpcRoute": {
+        "description": "A VPC route resolved into a concrete target.",
+        "type": "object",
+        "properties": {
+          "dest": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "target": {
+            "$ref": "#/components/schemas/RouterTarget"
+          }
+        },
+        "required": [
+          "dest",
+          "target"
+        ]
+      },
+      "ReifiedVpcRouteSet": {
+        "description": "XX",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RouterId"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReifiedVpcRoute"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "routes"
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -4279,6 +4372,96 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RouterId": {
+        "description": "XX",
+        "type": "object",
+        "properties": {
+          "subnet": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "vni"
+        ]
+      },
+      "RouterTarget": {
+        "description": "The target for a given router entry.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "drop"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internet_gateway"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc_subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "SemverVersion": {

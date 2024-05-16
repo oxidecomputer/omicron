@@ -16,6 +16,10 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::ReifiedVpcRoute;
+use omicron_common::api::internal::shared::ReifiedVpcRouteSet;
+use omicron_common::api::internal::shared::RouterId;
+use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
@@ -36,6 +40,8 @@ use slog::error;
 use slog::info;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
@@ -60,6 +66,13 @@ struct PortManagerInner {
     // Map of all ports, keyed on the interface Uuid and its kind
     // (which includes the Uuid of the parent instance or service)
     ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
+
+    // XX: vs. Hashmap?
+    // XX: Should this be the UUID of the VPC? The rulesets are
+    //     arguably shared v4+v6, although today we don't yet
+    //     allow dual-stack, let alone v6.
+    // Map of all current resolved routes
+    routes: Mutex<HashMap<RouterId, HashSet<ReifiedVpcRoute>>>,
 }
 
 impl PortManagerInner {
@@ -86,6 +99,7 @@ impl PortManager {
             next_port_id: AtomicU64::new(0),
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
+            routes: Mutex::new(Default::default()),
         });
 
         Self { inner }
@@ -400,12 +414,47 @@ impl PortManager {
             "route" => ?route,
         );
 
+        // XX: this is probably not the right initialisation here...
+        // XX: VPC rules should probably come from ctl plane.
+        let mut routes = self.inner.routes.lock().unwrap();
+        routes.entry(RouterId { vni: nic.vni, subnet: None }).or_insert_with(
+            || {
+                let mut out = HashSet::new();
+                out.insert(ReifiedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway,
+                });
+                out.insert(ReifiedVpcRoute {
+                    dest: "::/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway,
+                });
+                out
+            },
+        );
+
         info!(
             self.inner.log,
             "Created OPTE port";
             "port" => ?&port,
         );
         Ok((port, ticket))
+    }
+
+    pub fn vpc_routes_list(&self) -> Vec<ReifiedVpcRouteSet> {
+        let routes = self.inner.routes.lock().unwrap();
+        routes
+            .iter()
+            .map(|(k, v)| ReifiedVpcRouteSet { id: *k, routes: v.clone() })
+            .collect()
+    }
+
+    pub fn vpc_routes_ensure(&self, new_routes: Vec<ReifiedVpcRouteSet>) {
+        let mut routes = self.inner.routes.lock().unwrap();
+        // *routes = new_routes;
+        drop(routes);
+
+        // XX: compute deltas.
+        // XX: push down to OPTE.
     }
 
     /// Ensure external IPs for an OPTE port are up to date.

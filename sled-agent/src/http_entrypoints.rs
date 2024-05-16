@@ -33,7 +33,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
-use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_common::api::internal::shared::{ReifiedVpcRouteSet, SwitchPorts};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -86,6 +86,8 @@ pub fn api() -> SledApiDescription {
         api.register(host_os_write_status_delete)?;
         api.register(inventory)?;
         api.register(bootstore_status)?;
+        api.register(list_vpc_routes)?;
+        api.register(set_vpc_routes)?;
 
         Ok(())
     }
@@ -1017,4 +1019,30 @@ async fn bootstore_status(
         })?
         .into();
     Ok(HttpResponseOk(status))
+}
+
+/// Get the current state of VPC routing rules.
+#[endpoint {
+    method = GET,
+    path = "/vpc-routes",
+}]
+async fn list_vpc_routes(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Vec<ReifiedVpcRouteSet>>, HttpError> {
+    let sa = request_context.context();
+    Ok(HttpResponseOk(sa.list_vpc_routes()))
+}
+
+/// Update VPC routing rules.
+#[endpoint {
+    method = PUT,
+    path = "/vpc-routes",
+}]
+async fn set_vpc_routes(
+    request_context: RequestContext<SledAgent>,
+    body: TypedBody<Vec<ReifiedVpcRouteSet>>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = request_context.context();
+    sa.set_vpc_routes(body.into_inner());
+    Ok(HttpResponseUpdatedNoContent())
 }
