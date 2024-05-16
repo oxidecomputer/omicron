@@ -4743,6 +4743,7 @@ impl ServiceManager {
                             }
 
                             smfh.refresh()?;
+                            smfh.restart()?;
                         }
                         SwitchService::Dendrite { .. } => {
                             info!(
@@ -4785,6 +4786,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
+                            smfh.restart()?;
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4822,6 +4824,7 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
+                            smfh.restart()?;
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
@@ -4866,6 +4869,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
+                            smfh.restart()?;
                         }
                         SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "configuring mg-ddm service");
@@ -4895,6 +4899,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
+                            smfh.restart()?;
                         }
                     }
                 }
