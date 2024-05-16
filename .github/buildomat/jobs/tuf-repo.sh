@@ -65,4 +65,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo run --release --bin omicron-releng -- --output-dir /work
+cargo xtask releng --output-dir /work
