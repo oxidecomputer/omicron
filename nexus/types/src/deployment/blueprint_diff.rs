@@ -10,9 +10,12 @@ use super::blueprint_display::{
     BpSledSubtable, BpSledSubtableData, BpSledSubtableRow, KvListWithHeading,
     KvPair,
 };
+use super::zone_sort_key;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_client::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -67,6 +70,16 @@ impl BpSledSubtableData for BpDiffZoneDetails {
 pub struct ModifiedZone {
     pub prior_disposition: BlueprintZoneDisposition,
     pub zone: BlueprintOrCollectionZoneConfig,
+}
+
+impl ZoneSortKey for ModifiedZone {
+    fn kind(&self) -> ZoneKind {
+        self.zone.kind()
+    }
+
+    fn id(&self) -> OmicronZoneUuid {
+        self.zone.id()
+    }
 }
 
 impl ModifiedZone {
@@ -228,6 +241,7 @@ impl BpDiffZones {
                 // Add all records to `diffs` that come from either `before` or `after`
                 // for this `sled_id`.
                 if !unchanged.is_empty() {
+                    unchanged.sort_unstable_by_key(zone_sort_key);
                     diffs.unchanged.insert(
                         sled_id,
                         BpDiffZoneDetails {
@@ -238,6 +252,7 @@ impl BpDiffZones {
                     );
                 }
                 if !removed.is_empty() {
+                    removed.sort_unstable_by_key(zone_sort_key);
                     diffs.removed.insert(
                         sled_id,
                         BpDiffZoneDetails {
@@ -248,6 +263,7 @@ impl BpDiffZones {
                     );
                 }
                 if !added.is_empty() {
+                    added.sort_unstable_by_key(zone_sort_key);
                     diffs.added.insert(
                         sled_id,
                         BpDiffZoneDetails {
@@ -258,6 +274,7 @@ impl BpDiffZones {
                     );
                 }
                 if !modified.is_empty() {
+                    modified.sort_unstable_by_key(zone_sort_key);
                     diffs.modified.insert(
                         sled_id,
                         BpDiffZonesModified {
@@ -285,6 +302,7 @@ impl BpDiffZones {
                 }
 
                 if !removed.is_empty() {
+                    removed.sort_unstable_by_key(zone_sort_key);
                     diffs.removed.insert(
                         sled_id,
                         BpDiffZoneDetails {

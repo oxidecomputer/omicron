@@ -33,10 +33,10 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     crucible       70232a6d-6c9d-4fa6-a34d-9c73d940db33   in service    fd00:1122:3344:101::28
     crucible       8567a616-a709-4c8c-a323-4474675dad5c   in service    fd00:1122:3344:101::2c
     crucible       8b0b8623-930a-41af-9f9b-ca28b1b11139   in service    fd00:1122:3344:101::29
-    internal_ntp   ad76d200-5675-444b-b19c-684689ff421f   in service    fd00:1122:3344:101::21
     crucible       cf87d2a3-d323-44a3-a87e-adc4ef6c75f4   in service    fd00:1122:3344:101::2b
-    nexus          e9bf2525-5fa0-4c1b-b52d-481225083845   in service    fd00:1122:3344:101::22
     crucible       eac6c0a0-baa5-4490-9cee-65198b7fbd9c   in service    fd00:1122:3344:101::26
+    internal_ntp   ad76d200-5675-444b-b19c-684689ff421f   in service    fd00:1122:3344:101::21
+    nexus          e9bf2525-5fa0-4c1b-b52d-481225083845   in service    fd00:1122:3344:101::22
 
 
  MODIFIED SLEDS:
@@ -67,14 +67,14 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
 *   crucible       2307bbed-02ba-493b-89e3-46585c74c8fc   in service -> expunged   fd00:1122:3344:103::28
 *   crucible       4e36b7ef-5684-4304-b7c3-3c31aaf83d4f   in service -> expunged   fd00:1122:3344:103::23
 *   crucible       603e629d-2599-400e-b879-4134d4cc426e   in service -> expunged   fd00:1122:3344:103::2c
-*   nexus          6a70a233-1900-43c0-9c00-aa9d1f7adfbc   in service -> expunged   fd00:1122:3344:103::22
 *   crucible       9179d6dc-387d-424e-8d62-ed59b2c728f6   in service -> expunged   fd00:1122:3344:103::2a
 *   crucible       c28d7b4b-a259-45ad-945d-f19ca3c6964c   in service -> expunged   fd00:1122:3344:103::29
-*   internal_ntp   c62b87b6-b98d-4d22-ba4f-cee4499e2ba8   in service -> expunged   fd00:1122:3344:103::21
 *   crucible       e29998e7-9ed2-46b6-bb70-4118159fe07f   in service -> expunged   fd00:1122:3344:103::26
 *   crucible       f06e91a1-0c17-4cca-adbc-1c9b67bdb11d   in service -> expunged   fd00:1122:3344:103::2b
 *   crucible       f11f5c60-1ac7-4630-9a3a-a9bc85c75203   in service -> expunged   fd00:1122:3344:103::25
 *   crucible       f231e4eb-3fc9-4964-9d71-2c41644852d9   in service -> expunged   fd00:1122:3344:103::24
+*   internal_ntp   c62b87b6-b98d-4d22-ba4f-cee4499e2ba8   in service -> expunged   fd00:1122:3344:103::21
+*   nexus          6a70a233-1900-43c0-9c00-aa9d1f7adfbc   in service -> expunged   fd00:1122:3344:103::22
 
 
   sled fefcf4cf-f7e7-46b3-b629-058526ce440e:
@@ -102,7 +102,6 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     crucible       0e2b035e-1de1-48af-8ac0-5316418e3de1   in service    fd00:1122:3344:102::2a
     crucible       4f8ce495-21dd-48a1-859c-80d34ce394ed   in service    fd00:1122:3344:102::23
     crucible       5c78756d-6182-4c27-a507-3419e8dbe76b   in service    fd00:1122:3344:102::28
-    nexus          99c6401d-9796-4ae1-bf0c-9a097cf21c33   in service    fd00:1122:3344:102::22
     crucible       a1ae92ac-e1f1-4654-ab54-5b75ba7c44d6   in service    fd00:1122:3344:102::24
     crucible       a308d3e1-118c-440a-947a-8b6ab7d833ab   in service    fd00:1122:3344:102::25
     crucible       b7402110-d88f-4ca4-8391-4a2fda6ad271   in service    fd00:1122:3344:102::29
@@ -111,6 +110,7 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     crucible       cf13b878-47f1-4ba0-b8c2-9f3e15f2ee87   in service    fd00:1122:3344:102::2c
     crucible       e6d0df1f-9f98-4c5a-9540-8444d1185c7d   in service    fd00:1122:3344:102::27
     internal_ntp   f68846ad-4619-4747-8293-a2b4aeeafc5b   in service    fd00:1122:3344:102::21
+    nexus          99c6401d-9796-4ae1-bf0c-9a097cf21c33   in service    fd00:1122:3344:102::22
 +   nexus          c8851a11-a4f7-4b21-9281-6182fd15dc8d   in service    fd00:1122:3344:102::2d
 
 
