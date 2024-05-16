@@ -4699,6 +4699,10 @@ impl ServiceManager {
 
                     match service {
                         SwitchService::ManagementGatewayService => {
+                            info!(
+                                self.inner.log,
+                                "configuring MGS service"
+                            );
                             // TODO: Make sure all services use delpropvalue_default_instance
                             // and addpropvalue_default_instance instead of delpropvalue
                             // and addpropvalue. Verify property values are correct
@@ -4717,10 +4721,6 @@ impl ServiceManager {
                                 &format!("[::1]:{MGS_PORT}"),
                             )?;
 
-                            info!(
-                                self.inner.log,
-                                "DEBUG: address for MGS {}", address
-                            );
                             // Add the underlay address.
                             smfh.addpropvalue_default_instance(
                                 "config/address",
@@ -4743,7 +4743,8 @@ impl ServiceManager {
                             }
 
                             smfh.refresh()?;
-                            smfh.restart()?;
+                            info!(self.inner.log, "refreshed MGS service with new configuration")
+                            //smfh.restart()?;
                         }
                         SwitchService::Dendrite { .. } => {
                             info!(
@@ -4786,7 +4787,8 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            smfh.restart()?;
+                            info!(self.inner.log, "refreshed dendrite service with new configuration")
+                            //smfh.restart()?;
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4804,6 +4806,7 @@ impl ServiceManager {
                                 )?;
 
                                 smfh.refresh()?;
+                                info!(self.inner.log, "refreshed wicketd service with new configuration")
                             } else {
                                 error!(
                                     self.inner.log,
@@ -4824,7 +4827,8 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            smfh.restart()?;
+                            info!(self.inner.log, "refreshed lldpd service with new configuration")
+                            //smfh.restart()?;
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
@@ -4869,7 +4873,8 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            smfh.restart()?;
+                            info!(self.inner.log, "refreshed mgd service with new configuration")
+                            //smfh.restart()?;
                         }
                         SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "configuring mg-ddm service");
@@ -4899,7 +4904,8 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            smfh.restart()?;
+                            info!(self.inner.log, "refreshed mg-ddm service with new configuration")
+                            //smfh.restart()?;
                         }
                     }
                 }
