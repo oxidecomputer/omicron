@@ -254,6 +254,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_router: &authz::VpcRouter,
     ) -> Result<(), Error> {
+        use crate::db::fixed_data::vpc::SERVICES_VPC;
         use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
         use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET_ROUTE_ID;
         use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
@@ -293,7 +294,7 @@ impl DataStore {
 
             let route = RouterRoute::for_subnet(
                 route_id,
-                *SERVICES_VPC_ID,
+                SERVICES_VPC.system_router_id,
                 vpc_subnet.name().clone().into(),
             )
             .expect("builtin service names are short enough for route naming");
