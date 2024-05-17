@@ -298,7 +298,8 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every provisionable zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone
+            // on it.
             let mut ncrucibles_added = 0;
             for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
                 if self
@@ -328,82 +329,116 @@ impl<'a> Planner<'a> {
             }
         }
 
-        for kind in [
+        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)
+    }
+
+    fn do_plan_add_discretionary_zones(
+        &mut self,
+        sleds_waiting_for_ntp_zones: &BTreeSet<SledUuid>,
+    ) -> Result<(), Error> {
+        // We usually don't need to construct an `OmicronZonePlacement` to add
+        // discretionary zones, so defer its creation until it's needed.
+        let mut zone_placement = None;
+
+        for zone_kind in [
             DiscretionaryOmicronZone::Nexus,
             DiscretionaryOmicronZone::CockroachDb,
         ] {
-            self.ensure_correct_number_of_discretionary_zones(
-                &sleds_waiting_for_ntp_zone,
-                kind,
+            // Count the number of `kind` zones on all in-service sleds. This
+            // will include sleds that are in service but not eligible for new
+            // services, but will not include sleds that have been expunged or
+            // decommissioned.
+            let mut num_existing_kind_zones = 0;
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                let num_zones_of_kind = self
+                    .blueprint
+                    .sled_num_zones_of_kind(sled_id, zone_kind.into());
+                num_existing_kind_zones += num_zones_of_kind;
+            }
+
+            let target_count = match zone_kind {
+                DiscretionaryOmicronZone::Nexus => {
+                    self.input.target_nexus_zone_count()
+                }
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.input.target_cockroachdb_zone_count()
+                }
+            };
+
+            // TODO-correctness What should we do if we have _too many_
+            // instances? For now, just log it the number of zones any time we
+            // have at least the minimum number.
+            let num_zones_to_add =
+                target_count.saturating_sub(num_existing_kind_zones);
+            if num_zones_to_add == 0 {
+                info!(
+                    self.log, "sufficient {zone_kind:?} zones exist in plan";
+                    "desired_count" => target_count,
+                    "current_count" => num_existing_kind_zones,
+                );
+                continue;
+            }
+
+            // We need to add at least one zone; construct our `zone_placement`
+            // (or reuse the existing one if a previous loop iteration already
+            // created it).
+            let zone_placement = match zone_placement.as_mut() {
+                Some(zone_placement) => zone_placement,
+                None => {
+                    // This constructs a picture of the sleds as we currently
+                    // understand them, as far as which sleds have discretionary
+                    // zones. This will remain valid as we loop through the
+                    // `zone_kind`s in this function, as any zone additions will
+                    // update the `zone_placement` heap in-place.
+                    let current_discretionary_zones = self
+                        .input
+                        .all_sled_resources(SledFilter::Discretionary)
+                        .filter(|(sled_id, _)| {
+                            !sleds_waiting_for_ntp_zones.contains(&sled_id)
+                        })
+                        .map(|(sled_id, sled_resources)| {
+                            OmicronZonePlacementSledState {
+                            sled_id,
+                            num_zpools: sled_resources
+                                .all_zpools(ZpoolFilter::InService)
+                                .count(),
+                            discretionary_zones: self
+                                .blueprint
+                                .current_sled_zones(sled_id)
+                                .filter_map(|zone| {
+                                    DiscretionaryOmicronZone::from_zone_type(
+                                        &zone.zone_type,
+                                    )
+                                })
+                                .collect(),
+                        }
+                        });
+                    zone_placement.insert(OmicronZonePlacement::new(
+                        current_discretionary_zones,
+                    ))
+                }
+            };
+            self.add_discretionary_zones(
+                zone_placement,
+                zone_kind,
+                num_zones_to_add,
             )?;
         }
 
         Ok(())
     }
 
-    fn ensure_correct_number_of_discretionary_zones(
+    // Attempts to place `num_zones_to_add` new zones of `kind`.
+    //
+    // It is not an error if there are too few eligible sleds to start a
+    // sufficient number of zones; instead, we'll log a warning and start as
+    // many as we can (up to `num_zones_to_add`).
+    fn add_discretionary_zones(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+        zone_placement: &mut OmicronZonePlacement,
         kind: DiscretionaryOmicronZone,
+        mut num_zones_to_add: usize,
     ) -> Result<(), Error> {
-        // Count the number of `kind` zones on all in-service sleds. This will
-        // include sleds that are in service but not eligible for new services,
-        // but will not include sleds that have been expunged or decommissioned.
-        let mut num_existing_kind_zones = 0;
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_zones_of_kind =
-                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into());
-            num_existing_kind_zones += num_zones_of_kind;
-        }
-
-        let target_count = match kind {
-            DiscretionaryOmicronZone::Nexus => {
-                self.input.target_nexus_zone_count()
-            }
-            DiscretionaryOmicronZone::CockroachDb => {
-                self.input.target_cockroachdb_zone_count()
-            }
-        };
-
-        // TODO-correctness What should we do if we have _too many_ instances?
-        // For now, just log it the number of zones any time we have at least
-        // the minimum number.
-        let mut num_zones_to_add =
-            target_count.saturating_sub(num_existing_kind_zones);
-        if num_zones_to_add == 0 {
-            info!(
-                self.log, "sufficient {kind:?} zones exist in plan";
-                "desired_count" => target_count,
-                "current_count" => num_existing_kind_zones,
-            );
-            return Ok(());
-        }
-
-        let mut zone_placement = OmicronZonePlacement::new(
-            self.input
-                .all_sled_resources(SledFilter::Discretionary)
-                .filter(|(sled_id, _)| {
-                    !sleds_waiting_for_ntp_zone.contains(&sled_id)
-                })
-                .map(|(sled_id, sled_resources)| {
-                    OmicronZonePlacementSledState {
-                        sled_id,
-                        num_zpools: sled_resources
-                            .all_zpools(ZpoolFilter::InService)
-                            .count(),
-                        discretionary_zones: self
-                            .blueprint
-                            .current_sled_zones(sled_id)
-                            .filter_map(|zone| {
-                                DiscretionaryOmicronZone::from_zone_type(
-                                    &zone.zone_type,
-                                )
-                            })
-                            .collect(),
-                    }
-                }),
-        );
-
         // Build a map of sled -> new zones to add.
         let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
