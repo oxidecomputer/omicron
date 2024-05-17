@@ -416,6 +416,7 @@ impl PortManager {
 
         // XX: this is probably not the right initialisation here...
         // XX: VPC rules should probably come from ctl plane.
+        // XX: need to delete safely after.
         let mut routes = self.inner.routes.lock().unwrap();
         routes.entry(RouterId { vni: nic.vni, subnet: None }).or_insert_with(
             || {
@@ -431,6 +432,9 @@ impl PortManager {
                 out
             },
         );
+        routes
+            .entry(RouterId { vni: nic.vni, subnet: Some(nic.subnet) })
+            .or_insert_with(|| HashSet::default());
 
         info!(
             self.inner.log,
@@ -450,6 +454,11 @@ impl PortManager {
 
     pub fn vpc_routes_ensure(&self, new_routes: Vec<ReifiedVpcRouteSet>) {
         let mut routes = self.inner.routes.lock().unwrap();
+        error!(
+            self.inner.log,
+            "I got routes I don't know what to do with!";
+            "route_set" => format!("{new_routes:?}")
+        );
         // *routes = new_routes;
         drop(routes);
 

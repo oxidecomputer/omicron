@@ -36,6 +36,7 @@ progenitor::generate_api!(
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] }
+        RouterId = { derives = [PartialEq, Eq, Hash, Debug, Deserialize, Serialize] },
     },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
@@ -51,6 +52,10 @@ progenitor::generate_api!(
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        RouterId = omicron_common::api::internal::shared::RouterId,
+        ReifiedVpcRoute = omicron_common::api::internal::shared::ReifiedVpcRoute,
+        ReifiedVpcRouteSet = omicron_common::api::internal::shared::ReifiedVpcRouteSet,
+        RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         Vni = omicron_common::api::external::Vni,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,

@@ -609,6 +609,28 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Retrieve the primary network interface for a given instance.
+    pub async fn instance_get_primary_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceNetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        use db::schema::instance_network_interface::dsl;
+        dsl::instance_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::is_primary.eq(true))
+            .select(InstanceNetworkInterface::as_select())
+            .limit(1)
+            .first_async::<InstanceNetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Get network interface associated with a given probe.
     pub async fn probe_get_network_interface(
         &self,

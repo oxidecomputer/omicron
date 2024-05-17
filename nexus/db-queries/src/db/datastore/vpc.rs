@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Vpc`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -35,6 +36,7 @@ use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
 use crate::db::model::{Ipv4Net, Ipv6Net};
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
@@ -54,6 +56,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -63,9 +66,13 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::internal::shared::ReifiedVpcRoute;
+use omicron_common::api::internal::shared::RouterTarget;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -1402,6 +1409,279 @@ impl DataStore {
                 Ok(())
             }}).await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Look up a VPC by VNI.
+    pub async fn vpc_get_system_router(
+        &self,
+        opctx: &OpContext,
+        vpc_id: Uuid,
+    ) -> LookupResult<VpcRouter> {
+        // use db::schema::vpc::dsl as vpc_dsl;
+        use db::schema::vpc::dsl as vpc_dsl;
+        use db::schema::vpc_router::dsl as router_dsl;
+
+        vpc_dsl::vpc
+            .inner_join(
+                router_dsl::vpc_router
+                    .on(router_dsl::id.eq(vpc_dsl::system_router_id)),
+            )
+            .filter(vpc_dsl::time_deleted.is_null())
+            .filter(vpc_dsl::id.eq(vpc_id))
+            .filter(router_dsl::time_deleted.is_null())
+            .filter(router_dsl::vpc_id.eq(vpc_id))
+            .select(VpcRouter::as_select())
+            .limit(1)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(vpc_id),
+                    ),
+                )
+            })
+    }
+
+    /// Fetch all active custom routers (and their parent subnets)
+    /// in a VPC.
+    pub async fn vpc_get_active_custom_routers(
+        &self,
+        opctx: &OpContext,
+        vpc_id: Uuid,
+    ) -> ListResultVec<(VpcSubnet, VpcRouter)> {
+        use db::schema::vpc_router::dsl as router_dsl;
+        use db::schema::vpc_subnet::dsl as subnet_dsl;
+
+        subnet_dsl::vpc_subnet
+            .inner_join(
+                router_dsl::vpc_router.on(router_dsl::id
+                    .nullable()
+                    .eq(subnet_dsl::custom_router_id)),
+            )
+            .filter(subnet_dsl::time_deleted.is_null())
+            .filter(subnet_dsl::vpc_id.is_null())
+            .filter(router_dsl::time_deleted.is_null())
+            .select((VpcSubnet::as_select(), VpcRouter::as_select()))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(vpc_id),
+                    ),
+                )
+            })
+    }
+
+    /// Resolve all targets in a router into concrete details.
+    pub async fn vpc_resolve_router_rules(
+        &self,
+        opctx: &OpContext,
+        vpc_router_id: Uuid,
+    ) -> Result<HashSet<ReifiedVpcRoute>, Error> {
+        // Get all rules in target router.
+        opctx.check_complex_operations_allowed()?;
+
+        let (.., authz_project, authz_vpc, authz_router) =
+            db::lookup::LookupPath::new(opctx, self)
+                .vpc_router_id(vpc_router_id)
+                .lookup_for(authz::Action::ListChildren)
+                .await
+                .internal_context("lookup built-in services project")?;
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut all_rules = vec![];
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .vpc_router_route_list(
+                    opctx,
+                    &authz_router,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|s: &nexus_db_model::RouterRoute| s.id());
+            all_rules.extend(batch);
+        }
+
+        // XXX: transaction based on generation number?
+        let mut subnet_names = HashSet::new();
+        let mut vpc_names = HashSet::new();
+        let mut inetgw_names = HashSet::new();
+        let mut instance_names = HashSet::new();
+        for rule in &all_rules {
+            match &rule.target.0 {
+                RouteTarget::Vpc(n) => {
+                    vpc_names.insert(n.clone());
+                }
+                RouteTarget::Subnet(n) => {
+                    subnet_names.insert(n.clone());
+                }
+                RouteTarget::Instance(n) => {
+                    instance_names.insert(n.clone());
+                }
+                RouteTarget::InternetGateway(n) => {
+                    inetgw_names.insert(n.clone());
+                }
+                _ => {}
+            }
+
+            match &rule.destination.0 {
+                RouteDestination::Vpc(n) => {
+                    vpc_names.insert(n.clone());
+                }
+                RouteDestination::Subnet(n) => {
+                    subnet_names.insert(n.clone());
+                }
+                _ => {}
+            }
+        }
+
+        // TODO: transact these, and/or solve in fewer queries.
+        let mut subnets = HashMap::new();
+        for name in subnet_names.drain() {
+            if let Ok((.., subnet)) = db::lookup::LookupPath::new(opctx, self)
+                .vpc_id(authz_vpc.id())
+                .vpc_subnet_name(Name::ref_cast(&name))
+                .fetch()
+                .await
+            {
+                subnets.insert(name, subnet);
+            }
+        }
+        let mut vpcs = HashMap::new();
+        for name in vpc_names.drain() {
+            if let Ok((.., vpc)) = db::lookup::LookupPath::new(opctx, self)
+                .project_id(authz_project.id())
+                .vpc_name(Name::ref_cast(&name))
+                .fetch()
+                .await
+            {
+                vpcs.insert(name, vpc);
+            }
+        }
+        let mut instances = HashMap::new();
+        for name in instance_names.drain() {
+            if let Ok((.., authz_instance, instance)) =
+                db::lookup::LookupPath::new(opctx, self)
+                    .project_id(authz_project.id())
+                    .instance_name(Name::ref_cast(&name))
+                    .fetch()
+                    .await
+            {
+                // XXX: currently an instance can have one primary,
+                //      and it is not dual-stack (v4 + v6). We need
+                //      to clarify what should be resolved in the v6 case.
+                if let Ok(primary_nic) = self
+                    .instance_get_primary_network_interface(
+                        opctx,
+                        &authz_instance,
+                    )
+                    .await
+                {
+                    instances.insert(name, (instance, primary_nic));
+                }
+            }
+        }
+        // TODO: validate names of Internet Gateways.
+
+        // See the discussion in `resolve_firewall_rules_for_sled_agent` on
+        // how we should resolve name misses in route resolution.
+        // This method adopts the same strategy: a lookup failure corresponds
+        // to a NO-OP rule.
+        let mut out = HashSet::new();
+        for rule in all_rules {
+            // Some dests/targets (e.g., subnet) resolve to *several* specifiers
+            // to handle both v4 and v6. The user-facing API will prevent severe
+            // mistakes on naked IPs/CIDRs (mixed v4/6), but we need to be smarter
+            // around named entities here.
+            let (v4_dest, v6_dest) = match rule.destination.0 {
+                RouteDestination::Ip(ip @ IpAddr::V4(_)) => {
+                    (Some(IpNet::single(ip)), None)
+                }
+                RouteDestination::Ip(ip @ IpAddr::V6(_)) => {
+                    (None, Some(IpNet::single(ip)))
+                }
+                RouteDestination::IpNet(ip @ IpNet::V4(_)) => (Some(ip), None),
+                RouteDestination::IpNet(ip @ IpNet::V6(_)) => (None, Some(ip)),
+                RouteDestination::Subnet(n) => subnets
+                    .get(&n)
+                    .map(|s| {
+                        (
+                            Some(s.ipv4_block.0.into()),
+                            Some(s.ipv6_block.0.into()),
+                        )
+                    })
+                    .unwrap_or_default(),
+
+                // TODO: VPC peering.
+                RouteDestination::Vpc(_) => (None, None),
+            };
+
+            let (v4_target, v6_target) = match rule.target.0 {
+                RouteTarget::Ip(ip @ IpAddr::V4(_)) => {
+                    (Some(RouterTarget::Ip(ip)), None)
+                }
+                RouteTarget::Ip(ip @ IpAddr::V6(_)) => {
+                    (None, Some(RouterTarget::Ip(ip)))
+                }
+                RouteTarget::Subnet(n) => subnets
+                    .get(&n)
+                    .map(|s| {
+                        (
+                            Some(RouterTarget::VpcSubnet(
+                                s.ipv4_block.0.into(),
+                            )),
+                            Some(RouterTarget::VpcSubnet(
+                                s.ipv6_block.0.into(),
+                            )),
+                        )
+                    })
+                    .unwrap_or_default(),
+                RouteTarget::Instance(n) => instances
+                    .get(&n)
+                    .map(|i| match i.1.ip {
+                        // TODO: update for dual-stack v4/6.
+                        ip @ IpNetwork::V4(_) => {
+                            (Some(RouterTarget::Ip(ip.ip())), None)
+                        }
+                        ip @ IpNetwork::V6(_) => {
+                            (None, Some(RouterTarget::Ip(ip.ip())))
+                        }
+                    })
+                    .unwrap_or_default(),
+                RouteTarget::Drop => {
+                    (Some(RouterTarget::Drop), Some(RouterTarget::Drop))
+                }
+
+                // TODO: Internet Gateways.
+                //       The semantic here is 'name match => allow',
+                //       as the other aspect they will control is SNAT
+                //       IP allocation. Today, presence of this rule
+                //       allows upstream regardless of name.
+                RouteTarget::InternetGateway(_n) => (
+                    Some(RouterTarget::InternetGateway),
+                    Some(RouterTarget::InternetGateway),
+                ),
+
+                // TODO: VPC Peering.
+                RouteTarget::Vpc(_) => (None, None),
+            };
+
+            if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
+                out.insert(ReifiedVpcRoute { dest, target });
+            }
+
+            if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
+                out.insert(ReifiedVpcRoute { dest, target });
+            }
+        }
+
+        Ok(out)
     }
 }
 
