@@ -1330,6 +1330,7 @@ impl InstanceRunner {
                 floating_ips,
                 &self.firewall_rules,
                 self.dhcp_config.clone(),
+                false,
             )?;
             opte_ports.push(port);
         }

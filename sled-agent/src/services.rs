@@ -1266,7 +1266,15 @@ impl ServiceManager {
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(nic, snat, None, floating_ips, &[], DhcpCfg::default())
+            .create_port(
+                nic,
+                snat,
+                None,
+                floating_ips,
+                &[],
+                DhcpCfg::default(),
+                true,
+            )
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),

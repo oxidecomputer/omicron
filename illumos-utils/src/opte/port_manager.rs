@@ -31,7 +31,6 @@ use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv6Cfg;
 use oxide_vpc::api::MacAddr;
 use oxide_vpc::api::RouterClass;
-use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetExternalIpsReq;
@@ -120,6 +119,7 @@ impl PortManager {
         floating_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
         dhcp_config: DhcpCfg,
+        is_service: bool,
     ) -> Result<(Port, PortTicket), Error> {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
@@ -356,87 +356,57 @@ impl PortManager {
             (port, ticket)
         };
 
-        // TODO: These should not be filled in like this, and should be informed
-        //       by either our existing knowledge of current knowledge of system + custom
-        //       routers OR we just await the router RPW filling this in for us.
-        //       In future, ∃ VPCs *without* an Internet Gateway so we can't just
-        //       plumb that in as well...
-
-        // Add a router entry for this interface's subnet, directing traffic to the
-        // VPC subnet.
-        let route = AddRouterEntryReq {
-            class: RouterClass::System,
-            port_name: port_name.clone(),
-            dest: vpc_subnet,
-            target: RouterTarget::VpcSubnet(vpc_subnet),
-        };
-        #[cfg(target_os = "illumos")]
-        hdl.add_router_entry(&route)?;
-        debug!(
-            self.inner.log,
-            "Added VPC Subnet router entry";
-            "port_name" => &port_name,
-            "route" => ?route,
-        );
-
-        // TODO-remove
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/1336
-        //
-        // This is another part of the workaround, allowing reply traffic from
-        // the guest back out. Normally, OPTE would drop such traffic at the
-        // router layer, as it has no route for that external IP address. This
-        // allows such traffic through.
-        //
-        // Note that this exact rule will eventually be included, since it's one
-        // of the default routing rules in the VPC System Router. However, that
-        // will likely be communicated in a different way, or could be modified,
-        // and this specific call should be removed in favor of sending the
-        // routing rules the control plane provides.
-        //
-        // This rule sends all traffic that has no better match to the gateway.
-        let dest = match vpc_subnet {
-            IpCidr::Ip4(_) => "0.0.0.0/0",
-            IpCidr::Ip6(_) => "::/0",
-        }
-        .parse()
-        .unwrap();
-        let route = AddRouterEntryReq {
-            class: RouterClass::System,
-            port_name: port_name.clone(),
-            dest,
-            target: RouterTarget::InternetGateway,
-        };
-        #[cfg(target_os = "illumos")]
-        hdl.add_router_entry(&route)?;
-        debug!(
-            self.inner.log,
-            "Added default internet gateway route entry";
-            "port_name" => &port_name,
-            "route" => ?route,
-        );
-
-        // XX: this is probably not the right initialisation here...
-        // XX: VPC rules should probably come from ctl plane.
-        // XX: need to delete safely after.
+        // XX: need to delete safely after all subnet-holders leave
+        //     to not get flooded with useless rules.
         let mut routes = self.inner.routes.lock().unwrap();
-        routes.entry(RouterId { vni: nic.vni, subnet: None }).or_insert_with(
-            || {
+        let system_routes = routes
+            .entry(RouterId { vni: nic.vni, subnet: None })
+            .or_insert_with(|| {
                 let mut out = HashSet::new();
-                out.insert(ReifiedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway,
-                });
-                out.insert(ReifiedVpcRoute {
-                    dest: "::/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway,
-                });
+                // Services do not talk to one another via OPTE, but do need
+                // to reach out over the Internet *before* nexus is up to give
+                // us real rules. The easiest bet is to instantiate these here.
+                if is_service {
+                    out.insert(ReifiedVpcRoute {
+                        dest: "0.0.0.0/0".parse().unwrap(),
+                        target: ApiRouterTarget::InternetGateway,
+                    });
+                    out.insert(ReifiedVpcRoute {
+                        dest: "::/0".parse().unwrap(),
+                        target: ApiRouterTarget::InternetGateway,
+                    });
+                }
                 out
-            },
-        );
-        routes
+            })
+            .clone();
+
+        let custom_routes = routes
             .entry(RouterId { vni: nic.vni, subnet: Some(nic.subnet) })
             .or_insert_with(|| HashSet::default());
+
+        for (class, routes) in [
+            (RouterClass::System, &system_routes),
+            (RouterClass::Custom, custom_routes),
+        ] {
+            for route in routes {
+                let route = AddRouterEntryReq {
+                    class,
+                    port_name: port_name.clone(),
+                    dest: super::net_to_cidr(route.dest),
+                    target: super::router_target_opte(&route.target),
+                };
+
+                #[cfg(target_os = "illumos")]
+                hdl.add_router_entry(&route)?;
+
+                debug!(
+                    self.inner.log,
+                    "Added router entry";
+                    "port_name" => &port_name,
+                    "route" => ?route,
+                );
+            }
+        }
 
         info!(
             self.inner.log,
@@ -509,6 +479,13 @@ impl PortManager {
 
                     #[cfg(target_os = "illumos")]
                     hdl.del_router_entry(&route)?;
+
+                    debug!(
+                        self.inner.log,
+                        "Removed router entry";
+                        "port_name" => &port.name(),
+                        "route" => ?route,
+                    );
                 }
 
                 for route in to_add {
@@ -521,6 +498,13 @@ impl PortManager {
 
                     #[cfg(target_os = "illumos")]
                     hdl.add_router_entry(&route)?;
+
+                    debug!(
+                        self.inner.log,
+                        "Added router entry";
+                        "port_name" => &port.name(),
+                        "route" => ?route,
+                    );
                 }
             }
         }
