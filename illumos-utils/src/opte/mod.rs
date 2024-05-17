@@ -18,6 +18,14 @@ mod port;
 mod port_manager;
 
 pub use firewall_rules::opte_firewall_rules;
+use omicron_common::api::external::IpNet;
+use omicron_common::api::internal::shared;
+use oxide_vpc::api::IpCidr;
+use oxide_vpc::api::Ipv4Cidr;
+use oxide_vpc::api::Ipv4PrefixLen;
+use oxide_vpc::api::Ipv6Cidr;
+use oxide_vpc::api::Ipv6PrefixLen;
+use oxide_vpc::api::RouterTarget;
 pub use port::Port;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
@@ -61,5 +69,28 @@ impl Gateway {
 
     pub fn ip(&self) -> &IpAddr {
         &self.ip
+    }
+}
+
+fn net_to_cidr(net: IpNet) -> IpCidr {
+    match net {
+        IpNet::V4(net) => IpCidr::Ip4(Ipv4Cidr::new(
+            net.ip().into(),
+            Ipv4PrefixLen::new(net.prefix()).unwrap(),
+        )),
+        IpNet::V6(net) => IpCidr::Ip6(Ipv6Cidr::new(
+            net.ip().into(),
+            Ipv6PrefixLen::new(net.prefix()).unwrap(),
+        )),
+    }
+}
+
+fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
+    use shared::RouterTarget::*;
+    match target {
+        Drop => RouterTarget::Drop,
+        InternetGateway => RouterTarget::InternetGateway,
+        Ip(ip) => RouterTarget::Ip((*ip).into()),
+        VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
     }
 }

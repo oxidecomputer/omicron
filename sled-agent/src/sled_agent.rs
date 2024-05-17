@@ -1095,8 +1095,11 @@ impl SledAgent {
         self.inner.port_manager.vpc_routes_list()
     }
 
-    pub fn set_vpc_routes(&self, routes: Vec<ReifiedVpcRouteSet>) {
-        self.inner.port_manager.vpc_routes_ensure(routes)
+    pub fn set_vpc_routes(
+        &self,
+        routes: Vec<ReifiedVpcRouteSet>,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
     }
 
     /// Return the metric producer registry.

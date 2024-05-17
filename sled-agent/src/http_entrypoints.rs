@@ -1043,6 +1043,6 @@ async fn set_vpc_routes(
     body: TypedBody<Vec<ReifiedVpcRouteSet>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = request_context.context();
-    sa.set_vpc_routes(body.into_inner());
+    sa.set_vpc_routes(body.into_inner())?;
     Ok(HttpResponseUpdatedNoContent())
 }

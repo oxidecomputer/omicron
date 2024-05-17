@@ -22,6 +22,7 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
@@ -341,6 +342,7 @@ impl PortManager {
                 mac,
                 nic.slot,
                 vni,
+                nic.subnet,
                 gateway,
                 vnic,
             );
@@ -452,18 +454,78 @@ impl PortManager {
             .collect()
     }
 
-    pub fn vpc_routes_ensure(&self, new_routes: Vec<ReifiedVpcRouteSet>) {
+    pub fn vpc_routes_ensure(
+        &self,
+        new_routes: Vec<ReifiedVpcRouteSet>,
+    ) -> Result<(), Error> {
         let mut routes = self.inner.routes.lock().unwrap();
-        error!(
-            self.inner.log,
-            "I got routes I don't know what to do with!";
-            "route_set" => format!("{new_routes:?}")
-        );
-        // *routes = new_routes;
+        let mut deltas = HashMap::new();
+        for set in new_routes {
+            let old = routes.get(&set.id);
+
+            let (to_add, to_delete) = if let Some(old) = old {
+                (
+                    set.routes.difference(old).cloned().collect(),
+                    old.difference(&set.routes).cloned().collect(),
+                )
+            } else {
+                (set.routes.clone(), HashSet::new())
+            };
+            deltas.insert(set.id, (to_add, to_delete));
+
+            routes.insert(set.id, set.routes);
+        }
         drop(routes);
 
-        // XX: compute deltas.
-        // XX: push down to OPTE.
+        let ports = self.inner.ports.lock().unwrap();
+        #[cfg(target_os = "illumos")]
+        let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
+
+        for port in ports.values() {
+            let vni = external::Vni::try_from(port.vni().as_u32()).unwrap();
+            let system_id = RouterId { vni, subnet: None };
+            let system_delta = deltas.get(&system_id);
+
+            let custom_id = RouterId { vni, subnet: Some(*port.subnet()) };
+
+            let custom_delta = deltas.get(&custom_id);
+
+            #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
+            for (class, delta) in [
+                (RouterClass::System, system_delta),
+                (RouterClass::Custom, custom_delta),
+            ] {
+                let Some((to_add, to_delete)) = delta else {
+                    continue;
+                };
+
+                for route in to_delete {
+                    let route = DelRouterEntryReq {
+                        class,
+                        port_name: port.name().into(),
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                    };
+
+                    #[cfg(target_os = "illumos")]
+                    hdl.del_router_entry(&route)?;
+                }
+
+                for route in to_add {
+                    let route = AddRouterEntryReq {
+                        class,
+                        port_name: port.name().into(),
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                    };
+
+                    #[cfg(target_os = "illumos")]
+                    hdl.add_router_entry(&route)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Ensure external IPs for an OPTE port are up to date.

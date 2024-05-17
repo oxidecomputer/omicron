@@ -7,6 +7,7 @@
 use crate::opte::Gateway;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
+use omicron_common::api::external::IpNet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -22,6 +23,8 @@ struct PortInner {
     slot: u8,
     // Geneve VNI for the VPC
     vni: Vni,
+    // Subnet the port belong to within the VPC.
+    subnet: IpNet,
     // Information about the virtual gateway, aka OPTE
     gateway: Gateway,
     // TODO-remove(#2932): Remove this once we can put Viona directly on top of an
@@ -89,6 +92,7 @@ impl Port {
         mac: MacAddr6,
         slot: u8,
         vni: Vni,
+        subnet: IpNet,
         gateway: Gateway,
         vnic: String,
     ) -> Self {
@@ -99,6 +103,7 @@ impl Port {
                 mac,
                 slot,
                 vni,
+                subnet,
                 gateway,
                 vnic,
             }),
@@ -124,6 +129,10 @@ impl Port {
 
     pub fn vni(&self) -> &Vni {
         &self.inner.vni
+    }
+
+    pub fn subnet(&self) -> &IpNet {
+        &self.inner.subnet
     }
 
     pub fn vnic_name(&self) -> &str {
