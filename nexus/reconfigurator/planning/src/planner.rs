@@ -334,7 +334,7 @@ impl<'a> Planner<'a> {
 
     fn do_plan_add_discretionary_zones(
         &mut self,
-        sleds_waiting_for_ntp_zones: &BTreeSet<SledUuid>,
+        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
     ) -> Result<(), Error> {
         // We usually don't need to construct an `OmicronZonePlacement` to add
         // discretionary zones, so defer its creation until it's needed.
@@ -366,8 +366,8 @@ impl<'a> Planner<'a> {
             };
 
             // TODO-correctness What should we do if we have _too many_
-            // instances? For now, just log it the number of zones any time we
-            // have at least the minimum number.
+            // `zone_kind` zones? For now, just log it the number of zones any
+            // time we have at least the minimum number.
             let num_zones_to_add =
                 target_count.saturating_sub(num_existing_kind_zones);
             if num_zones_to_add == 0 {
@@ -394,7 +394,7 @@ impl<'a> Planner<'a> {
                         .input
                         .all_sled_resources(SledFilter::Discretionary)
                         .filter(|(sled_id, _)| {
-                            !sleds_waiting_for_ntp_zones.contains(&sled_id)
+                            !sleds_waiting_for_ntp_zone.contains(&sled_id)
                         })
                         .map(|(sled_id, sled_resources)| {
                             OmicronZonePlacementSledState {
@@ -454,7 +454,7 @@ impl<'a> Planner<'a> {
                     // able to produce blueprints to achieve that status.
                     warn!(
                         self.log,
-                        "failed to place all new desired {kind:?} instances";
+                        "failed to place all new desired {kind:?} zones";
                         "placed" => i,
                         "wanted_to_place" => num_zones_to_add,
                     );
@@ -860,7 +860,7 @@ mod test {
             1
         );
 
-        // Now run the planner.  It should add additional Nexus instances to the
+        // Now run the planner.  It should add additional Nexus zones to the
         // one sled we have.
         let mut builder = input.into_builder();
         builder.policy_mut().target_nexus_zone_count = 5;
