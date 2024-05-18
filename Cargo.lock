@@ -4791,6 +4791,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
+ "serde",
  "sled-agent-client",
  "slog",
  "test-strategy",
