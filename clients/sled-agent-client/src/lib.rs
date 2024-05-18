@@ -36,6 +36,7 @@ progenitor::generate_api!(
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         VirtualNetworkInterfaceHost = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] },
     },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
@@ -63,7 +64,6 @@ progenitor::generate_api!(
 // We cannot easily configure progenitor to derive `Eq` on all the client-
 // generated types because some have floats and other types that can't impl
 // `Eq`.  We impl it explicitly for a few types on which we need it.
-impl Eq for types::OmicronPhysicalDiskConfig {}
 impl Eq for types::OmicronPhysicalDisksConfig {}
 impl Eq for types::OmicronZonesConfig {}
 impl Eq for types::OmicronZoneConfig {}

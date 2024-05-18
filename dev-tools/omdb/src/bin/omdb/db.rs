@@ -51,6 +51,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
@@ -98,6 +99,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -381,6 +383,8 @@ enum InventoryCommands {
     Cabooses,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
+    /// show all physical disks every found
+    PhysicalDisks(PhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -406,6 +410,15 @@ struct CollectionsShowArgs {
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
+}
+
+#[derive(Debug, Args, Clone, Copy)]
+struct PhysicalDisksArgs {
+    #[clap(long)]
+    collection_id: Option<CollectionUuid>,
+
+    #[clap(long, requires("collection_id"))]
+    sled_id: Option<SledUuid>,
 }
 
 #[derive(Debug, Args)]
@@ -2652,6 +2665,9 @@ async fn cmd_db_inventory(
             )
             .await
         }
+        InventoryCommands::PhysicalDisks(args) => {
+            cmd_db_inventory_physical_disks(&conn, limit, args).await
+        }
         InventoryCommands::RotPages => {
             cmd_db_inventory_rot_pages(&conn, limit).await
         }
@@ -2726,6 +2742,63 @@ async fn cmd_db_inventory_cabooses(
         version: caboose.version,
         git_commit: caboose.git_commit,
     });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_physical_disks(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+    args: PhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        slot: i64,
+        vendor: String,
+        model: String,
+        serial: String,
+        variant: String,
+    }
+
+    use db::schema::inv_physical_disk::dsl;
+    let mut query = dsl::inv_physical_disk.into_boxed();
+    query = query.limit(i64::from(u32::from(limit)));
+
+    if let Some(collection_id) = args.collection_id {
+        query = query.filter(
+            dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
+        );
+    }
+
+    if let Some(sled_id) = args.sled_id {
+        query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
+    }
+
+    let disks = query
+        .select(InvPhysicalDisk::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading physical disks")?;
+
+    let rows = disks.into_iter().map(|disk| DiskRow {
+        inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
+        sled_id: disk.sled_id.into_untyped_uuid(),
+        slot: disk.slot,
+        vendor: disk.vendor,
+        model: disk.model.clone(),
+        serial: disk.model.clone(),
+        variant: format!("{:?}", disk.variant),
+    });
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))

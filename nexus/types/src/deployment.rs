@@ -21,8 +21,10 @@ pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use derive_more::From;
 use newtype_uuid::GenericUuid;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -30,10 +32,11 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::OmicronPhysicalDisksConfig;
 use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::Ipv6Addr;
@@ -42,6 +45,8 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
+mod blueprint_diff;
+mod blueprint_display;
 mod network_resources;
 mod planning_input;
 mod tri_map;
@@ -69,6 +74,14 @@ pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
+
+use blueprint_display::{
+    constants::*, BpDiffState, BpGeneration, BpOmicronZonesSubtableSchema,
+    BpPhysicalDisksSubtableSchema, BpSledSubtable, BpSledSubtableData,
+    BpSledSubtableRow, KvListWithHeading,
+};
+
+pub use blueprint_diff::BlueprintDiff;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -206,10 +219,7 @@ impl Blueprint {
     /// The argument provided is the "before" side, and `self` is the "after"
     /// side. This matches the order of arguments to
     /// [`Blueprint::diff_since_collection`].
-    pub fn diff_since_blueprint(
-        &self,
-        before: &Blueprint,
-    ) -> Result<BlueprintDiff, BlueprintDiffError> {
+    pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
             before
@@ -219,6 +229,12 @@ impl Blueprint {
                 .collect(),
             self.metadata(),
             self.blueprint_zones.clone(),
+            before
+                .blueprint_disks
+                .iter()
+                .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
+                .collect(),
+            self.blueprint_disks.clone(),
         )
     }
 
@@ -231,10 +247,7 @@ impl Blueprint {
     /// Note that collections do not include information about zone
     /// disposition, so it is assumed that all zones in the collection have the
     /// [`InService`](BlueprintZoneDisposition::InService) disposition.
-    pub fn diff_since_collection(
-        &self,
-        before: &Collection,
-    ) -> Result<BlueprintDiff, BlueprintDiffError> {
+    pub fn diff_since_collection(&self, before: &Collection) -> BlueprintDiff {
         let before_zones = before
             .omicron_zones
             .iter()
@@ -243,11 +256,31 @@ impl Blueprint {
             })
             .collect();
 
+        let before_disks = before
+            .sled_agents
+            .iter()
+            .map(|(sled_id, sa)| {
+                (
+                    *sled_id,
+                    CollectionPhysicalDisksConfig {
+                        disks: sa
+                            .disks
+                            .iter()
+                            .map(|d| d.identity.clone())
+                            .collect::<BTreeSet<_>>(),
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.metadata(),
             self.blueprint_zones.clone(),
+            before_disks,
+            self.blueprint_disks.clone(),
         )
     }
 
@@ -255,6 +288,50 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+}
+
+impl BpSledSubtableData for &OmicronPhysicalDisksConfig {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Value(self.generation)
+    }
+
+    fn rows(
+        &self,
+        state: BpDiffState,
+    ) -> impl Iterator<Item = BpSledSubtableRow> {
+        let sorted_disk_ids: BTreeSet<DiskIdentity> =
+            self.disks.iter().map(|d| d.identity.clone()).collect();
+
+        sorted_disk_ids.into_iter().map(move |d| {
+            BpSledSubtableRow::from_strings(
+                state,
+                vec![d.vendor, d.model, d.serial],
+            )
+        })
+    }
+}
+
+impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Value(self.generation())
+    }
+
+    fn rows(
+        &self,
+        state: BpDiffState,
+    ) -> impl Iterator<Item = BpSledSubtableRow> {
+        self.zones().map(move |zone| {
+            BpSledSubtableRow::from_strings(
+                state,
+                vec![
+                    zone.kind().to_string(),
+                    zone.id().to_string(),
+                    zone.disposition().to_string(),
+                    zone.underlay_address().to_string(),
+                ],
+            )
+        })
     }
 }
 
@@ -266,6 +343,39 @@ impl Blueprint {
 pub struct BlueprintDisplay<'a> {
     blueprint: &'a Blueprint,
     // TODO: add colorization with a stylesheet
+}
+
+impl<'a> BlueprintDisplay<'a> {
+    pub(super) fn make_metadata_table(&self) -> KvListWithHeading {
+        let comment = if self.blueprint.comment.is_empty() {
+            NONE_PARENS.to_string()
+        } else {
+            self.blueprint.comment.clone()
+        };
+
+        KvListWithHeading::new_unchanged(
+            METADATA_HEADING,
+            vec![
+                (CREATED_BY, self.blueprint.creator.clone()),
+                (
+                    CREATED_AT,
+                    humantime::format_rfc3339_millis(
+                        self.blueprint.time_created.into(),
+                    )
+                    .to_string(),
+                ),
+                (COMMENT, comment),
+                (
+                    INTERNAL_DNS_VERSION,
+                    self.blueprint.internal_dns_version.to_string(),
+                ),
+                (
+                    EXTERNAL_DNS_VERSION,
+                    self.blueprint.external_dns_version.to_string(),
+                ),
+            ],
+        )
+    }
 }
 
 impl<'a> fmt::Display for BlueprintDisplay<'a> {
@@ -280,9 +390,62 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 .unwrap_or_else(|| String::from("<none>"))
         )?;
 
-        writeln!(f, "\n{}", self.make_zone_table())?;
+        // Keep track of any sled_ids that have been seen in the first loop.
+        let mut seen_sleds = BTreeSet::new();
 
-        writeln!(f, "\n{}", table_display::metadata_heading())?;
+        // Loop through all sleds that have physical disks and print a table of
+        // those physical disks.
+        //
+        // If there are corresponding zones, print those as well.
+        for (sled_id, disks) in &self.blueprint.blueprint_disks {
+            // Construct the disks subtable
+            let disks_table = BpSledSubtable::new(
+                BpPhysicalDisksSubtableSchema {},
+                disks.bp_generation(),
+                disks.rows(BpDiffState::Unchanged).collect(),
+            );
+
+            // Construct the zones subtable
+            match self.blueprint.blueprint_zones.get(sled_id) {
+                Some(zones) => {
+                    let zones =
+                        BlueprintOrCollectionZonesConfig::from(zones.clone());
+                    let zones_tab = BpSledSubtable::new(
+                        BpOmicronZonesSubtableSchema {},
+                        zones.bp_generation(),
+                        zones.rows(BpDiffState::Unchanged).collect(),
+                    );
+                    writeln!(
+                        f,
+                        "\n  sled: {sled_id}\n\n{disks_table}\n\n{zones_tab}\n"
+                    )?;
+                }
+                None => writeln!(f, "\n  sled: {sled_id}\n\n{disks_table}\n")?,
+            }
+            seen_sleds.insert(sled_id);
+        }
+
+        // Now create and display a table of zones on sleds that don't
+        // yet have physical disks.
+        //
+        // This should basically be impossible, so we warn if it occurs.
+        for (sled_id, zones) in &self.blueprint.blueprint_zones {
+            if !seen_sleds.contains(sled_id) && !zones.zones.is_empty() {
+                let zones =
+                    BlueprintOrCollectionZonesConfig::from(zones.clone());
+                writeln!(
+                    f,
+                    "\n!{sled_id}\n{}\n{}\n\n",
+                    "WARNING: Zones exist without physical disks!",
+                    BpSledSubtable::new(
+                        BpOmicronZonesSubtableSchema {},
+                        zones.bp_generation(),
+                        zones.rows(BpDiffState::Unchanged).collect()
+                    )
+                )?;
+            }
+        }
+
         writeln!(f, "{}", self.make_metadata_table())?;
 
         Ok(())
@@ -872,244 +1035,6 @@ pub struct BlueprintTargetSet {
     pub enabled: bool,
 }
 
-/// Summarizes the differences between two blueprints
-#[derive(Debug)]
-pub struct BlueprintDiff {
-    before_meta: DiffBeforeMetadata,
-    after_meta: BlueprintMetadata,
-    sleds: DiffSleds,
-}
-
-impl BlueprintDiff {
-    /// Build a diff with the provided contents, verifying that the provided
-    /// data is valid.
-    fn new(
-        before_meta: DiffBeforeMetadata,
-        before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
-        after_meta: BlueprintMetadata,
-        after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-    ) -> Result<Self, BlueprintDiffError> {
-        let mut errors = Vec::new();
-
-        let sleds = DiffSleds::new(before_zones, after_zones, &mut errors);
-
-        if errors.is_empty() {
-            Ok(Self { before_meta, after_meta, sleds })
-        } else {
-            Err(BlueprintDiffError {
-                before_meta,
-                after_meta: Box::new(after_meta),
-                errors,
-            })
-        }
-    }
-
-    /// Returns metadata about the source of the "before" data.
-    pub fn before_meta(&self) -> &DiffBeforeMetadata {
-        &self.before_meta
-    }
-
-    /// Returns metadata about the source of the "after" data.
-    pub fn after_meta(&self) -> &BlueprintMetadata {
-        &self.after_meta
-    }
-
-    /// Iterate over sleds only present in the second blueprint of a diff
-    pub fn sleds_added(
-        &self,
-    ) -> impl ExactSizeIterator<Item = (SledUuid, &BlueprintZonesConfig)> + '_
-    {
-        self.sleds.added.iter().map(|(sled_id, zones)| (*sled_id, zones))
-    }
-
-    /// Iterate over sleds only present in the first blueprint of a diff
-    pub fn sleds_removed(
-        &self,
-    ) -> impl ExactSizeIterator<
-        Item = (SledUuid, &BlueprintOrCollectionZonesConfig),
-    > + '_ {
-        self.sleds.removed.iter().map(|(sled_id, zones)| (*sled_id, zones))
-    }
-
-    /// Iterate over sleds present in both blueprints in a diff that have
-    /// changes.
-    pub fn sleds_modified(
-        &self,
-    ) -> impl ExactSizeIterator<Item = (SledUuid, &DiffSledModified)> + '_ {
-        self.sleds.modified.iter().map(|(sled_id, sled)| (*sled_id, sled))
-    }
-
-    /// Iterate over sleds present in both blueprints in a diff that have no
-    /// changes.
-    pub fn sleds_unchanged(
-        &self,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZonesConfig)> + '_ {
-        self.sleds.unchanged.iter().map(|(sled_id, zones)| (*sled_id, zones))
-    }
-
-    /// Return a struct that can be used to display the diff.
-    pub fn display(&self) -> BlueprintDiffDisplay<'_> {
-        BlueprintDiffDisplay::new(self)
-    }
-}
-
-#[derive(Debug)]
-struct DiffSleds {
-    added: BTreeMap<SledUuid, BlueprintZonesConfig>,
-    removed: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
-    modified: BTreeMap<SledUuid, DiffSledModified>,
-    unchanged: BTreeMap<SledUuid, BlueprintZonesConfig>,
-}
-
-impl DiffSleds {
-    /// Builds added, removed and common maps, verifying that the provided data
-    /// is valid.
-    ///
-    /// The return value only contains the sleds that are present in both
-    /// blueprints.
-    fn new(
-        before: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
-        mut after: BTreeMap<SledUuid, BlueprintZonesConfig>,
-        errors: &mut Vec<BlueprintDiffSingleError>,
-    ) -> Self {
-        let mut removed = BTreeMap::new();
-        let mut modified = BTreeMap::new();
-        let mut unchanged = BTreeMap::new();
-
-        for (sled_id, mut before_z) in before {
-            if let Some(mut after_z) = after.remove(&sled_id) {
-                // Sort before_z and after_z so they can be compared directly.
-                before_z.sort();
-                after_z.sort();
-
-                if before_z == after_z {
-                    unchanged.insert(sled_id, after_z);
-                } else {
-                    let sled_modified = DiffSledModified::new(
-                        sled_id, before_z, after_z, errors,
-                    );
-                    modified.insert(sled_id, sled_modified);
-                }
-            } else {
-                removed.insert(sled_id, before_z);
-            }
-        }
-
-        // We removed everything common from `after` above, so anything left is
-        // an added sled.
-        Self { added: after, removed, modified, unchanged }
-    }
-}
-
-/// Wrapper to allow a [`BlueprintDiff`] to be displayed.
-///
-/// Returned by [`BlueprintDiff::display()`].
-#[derive(Clone, Debug)]
-#[must_use = "this struct does nothing unless displayed"]
-pub struct BlueprintDiffDisplay<'diff> {
-    diff: &'diff BlueprintDiff,
-    // TODO: add colorization with a stylesheet
-}
-
-impl<'diff> BlueprintDiffDisplay<'diff> {
-    #[inline]
-    fn new(diff: &'diff BlueprintDiff) -> Self {
-        Self { diff }
-    }
-}
-
-impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let diff = self.diff;
-
-        // Print things differently based on whether the diff is between a
-        // collection and a blueprint, or a blueprint and a blueprint.
-        match &diff.before_meta {
-            DiffBeforeMetadata::Collection { id } => {
-                writeln!(
-                    f,
-                    "from: collection {}\n\
-                     to:   blueprint  {}",
-                    id, diff.after_meta.id,
-                )?;
-            }
-            DiffBeforeMetadata::Blueprint(before) => {
-                writeln!(
-                    f,
-                    "from: blueprint {}\n\
-                     to:   blueprint {}",
-                    before.id, diff.after_meta.id
-                )?;
-            }
-        }
-
-        writeln!(f, "\n{}", self.make_zone_diff_table())?;
-
-        writeln!(f, "\n{}", table_display::metadata_diff_heading())?;
-        writeln!(f, "{}", self.make_metadata_diff_table())?;
-
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Error)]
-pub struct BlueprintDiffError {
-    pub before_meta: DiffBeforeMetadata,
-    pub after_meta: Box<BlueprintMetadata>,
-    pub errors: Vec<BlueprintDiffSingleError>,
-}
-
-impl fmt::Display for BlueprintDiffError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(
-            f,
-            "errors in diff between {} and {}:",
-            self.before_meta.display_id(),
-            self.after_meta.display_id()
-        )?;
-        for e in &self.errors {
-            writeln!(f, "  - {}", e)?;
-        }
-        Ok(())
-    }
-}
-
-/// An individual error within a [`BlueprintDiffError`].
-#[derive(Clone, Debug)]
-pub enum BlueprintDiffSingleError {
-    /// The [`OmicronZoneType`] of a particular zone changed between the before
-    /// and after blueprints.
-    ///
-    /// For a particular zone, the type should never change.
-    ZoneTypeChanged {
-        sled_id: SledUuid,
-        zone_id: Uuid,
-        before: ZoneKind,
-        after: ZoneKind,
-    },
-    InvalidOmicronZoneType(InvalidOmicronZoneType),
-}
-
-impl fmt::Display for BlueprintDiffSingleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BlueprintDiffSingleError::ZoneTypeChanged {
-                sled_id,
-                zone_id,
-                before,
-                after,
-            } => write!(
-                f,
-                "on sled {sled_id}, zone {zone_id} changed type \
-                 from {before} to {after}",
-            ),
-            BlueprintDiffSingleError::InvalidOmicronZoneType(err) => {
-                write!(f, "invalid OmicronZoneType in collection: {err}")
-            }
-        }
-    }
-}
-
 /// Data about the "before" version within a [`BlueprintDiff`].
 #[derive(Clone, Debug)]
 pub enum DiffBeforeMetadata {
@@ -1216,6 +1141,15 @@ impl From<BlueprintZoneConfig> for BlueprintOrCollectionZoneConfig {
     }
 }
 
+impl PartialEq<BlueprintZoneConfig> for BlueprintOrCollectionZoneConfig {
+    fn eq(&self, other: &BlueprintZoneConfig) -> bool {
+        self.kind() == other.kind()
+            && self.disposition() == other.disposition
+            && self.underlay_address() == other.underlay_address
+            && self.is_zone_type_equal(&other.zone_type)
+    }
+}
+
 impl BlueprintOrCollectionZoneConfig {
     pub fn id(&self) -> OmicronZoneUuid {
         match self {
@@ -1266,151 +1200,39 @@ impl BlueprintOrCollectionZoneConfig {
     }
 }
 
-/// Describes a sled that appeared on both sides of a diff and is changed.
-#[derive(Clone, Debug)]
-pub struct DiffSledModified {
-    /// id of the sled
-    pub sled_id: SledUuid,
-    /// generation of the "zones" configuration on the left side
-    pub generation_before: Generation,
-    /// generation of the "zones" configuration on the right side
-    pub generation_after: Generation,
-    zones_added: Vec<BlueprintZoneConfig>,
-    zones_removed: Vec<BlueprintOrCollectionZoneConfig>,
-    zones_common: Vec<DiffZoneCommon>,
+/// Single sled's disks config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub enum BlueprintOrCollectionDisksConfig {
+    /// The diff was made from a collection.
+    Collection(CollectionPhysicalDisksConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintPhysicalDisksConfig),
 }
 
-impl DiffSledModified {
-    fn new(
-        sled_id: SledUuid,
-        before: BlueprintOrCollectionZonesConfig,
-        after: BlueprintZonesConfig,
-        errors: &mut Vec<BlueprintDiffSingleError>,
-    ) -> Self {
-        // Assemble separate summaries of the zones, indexed by zone id.
-        let before_by_id: HashMap<_, _> =
-            before.zones().map(|zone| (zone.id(), zone)).collect();
-        let mut after_by_id: HashMap<_, _> =
-            after.zones.into_iter().map(|zone| (zone.id, zone)).collect();
-
-        let mut zones_removed = Vec::new();
-        let mut zones_common = Vec::new();
-
-        // Now go through each zone and compare them.
-        for (zone_id, zone_before) in before_by_id {
-            if let Some(zone_after) = after_by_id.remove(&zone_id) {
-                let before_kind = zone_before.kind();
-                let after_kind = zone_after.zone_type.kind();
-
-                if before_kind != after_kind {
-                    errors.push(BlueprintDiffSingleError::ZoneTypeChanged {
-                        sled_id,
-                        zone_id: zone_id.into_untyped_uuid(),
-                        before: before_kind,
-                        after: after_kind,
-                    });
-                } else {
-                    let common = DiffZoneCommon { zone_before, zone_after };
-                    zones_common.push(common);
-                }
-            } else {
-                zones_removed.push(zone_before);
+impl BlueprintOrCollectionDisksConfig {
+    pub fn generation(&self) -> Option<Generation> {
+        match self {
+            BlueprintOrCollectionDisksConfig::Collection(_) => None,
+            BlueprintOrCollectionDisksConfig::Blueprint(c) => {
+                Some(c.generation)
             }
         }
+    }
 
-        // Since we removed common zones above, anything else exists only in
-        // before and was therefore added.
-        let mut zones_added: Vec<_> = after_by_id.into_values().collect();
-
-        // Sort for test reproducibility.
-        zones_added.sort_unstable_by_key(zone_sort_key);
-        zones_removed.sort_unstable_by_key(zone_sort_key);
-        zones_common.sort_unstable_by_key(|common| {
-            // The ID is common by definition, and the zone type was already
-            // verified to be the same above. So just sort by the sort key for
-            // the before zone. (In case of errors, the result will be thrown
-            // away anyway, so this is harmless.)
-            zone_sort_key(&common.zone_before)
-        });
-
-        Self {
-            sled_id,
-            generation_before: before.generation(),
-            generation_after: after.generation,
-            zones_added,
-            zones_removed,
-            zones_common,
+    pub fn disks(&self) -> BTreeSet<DiskIdentity> {
+        match self {
+            BlueprintOrCollectionDisksConfig::Collection(c) => c.disks.clone(),
+            BlueprintOrCollectionDisksConfig::Blueprint(c) => {
+                c.disks.iter().map(|d| d.identity.clone()).collect()
+            }
         }
     }
-
-    /// Iterate over zones added between the blueprints
-    pub fn zones_added(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &BlueprintZoneConfig> + '_ {
-        self.zones_added.iter()
-    }
-
-    /// Iterate over zones removed between the blueprints
-    pub fn zones_removed(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &BlueprintOrCollectionZoneConfig> + '_
-    {
-        self.zones_removed.iter()
-    }
-
-    /// Iterate over zones that are common to both blueprints
-    pub fn zones_in_common(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &DiffZoneCommon> + '_ {
-        self.zones_common.iter()
-    }
-
-    /// Iterate over zones that changed between the blueprints
-    pub fn zones_modified(&self) -> impl Iterator<Item = &DiffZoneCommon> + '_ {
-        self.zones_in_common().filter(|z| z.is_modified())
-    }
-
-    /// Iterate over zones that did not change between the blueprints
-    pub fn zones_unchanged(
-        &self,
-    ) -> impl Iterator<Item = &DiffZoneCommon> + '_ {
-        self.zones_in_common().filter(|z| !z.is_modified())
-    }
 }
 
-/// Describes a zone that was common to both sides of a diff
-#[derive(Debug, Clone)]
-pub struct DiffZoneCommon {
-    /// full zone configuration before
-    pub zone_before: BlueprintOrCollectionZoneConfig,
-    /// full zone configuration after
-    pub zone_after: BlueprintZoneConfig,
-}
-
-impl DiffZoneCommon {
-    /// Returns true if there are any differences between `zone_before` and
-    /// `zone_after`.
-    ///
-    /// This is equivalent to `config_changed() || disposition_changed()`.
-    #[inline]
-    pub fn is_modified(&self) -> bool {
-        // state is smaller and easier to compare than config.
-        self.disposition_changed() || self.config_changed()
-    }
-
-    /// Returns true if the zone configuration (excluding the disposition)
-    /// changed.
-    #[inline]
-    pub fn config_changed(&self) -> bool {
-        self.zone_before.underlay_address() != self.zone_after.underlay_address
-            || !self.zone_before.is_zone_type_equal(&self.zone_after.zone_type)
-    }
-
-    /// Returns true if the [`BlueprintZoneDisposition`] for the zone changed.
-    #[inline]
-    pub fn disposition_changed(&self) -> bool {
-        self.zone_before.disposition() != self.zone_after.disposition
-    }
+/// Single sled's disk config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub struct CollectionPhysicalDisksConfig {
+    disks: BTreeSet<DiskIdentity>,
 }
 
 /// Encapsulates Reconfigurator state
@@ -1429,659 +1251,4 @@ pub struct UnstableReconfiguratorState {
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
     pub silo_names: Vec<omicron_common::api::external::Name>,
     pub external_dns_zone_names: Vec<String>,
-}
-
-/// Code to generate tables.
-///
-/// This is here because `tabled` has a number of generically-named types, and
-/// we'd like to avoid name collisions with other types.
-mod table_display {
-    use super::*;
-    use crate::sectioned_table::SectionSpacing;
-    use crate::sectioned_table::StBuilder;
-    use crate::sectioned_table::StSectionBuilder;
-    use tabled::builder::Builder;
-    use tabled::settings::object::Columns;
-    use tabled::settings::Modify;
-    use tabled::settings::Padding;
-    use tabled::settings::Style;
-    use tabled::Table;
-
-    impl<'a> super::BlueprintDisplay<'a> {
-        pub(super) fn make_zone_table(&self) -> Table {
-            let blueprint_zones = &self.blueprint.blueprint_zones;
-            let mut builder = StBuilder::new();
-            builder.push_header_row(header_row());
-
-            for (sled_id, sled_zones) in blueprint_zones {
-                let heading = format!(
-                    "{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
-                    sled_zones.generation
-                );
-                builder.make_section(
-                    SectionSpacing::Always,
-                    heading,
-                    |section| {
-                        for zone in &sled_zones.zones {
-                            add_zone_record(
-                                ZONE_INDENT.to_string(),
-                                &zone.clone().into(),
-                                section,
-                            );
-                        }
-
-                        if section.is_empty() {
-                            section.push_nested_heading(
-                                SectionSpacing::IfNotFirst,
-                                format!("{ZONE_HEAD_INDENT}{NO_ZONES_PARENS}"),
-                            );
-                        }
-                    },
-                );
-            }
-
-            builder.build()
-        }
-
-        pub(super) fn make_metadata_table(&self) -> Table {
-            let mut builder = Builder::new();
-
-            // Metadata is presented as a linear (top-to-bottom) table with a
-            // small indent.
-
-            builder.push_record(vec![
-                METADATA_INDENT.to_string(),
-                linear_table_label(&CREATED_BY),
-                self.blueprint.creator.clone(),
-            ]);
-
-            builder.push_record(vec![
-                METADATA_INDENT.to_string(),
-                linear_table_label(&CREATED_AT),
-                humantime::format_rfc3339_millis(
-                    self.blueprint.time_created.into(),
-                )
-                .to_string(),
-            ]);
-
-            let comment = if self.blueprint.comment.is_empty() {
-                NONE_PARENS.to_string()
-            } else {
-                self.blueprint.comment.clone()
-            };
-
-            builder.push_record(vec![
-                METADATA_INDENT.to_string(),
-                linear_table_label(&COMMENT),
-                comment,
-            ]);
-
-            builder.push_record(vec![
-                METADATA_INDENT.to_string(),
-                linear_table_label(&INTERNAL_DNS_VERSION),
-                self.blueprint.internal_dns_version.to_string(),
-            ]);
-
-            builder.push_record(vec![
-                METADATA_INDENT.to_string(),
-                linear_table_label(&EXTERNAL_DNS_VERSION),
-                self.blueprint.external_dns_version.to_string(),
-            ]);
-
-            let mut table = builder.build();
-            apply_linear_table_settings(&mut table);
-            table
-        }
-    }
-
-    impl<'diff> BlueprintDiffDisplay<'diff> {
-        pub(super) fn make_zone_diff_table(&self) -> Table {
-            let diff = self.diff;
-
-            // Add the unchanged prefix to the zone indent since the first
-            // column will be used as the prefix.
-            let mut builder = StBuilder::new();
-            builder.push_header_row(diff_header_row());
-
-            // The order is:
-            //
-            // 1. Unchanged
-            // 2. Removed
-            // 3. Modified
-            // 4. Added
-            //
-            // The idea behind the order is to (a) group all changes together
-            // and (b) put changes towards the bottom, so people have to scroll
-            // back less.
-            //
-            // Zones within a modified sled follow the same order. If you're
-            // changing the order here, make sure to keep that in sync.
-
-            // First, unchanged sleds.
-            builder.make_section(
-                SectionSpacing::Always,
-                unchanged_sleds_heading(),
-                |section| {
-                    for (sled_id, sled_zones) in diff.sleds_unchanged() {
-                        add_whole_sled_records(
-                            sled_id,
-                            &sled_zones.clone().into(),
-                            WholeSledKind::Unchanged,
-                            section,
-                        );
-                    }
-                },
-            );
-
-            // Then, removed sleds.
-            builder.make_section(
-                SectionSpacing::Always,
-                removed_sleds_heading(),
-                |section| {
-                    for (sled_id, sled_zones) in diff.sleds_removed() {
-                        add_whole_sled_records(
-                            sled_id,
-                            sled_zones,
-                            WholeSledKind::Removed,
-                            section,
-                        );
-                    }
-                },
-            );
-
-            // Then, modified sleds.
-            builder.make_section(
-                SectionSpacing::Always,
-                modified_sleds_heading(),
-                |section| {
-                    // For sleds that are in common:
-                    for (sled_id, modified) in diff.sleds_modified() {
-                        add_modified_sled_records(sled_id, modified, section);
-                    }
-                },
-            );
-
-            // Finally, added sleds.
-            builder.make_section(
-                SectionSpacing::Always,
-                added_sleds_heading(),
-                |section| {
-                    for (sled_id, sled_zones) in diff.sleds_added() {
-                        add_whole_sled_records(
-                            sled_id,
-                            &sled_zones.clone().into(),
-                            WholeSledKind::Added,
-                            section,
-                        );
-                    }
-                },
-            );
-
-            builder.build()
-        }
-
-        pub(super) fn make_metadata_diff_table(&self) -> Table {
-            let diff = self.diff;
-            let mut builder = Builder::new();
-
-            // Metadata is presented as a linear (top-to-bottom) table with a
-            // small indent.
-
-            match &diff.before_meta {
-                DiffBeforeMetadata::Collection { .. } => {
-                    // Collections don't have DNS versions, so this is new.
-                    builder.push_record(vec![
-                        format!("{ADDED_PREFIX}{METADATA_DIFF_INDENT}"),
-                        metadata_table_internal_dns(),
-                        linear_table_modified(
-                            &NOT_PRESENT_IN_COLLECTION_PARENS,
-                            &diff.after_meta.internal_dns_version,
-                        ),
-                    ]);
-
-                    builder.push_record(vec![
-                        format!("{ADDED_PREFIX}{METADATA_DIFF_INDENT}"),
-                        metadata_table_external_dns(),
-                        linear_table_modified(
-                            &NOT_PRESENT_IN_COLLECTION_PARENS,
-                            &diff.after_meta.external_dns_version,
-                        ),
-                    ]);
-                }
-                DiffBeforeMetadata::Blueprint(before) => {
-                    if before.internal_dns_version
-                        != diff.after_meta.internal_dns_version
-                    {
-                        builder.push_record(vec![
-                            format!("{MODIFIED_PREFIX}{METADATA_DIFF_INDENT}"),
-                            metadata_table_internal_dns(),
-                            linear_table_modified(
-                                &before.internal_dns_version,
-                                &diff.after_meta.internal_dns_version,
-                            ),
-                        ]);
-                    } else {
-                        builder.push_record(vec![
-                            format!("{UNCHANGED_PREFIX}{METADATA_DIFF_INDENT}"),
-                            metadata_table_internal_dns(),
-                            linear_table_unchanged(
-                                &before.internal_dns_version,
-                            ),
-                        ]);
-                    };
-
-                    if before.external_dns_version
-                        != diff.after_meta.external_dns_version
-                    {
-                        builder.push_record(vec![
-                            format!("{MODIFIED_PREFIX}{METADATA_DIFF_INDENT}"),
-                            metadata_table_external_dns(),
-                            linear_table_modified(
-                                &before.external_dns_version,
-                                &diff.after_meta.external_dns_version,
-                            ),
-                        ]);
-                    } else {
-                        builder.push_record(vec![
-                            format!("{UNCHANGED_PREFIX}{METADATA_DIFF_INDENT}"),
-                            metadata_table_external_dns(),
-                            linear_table_unchanged(
-                                &before.external_dns_version,
-                            ),
-                        ]);
-                    };
-                }
-            }
-
-            let mut table = builder.build();
-            apply_linear_table_settings(&mut table);
-            table
-        }
-    }
-
-    fn add_whole_sled_records(
-        sled_id: SledUuid,
-        sled_zones: &BlueprintOrCollectionZonesConfig,
-        kind: WholeSledKind,
-        section: &mut StSectionBuilder,
-    ) {
-        let heading = format!(
-            "{}{SLED_INDENT}sled {sled_id}: blueprint zones at generation {}",
-            kind.prefix(),
-            sled_zones.generation(),
-        );
-        let prefix = kind.prefix();
-        let status = kind.status();
-        section.make_subsection(SectionSpacing::Always, heading, |s2| {
-            // Also add another section for zones.
-            for zone in sled_zones.zones() {
-                match status {
-                    Some(status) => {
-                        add_zone_record_with_status(
-                            format!("{prefix}{ZONE_INDENT}"),
-                            &zone,
-                            status,
-                            s2,
-                        );
-                    }
-                    None => {
-                        add_zone_record(
-                            format!("{prefix}{ZONE_INDENT}"),
-                            &zone,
-                            s2,
-                        );
-                    }
-                }
-            }
-        });
-    }
-
-    fn add_modified_sled_records(
-        sled_id: SledUuid,
-        modified: &DiffSledModified,
-        section: &mut StSectionBuilder,
-    ) {
-        let (generation_heading, warning) =
-            if modified.generation_before != modified.generation_after {
-                (
-                    format!(
-                        "blueprint zones at generation: {} -> {}",
-                        modified.generation_before, modified.generation_after,
-                    ),
-                    None,
-                )
-            } else {
-                // Modified sleds should always see a generation bump.
-                (
-                    format!(
-                        "blueprint zones at generation: {}",
-                        modified.generation_before
-                    ),
-                    Some(format!(
-                        "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
-                     warning: generation should have changed"
-                    )),
-                )
-            };
-
-        let sled_heading =
-            format!("{MODIFIED_PREFIX}{SLED_INDENT}sled {sled_id}: {generation_heading}");
-
-        section.make_subsection(SectionSpacing::Always, sled_heading, |s2| {
-            if let Some(warning) = warning {
-                s2.push_nested_heading(SectionSpacing::Never, warning);
-            }
-
-            // The order is:
-            //
-            // 1. Unchanged
-            // 2. Removed
-            // 3. Modified
-            // 4. Added
-            //
-            // The idea behind the order is to (a) group all changes together
-            // and (b) put changes towards the bottom, so people have to scroll
-            // back less.
-            //
-            // Sleds follow the same order. If you're changing the order here,
-            // make sure to keep that in sync.
-
-            // First, unchanged zones.
-            for zone_unchanged in modified.zones_unchanged() {
-                add_zone_record(
-                    format!("{UNCHANGED_PREFIX}{ZONE_INDENT}"),
-                    &zone_unchanged.zone_before,
-                    s2,
-                );
-            }
-
-            // Then, removed zones.
-            for zone in modified.zones_removed() {
-                add_zone_record_with_status(
-                    format!("{REMOVED_PREFIX}{ZONE_INDENT}"),
-                    zone,
-                    REMOVED,
-                    s2,
-                );
-            }
-
-            // Then, modified zones.
-            for zone_modified in modified.zones_modified() {
-                add_modified_zone_records(zone_modified, s2);
-            }
-
-            // Finally, added zones.
-            for zone in modified.zones_added() {
-                add_zone_record_with_status(
-                    format!("{ADDED_PREFIX}{ZONE_INDENT}"),
-                    &zone.clone().into(),
-                    ADDED,
-                    s2,
-                );
-            }
-
-            // If no rows were pushed, add a row indicating that for this sled.
-            if s2.is_empty() {
-                s2.push_nested_heading(
-                    SectionSpacing::Never,
-                    format!(
-                        "{UNCHANGED_PREFIX}{ZONE_HEAD_INDENT}\
-                             {NO_ZONES_PARENS}"
-                    ),
-                );
-            }
-        });
-    }
-
-    /// Add a zone record to this section.
-    ///
-    /// This is the meat-and-potatoes of the diff display.
-    fn add_zone_record(
-        first_column: String,
-        zone: &BlueprintOrCollectionZoneConfig,
-        section: &mut StSectionBuilder,
-    ) {
-        section.push_record(vec![
-            first_column,
-            zone.kind().to_string(),
-            zone.id().to_string(),
-            zone.disposition().to_string(),
-            zone.underlay_address().to_string(),
-        ]);
-    }
-
-    fn add_zone_record_with_status(
-        first_column: String,
-        zone: &BlueprintOrCollectionZoneConfig,
-        status: &str,
-        section: &mut StSectionBuilder,
-    ) {
-        section.push_record(vec![
-            first_column,
-            zone.kind().to_string(),
-            zone.id().to_string(),
-            zone.disposition().to_string(),
-            zone.underlay_address().to_string(),
-            status.to_string(),
-        ]);
-    }
-
-    /// Add a change table for the zone to the section.
-    ///
-    /// For diffs, this contains a table of changes between two zone
-    /// records.
-    fn add_modified_zone_records(
-        modified: &DiffZoneCommon,
-        section: &mut StSectionBuilder,
-    ) {
-        // Negative record for the before.
-        let before = &modified.zone_before;
-        let after = &modified.zone_after;
-
-        // Before record.
-        add_zone_record_with_status(
-            format!("{REMOVED_PREFIX}{ZONE_INDENT}"),
-            &before,
-            MODIFIED,
-            section,
-        );
-
-        let mut what_changed = Vec::new();
-        if !before.is_zone_type_equal(&after.zone_type) {
-            what_changed.push(ZONE_TYPE_CONFIG);
-        }
-        if before.disposition() != after.disposition {
-            what_changed.push(DISPOSITION);
-        }
-        if before.underlay_address() != after.underlay_address {
-            what_changed.push(UNDERLAY_IP);
-        }
-        debug_assert!(
-            !what_changed.is_empty(),
-            "at least something should have changed:\n\
-             before = {before:#?}\n\
-             after = {after:#?}"
-        );
-
-        let record = vec![
-            format!("{ADDED_PREFIX}{ZONE_INDENT}"),
-            // First two columns of data are skipped over since they're
-            // always the same (verified at diff construction time).
-            format!(" {SUB_NOT_LAST}"),
-            "".to_string(),
-            after.disposition.to_string(),
-            after.underlay_address.to_string(),
-        ];
-        section.push_record(record);
-
-        section.push_spanned_row(format!(
-            "{MODIFIED_PREFIX}{ZONE_INDENT}  \
-                 {SUB_LAST} changed: {}",
-            what_changed.join(", "),
-        ));
-    }
-
-    #[derive(Copy, Clone, Debug)]
-    enum WholeSledKind {
-        Removed,
-        Added,
-        Unchanged,
-    }
-
-    impl WholeSledKind {
-        fn prefix(self) -> char {
-            match self {
-                WholeSledKind::Removed => REMOVED_PREFIX,
-                WholeSledKind::Added => ADDED_PREFIX,
-                WholeSledKind::Unchanged => UNCHANGED_PREFIX,
-            }
-        }
-
-        fn status(self) -> Option<&'static str> {
-            match self {
-                WholeSledKind::Removed => Some(REMOVED),
-                WholeSledKind::Added => Some(ADDED),
-                WholeSledKind::Unchanged => None,
-            }
-        }
-    }
-
-    // Apply settings for a table which has top-to-bottom rows, and a first
-    // column with indents.
-    fn apply_linear_table_settings(table: &mut Table) {
-        table.with(Style::empty()).with(Padding::zero()).with(
-            Modify::new(Columns::single(1))
-                // Add an padding on the right of the label column to make the
-                // table visually distinctive.
-                .with(Padding::new(0, 2, 0, 0)),
-        );
-    }
-
-    // ---
-    // Heading and other definitions
-    // ---
-
-    // This aligns the heading with the first column of actual text.
-    const H1_INDENT: &str = "  ";
-    const SLED_HEAD_INDENT: &str = " ";
-    const SLED_INDENT: &str = "  ";
-    const ZONE_HEAD_INDENT: &str = "   ";
-    // Due to somewhat mysterious reasons with how padding works with tabled,
-    // this needs to be 3 columns wide rather than 4.
-    const ZONE_INDENT: &str = "   ";
-    const METADATA_INDENT: &str = "  ";
-    const METADATA_DIFF_INDENT: &str = "   ";
-
-    const ADDED_PREFIX: char = '+';
-    const REMOVED_PREFIX: char = '-';
-    const MODIFIED_PREFIX: char = '*';
-    const UNCHANGED_PREFIX: char = ' ';
-    const WARNING_PREFIX: char = '!';
-
-    const ARROW: &str = "->";
-    const SUB_NOT_LAST: &str = "├─";
-    const SUB_LAST: &str = "└─";
-
-    const ZONE_TYPE: &str = "zone type";
-    const ZONE_ID: &str = "zone ID";
-    const DISPOSITION: &str = "disposition";
-    const UNDERLAY_IP: &str = "underlay IP";
-    const ZONE_TYPE_CONFIG: &str = "zone type config";
-    const STATUS: &str = "status";
-    const REMOVED_SLEDS_HEADING: &str = "REMOVED SLEDS";
-    const MODIFIED_SLEDS_HEADING: &str = "MODIFIED SLEDS";
-    const UNCHANGED_SLEDS_HEADING: &str = "UNCHANGED SLEDS";
-    const ADDED_SLEDS_HEADING: &str = "ADDED SLEDS";
-    const REMOVED: &str = "removed";
-    const ADDED: &str = "added";
-    const MODIFIED: &str = "modified";
-
-    const METADATA_HEADING: &str = "METADATA";
-    const CREATED_BY: &str = "created by";
-    const CREATED_AT: &str = "created at";
-    const INTERNAL_DNS_VERSION: &str = "internal DNS version";
-    const EXTERNAL_DNS_VERSION: &str = "external DNS version";
-    const COMMENT: &str = "comment";
-
-    const UNCHANGED_PARENS: &str = "(unchanged)";
-    const NO_ZONES_PARENS: &str = "(no zones)";
-    const NONE_PARENS: &str = "(none)";
-    const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
-        "(not present in collection)";
-
-    fn header_row() -> Vec<String> {
-        vec![
-            // First column is so that the header border aligns with the ZONE
-            // TABLE section header.
-            SLED_INDENT.to_string(),
-            ZONE_TYPE.to_string(),
-            ZONE_ID.to_string(),
-            DISPOSITION.to_string(),
-            UNDERLAY_IP.to_string(),
-        ]
-    }
-
-    fn diff_header_row() -> Vec<String> {
-        vec![
-            // First column is so that the header border aligns with the ZONE
-            // TABLE section header.
-            SLED_HEAD_INDENT.to_string(),
-            ZONE_TYPE.to_string(),
-            ZONE_ID.to_string(),
-            DISPOSITION.to_string(),
-            UNDERLAY_IP.to_string(),
-            STATUS.to_string(),
-        ]
-    }
-
-    pub(super) fn metadata_heading() -> String {
-        format!("{METADATA_HEADING}:")
-    }
-
-    pub(super) fn metadata_diff_heading() -> String {
-        format!("{H1_INDENT}{METADATA_HEADING}:")
-    }
-
-    fn sleds_heading(prefix: char, heading: &'static str) -> String {
-        format!("{prefix}{SLED_HEAD_INDENT}{heading}:")
-    }
-
-    fn removed_sleds_heading() -> String {
-        sleds_heading(UNCHANGED_PREFIX, REMOVED_SLEDS_HEADING)
-    }
-
-    fn added_sleds_heading() -> String {
-        sleds_heading(UNCHANGED_PREFIX, ADDED_SLEDS_HEADING)
-    }
-
-    fn modified_sleds_heading() -> String {
-        sleds_heading(UNCHANGED_PREFIX, MODIFIED_SLEDS_HEADING)
-    }
-
-    fn unchanged_sleds_heading() -> String {
-        sleds_heading(UNCHANGED_PREFIX, UNCHANGED_SLEDS_HEADING)
-    }
-
-    fn metadata_table_internal_dns() -> String {
-        linear_table_label(&INTERNAL_DNS_VERSION)
-    }
-
-    fn metadata_table_external_dns() -> String {
-        linear_table_label(&EXTERNAL_DNS_VERSION)
-    }
-
-    fn linear_table_label(value: &dyn fmt::Display) -> String {
-        format!("{value}:")
-    }
-
-    fn linear_table_modified(
-        before: &dyn fmt::Display,
-        after: &dyn fmt::Display,
-    ) -> String {
-        format!("{before} {ARROW} {after}")
-    }
-
-    fn linear_table_unchanged(value: &dyn fmt::Display) -> String {
-        format!("{value} {UNCHANGED_PARENS}")
-    }
 }

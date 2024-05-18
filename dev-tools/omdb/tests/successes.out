@@ -512,27 +512,28 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  -----------------------------------------------------------------------------------------
-    zone type         zone ID                                disposition  underlay IP      
-  -----------------------------------------------------------------------------------------
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-   (no zones)                                                                              
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
-    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
-    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+!..........<REDACTED_UUID>...........
+WARNING: Zones exist without physical disks!
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
-METADATA:
-  created by:            nexus-test-utils        
-  created at:            <REDACTED     TIMESTAMP>
-  comment:               initial test blueprint  
-  internal DNS version:  1                       
-  external DNS version:  2                       
+
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED     TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
 
 ---------------------------------------------
 stderr:
@@ -545,27 +546,28 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  -----------------------------------------------------------------------------------------
-    zone type         zone ID                                disposition  underlay IP      
-  -----------------------------------------------------------------------------------------
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-   (no zones)                                                                              
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
-    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
-    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+!..........<REDACTED_UUID>...........
+WARNING: Zones exist without physical disks!
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
-METADATA:
-  created by:            nexus-test-utils        
-  created at:            <REDACTED     TIMESTAMP>
-  comment:               initial test blueprint  
-  internal DNS version:  1                       
-  external DNS version:  2                       
+
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED     TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
 
 ---------------------------------------------
 stderr:
@@ -578,23 +580,28 @@ stdout:
 from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
 to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
-  ---------------------------------------------------------------------------------------------------
-     zone type         zone ID                                disposition   underlay IP       status 
-  ---------------------------------------------------------------------------------------------------
-                                                                                                     
-  UNCHANGED SLEDS:                                                                                   
-                                                                                                     
-   sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2                        
-     clickhouse        ..........<REDACTED_UUID>...........   in service    ::1                      
-     cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1                      
-     crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1                      
-     external_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
-     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
-     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1         
+ UNCHANGED SLEDS:
 
-  METADATA:
-    internal DNS version:  1 (unchanged)
-    external DNS version:  2 (unchanged)
+  sled ..........<REDACTED_UUID>...........:
+
+  sled ..........<REDACTED_UUID>...........:
+
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   2 (unchanged)
+
 
 ---------------------------------------------
 stderr:
