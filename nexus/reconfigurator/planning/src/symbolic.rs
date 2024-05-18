@@ -24,32 +24,33 @@ type IpRangeSize = usize;
 
 const DEFAULT_IP_RANGE_SIZE: usize = 5;
 
-/// A description of the state of a rack at a given point in time. A user
-/// creates one of these and then the corresponding symbolic types are generated
-/// from it. These symbolic types can then be used to generate real types in
-/// order to test reconfigurator.
+/// A description of a fleet at at given point in time. For now, fleets may only
+/// contain one rack.
 ///
-/// This is most useful to generate the "initial state" of a rack for testing
-/// purposes. A symbolic `Collection` and `PlanningInput` can be generated and
-/// manipulated to generate new symbolic Racks, collections, and planning inputs.
+/// This is most useful to generate the "initial state" of a `Fleet` for testing
+/// purposes. A symbolic `Collection` and `PlanningInput` can be generated from
+/// a `Fleet`.
 ///
 /// From these symbolic representations we can generate a set of concrete types
 /// and use them to generate blueprints from the planner.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct RackDescription {
+pub struct FleetDescription {
+    // We only support one rack right now
+    num_racks: usize,
     pub num_sleds: usize,
     pub num_nexus_zones: usize,
     pub ip_ranges: Vec<IpRangeSize>,
 }
 
-impl RackDescription {
-    /// Provision a single sled with:
+impl FleetDescription {
+    /// Provision a single sled on a single rack with:
     ///   * a single ip range
     ///   * a single nexus zone.
-    ///   * A single IP range with the default number of addresses
-    ///
-    pub fn single_sled() -> RackDescription {
-        RackDescription {
+    ///   * a single IP range with the default number of addresses
+    ///   * a full set of 10 U.2 disks, all adopted
+    pub fn single_sled() -> FleetDescription {
+        FleetDescription {
+            num_racks: 1,
             num_sleds: 1,
             num_nexus_zones: 1,
             ip_ranges: vec![DEFAULT_IP_RANGE_SIZE],
@@ -106,9 +107,30 @@ impl RackDescription {
         sleds
     }
 
-    pub fn to_rack(&self, id_gen: &mut SymbolicIdGenerator) -> Rack {
-        Rack { policy: self.policy(id_gen), sleds: self.sleds(id_gen) }
+    pub fn to_fleet(&self, id_gen: &mut SymbolicIdGenerator) -> Fleet {
+        let db_state = DbState { policy: self.policy(id_gen) };
+        let rack = Rack {
+            symbolic_id: id_gen.next(),
+            sleds: self.sleds(id_gen),
+            zones: BTreeMap::new(),
+        };
+        let rack_uuid = RackUuid { symbolic_id: rack.symbolic_id };
+        Fleet { db_state, racks: [(rack_uuid, rack)].into() }
     }
+}
+
+/// A symbolic representation of a Fleet at a given point in time
+/// This is the top-level symbolic type used for testing
+///
+/// TODO-multirack: For now we only allow one rack in a fleet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Fleet {
+    /// The state of CRDB (presumed as a single instance with nodes running
+    /// across the fleet).
+    pub db_state: DbState,
+
+    /// The state of hardware and software running on the racks in a Fleet
+    pub racks: BTreeMap<RackUuid, Rack>,
 }
 
 // TODO: Should really model the Control Plane state (what's in the database)
@@ -134,14 +156,36 @@ pub struct DbState {
 
 /// A symbolic representation of a rack at a given point in time.
 ///
-/// The rack can be used to generate a symbolic `Collection` and
-/// `PlanningInput`.
-///
-/// TODO-multirack: `FleetPolicy` will move outside the rack.
+/// The rack can be used to generate a symbolic `Collection`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rack {
-    pub policy: FleetPolicy,
+    pub symbolic_id: SymbolicId,
     pub sleds: BTreeMap<SledUuid, Sled>,
+
+    // When zones are symbolically allocated, we don't know which sled the
+    // reconfigurator will actually place them on, so we use a symbolic
+    // placeholder `SledUuid`, rather than storing the zone under a known sled
+    // in the `sleds` field above.
+    pub zones: BTreeMap<OmicronZoneUuid, SledUuid>,
+}
+
+impl Enumerable for Rack {
+    fn symbolic_id(&self) -> SymbolicId {
+        self.symbolic_id
+    }
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct RackUuid {
+    symbolic_id: SymbolicId,
+}
+
+impl Enumerable for RackUuid {
+    fn symbolic_id(&self) -> SymbolicId {
+        self.symbolic_id
+    }
 }
 
 /// A symbolic representation of a PlanningInput
@@ -266,29 +310,45 @@ impl Enumerable for PhysicalDiskUuid {
     }
 }
 
-/// A symbolic representation of a single disk already
-/// managed by the sled.
+/// A symbolic representation a control plane physical disk as stored in CRDB.
 ///
-/// TODO: This shouldn't be part of the `Sled`, but rather part of
-/// the `DbState`. The `Sled` should have a different type where all
-/// the control plane parts (disk_id, policy, and state) are optional
-/// until they exist in the DB. This allows us to represent disk adoption better.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbPhysicalDisk {
+    pub disk_id: PhysicalDiskUuid,
+    pub policy: PhysicalDiskPolicy,
+    pub state: PhysicalDiskState,
+}
+
+impl DbPhysicalDisk {
+    pub fn new(id_gen: &mut SymbolicIdGenerator) -> Self {
+        DbPhysicalDisk {
+            disk_id: PhysicalDiskUuid::new(id_gen.next()),
+            policy: PhysicalDiskPolicy::InService,
+            state: PhysicalDiskState::Active,
+        }
+    }
+}
+
+/// A symbolic representation of a single disk that may or may not have been
+/// adopted by the control plane yet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledDisk {
-    disk_identity: DiskIdentity,
-    disk_id: PhysicalDiskUuid,
-    policy: PhysicalDiskPolicy,
-    state: PhysicalDiskState,
+    pub disk_identity: DiskIdentity,
+
+    // This is only filled in when the control plane adopts the physical disk.
+    pub db_physical_disk: Option<DbPhysicalDisk>,
 }
 
 impl SledDisk {
     pub fn new(id_gen: &mut SymbolicIdGenerator) -> SledDisk {
         SledDisk {
             disk_identity: DiskIdentity::new(id_gen.next()),
-            disk_id: PhysicalDiskUuid::new(id_gen.next()),
-            policy: PhysicalDiskPolicy::InService,
-            state: PhysicalDiskState::Active,
+            db_physical_disk: None,
         }
+    }
+
+    pub fn control_plane_adopt(&mut self, db_physical_disk: DbPhysicalDisk) {
+        self.db_physical_disk = Some(db_physical_disk);
     }
 }
 
@@ -314,6 +374,9 @@ pub enum OmicronZoneExternalIpType {
 }
 
 /// Symbolic representation of an OmicronZoneUuid
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct OmicronZoneUuid {
     symbolic_id: SymbolicId,
 }
@@ -380,20 +443,24 @@ impl Enumerable for SledSubnet {
     }
 }
 
-/// Symbolic representation of `SledResources`
+/// Symbolic representation of the state of a sled inside a rack at a given
+/// point in time.
+///
+/// Note that this type only contains resources that get explicitly allocated
+/// by a user, such as a physical disk being inserted into a sled, and not
+/// resources, such as `zones` that may be allocated to one or more sleds by
+/// the planner. The symbolic representation does not try to reproduce planner
+/// logic and therefore does not attempt pinpoint which sled  a resource is
+/// deployed to when there are multiple possible choices. Instead, the resources
+/// themselves are tracked individually inside a `Rack` for now, and eventually
+/// perhaps a fleet if reconfigurator and DBs span fleets. The tracked resources
+/// point to `UnknownSled` symbols with their own `SymbolicId`s that will be mapped
+/// to their real `SledUuid`s when the planner performs a real reconfiguration
+/// and generates a `Blueprint`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
     zpools: BTreeMap<ZpoolUuid, SledDisk>,
     subnet: SledSubnet,
-    // TODO:  We want to be able to be able to symbolically represent the state
-    // of an entire rack. And from that we should be able to generate symbolic
-    // versions of a `PlanningInput` and a `Collection`. We can mutate the
-    // symbolic `Collection` and `PlanningInput` in order to generate a symbolic
-    // `Blueprint` which we can then apply to the symbolic `Rack` to update
-    // its state. In order to do this, we need to model more resources:
-    //
-    //  * zones and network resources
-    //  * eventually sp, rot and other hardware
 }
 
 /// Symbolic representation of a sled at a given point in time
@@ -468,7 +535,7 @@ mod test {
     #[test]
     fn initial_rack_construction() {
         let mut id_gen = SymbolicIdGenerator::default();
-        let rack = RackDescription::single_sled().to_rack(&mut id_gen);
-        println!("{rack:#?}");
+        let fleet = FleetDescription::single_sled().to_fleet(&mut id_gen);
+        println!("{fleet:#?}");
     }
 }
