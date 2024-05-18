@@ -1,0 +1,98 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use super::impl_enum_type;
+use crate::schema::region_replacement;
+use crate::Region;
+use chrono::DateTime;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "region_replacement_state", schema = "public"))]
+    pub struct RegionReplacementStateEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[diesel(sql_type = RegionReplacementStateEnum)]
+    pub enum RegionReplacementState;
+
+    // Enum values
+    Requested => b"requested"
+    Allocating => b"allocating"
+    Running => b"running"
+    Driving => b"driving"
+    ReplacementDone => b"replacement_done"
+    Completing => b"completing"
+    Complete => b"complete"
+);
+
+impl std::str::FromStr for RegionReplacementState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "requested" => Ok(RegionReplacementState::Requested),
+            "allocating" => Ok(RegionReplacementState::Allocating),
+            "running" => Ok(RegionReplacementState::Running),
+            "driving" => Ok(RegionReplacementState::Driving),
+            "replacement_done" => Ok(RegionReplacementState::ReplacementDone),
+            "complete" => Ok(RegionReplacementState::Complete),
+            "completing" => Ok(RegionReplacementState::Completing),
+            _ => Err(format!("unrecognized value {} for enum", s)),
+        }
+    }
+}
+
+/// Database representation of a Region replacement request.
+#[derive(
+    Queryable,
+    Insertable,
+    Debug,
+    Clone,
+    Selectable,
+    Serialize,
+    Deserialize,
+    PartialEq,
+)]
+#[diesel(table_name = region_replacement)]
+pub struct RegionReplacement {
+    pub id: Uuid,
+
+    pub request_time: DateTime<Utc>,
+
+    pub old_region_id: Uuid,
+
+    /// The volume whose region is being replaced
+    pub volume_id: Uuid,
+
+    /// A synthetic volume that only is used to later delete the old region
+    pub old_region_volume_id: Option<Uuid>,
+
+    pub new_region_id: Option<Uuid>,
+
+    pub replacement_state: RegionReplacementState,
+
+    pub operating_saga_id: Option<Uuid>,
+}
+
+impl RegionReplacement {
+    pub fn for_region(region: &Region) -> Self {
+        Self::new(region.id(), region.volume_id())
+    }
+
+    pub fn new(old_region_id: Uuid, volume_id: Uuid) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            request_time: Utc::now(),
+            old_region_id,
+            volume_id,
+            old_region_volume_id: None,
+            new_region_id: None,
+            replacement_state: RegionReplacementState::Requested,
+            operating_saga_id: None,
+        }
+    }
+}
