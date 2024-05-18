@@ -170,7 +170,6 @@ impl SimDisk {
             id,
             kind: ProducerKind::SledAgent,
             address: producer_address,
-            base_route: String::new(), // Unused, will be removed.
             interval: Duration::from_millis(200),
         };
         let config = oximeter_producer::Config {

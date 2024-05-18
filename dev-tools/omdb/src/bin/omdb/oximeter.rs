@@ -90,7 +90,6 @@ impl OximeterArgs {
 struct Producer {
     id: Uuid,
     address: SocketAddr,
-    base_route: String,
     interval: String,
 }
 
@@ -100,7 +99,6 @@ impl From<ProducerEndpoint> for Producer {
         Self {
             id: p.id,
             address: p.address.parse().unwrap(),
-            base_route: p.base_route,
             interval: humantime::format_duration(interval).to_string(),
         }
     }

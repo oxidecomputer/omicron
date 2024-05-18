@@ -1171,7 +1171,7 @@ async fn cmd_nexus_blueprints_diff(
         args.blueprint2_id.resolve_to_blueprint(client),
     )
     .await?;
-    let diff = b2.diff_since_blueprint(&b1).context("diffing blueprints")?;
+    let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     Ok(())
 }

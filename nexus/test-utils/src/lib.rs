@@ -1468,7 +1468,6 @@ pub fn start_producer_server(
         id,
         kind: ProducerKind::Service,
         address: producer_address,
-        base_route: String::new(), // Unused, will be removed.
         interval: Duration::from_secs(1),
     };
     let config = oximeter_producer::Config {

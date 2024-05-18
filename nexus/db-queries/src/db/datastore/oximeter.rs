@@ -109,7 +109,6 @@ impl DataStore {
                 dsl::ip.eq(producer.ip),
                 dsl::port.eq(producer.port),
                 dsl::interval.eq(producer.interval),
-                dsl::base_route.eq(producer.base_route.clone()),
             ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -297,7 +296,6 @@ mod tests {
                 id: Uuid::new_v4(),
                 kind: nexus::ProducerKind::Service,
                 address: "[::1]:0".parse().unwrap(), // unused
-                base_route: "/".to_string(),         // unused
                 interval: Duration::from_secs(0),    // unused
             },
             collector_info.id,
