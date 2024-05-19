@@ -19,6 +19,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod omicron_zones;
+mod physical_disks;
+mod test_harness;
+
+pub use test_harness::TestHarness;
+
+pub use omicron_zones::{
+    OmicronZoneExternalIp, OmicronZoneExternalIpUuid,
+    OmicronZoneNetworkResources, OmicronZoneNic, OmicronZoneUuid, ZoneCount,
+};
+
+pub use physical_disks::{
+    ControlPlanePhysicalDisk, DiskIdentity, PhysicalDiskPolicy,
+    PhysicalDiskState, PhysicalDiskUuid, ZpoolUuid,
+};
+
 /// The number of IPs in a range
 type IpRangeSize = usize;
 
@@ -28,8 +44,7 @@ const DEFAULT_IP_RANGE_SIZE: usize = 5;
 /// contain one rack.
 ///
 /// This is most useful to generate the "initial state" of a `Fleet` for testing
-/// purposes. A symbolic `Collection` and `PlanningInput` can be generated from
-/// a `Fleet`.
+/// purposes.
 ///
 /// From these symbolic representations we can generate a set of concrete types
 /// and use them to generate blueprints from the planner.
@@ -64,10 +79,10 @@ impl FleetDescription {
                 .iter()
                 .map(|size| IpRange { symbolic_id: id_gen.next(), size: *size })
                 .collect(),
-            target_nexus_zone_count: ZoneCount {
-                symbolic_id: id_gen.next(),
-                val: self.num_nexus_zones,
-            },
+            target_nexus_zone_count: ZoneCount::new(
+                id_gen.next(),
+                self.num_nexus_zones,
+            ),
         }
     }
 
@@ -150,16 +165,9 @@ pub struct Fleet {
     pub racks: BTreeMap<RackUuid, Rack>,
 }
 
-// TODO: Should really model the Control Plane state (what's in the database)
-// vs what's on each sled at each point in time. This will result in a model different
-// from both the way `System` works, and disjoint from `PlanningInput` and `Collection`.
-//
-// The `ControlPlaneState` combined with the `Rack` can be used to generate the
-// `PlanningInput` and `Collection`. Eventually we may also want to change the
-// way these look to better reflect the symbolic types, but it's not strictly
-// necessary. It depends on how much we like the symbolic model.
-//
-/// The symbolic state of the database
+/// The symbolic state of the database at a given point in time.
+///
+/// The `DbState` can be used to generate a concrete `PlanningInput`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbState {
     pub policy: FleetPolicy,
@@ -174,7 +182,7 @@ pub struct DbState {
 
 /// A symbolic representation of a rack at a given point in time.
 ///
-/// The rack can be used to generate a symbolic `Collection`.
+/// The rack can be used to generate a concrete `Collection`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rack {
     pub symbolic_id: SymbolicId,
@@ -208,17 +216,6 @@ impl Enumerable for RackUuid {
     fn symbolic_id(&self) -> SymbolicId {
         self.symbolic_id
     }
-}
-
-/// A symbolic representation of a PlanningInput
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanningInput {
-    pub policy: FleetPolicy,
-    pub internal_dns_version: Generation,
-    pub external_dns_version: Generation,
-    pub sleds: BTreeMap<SledUuid, Sled>,
-    pub network_resources:
-        BTreeMap<OmicronZoneUuid, OmicronZoneNetworkResources>,
 }
 
 /// This maps to `Policy` in `nexus-types`.
@@ -272,181 +269,9 @@ impl SymbolicIdGenerator {
     }
 }
 
-/// An abstract representation of a zone type
-///
-/// This should be updated when blueprint generation supports more types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ZoneType {
-    BoundaryNtp,
-    Clickhouse,
-    ClickhouseKeeper,
-    CockroachDb,
-    Crucible,
-    CruciblePantry,
-    ExternalDns,
-    InternalDns,
-    InternalNtp,
-    Nexus,
-    Oximeter,
-}
-
 /// A symbolic type that has a unique SymbolicId
 pub trait Enumerable {
     fn symbolic_id(&self) -> SymbolicId;
-}
-
-/// A symbolic representation of a `DiskIdentity`
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct DiskIdentity {
-    pub symbolic_id: SymbolicId,
-}
-
-impl DiskIdentity {
-    pub fn new(symbolic_id: SymbolicId) -> Self {
-        DiskIdentity { symbolic_id }
-    }
-}
-
-impl Enumerable for DiskIdentity {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
-}
-
-/// A symbolic representation of a `PhysicalDiskUuid`
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct PhysicalDiskUuid {
-    symbolic_id: SymbolicId,
-}
-
-impl PhysicalDiskUuid {
-    fn new(symbolic_id: SymbolicId) -> Self {
-        PhysicalDiskUuid { symbolic_id }
-    }
-}
-
-impl Enumerable for PhysicalDiskUuid {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
-}
-
-/// A symbolic representation of a single disk that has been adopted by the
-/// control plane.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlPlanePhysicalDisk {
-    pub disk_identity: DiskIdentity,
-    pub disk_id: PhysicalDiskUuid,
-    pub policy: PhysicalDiskPolicy,
-    pub state: PhysicalDiskState,
-}
-
-impl ControlPlanePhysicalDisk {
-    pub fn new(id_gen: &mut SymbolicIdGenerator) -> ControlPlanePhysicalDisk {
-        ControlPlanePhysicalDisk {
-            disk_identity: DiskIdentity::new(id_gen.next()),
-            disk_id: PhysicalDiskUuid::new(id_gen.next()),
-            policy: PhysicalDiskPolicy::InService,
-            state: PhysicalDiskState::Active,
-        }
-    }
-}
-
-/// Symbolic representation of a `PhysicalDiskPolicy`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PhysicalDiskPolicy {
-    InService,
-    Expunged,
-}
-
-/// Symbolic representation of `PhysicalDiskState`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PhysicalDiskState {
-    Active,
-    Decommissioned,
-}
-
-/// A symbolic representation of external network resources mapped to an
-/// individual omicron zone.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OmicronZoneNetworkResources {
-    external_ips: Vec<OmicronZoneExternalIp>,
-    zone_nics: Vec<OmicronZoneNic>,
-}
-
-/// A symbolic representation of an `OmicronZoneExternalIpUuid`
-///
-/// These map to floating IPs and source NAT configs
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct OmicronZoneExternalIpUuid {
-    symbolic_id: SymbolicId,
-}
-
-impl OmicronZoneExternalIpUuid {
-    pub fn new(symbolic_id: SymbolicId) -> OmicronZoneExternalIpUuid {
-        OmicronZoneExternalIpUuid { symbolic_id }
-    }
-}
-
-impl Enumerable for OmicronZoneExternalIpUuid {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
-}
-
-/// Symbolic representation of an external ip for a zone
-///
-/// We don't actually bother representing the underlying floating IPs or SNAT
-/// configs. Instead we just generate consistent ones when reifying the the
-/// symbolic types to concrete types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum OmicronZoneExternalIp {
-    Floating(OmicronZoneExternalIpUuid),
-    Snat(OmicronZoneExternalIpUuid),
-}
-
-/// A symbolic representation of an `OmicronZoneNic`
-///
-/// We don't bother tracking all the details. We'll generate
-/// consistent details of the concrete type during reification.
-/// Symbolic representation of an OmicronZoneUuid
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct OmicronZoneNic {
-    symbolic_id: SymbolicId,
-}
-
-impl OmicronZoneNic {
-    pub fn new(symbolic_id: SymbolicId) -> OmicronZoneNic {
-        OmicronZoneNic { symbolic_id }
-    }
-}
-
-impl Enumerable for OmicronZoneNic {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
-}
-
-/// Symbolic representation of an OmicronZoneUuid
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct OmicronZoneUuid {
-    symbolic_id: SymbolicId,
-}
-
-impl Enumerable for OmicronZoneUuid {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
 }
 
 /// Symbolic representation of a sled policy
@@ -463,26 +288,6 @@ pub enum SledPolicy {
 pub enum SledState {
     Active,
     Decommissioned,
-}
-
-/// A symbolic representation of a `ZpoolUuid`
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct ZpoolUuid {
-    symbolic_id: SymbolicId,
-}
-
-impl ZpoolUuid {
-    fn new(symbolic_id: SymbolicId) -> ZpoolUuid {
-        ZpoolUuid { symbolic_id }
-    }
-}
-
-impl Enumerable for ZpoolUuid {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
 }
 
 /// A symbolic representation of the sled's Ipv6 subnet on the underlay network
@@ -580,19 +385,6 @@ pub struct IpRange {
 }
 
 impl Enumerable for IpRange {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
-}
-
-/// A symbolic version of the number of given types of zone
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZoneCount {
-    symbolic_id: SymbolicId,
-    val: usize,
-}
-
-impl Enumerable for ZoneCount {
     fn symbolic_id(&self) -> SymbolicId {
         self.symbolic_id
     }
