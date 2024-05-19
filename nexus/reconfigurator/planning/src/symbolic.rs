@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod omicron_zones;
+mod ops;
 mod physical_disks;
 mod test_harness;
 
@@ -34,6 +35,8 @@ pub use physical_disks::{
     ControlPlanePhysicalDisk, DiskIdentity, PhysicalDiskPolicy,
     PhysicalDiskState, PhysicalDiskUuid, ZpoolUuid,
 };
+
+pub use ops::Op;
 
 /// The number of IPs in a range
 type IpRangeSize = usize;
@@ -371,9 +374,6 @@ impl Enumerable for SledUuid {
         self.symbolic_id
     }
 }
-
-/// Trait representing a symbolic operation across one or more symbolic types
-pub trait SymbolicOp {}
 
 /// Symbolic representation of ranges specified by the IP pool for
 /// externally-visible control plane services (e.g., external DNS, Nexus,
