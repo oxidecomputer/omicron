@@ -4,7 +4,7 @@
 
 //! A test harness for symbolic model based testing.
 
-use super::{Fleet, FleetDescription};
+use super::{Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator};
 
 /// Take a [`FleetDescription`] as an "initial state" of the system and use it
 /// to generate a symbolic model of the initial state of the [`Fleet`].
@@ -33,4 +33,50 @@ use super::{Fleet, FleetDescription};
 /// callbacks that allow specific tests to ensure that the output `Blueprint`
 /// matches what is expected given the input symbolic input, and concrete parent
 /// `Blueprint`, `PlanningInput`, and `Inventory`.
-pub struct TestHarness {}
+pub struct TestHarness {
+    initial_fleet_description: FleetDescription,
+    initial_fleet: Fleet,
+    symbolic_ops_input: Vec<Op>,
+    symbolic_id_gen: SymbolicIdGenerator,
+    symbolic_history: Vec<SymbolicEvent>,
+    discarded_symbolic_ops: Vec<DiscardedOp>,
+}
+
+impl TestHarness {
+    pub fn new(
+        initial_fleet_description: FleetDescription,
+        ops: Vec<Op>,
+    ) -> TestHarness {
+        let mut symbolic_id_gen = SymbolicIdGenerator::default();
+        let initial_fleet =
+            initial_fleet_description.to_fleet(&mut symbolic_id_gen);
+        let symbolic_history = Vec::with_capacity(ops.len());
+
+        TestHarness {
+            initial_fleet_description,
+            initial_fleet,
+            symbolic_ops_input: ops,
+            symbolic_id_gen,
+            symbolic_history,
+            discarded_symbolic_ops: vec![],
+        }
+    }
+}
+
+/// A symbolic operation and the new symbolic `Fleet` generated
+/// from that operation.
+///
+/// This is an element in the totally ordered `TestHarness::symbolic_history`.
+struct SymbolicEvent {
+    symbolic_id: SymbolicId,
+    op: Op,
+    next_fleet: Fleet,
+}
+
+/// Operations discarded during symbolic execution
+struct DiscardedOp {
+    // The index of the last entry in `symbolic_history` when this operation was
+    // discarded.
+    history_index: usize,
+    op: Op,
+}
