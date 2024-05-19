@@ -17,7 +17,7 @@
 //! variants.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The number of IPs in a range
 type IpRangeSize = usize;
@@ -75,10 +75,13 @@ impl FleetDescription {
         &self,
         num_disks: usize,
         id_gen: &mut SymbolicIdGenerator,
-    ) -> BTreeMap<ZpoolUuid, SledDisk> {
+    ) -> BTreeMap<ZpoolUuid, ControlPlanePhysicalDisk> {
         let mut disks = BTreeMap::new();
         for _ in 0..num_disks {
-            disks.insert(ZpoolUuid::new(id_gen.next()), SledDisk::new(id_gen));
+            disks.insert(
+                ZpoolUuid::new(id_gen.next()),
+                ControlPlanePhysicalDisk::new(id_gen),
+            );
         }
         disks
     }
@@ -91,12 +94,17 @@ impl FleetDescription {
 
         for _ in 0..self.num_sleds {
             let zpools = self.sled_disks(10, id_gen);
+            let physical_disks = zpools
+                .iter()
+                .map(|(_, cp_disk)| cp_disk.disk_identity.clone())
+                .collect();
             sleds.insert(
                 SledUuid::new(id_gen.next()),
                 Sled {
                     policy: SledPolicy::InServiceProvisionable,
                     state: SledState::Active,
                     resources: SledResources {
+                        physical_disks,
                         zpools,
                         subnet: SledSubnet::new(id_gen.next()),
                     },
@@ -108,11 +116,20 @@ impl FleetDescription {
     }
 
     pub fn to_fleet(&self, id_gen: &mut SymbolicIdGenerator) -> Fleet {
-        let db_state = DbState { policy: self.policy(id_gen) };
+        let sleds = self.sleds(id_gen);
+        let zones = BTreeMap::new();
+        let network_resources = BTreeMap::new();
+        let db_state = DbState {
+            policy: self.policy(id_gen),
+            sleds: sleds.clone(),
+            zones: zones.clone(),
+            network_resources: network_resources.clone(),
+        };
         let rack = Rack {
             symbolic_id: id_gen.next(),
-            sleds: self.sleds(id_gen),
-            zones: BTreeMap::new(),
+            sleds,
+            zones,
+            network_resources,
         };
         let rack_uuid = RackUuid { symbolic_id: rack.symbolic_id };
         Fleet { db_state, racks: [(rack_uuid, rack)].into() }
@@ -146,12 +163,13 @@ pub struct Fleet {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbState {
     pub policy: FleetPolicy,
-    // TODO: Add more control plane related stuff
-    //  * any known sled ids, external ips, etc...
-    //  * any physical disks
-    //  * the known state of sleds
-    //  * prior collections
-    //  * blueprints
+
+    // These are the control plane versions of what exist in `Rack`. `Rack` may
+    // not be in sync until the blueprint gets "executed" using this information
+    pub sleds: BTreeMap<SledUuid, Sled>,
+    pub zones: BTreeMap<OmicronZoneUuid, SledUuid>,
+    pub network_resources:
+        BTreeMap<OmicronZoneUuid, OmicronZoneNetworkResources>,
 }
 
 /// A symbolic representation of a rack at a given point in time.
@@ -162,11 +180,15 @@ pub struct Rack {
     pub symbolic_id: SymbolicId,
     pub sleds: BTreeMap<SledUuid, Sled>,
 
-    // When zones are symbolically allocated, we don't know which sled the
-    // reconfigurator will actually place them on, so we use a symbolic
-    // placeholder `SledUuid`, rather than storing the zone under a known sled
-    // in the `sleds` field above.
+    /// When zones are symbolically allocated, we don't know which sled the
+    /// reconfigurator will actually place them on, so we use a symbolic
+    /// placeholder `SledUuid`, rather than storing the zone under a known sled
+    /// in the `sleds` field above.
     pub zones: BTreeMap<OmicronZoneUuid, SledUuid>,
+
+    /// For the same reason as zones above, these are kept outside of `sleds`
+    pub network_resources:
+        BTreeMap<OmicronZoneUuid, OmicronZoneNetworkResources>,
 }
 
 impl Enumerable for Rack {
@@ -195,7 +217,8 @@ pub struct PlanningInput {
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
     pub sleds: BTreeMap<SledUuid, Sled>,
-    // TODO: Network resources
+    pub network_resources:
+        BTreeMap<OmicronZoneUuid, OmicronZoneNetworkResources>,
 }
 
 /// This maps to `Policy` in `nexus-types`.
@@ -273,7 +296,9 @@ pub trait Enumerable {
 }
 
 /// A symbolic representation of a `DiskIdentity`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct DiskIdentity {
     pub symbolic_id: SymbolicId,
 }
@@ -310,45 +335,24 @@ impl Enumerable for PhysicalDiskUuid {
     }
 }
 
-/// A symbolic representation a control plane physical disk as stored in CRDB.
-///
+/// A symbolic representation of a single disk that has been adopted by the
+/// control plane.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbPhysicalDisk {
+pub struct ControlPlanePhysicalDisk {
+    pub disk_identity: DiskIdentity,
     pub disk_id: PhysicalDiskUuid,
     pub policy: PhysicalDiskPolicy,
     pub state: PhysicalDiskState,
 }
 
-impl DbPhysicalDisk {
-    pub fn new(id_gen: &mut SymbolicIdGenerator) -> Self {
-        DbPhysicalDisk {
+impl ControlPlanePhysicalDisk {
+    pub fn new(id_gen: &mut SymbolicIdGenerator) -> ControlPlanePhysicalDisk {
+        ControlPlanePhysicalDisk {
+            disk_identity: DiskIdentity::new(id_gen.next()),
             disk_id: PhysicalDiskUuid::new(id_gen.next()),
             policy: PhysicalDiskPolicy::InService,
             state: PhysicalDiskState::Active,
         }
-    }
-}
-
-/// A symbolic representation of a single disk that may or may not have been
-/// adopted by the control plane yet.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SledDisk {
-    pub disk_identity: DiskIdentity,
-
-    // This is only filled in when the control plane adopts the physical disk.
-    pub db_physical_disk: Option<DbPhysicalDisk>,
-}
-
-impl SledDisk {
-    pub fn new(id_gen: &mut SymbolicIdGenerator) -> SledDisk {
-        SledDisk {
-            disk_identity: DiskIdentity::new(id_gen.next()),
-            db_physical_disk: None,
-        }
-    }
-
-    pub fn control_plane_adopt(&mut self, db_physical_disk: DbPhysicalDisk) {
-        self.db_physical_disk = Some(db_physical_disk);
     }
 }
 
@@ -366,11 +370,69 @@ pub enum PhysicalDiskState {
     Decommissioned,
 }
 
-/// Symbolic representation of an external ip type for a zone
+/// A symbolic representation of external network resources mapped to an
+/// individual omicron zone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum OmicronZoneExternalIpType {
-    Floating,
-    Snat,
+pub struct OmicronZoneNetworkResources {
+    external_ips: Vec<OmicronZoneExternalIp>,
+    zone_nics: Vec<OmicronZoneNic>,
+}
+
+/// A symbolic representation of an `OmicronZoneExternalIpUuid`
+///
+/// These map to floating IPs and source NAT configs
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct OmicronZoneExternalIpUuid {
+    symbolic_id: SymbolicId,
+}
+
+impl OmicronZoneExternalIpUuid {
+    pub fn new(symbolic_id: SymbolicId) -> OmicronZoneExternalIpUuid {
+        OmicronZoneExternalIpUuid { symbolic_id }
+    }
+}
+
+impl Enumerable for OmicronZoneExternalIpUuid {
+    fn symbolic_id(&self) -> SymbolicId {
+        self.symbolic_id
+    }
+}
+
+/// Symbolic representation of an external ip for a zone
+///
+/// We don't actually bother representing the underlying floating IPs or SNAT
+/// configs. Instead we just generate consistent ones when reifying the the
+/// symbolic types to concrete types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OmicronZoneExternalIp {
+    Floating(OmicronZoneExternalIpUuid),
+    Snat(OmicronZoneExternalIpUuid),
+}
+
+/// A symbolic representation of an `OmicronZoneNic`
+///
+/// We don't bother tracking all the details. We'll generate
+/// consistent details of the concrete type during reification.
+/// Symbolic representation of an OmicronZoneUuid
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct OmicronZoneNic {
+    symbolic_id: SymbolicId,
+}
+
+impl OmicronZoneNic {
+    pub fn new(symbolic_id: SymbolicId) -> OmicronZoneNic {
+        OmicronZoneNic { symbolic_id }
+    }
+}
+
+impl Enumerable for OmicronZoneNic {
+    fn symbolic_id(&self) -> SymbolicId {
+        self.symbolic_id
+    }
 }
 
 /// Symbolic representation of an OmicronZoneUuid
@@ -459,8 +521,21 @@ impl Enumerable for SledSubnet {
 /// and generates a `Blueprint`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    zpools: BTreeMap<ZpoolUuid, SledDisk>,
+    physical_disks: BTreeSet<DiskIdentity>,
+    /// All zpools must map to `physical_disks` in the above field
+    /// This is actually an example of an assertion that can be performed on
+    /// symbolic state.
+    zpools: BTreeMap<ZpoolUuid, ControlPlanePhysicalDisk>,
     subnet: SledSubnet,
+}
+
+impl SledResources {
+    pub fn assert_invariants(&self) {
+        // Any adopted logical disk must match a physical disk in this sled
+        for (_, cp_disk) in &self.zpools {
+            assert!(self.physical_disks.contains(&cp_disk.disk_identity));
+        }
+    }
 }
 
 /// Symbolic representation of a sled at a given point in time
@@ -533,7 +608,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn initial_rack_construction() {
+    fn fleet_construction() {
         let mut id_gen = SymbolicIdGenerator::default();
         let fleet = FleetDescription::single_sled().to_fleet(&mut id_gen);
         println!("{fleet:#?}");
