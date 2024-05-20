@@ -44,6 +44,7 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
     pub kind: VpcRouterKind,
     pub rcgen: Generation,
+    pub resolved_version: i64,
 }
 
 impl VpcRouter {
@@ -54,7 +55,13 @@ impl VpcRouter {
         params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind, rcgen: Generation::new() }
+        Self {
+            identity,
+            vpc_id,
+            kind,
+            rcgen: Generation::new(),
+            resolved_version: 0,
+        }
     }
 }
 

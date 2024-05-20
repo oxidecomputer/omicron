@@ -1114,6 +1114,7 @@ table! {
         kind -> crate::VpcRouterKindEnum,
         vpc_id -> Uuid,
         rcgen -> Int8,
+        resolved_version -> Int8,
     }
 }
 

@@ -611,7 +611,23 @@ pub enum RouterTarget {
     VpcSubnet(IpNet),
 }
 
-/// XX
+/// XXX
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct RouterVersion {
+    pub router_id: Uuid,
+    pub generation: u64,
+}
+
+impl RouterVersion {
+    pub fn is_replaced_by(&self, other: &Self) -> bool {
+        (self.router_id != other.router_id)
+            || self.generation < other.generation
+    }
+}
+
+/// Implementation details on XXX
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -620,10 +636,18 @@ pub struct RouterId {
     pub subnet: Option<IpNet>,
 }
 
-/// XX
+/// Version information
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ReifiedVpcRouteState {
+    pub id: RouterId,
+    pub version: Option<RouterVersion>,
+}
+
+/// An updated set of routes for a given
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ReifiedVpcRouteSet {
     pub id: RouterId,
+    pub version: Option<RouterVersion>,
     pub routes: HashSet<ReifiedVpcRoute>,
 }
 

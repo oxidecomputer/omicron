@@ -1599,7 +1599,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_router (
     time_deleted TIMESTAMPTZ,
     kind omicron.public.vpc_router_kind NOT NULL,
     vpc_id UUID NOT NULL,
-    rcgen INT NOT NULL
+    rcgen INT NOT NULL,
+    /*
+     * version information used to trigger VPC router RPW.
+     * this is sensitive to CRUD on named resources beyond
+     * routers e.g. instances, subnets, ...
+     */
+    resolved_version INT NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_router (

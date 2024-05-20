@@ -33,7 +33,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
-use omicron_common::api::internal::shared::{ReifiedVpcRouteSet, SwitchPorts};
+use omicron_common::api::internal::shared::{
+    ReifiedVpcRouteSet, ReifiedVpcRouteState, SwitchPorts,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -1021,14 +1023,14 @@ async fn bootstore_status(
     Ok(HttpResponseOk(status))
 }
 
-/// Get the current state of VPC routing rules.
+/// Get the current versions of VPC routing rules.
 #[endpoint {
     method = GET,
     path = "/vpc-routes",
 }]
 async fn list_vpc_routes(
     request_context: RequestContext<SledAgent>,
-) -> Result<HttpResponseOk<Vec<ReifiedVpcRouteSet>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ReifiedVpcRouteState>>, HttpError> {
     let sa = request_context.context();
     Ok(HttpResponseOk(sa.list_vpc_routes()))
 }

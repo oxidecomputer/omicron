@@ -19,8 +19,10 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::ReifiedVpcRoute;
 use omicron_common::api::internal::shared::ReifiedVpcRouteSet;
+use omicron_common::api::internal::shared::ReifiedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
+use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DelRouterEntryReq;
@@ -54,6 +56,12 @@ use uuid::Uuid;
 // Prefix used to identify xde data links.
 const XDE_LINK_PREFIX: &str = "opte";
 
+#[derive(Debug, Clone)]
+struct RouteSet {
+    version: Option<RouterVersion>,
+    routes: HashSet<ReifiedVpcRoute>,
+}
+
 #[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
@@ -68,12 +76,11 @@ struct PortManagerInner {
     // (which includes the Uuid of the parent instance or service)
     ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
 
-    // XX: vs. Hashmap?
     // XX: Should this be the UUID of the VPC? The rulesets are
     //     arguably shared v4+v6, although today we don't yet
     //     allow dual-stack, let alone v6.
-    // Map of all current resolved routes
-    routes: Mutex<HashMap<RouterId, HashSet<ReifiedVpcRoute>>>,
+    // Map of all current resolved routes.
+    routes: Mutex<HashMap<RouterId, RouteSet>>,
 }
 
 impl PortManagerInner {
@@ -379,33 +386,38 @@ impl PortManager {
         let system_routes = routes
             .entry(RouterId { vni: nic.vni, subnet: None })
             .or_insert_with(|| {
-                let mut out = HashSet::new();
+                let mut routes = HashSet::new();
+
                 // Services do not talk to one another via OPTE, but do need
                 // to reach out over the Internet *before* nexus is up to give
                 // us real rules. The easiest bet is to instantiate these here.
                 if is_service {
-                    out.insert(ReifiedVpcRoute {
+                    routes.insert(ReifiedVpcRoute {
                         dest: "0.0.0.0/0".parse().unwrap(),
                         target: ApiRouterTarget::InternetGateway,
                     });
-                    out.insert(ReifiedVpcRoute {
+                    routes.insert(ReifiedVpcRoute {
                         dest: "::/0".parse().unwrap(),
                         target: ApiRouterTarget::InternetGateway,
                     });
                 }
-                out
+
+                RouteSet { version: None, routes }
             })
             .clone();
 
         let custom_routes = routes
             .entry(RouterId { vni: nic.vni, subnet: Some(nic.subnet) })
-            .or_insert_with(|| HashSet::default());
+            .or_insert_with(|| RouteSet {
+                version: None,
+                routes: HashSet::default(),
+            });
 
         for (class, routes) in [
             (RouterClass::System, &system_routes),
             (RouterClass::Custom, custom_routes),
         ] {
-            for route in routes {
+            for route in &routes.routes {
                 let route = AddRouterEntryReq {
                     class,
                     port_name: port_name.clone(),
@@ -433,11 +445,11 @@ impl PortManager {
         Ok((port, ticket))
     }
 
-    pub fn vpc_routes_list(&self) -> Vec<ReifiedVpcRouteSet> {
+    pub fn vpc_routes_list(&self) -> Vec<ReifiedVpcRouteState> {
         let routes = self.inner.routes.lock().unwrap();
         routes
             .iter()
-            .map(|(k, v)| ReifiedVpcRouteSet { id: *k, routes: v.clone() })
+            .map(|(k, v)| ReifiedVpcRouteState { id: *k, version: v.version })
             .collect()
     }
 
@@ -448,19 +460,31 @@ impl PortManager {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
         for set in new_routes {
-            let old = routes.get(&set.id);
-
-            let (to_add, to_delete) = if let Some(old) = old {
-                (
-                    set.routes.difference(old).cloned().collect(),
-                    old.difference(&set.routes).cloned().collect(),
-                )
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            let (to_add, to_delete) = if let Some(old) = routes.get(&set.id) {
+                match (old.version, set.version) {
+                    (Some(old_vers), Some(new_vers))
+                        if !old_vers.is_replaced_by(&new_vers) =>
+                    {
+                        continue;
+                    }
+                    _ => (
+                        set.routes.difference(&old.routes).cloned().collect(),
+                        old.routes.difference(&set.routes).cloned().collect(),
+                    ),
+                }
             } else {
                 (set.routes.clone(), HashSet::new())
             };
             deltas.insert(set.id, (to_add, to_delete));
 
-            routes.insert(set.id, set.routes);
+            routes.insert(
+                set.id,
+                RouteSet { version: set.version, routes: set.routes },
+            );
         }
         drop(routes);
 

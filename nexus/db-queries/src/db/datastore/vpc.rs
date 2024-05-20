@@ -1696,6 +1696,7 @@ mod tests {
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
+    use ipnetwork::Ipv4Network;
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -2210,5 +2211,255 @@ mod tests {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    // Test to verify that subnet CRUD operations are correctly
+    // reflected in the nexus-managed system router attached to a VPC.
+    #[tokio::test]
+    async fn test_vpc_system_router_sync_to_subnets() {
+        usdt::register_probes().unwrap();
+        let logctx =
+            dev::test_setup_log("test_vpc_system_router_sync_to_subnets");
+        let log = &logctx.log;
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a project and VPC.
+        let project_params = params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "project".parse().unwrap(),
+                description: String::from("test project"),
+            },
+        };
+        let project = Project::new(Uuid::new_v4(), project_params);
+        let (authz_project, _) = datastore
+            .project_create(&opctx, project)
+            .await
+            .expect("failed to create project");
+
+        let vpc_name: external::Name = "my-vpc".parse().unwrap();
+        let description = String::from("test vpc");
+        let mut incomplete_vpc = IncompleteVpc::new(
+            Uuid::new_v4(),
+            authz_project.id(),
+            Uuid::new_v4(),
+            params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: vpc_name.clone(),
+                    description: description.clone(),
+                },
+                ipv6_prefix: None,
+                dns_name: vpc_name.clone(),
+            },
+        )
+        .expect("failed to create incomplete VPC");
+        let this_vni = Vni(external::Vni::try_from(2048).unwrap());
+        incomplete_vpc.vni = this_vni;
+        info!(
+            log,
+            "creating initial VPC";
+            "vni" => ?this_vni,
+        );
+        let query = InsertVpcQuery::new(incomplete_vpc);
+        let (authz_vpc, db_vpc) = datastore
+            .project_create_vpc_raw(&opctx, &authz_project, query)
+            .await
+            .expect("failed to create initial set of VPCs")
+            .expect("expected an actual VPC");
+        info!(
+            log,
+            "created VPC";
+            "vpc" => ?db_vpc,
+        );
+
+        // Now create the system router for this VPC. Subnet CRUD
+        // operations need this defined to succeed.
+        let router = VpcRouter::new(
+            db_vpc.system_router_id,
+            db_vpc.id(),
+            VpcRouterKind::System,
+            nexus_types::external_api::params::VpcRouterCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "system".parse().unwrap(),
+                    description: description.clone(),
+                },
+            },
+        );
+
+        let (_, db_router) = datastore
+            .vpc_create_router(&opctx, &authz_vpc, router)
+            .await
+            .unwrap();
+
+        // InternetGateway route creation is handled by the saga proper,
+        // so we'll only have subnet routes here. Initially, we start with none:
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[],
+        )
+        .await;
+
+        // Add a new subnet and we should get a new route.
+        let ipv6_block = db_vpc
+            .ipv6_prefix
+            .random_subnet(external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
+            .map(|block| block.0)
+            .unwrap();
+        let (authz_sub0, sub0) = datastore
+            .vpc_create_subnet(
+                &opctx,
+                &authz_vpc,
+                db::model::VpcSubnet::new(
+                    Uuid::new_v4(),
+                    db_vpc.id(),
+                    IdentityMetadataCreateParams {
+                        name: "s0".parse().unwrap(),
+                        description: "The default subnet...".into(),
+                    },
+                    external::Ipv4Net(
+                        Ipv4Network::new(
+                            core::net::Ipv4Addr::new(172, 30, 0, 0),
+                            22,
+                        )
+                        .unwrap(),
+                    ),
+                    ipv6_block,
+                ),
+            )
+            .await
+            .unwrap();
+
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[&sub0],
+        )
+        .await;
+
+        // Add another, and get another route.
+        let ipv6_block = db_vpc
+            .ipv6_prefix
+            .random_subnet(external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
+            .map(|block| block.0)
+            .unwrap();
+        let (_, sub1) = datastore
+            .vpc_create_subnet(
+                &opctx,
+                &authz_vpc,
+                db::model::VpcSubnet::new(
+                    Uuid::new_v4(),
+                    db_vpc.id(),
+                    IdentityMetadataCreateParams {
+                        name: "s1".parse().unwrap(),
+                        description: "A second subnet...".into(),
+                    },
+                    external::Ipv4Net(
+                        Ipv4Network::new(
+                            core::net::Ipv4Addr::new(172, 31, 0, 0),
+                            22,
+                        )
+                        .unwrap(),
+                    ),
+                    ipv6_block,
+                ),
+            )
+            .await
+            .unwrap();
+
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[&sub0, &sub1],
+        )
+        .await;
+
+        // Rename one subnet, and our invariants should hold.
+        let sub0 = datastore
+            .vpc_update_subnet(
+                &opctx,
+                &authz_sub0,
+                VpcSubnetUpdate {
+                    name: Some(
+                        "a-new-name".parse::<external::Name>().unwrap().into(),
+                    ),
+                    description: None,
+                    time_modified: Utc::now(),
+                },
+            )
+            .await
+            .unwrap();
+
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[&sub0, &sub1],
+        )
+        .await;
+
+        // Delete one, and routes should stay in sync.
+        datastore.vpc_delete_subnet(&opctx, &sub0, &authz_sub0).await.unwrap();
+
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[&sub1],
+        )
+        .await;
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn verify_all_subnet_routes_in_router(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        router_id: Uuid,
+        subnets: &[&VpcSubnet],
+    ) -> Vec<RouterRoute> {
+        let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
+
+        use db::schema::router_route::dsl;
+        let routes = dsl::router_route
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_router_id.eq(router_id))
+            .filter(dsl::kind.eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)))
+            .select(RouterRoute::as_select())
+            .load_async(&*conn)
+            .await
+            .unwrap();
+
+        // We should have exactly as many subnet routes as subnets.
+        assert_eq!(routes.len(), subnets.len());
+
+        let mut names: HashMap<_, _> =
+            subnets.iter().map(|s| (s.name().clone(), 0usize)).collect();
+
+        // Each should have a target+dest bound to a subnet by name.
+        for route in &routes {
+            let found_name = match &route.target.0 {
+                RouteTarget::Subnet(name) => name,
+                e => panic!("found target {e:?} instead of Subnet({{name}})"),
+            };
+
+            match &route.destination.0 {
+                RouteDestination::Subnet(name) => assert_eq!(name, found_name),
+                e => panic!("found dest {e:?} instead of Subnet({{name}})"),
+            }
+
+            *names.get_mut(found_name).unwrap() += 1;
+        }
+
+        // Each name should be used exactly once.
+        for (name, count) in names {
+            assert_eq!(count, 1, "subnet {name} should appear exactly once")
+        }
+
+        routes
     }
 }

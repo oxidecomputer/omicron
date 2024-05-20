@@ -955,7 +955,7 @@
     },
     "/vpc-routes": {
       "get": {
-        "summary": "Get the current state of VPC routing rules.",
+        "summary": "Get the current versions of VPC routing rules.",
         "operationId": "list_vpc_routes",
         "responses": {
           "200": {
@@ -963,10 +963,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_ReifiedVpcRouteSet",
+                  "title": "Array_of_ReifiedVpcRouteState",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ReifiedVpcRouteSet"
+                    "$ref": "#/components/schemas/ReifiedVpcRouteState"
                   }
                 }
               }
@@ -4326,7 +4326,7 @@
         ]
       },
       "ReifiedVpcRouteSet": {
-        "description": "XX",
+        "description": "An updated set of routes for a given",
         "type": "object",
         "properties": {
           "id": {
@@ -4338,11 +4338,35 @@
               "$ref": "#/components/schemas/ReifiedVpcRoute"
             },
             "uniqueItems": true
+          },
+          "version": {
+            "$ref": "#/components/schemas/RouterVersion"
           }
         },
         "required": [
           "id",
-          "routes"
+          "routes",
+          "version"
+        ]
+      },
+      "ReifiedVpcRouteState": {
+        "description": "Version information",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RouterId"
+          },
+          "version": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "RouteConfig": {
@@ -4375,7 +4399,7 @@
         ]
       },
       "RouterId": {
-        "description": "XX",
+        "description": "Implementation details on XXX",
         "type": "object",
         "properties": {
           "subnet": {
@@ -4462,6 +4486,25 @@
               "value"
             ]
           }
+        ]
+      },
+      "RouterVersion": {
+        "description": "XXX",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "router_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "generation",
+          "router_id"
         ]
       },
       "SemverVersion": {

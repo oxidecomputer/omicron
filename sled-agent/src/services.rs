@@ -49,7 +49,9 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{DhcpCfg, Port, PortCreateParams, PortManager, PortTicket};
+use illumos_utils::opte::{
+    DhcpCfg, Port, PortCreateParams, PortManager, PortTicket,
+};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,

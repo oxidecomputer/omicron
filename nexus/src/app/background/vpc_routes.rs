@@ -14,9 +14,11 @@ use nexus_types::{
     deployment::SledFilter, external_api::views::SledPolicy, identity::Asset,
     identity::Resource,
 };
-use omicron_common::api::internal::shared::ReifiedVpcRoute;
-use omicron_common::api::internal::shared::{ReifiedVpcRouteSet, RouterId};
+use omicron_common::api::internal::shared::{
+    ReifiedVpcRoute, ReifiedVpcRouteSet, RouterId, RouterVersion,
+};
 use serde_json::json;
+use std::collections::hash_map::Entry;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -33,6 +35,10 @@ impl VpcRouteManager {
     }
 }
 
+// There's a sort of eventual consistency happening here.
+// ... DETAIL XX ...
+// version bumps must happen AFTER other changes occur in
+// children etc. to keep this sane and working. :)
 impl BackgroundTask for VpcRouteManager {
     fn activate<'a>(
         &'a mut self,
@@ -40,7 +46,6 @@ impl BackgroundTask for VpcRouteManager {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
-            // let mut paginator = Paginator::new(MAX_SLED_AGENTS);
 
             // XX: copied from omicron#5566
             let sleds = match self
@@ -73,10 +78,10 @@ impl BackgroundTask for VpcRouteManager {
                 })
                 .collect();
 
-            // XX: actually reify rules.
             let mut known_rules: HashMap<Uuid, HashSet<ReifiedVpcRoute>> =
                 HashMap::new();
             let mut db_routers = HashMap::new();
+            let mut vni_to_vpc = HashMap::new();
 
             for (sled, client) in sled_clients {
                 let Ok(route_sets) = client.list_vpc_routes().await else {
@@ -90,26 +95,35 @@ impl BackgroundTask for VpcRouteManager {
 
                 let route_sets = route_sets.into_inner();
 
-                // Lookup all missing (VNI, subnet) pairs we need from this sled.
+                // Lookup all VPC<->Subnet<->Router associations we might need,
+                // based on the set of VNIs reported by this sled.
+                // These provide the versions we'll stick with -- in the worst
+                // case we push newer state to a sled with an older generation
+                // number, which
                 for set in &route_sets {
-                    let system_route =
-                        RouterId { vni: set.id.vni, subnet: None };
-
-                    if db_routers.contains_key(&system_route) {
-                        continue;
-                    }
-
                     let db_vni = Vni(set.id.vni);
-                    let Ok(vpc) =
-                        self.datastore.resolve_vni_to_vpc(opctx, db_vni).await
-                    else {
-                        error!(
-                            log,
-                            "failed to fetch VPC from VNI";
-                            "sled" => sled.serial_number(),
-                            "vni" => format!("{db_vni:?}")
-                        );
-                        continue;
+                    let maybe_vpc = vni_to_vpc.entry(set.id.vni);
+                    let vpc = match maybe_vpc {
+                        Entry::Occupied(_) => {
+                            continue;
+                        }
+                        Entry::Vacant(v) => {
+                            let Ok(vpc) = self
+                                .datastore
+                                .resolve_vni_to_vpc(opctx, db_vni)
+                                .await
+                            else {
+                                error!(
+                                    log,
+                                    "failed to fetch VPC from VNI";
+                                    "sled" => sled.serial_number(),
+                                    "vni" => ?db_vni
+                                );
+                                continue;
+                            };
+
+                            v.insert(vpc)
+                        }
                     };
 
                     let vpc_id = vpc.identity().id;
@@ -140,50 +154,71 @@ impl BackgroundTask for VpcRouteManager {
                         continue;
                     };
 
-                    db_routers.insert(system_route, system_router);
-                    db_routers.extend(custom_routers.into_iter().map(
+                    db_routers.insert(
+                        RouterId { vni: set.id.vni, subnet: None },
+                        system_router,
+                    );
+                    db_routers.extend(custom_routers.iter().map(
                         |(subnet, router)| {
                             (
                                 RouterId {
                                     vni: set.id.vni,
                                     subnet: Some(subnet.ipv4_block.0.into()),
                                 },
+                                router.clone(),
+                            )
+                        },
+                    ));
+                    db_routers.extend(custom_routers.into_iter().map(
+                        |(subnet, router)| {
+                            (
+                                RouterId {
+                                    vni: set.id.vni,
+                                    subnet: Some(subnet.ipv6_block.0.into()),
+                                },
                                 router,
                             )
                         },
                     ));
-                    // XX: do this right / unify v4 and v6
-                    // db_routers.extend(custom_routers.into_iter().map(
-                    //     |(subnet, router)| {
-                    //         (
-                    //             RouterId {
-                    //                 vni: set.id.vni,
-                    //                 subnet: Some(subnet.ipv6_block.0.into()),
-                    //             },
-                    //             router,
-                    //         )
-                    //     },
-                    // ));
                 }
 
-                let mut to_push = HashMap::new();
+                let mut to_push = Vec::new();
+                let mut set_rules = |id, version, routes| {
+                    to_push.push(ReifiedVpcRouteSet { id, routes, version });
+                };
 
-                // reify into known_rules on an as-needed basis.
+                // resolve into known_rules on an as-needed basis.
                 for set in &route_sets {
                     let Some(db_router) = db_routers.get(&set.id) else {
                         // The sled wants to know about rules for a VPC
                         // subnet with no custom router set. Send them
-                        // the empty list.
-                        to_push.insert(set.id, HashSet::new());
+                        // the empty list, unset its table version.
+                        set_rules(set.id, None, HashSet::new());
                         continue;
                     };
 
                     let router_id = db_router.id();
+                    let version = RouterVersion {
+                        generation: db_router.resolved_version as u64,
+                        router_id,
+                    };
+
+                    // Only attempt to resolve/push a ruleset if we have a different
+                    // router ID than the sled, or a higher version number.
+                    match &set.version {
+                        Some(v)
+                            if v.router_id == router_id
+                                && v.generation >= version.generation =>
+                        {
+                            continue;
+                        }
+                        _ => {}
+                    }
 
                     // We may have already resolved the rules for this
-                    // router in a previous call.
+                    // router in a previous iteration.
                     if let Some(rules) = known_rules.get(&router_id) {
-                        to_push.insert(set.id, rules.clone());
+                        set_rules(set.id, Some(version), rules.clone());
                         continue;
                     }
 
@@ -196,7 +231,7 @@ impl BackgroundTask for VpcRouteManager {
                         .await
                     {
                         Ok(rules) => {
-                            to_push.insert(set.id, rules.clone());
+                            set_rules(set.id, Some(version), rules.clone());
                             known_rules.insert(router_id, rules);
                         }
                         Err(e) => {
@@ -210,17 +245,12 @@ impl BackgroundTask for VpcRouteManager {
                     }
                 }
 
-                let to_push = to_push
-                    .into_iter()
-                    .map(|(id, routes)| ReifiedVpcRouteSet { id, routes })
-                    .collect();
-
                 if let Err(e) = client.set_vpc_routes(&to_push).await {
                     error!(
                         log,
                         "failed to push new VPC route state from sled";
                         "sled" => sled.serial_number(),
-                        "err" => format!("{e}")
+                        "err" => ?e
                     );
                     continue;
                 };
