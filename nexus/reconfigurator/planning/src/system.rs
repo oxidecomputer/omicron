@@ -453,7 +453,7 @@ impl Sled {
         let serial = format!("serial{}", unique);
         let revision = 0;
         let mut zpool_rng =
-            TypedUuidRng::from_seed("SystemSimultatedSled", "ZpoolUuid");
+            TypedUuidRng::from_seed("SystemSimultatedSled-ZpoolUuid", sled_id);
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
                 let zpool = ZpoolUuid::from(zpool_rng.next());
