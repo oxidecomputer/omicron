@@ -49,7 +49,7 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
+use illumos_utils::opte::{DhcpCfg, Port, PortCreateParams, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
@@ -1266,15 +1266,15 @@ impl ServiceManager {
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(
+            .create_port(PortCreateParams {
                 nic,
-                snat,
-                None,
+                source_nat: snat,
+                ephemeral_ip: None,
                 floating_ips,
-                &[],
-                DhcpCfg::default(),
-                true,
-            )
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg::default(),
+                is_service: true,
+            })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),

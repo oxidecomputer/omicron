@@ -8,6 +8,7 @@ use crate::opte::opte_firewall_rules;
 use crate::opte::params::DeleteVirtualNetworkInterfaceHost;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::VpcFirewallRule;
+use crate::opte::port::PortData;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
@@ -85,6 +86,18 @@ impl PortManagerInner {
     }
 }
 
+#[derive(Debug)]
+/// Parameters needed to create and configure an OPTE port.
+pub struct PortCreateParams<'a> {
+    pub nic: &'a NetworkInterface,
+    pub source_nat: Option<SourceNatConfig>,
+    pub ephemeral_ip: Option<IpAddr>,
+    pub floating_ips: &'a [IpAddr],
+    pub firewall_rules: &'a [VpcFirewallRule],
+    pub dhcp_config: DhcpCfg,
+    pub is_service: bool,
+}
+
 /// The port manager controls all OPTE ports on a single host.
 #[derive(Debug, Clone)]
 pub struct PortManager {
@@ -113,14 +126,18 @@ impl PortManager {
     #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn create_port(
         &self,
-        nic: &NetworkInterface,
-        source_nat: Option<SourceNatConfig>,
-        ephemeral_ip: Option<IpAddr>,
-        floating_ips: &[IpAddr],
-        firewall_rules: &[VpcFirewallRule],
-        dhcp_config: DhcpCfg,
-        is_service: bool,
+        params: PortCreateParams,
     ) -> Result<(Port, PortTicket), Error> {
+        let PortCreateParams {
+            nic,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+            firewall_rules,
+            dhcp_config,
+            is_service,
+        } = params;
+
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
         let subnet = IpNetwork::from(nic.subnet);
@@ -336,16 +353,16 @@ impl PortManager {
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
-            let port = Port::new(
-                port_name.clone(),
-                nic.ip,
+            let port = Port::new(PortData {
+                name: port_name.clone(),
+                ip: nic.ip,
                 mac,
-                nic.slot,
+                slot: nic.slot,
                 vni,
-                nic.subnet,
+                subnet: nic.subnet,
                 gateway,
                 vnic,
-            );
+            });
             let old = ports.insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),

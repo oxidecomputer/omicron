@@ -12,21 +12,22 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 #[derive(Debug)]
-struct PortInner {
-    // Name of the port as identified by OPTE
-    name: String,
-    // IP address within the VPC Subnet
-    ip: IpAddr,
-    // VPC-private MAC address
-    mac: MacAddr6,
-    // Emulated PCI slot for the guest NIC, passed to Propolis
-    slot: u8,
-    // Geneve VNI for the VPC
-    vni: Vni,
-    // Subnet the port belong to within the VPC.
-    subnet: IpNet,
-    // Information about the virtual gateway, aka OPTE
-    gateway: Gateway,
+pub struct PortData {
+    /// Name of the port as identified by OPTE
+    pub(crate) name: String,
+    /// IP address within the VPC Subnet
+    pub(crate) ip: IpAddr,
+    /// VPC-private MAC address
+    pub(crate) mac: MacAddr6,
+    /// Emulated PCI slot for the guest NIC, passed to Propolis
+    pub(crate) slot: u8,
+    /// Geneve VNI for the VPC
+    pub(crate) vni: Vni,
+    /// Subnet the port belong to within the VPC.
+    pub(crate) subnet: IpNet,
+    /// Information about the virtual gateway, aka OPTE
+    pub(crate) gateway: Gateway,
+    /// Name of the VNIC the OPTE port is bound to.
     // TODO-remove(#2932): Remove this once we can put Viona directly on top of an
     // OPTE port device.
     //
@@ -36,7 +37,18 @@ struct PortInner {
     // https://github.com/oxidecomputer/opte/issues/178 for more details. This
     // can be changed back to a real VNIC when that is resolved, and the Drop
     // impl below can simplify to just call `drop(self.vnic)`.
-    vnic: String,
+    pub(crate) vnic: String,
+}
+
+#[derive(Debug)]
+struct PortInner(PortData);
+
+impl core::ops::Deref for PortInner {
+    type Target = PortData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[cfg(target_os = "illumos")]
@@ -86,28 +98,8 @@ pub struct Port {
 }
 
 impl Port {
-    pub fn new(
-        name: String,
-        ip: IpAddr,
-        mac: MacAddr6,
-        slot: u8,
-        vni: Vni,
-        subnet: IpNet,
-        gateway: Gateway,
-        vnic: String,
-    ) -> Self {
-        Self {
-            inner: Arc::new(PortInner {
-                name,
-                ip,
-                mac,
-                slot,
-                vni,
-                subnet,
-                gateway,
-                vnic,
-            }),
-        }
+    pub fn new(data: PortData) -> Self {
+        Self { inner: Arc::new(PortInner(data)) }
     }
 
     pub fn ip(&self) -> &IpAddr {

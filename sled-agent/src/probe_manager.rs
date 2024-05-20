@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::params::VpcFirewallRule;
-use illumos_utils::opte::{DhcpCfg, PortManager};
+use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
 use nexus_client::types::{ProbeExternalIp, ProbeInfo};
@@ -223,12 +223,12 @@ impl ProbeManagerInner {
             .get(0)
             .ok_or(anyhow!("expected an external ip"))?;
 
-        let port = self.port_manager.create_port(
-            &nic,
-            None,
-            Some(eip.ip),
-            &[], // floating ips
-            &[VpcFirewallRule {
+        let port = self.port_manager.create_port(PortCreateParams {
+            nic,
+            source_nat: None,
+            ephemeral_ip: Some(eip.ip),
+            floating_ips: &[],
+            firewall_rules: &[VpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![nic.clone()],
@@ -238,9 +238,9 @@ impl ProbeManagerInner {
                 action: VpcFirewallRuleAction::Allow,
                 priority: VpcFirewallRulePriority(100),
             }],
-            DhcpCfg::default(),
-            false,
-        )?;
+            dhcp_config: DhcpCfg::default(),
+            is_service: false,
+        })?;
 
         let installed_zone = ZoneBuilderFactory::default()
             .builder()

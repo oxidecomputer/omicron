@@ -27,6 +27,7 @@ use oxide_vpc::api::Ipv6Cidr;
 use oxide_vpc::api::Ipv6PrefixLen;
 use oxide_vpc::api::RouterTarget;
 pub use port::Port;
+pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
 
