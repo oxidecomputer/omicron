@@ -6,11 +6,14 @@
 //! by the [`super::TestHarness`].
 
 use super::SledUuid;
+use serde::{Deserialize, Serialize};
 
 /// All symbolic operations against a `Fleet`.
 ///
 /// Each operation results in one set of behaviors during symbolic execution
 /// and another during dynamic (concrete) execution.
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Op {
     /// Symbolic: Add a new sled to `DbState`
     ///

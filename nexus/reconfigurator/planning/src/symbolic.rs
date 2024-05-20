@@ -15,8 +15,6 @@
 //! needs to change only when a new test is written to utilize that variant.
 //! Otherwise the existing symbolic type will just generate the known concrete
 //! variants.
-
-use nexus_types::external_api::params::SubnetSelector;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -208,6 +206,14 @@ impl Fleet {
             }
         }
     }
+
+    /// Return the first rack
+    ///
+    /// Currently we only support a fleet with a single rack, so this is a
+    /// mighty useful method.
+    pub fn first_rack(&self) -> &Rack {
+        self.racks.first_key_value().unwrap().1
+    }
 }
 
 /// The symbolic state of the database at a given point in time.
@@ -346,7 +352,7 @@ pub enum Capacity {
 )]
 pub struct SymbolicId(usize);
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SymbolicIdGenerator {
     next_id: usize,
 }

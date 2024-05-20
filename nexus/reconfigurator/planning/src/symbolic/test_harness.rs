@@ -4,7 +4,10 @@
 
 //! A test harness for symbolic model based testing.
 
-use super::{Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator};
+use super::{
+    Error, Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator,
+};
+use serde::{Deserialize, Serialize};
 
 // TODO: Instead of callbacks via a trait, allow the symbolic and dynamic
 // execution to use iterators to run each op and check invariants. This will
@@ -39,13 +42,15 @@ use super::{Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator};
 /// callbacks that allow specific tests to ensure that the output `Blueprint`
 /// matches what is expected given the input symbolic input, and concrete parent
 /// `Blueprint`, `PlanningInput`, and `Inventory`.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TestHarness {
-    initial_fleet_description: FleetDescription,
-    initial_fleet: Fleet,
-    symbolic_ops_input: Vec<Op>,
-    symbolic_id_gen: SymbolicIdGenerator,
-    symbolic_history: Vec<SymbolicEvent>,
-    discarded_symbolic_ops: Vec<DiscardedOp>,
+    pub initial_fleet_description: FleetDescription,
+    pub initial_fleet: Fleet,
+    pub symbolic_ops_input: Vec<Op>,
+    // Purely an option to prevent borrow checker issues
+    pub symbolic_id_gen: Option<SymbolicIdGenerator>,
+    pub symbolic_history: Vec<SymbolicEvent>,
+    pub discarded_symbolic_ops: Vec<DiscardedOp>,
 }
 
 impl TestHarness {
@@ -62,14 +67,39 @@ impl TestHarness {
             initial_fleet_description,
             initial_fleet,
             symbolic_ops_input: ops,
-            symbolic_id_gen,
+            symbolic_id_gen: Some(symbolic_id_gen),
             symbolic_history,
             discarded_symbolic_ops: vec![],
         }
     }
 
+    pub fn current_fleet(&self) -> &Fleet {
+        self.symbolic_history
+            .last()
+            .map(|event| &event.next_fleet)
+            .unwrap_or_else(|| &self.initial_fleet)
+    }
+
     pub fn run_symbolic(&mut self) {
-        todo!()
+        // Take the id generator for borrowck purposes
+        let mut id_gen = self.symbolic_id_gen.take().unwrap();
+        for op in &self.symbolic_ops_input {
+            match self.current_fleet().exec(&mut id_gen, *op) {
+                Ok(new_fleet) => {
+                    let event = SymbolicEvent::new(&mut id_gen, *op, new_fleet);
+                    self.symbolic_history.push(event);
+                }
+                Err(err) => {
+                    self.discarded_symbolic_ops.push(DiscardedOp {
+                        history_index: self.symbolic_ops_input.len(),
+                        op: *op,
+                        reason: err,
+                    });
+                }
+            }
+        }
+        // Put the id generator back for next time
+        self.symbolic_id_gen = Some(id_gen);
     }
 }
 
@@ -77,16 +107,66 @@ impl TestHarness {
 /// from that operation.
 ///
 /// This is an element in the totally ordered `TestHarness::symbolic_history`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SymbolicEvent {
     symbolic_id: SymbolicId,
     op: Op,
     next_fleet: Fleet,
 }
 
+impl SymbolicEvent {
+    pub fn new(
+        id_gen: &mut SymbolicIdGenerator,
+        op: Op,
+        next_fleet: Fleet,
+    ) -> SymbolicEvent {
+        SymbolicEvent { symbolic_id: id_gen.next(), op, next_fleet }
+    }
+}
+
 /// Operations discarded during symbolic execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DiscardedOp {
-    // The index of the last entry in `symbolic_history` when this operation was
-    // discarded.
+    // The index of the entry in `symbolic_history` where this operation would have
+    // gone when it was discarded.
     history_index: usize,
     op: Op,
+    // The reason we discarded the operation
+    reason: Error,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::symbolic::{
+        FleetDescription, Op, SledUuid, SymbolicIdGenerator,
+    };
+
+    #[test]
+    fn basic_symbolic_add_sled() {
+        let mut id_gen = SymbolicIdGenerator::default();
+        let initial_fleet_description = FleetDescription::single_sled();
+        let ops =
+            vec![Op::AddSledToDbState { sled: SledUuid::new(id_gen.next()) }];
+        let mut harness =
+            TestHarness::new(id_gen, initial_fleet_description, ops);
+
+        // The initial fleet has one sled that is in the db and has zones
+        // deployed to the rack
+        assert_eq!(harness.initial_fleet.db_state.sleds.len(), 1);
+        let rack = harness.initial_fleet.first_rack();
+        assert_eq!(rack.sleds.len(), 1);
+
+        // Execute all the symbolic operations
+        harness.run_symbolic();
+
+        // We should have generated a new fleet with an added sled in the db,
+        // but not deployed to the rack
+        assert_eq!(harness.symbolic_history.len(), 1);
+        let fleet = &harness.symbolic_history[0].next_fleet;
+        assert_eq!(fleet.db_state.sleds.len(), 2);
+        assert_eq!(fleet.first_rack().sleds.len(), 1);
+
+        println!("{harness:#?}");
+    }
 }
