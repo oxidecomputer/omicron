@@ -1890,4 +1890,94 @@ pub mod test {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn test_ensure_cockroachdb() {
+        static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Discard the example blueprint and start with an empty one.
+        let (_, input, _) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let input = {
+            // Clear out the external networking records from `input`, since
+            // we're building an empty blueprint.
+            let mut builder = input.into_builder();
+            *builder.network_resources_mut() =
+                OmicronZoneNetworkResources::new();
+            builder.build()
+        };
+        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
+            input.all_sled_ids(SledFilter::Commissioned),
+            "test",
+            TEST_NAME,
+        );
+
+        // Pick an arbitrary sled.
+        let (target_sled_id, sled_resources) = input
+            .all_sled_resources(SledFilter::InService)
+            .next()
+            .expect("at least one sled");
+
+        // It should have multiple zpools.
+        let num_sled_zpools = sled_resources.zpools.len();
+        assert!(
+            num_sled_zpools > 1,
+            "expected more than 1 zpool, got {num_sled_zpools}"
+        );
+
+        // We should be able to ask for a CRDB zone per zpool.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            &input,
+            "test",
+        )
+        .expect("constructed builder");
+        let ensure_result = builder
+            .sled_ensure_zone_multiple_cockroachdb(
+                target_sled_id,
+                num_sled_zpools,
+            )
+            .expect("ensured multiple CRDB zones");
+        assert_eq!(ensure_result, EnsureMultiple::Added(num_sled_zpools));
+
+        let blueprint = builder.build();
+        verify_blueprint(&blueprint);
+        assert_eq!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(sled_id, z)| {
+                    *sled_id == target_sled_id
+                        && z.zone_type.kind() == ZoneKind::CockroachDb
+                })
+                .count(),
+            num_sled_zpools
+        );
+
+        // If we instead ask for one more zone than there are zpools, we should
+        // get a zpool allocation error.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            &input,
+            "test",
+        )
+        .expect("constructed builder");
+        let ensure_error = builder
+            .sled_ensure_zone_multiple_cockroachdb(
+                target_sled_id,
+                num_sled_zpools + 1,
+            )
+            .expect_err("failed to create too many CRDB zones");
+        match ensure_error {
+            Error::NoAvailableZpool { sled_id, kind } => {
+                assert_eq!(target_sled_id, sled_id);
+                assert_eq!(kind, ZoneKind::CockroachDb);
+            }
+            _ => panic!("unexpected error {ensure_error}"),
+        }
+
+        logctx.cleanup_successful();
+    }
 }
