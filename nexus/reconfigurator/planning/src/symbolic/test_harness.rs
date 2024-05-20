@@ -6,6 +6,12 @@
 
 use super::{Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator};
 
+// TODO: Instead of callbacks via a trait, allow the symbolic and dynamic
+// execution to use iterators to run each op and check invariants. This will
+// make things much easier with regards to the borrow checker. Update comment
+// below to reflect this
+//
+//
 /// Take a [`FleetDescription`] as an "initial state" of the system and use it
 /// to generate a symbolic model of the initial state of the [`Fleet`].
 ///
@@ -44,10 +50,10 @@ pub struct TestHarness {
 
 impl TestHarness {
     pub fn new(
+        mut symbolic_id_gen: SymbolicIdGenerator,
         initial_fleet_description: FleetDescription,
         ops: Vec<Op>,
     ) -> TestHarness {
-        let mut symbolic_id_gen = SymbolicIdGenerator::default();
         let initial_fleet =
             initial_fleet_description.to_fleet(&mut symbolic_id_gen);
         let symbolic_history = Vec::with_capacity(ops.len());
@@ -60,6 +66,10 @@ impl TestHarness {
             symbolic_history,
             discarded_symbolic_ops: vec![],
         }
+    }
+
+    pub fn run_symbolic(&mut self) {
+        todo!()
     }
 }
 

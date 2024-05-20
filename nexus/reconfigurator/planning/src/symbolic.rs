@@ -16,6 +16,7 @@
 //! Otherwise the existing symbolic type will just generate the known concrete
 //! variants.
 
+use nexus_types::external_api::params::SubnetSelector;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,6 +43,8 @@ pub use ops::Op;
 type IpRangeSize = usize;
 
 const DEFAULT_IP_RANGE_SIZE: usize = 5;
+const SLOTS_PER_RACK: usize = 32;
+const MAX_DISKS_PER_SLED: usize = 10;
 
 /// A description of a fleet at at given point in time. For now, fleets may only
 /// contain one rack.
@@ -89,21 +92,6 @@ impl FleetDescription {
         }
     }
 
-    fn sled_disks(
-        &self,
-        num_disks: usize,
-        id_gen: &mut SymbolicIdGenerator,
-    ) -> BTreeMap<ZpoolUuid, ControlPlanePhysicalDisk> {
-        let mut disks = BTreeMap::new();
-        for _ in 0..num_disks {
-            disks.insert(
-                ZpoolUuid::new(id_gen.next()),
-                ControlPlanePhysicalDisk::new(id_gen),
-            );
-        }
-        disks
-    }
-
     fn sleds(
         &self,
         id_gen: &mut SymbolicIdGenerator,
@@ -111,7 +99,7 @@ impl FleetDescription {
         let mut sleds = BTreeMap::new();
 
         for _ in 0..self.num_sleds {
-            let zpools = self.sled_disks(10, id_gen);
+            let zpools = sled_disks(MAX_DISKS_PER_SLED, id_gen);
             let physical_disks = zpools
                 .iter()
                 .map(|(_, cp_disk)| cp_disk.disk_identity.clone())
@@ -154,6 +142,31 @@ impl FleetDescription {
     }
 }
 
+fn sled_disks(
+    num_disks: usize,
+    id_gen: &mut SymbolicIdGenerator,
+) -> BTreeMap<ZpoolUuid, ControlPlanePhysicalDisk> {
+    let mut disks = BTreeMap::new();
+    for _ in 0..num_disks {
+        disks.insert(
+            ZpoolUuid::new(id_gen.next()),
+            ControlPlanePhysicalDisk::new(id_gen),
+        );
+    }
+    disks
+}
+
+/// An error that results when trying to execute a symbolic operation against
+/// a fleet
+// TODO: thiserror
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Error {
+    /// There are no empty slots in the fleet's racks
+    NoSlotsAvailable,
+    /// The same sled already exists in the db
+    SledAlreadyPresent,
+}
+
 /// A symbolic representation of a Fleet at a given point in time
 /// This is the top-level symbolic type used for testing
 ///
@@ -166,6 +179,35 @@ pub struct Fleet {
 
     /// The state of hardware and software running on the racks in a Fleet
     pub racks: BTreeMap<RackUuid, Rack>,
+}
+
+impl Fleet {
+    /// Execute a symbolic operation against a fleet and return a new Fleet
+    // TODO-performance: This can almost certainly be made more efficient
+    // by reducing copying.
+    pub fn exec(
+        &self,
+        id_gen: &mut SymbolicIdGenerator,
+        op: Op,
+    ) -> Result<Fleet, Error> {
+        match op {
+            Op::AddSledToDbState { sled } => {
+                if self.db_state.slots_available() {
+                    let mut fleet = self.clone();
+                    fleet.db_state.add_sled(sled, id_gen)?;
+                    Ok(fleet)
+                } else {
+                    Err(Error::NoSlotsAvailable)
+                }
+            }
+            Op::DeployInitialZones { sled } => {
+                todo!()
+            }
+            Op::GenerateBlueprint => {
+                todo!()
+            }
+        }
+    }
 }
 
 /// The symbolic state of the database at a given point in time.
@@ -181,6 +223,51 @@ pub struct DbState {
     pub zones: BTreeMap<OmicronZoneUuid, SledUuid>,
     pub network_resources:
         BTreeMap<OmicronZoneUuid, OmicronZoneNetworkResources>,
+}
+
+impl DbState {
+    /// Return true if any slots are available to add sleds
+    // TODO-multirack: Take into account more than one rack
+    pub fn slots_available(&self) -> bool {
+        self.sleds.len() < SLOTS_PER_RACK
+    }
+
+    /// Add a sled to the db state. This maps to a sled being added by the operator
+    /// and then being announced to nexus over the underlay and stored in CRDB.
+    /// All present disks should be treated as adopted here.
+    ///
+    /// For now we use a full sled with 10 disks, but will allow flexibility
+    /// here later.
+    pub fn add_sled(
+        &mut self,
+        sled_id: SledUuid,
+        id_gen: &mut SymbolicIdGenerator,
+    ) -> Result<(), Error> {
+        if self.sleds.contains_key(&sled_id) {
+            return Err(Error::SledAlreadyPresent);
+        }
+
+        let zpools = sled_disks(MAX_DISKS_PER_SLED, id_gen);
+        let physical_disks = zpools
+            .iter()
+            .map(|(_, cp_disk)| cp_disk.disk_identity.clone())
+            .collect();
+
+        self.sleds.insert(
+            sled_id,
+            Sled {
+                policy: SledPolicy::InServiceProvisionable,
+                state: SledState::Active,
+                resources: SledResources {
+                    physical_disks,
+                    zpools,
+                    subnet: SledSubnet::new(id_gen.next()),
+                },
+            },
+        );
+
+        Ok(())
+    }
 }
 
 /// A symbolic representation of a rack at a given point in time.
@@ -357,7 +444,7 @@ pub struct Sled {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub struct SledUuid {
     symbolic_id: SymbolicId,

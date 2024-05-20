@@ -5,6 +5,8 @@
 //! Symbolic operations against a symbolic [`super::Fleet`] that are "executed"
 //! by the [`super::TestHarness`].
 
+use super::SledUuid;
+
 /// All symbolic operations against a `Fleet`.
 ///
 /// Each operation results in one set of behaviors during symbolic execution
@@ -17,7 +19,7 @@ pub enum Op {
     /// Preconditions:
     ///   1. This sled must not already have been addded to a rack
     ///   2. There must be room in a rack for a new sled
-    AddSledToDbState,
+    AddSledToDbState { sled: SledUuid },
 
     /// Symbolic: Add a new sled to a `Rack`, along with any resources such
     /// as zones and disks.
@@ -27,7 +29,7 @@ pub enum Op {
     ///
     /// Precondition: The sled must already have been added with
     /// `AddSledToDbState`.
-    DeployInitialZones,
+    DeployInitialZones { sled: SledUuid },
 
     /// Symbolic: Do nothing
     ///
