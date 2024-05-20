@@ -1160,6 +1160,7 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     pub fn verify_blueprint(blueprint: &Blueprint) {
+        // There should be no duplicate underlay IPs.
         let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
             BTreeMap::new();
         for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
@@ -1175,6 +1176,33 @@ pub mod test {
                     previous.id,
                     blueprint.display(),
                 );
+            }
+        }
+
+        // On any given zpool, we should have at most one zone of any given
+        // kind.
+        let mut kinds_by_zpool: BTreeMap<
+            ZpoolUuid,
+            BTreeMap<ZoneKind, OmicronZoneUuid>,
+        > = BTreeMap::new();
+        for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
+            if let Some(dataset) = zone.zone_type.dataset() {
+                let kind = zone.zone_type.kind();
+                if let Some(previous) = kinds_by_zpool
+                    .entry(dataset.pool_name.id())
+                    .or_default()
+                    .insert(kind, zone.id)
+                {
+                    panic!(
+                        "zpool {} has two zones of kind {kind:?}: {} and {}\
+                            \n\n\
+                            blueprint: {}",
+                        dataset.pool_name,
+                        zone.id,
+                        previous,
+                        blueprint.display(),
+                    );
+                }
             }
         }
     }
