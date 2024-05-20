@@ -142,6 +142,12 @@ pub enum RepositoryError {
     DuplicateHashEntry(ArtifactHashId),
     #[error("error creating reader stream")]
     CreateReaderStream(#[source] anyhow::Error),
+    #[error("error reading extracted archive kind {}, hash {}", .artifact.kind, .artifact.hash)]
+    ReadExtractedArchive {
+        artifact: ArtifactHashId,
+        #[source]
+        error: std::io::Error,
+    },
 }
 
 impl RepositoryError {
@@ -156,6 +162,7 @@ impl RepositoryError {
             | RepositoryError::TempFileWrite(_)
             | RepositoryError::TempFileFlush(_)
             | RepositoryError::NamedTempFileCreate { .. }
+            | RepositoryError::ReadExtractedArchive { .. }
             | RepositoryError::CreateReaderStream { .. } => {
                 HttpError::for_unavail(None, message)
             }

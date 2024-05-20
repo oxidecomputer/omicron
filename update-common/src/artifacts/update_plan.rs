@@ -74,6 +74,15 @@ pub struct UpdatePlan {
     pub control_plane_hash: ArtifactHash,
 }
 
+// Used to represent the information extracted from signed RoT images. This
+// is used when going from `UpdatePlanBuilder` -> `UpdatePlan` to check
+// the versions on the RoT images
+#[derive(Debug, Eq, Hash, PartialEq)]
+struct RotSignData {
+    kind: KnownArtifactKind,
+    sign: Vec<u8>,
+}
+
 /// `UpdatePlanBuilder` mirrors all the fields of `UpdatePlan`, but they're all
 /// optional: it can be filled in as we read a TUF repository.
 /// [`UpdatePlanBuilder::build()`] will (fallibly) convert from the builder to
@@ -113,8 +122,10 @@ pub struct UpdatePlanBuilder<'a> {
     // The by_id and by_hash maps, and metadata, used in `ArtifactsWithPlan`.
     by_id: BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
     by_hash: HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
-    by_sign: HashMap<(KnownArtifactKind, String), Vec<ArtifactId>>,
     artifacts_meta: Vec<TufArtifactMeta>,
+
+    // map for RoT signing information, used in `ArtifactsWithPlan`
+    rot_by_sign: HashMap<RotSignData, Vec<ArtifactId>>,
 
     // extra fields we use to build the plan
     extracted_artifacts: ExtractedArtifacts,
@@ -146,7 +157,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
             by_id: BTreeMap::new(),
             by_hash: HashMap::new(),
-            by_sign: HashMap::new(),
+            rot_by_sign: HashMap::new(),
             artifacts_meta: Vec::new(),
 
             extracted_artifacts,
@@ -330,13 +341,19 @@ impl<'a> UpdatePlanBuilder<'a> {
         tokio_util::io::StreamReader::new(image_a_stream)
             .read_to_end(&mut image_a)
             .await
-            .expect("failed to read RoT image a");
+            .map_err(|error| RepositoryError::ReadExtractedArchive {
+                artifact: ArtifactHashId {
+                    kind: artifact_id.kind.clone(),
+                    hash: rot_a_data.hash(),
+                },
+                error,
+            })?;
 
         let (artifact_id, image_a_sign) =
             read_hubris_sign_from_archive(artifact_id, image_a)?;
 
-        self.by_sign
-            .entry((artifact_kind, image_a_sign))
+        self.rot_by_sign
+            .entry(RotSignData { kind: artifact_kind, sign: image_a_sign })
             .or_default()
             .push(artifact_id.clone());
 
@@ -348,13 +365,19 @@ impl<'a> UpdatePlanBuilder<'a> {
         tokio_util::io::StreamReader::new(image_b_stream)
             .read_to_end(&mut image_b)
             .await
-            .expect("failed to read RoT image b");
+            .map_err(|error| RepositoryError::ReadExtractedArchive {
+                artifact: ArtifactHashId {
+                    kind: artifact_id.kind.clone(),
+                    hash: rot_b_data.hash(),
+                },
+                error,
+            })?;
 
         let (artifact_id, image_b_sign) =
             read_hubris_sign_from_archive(artifact_id, image_b)?;
 
-        self.by_sign
-            .entry((artifact_kind, image_b_sign))
+        self.rot_by_sign
+            .entry(RotSignData { kind: artifact_kind, sign: image_b_sign })
             .or_default()
             .push(artifact_id.clone());
 
@@ -742,8 +765,13 @@ impl<'a> UpdatePlanBuilder<'a> {
         }
 
         // Ensure that all A/B RoT images for each board kind and same
-        // signing key have the same version.
-        for ((kind, _), versions) in self.by_sign {
+        // signing key have the same version. (i.e. allow gimlet_rot signed
+        // with a staging key to be a different version from gimlet_rot signed
+        // with a production key)
+        for (entry, versions) in self.rot_by_sign {
+            let kind = entry.kind;
+            // This unwrap is safe because we check above that each of the types
+            // has at least one entry
             let version = &versions.first().unwrap().version;
             match versions.iter().find(|x| x.version != *version) {
                 None => continue,
@@ -831,7 +859,7 @@ pub struct UpdatePlanBuildOutput {
 fn read_hubris_sign_from_archive(
     id: ArtifactId,
     data: Vec<u8>,
-) -> Result<(ArtifactId, String), RepositoryError> {
+) -> Result<(ArtifactId, Vec<u8>), RepositoryError> {
     let archive = match RawHubrisArchive::from_vec(data).map_err(Box::new) {
         Ok(archive) => archive,
         Err(error) => {
@@ -850,13 +878,7 @@ fn read_hubris_sign_from_archive(
             return Err(RepositoryError::ReadHubrisCabooseBoard { id, error });
         }
     };
-    let sign = match std::str::from_utf8(sign) {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(RepositoryError::ReadHubrisCabooseBoardUtf8(id));
-        }
-    };
-    Ok((id, sign.to_string()))
+    Ok((id, sign.to_vec()))
 }
 
 // This function takes and returns `id` to avoid an unnecessary clone; `id` will
@@ -1021,8 +1043,7 @@ mod tests {
         let logctx = test_setup_log("test_multi_rot_version");
 
         let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+            UpdatePlanBuilder::new(VERSION_0, &logctx.log).unwrap();
 
         // The control plane artifact can be arbitrary bytes; just populate it
         // with random data.
