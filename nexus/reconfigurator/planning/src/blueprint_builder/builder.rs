@@ -1897,8 +1897,7 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Discard the example blueprint and start with an empty one.
-        let (_, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let input = {
             // Clear out the external networking records from `input`, since
             // we're building an empty blueprint.
