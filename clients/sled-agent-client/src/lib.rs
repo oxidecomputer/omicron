@@ -35,7 +35,7 @@ progenitor::generate_api!(
         PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] }
+        OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] },
         RouterId = { derives = [PartialEq, Eq, Hash, Debug, Deserialize, Serialize] },
     },
     //TODO trade the manual transformations later in this file for the

@@ -4340,13 +4340,17 @@
             "uniqueItems": true
           },
           "version": {
-            "$ref": "#/components/schemas/RouterVersion"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterVersion"
+              }
+            ]
           }
         },
         "required": [
           "id",
-          "routes",
-          "version"
+          "routes"
         ]
       },
       "ReifiedVpcRouteState": {

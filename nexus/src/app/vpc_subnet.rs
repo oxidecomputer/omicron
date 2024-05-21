@@ -63,8 +63,7 @@ impl super::Nexus {
             )),
         }
     }
-    // TODO: When a subnet is created it should add a route entry into the VPC's
-    // system router
+
     pub(crate) async fn vpc_create_subnet(
         &self,
         opctx: &OpContext,
@@ -108,7 +107,7 @@ impl super::Nexus {
         // See <https://github.com/oxidecomputer/omicron/issues/685> for
         // details.
         let subnet_id = Uuid::new_v4();
-        match params.ipv6_block {
+        let out = match params.ipv6_block {
             None => {
                 const NUM_RETRIES: usize = 2;
                 let mut retry = 0;
@@ -212,7 +211,11 @@ impl super::Nexus {
                     .map(|(.., subnet)| subnet)
                     .map_err(SubnetError::into_external)
             }
-        }
+        }?;
+
+        self.vpc_needed_notify_sleds();
+
+        Ok(out)
     }
 
     pub(crate) async fn vpc_subnet_list(
@@ -234,13 +237,16 @@ impl super::Nexus {
     ) -> UpdateResult<VpcSubnet> {
         let (.., authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        let out = self
+            .db_datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
-            .await
+            .await?;
+
+        self.vpc_needed_notify_sleds();
+
+        Ok(out)
     }
 
-    // TODO: When a subnet is deleted it should remove its entry from the VPC's
-    // system router.
     pub(crate) async fn vpc_delete_subnet(
         &self,
         opctx: &OpContext,
@@ -248,9 +254,14 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_subnet, db_subnet) =
             vpc_subnet_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore
+        let out = self
+            .db_datastore
             .vpc_delete_subnet(opctx, &db_subnet, &authz_subnet)
-            .await
+            .await?;
+
+        self.vpc_needed_notify_sleds();
+
+        Ok(out)
     }
 
     pub(crate) async fn subnet_list_instance_network_interfaces(

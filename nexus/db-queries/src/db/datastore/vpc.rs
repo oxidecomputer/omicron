@@ -1409,7 +1409,9 @@ impl DataStore {
 
                 Ok(())
             }}).await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        self.vpc_increment_rpw_version(opctx, vpc_id).await
     }
 
     /// Look up a VPC by VNI.
@@ -1690,49 +1692,40 @@ impl DataStore {
     pub async fn vpc_router_increment_rpw_version(
         &self,
         opctx: &OpContext,
-        authz_router: &authz::VpcRouter,
+        router_id: Uuid,
     ) -> UpdateResult<()> {
-        opctx.authorize(authz::Action::Modify, authz_router).await?;
+        // NOTE: this operation and `vpc_increment_rpw_version` do not
+        // have auth checks, as these can occur in connection with unrelated
+        // resources -- the current user may have access to those, but be unable
+        // to modify the entire set of VPC routers in a project.
 
         use db::schema::vpc_router::dsl;
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_router.id()))
+            .filter(dsl::id.eq(router_id))
             .set(dsl::resolved_version.eq(dsl::resolved_version + 1))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_router),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
     }
 
-    /// Trigger an RPW version bump on all routers within a VPC in
+    /// Trigger an RPW version bump on *all* routers within a VPC in
     /// response to changes to named entities (e.g., subnets, instances).
     pub async fn vpc_increment_rpw_version(
         &self,
         opctx: &OpContext,
-        authz_vpc: &authz::Vpc,
+        vpc_id: Uuid,
     ) -> UpdateResult<()> {
-        opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
-
         use db::schema::vpc_router::dsl;
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
+            .filter(dsl::vpc_id.eq(vpc_id))
             .set(dsl::resolved_version.eq(dsl::resolved_version + 1))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_vpc),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
     }

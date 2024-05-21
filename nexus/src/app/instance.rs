@@ -1524,6 +1524,7 @@ impl super::Nexus {
             new_runtime_state,
         )
         .await?;
+        self.vpc_needed_notify_sleds();
         Ok(())
     }
 

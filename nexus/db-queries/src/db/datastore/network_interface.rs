@@ -137,11 +137,27 @@ impl DataStore {
                 ),
             ));
         }
-        self.create_network_interface_raw(opctx, interface)
+
+        let out = self
+            .create_network_interface_raw(opctx, interface)
             .await
             // Convert to `InstanceNetworkInterface` before returning; we know
             // this is valid as we've checked the condition on-entry.
-            .map(NetworkInterface::as_instance)
+            .map(NetworkInterface::as_instance)?;
+
+        // `instance:xxx` targets in router rules resolve to the primary
+        // NIC of that instance. Accordingly, NIC create may cause dangling
+        // entries to re-resolve to a valid instance (even if it is not yet
+        // started).
+        // This will not trigger the RPW directly, we still need to do so
+        // in e.g. the instance watcher task.
+        if out.primary {
+            self.vpc_increment_rpw_version(opctx, out.vpc_id)
+                .await
+                .map_err(|e| network_interface::InsertError::External(e))?;
+        }
+
+        Ok(out)
     }
 
     /// List network interfaces associated with a given service.

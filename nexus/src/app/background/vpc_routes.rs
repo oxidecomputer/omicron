@@ -207,8 +207,7 @@ impl BackgroundTask for VpcRouteManager {
                     // different router ID than the sled, or a higher version
                     // number.
                     match &set.version {
-                        Some(v) if !v.is_replaced_by(&version) =>
-                        {
+                        Some(v) if !v.is_replaced_by(&version) => {
                             continue;
                         }
                         _ => {}
@@ -244,15 +243,17 @@ impl BackgroundTask for VpcRouteManager {
                     }
                 }
 
-                if let Err(e) = client.set_vpc_routes(&to_push).await {
-                    error!(
-                        log,
-                        "failed to push new VPC route state from sled";
-                        "sled" => sled.serial_number(),
-                        "err" => ?e
-                    );
-                    continue;
-                };
+                if !to_push.is_empty() {
+                    if let Err(e) = client.set_vpc_routes(&to_push).await {
+                        error!(
+                            log,
+                            "failed to push new VPC route state from sled";
+                            "sled" => sled.serial_number(),
+                            "err" => ?e
+                        );
+                        continue;
+                    };
+                }
             }
 
             json!({})

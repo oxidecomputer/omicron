@@ -6,7 +6,9 @@ use illumos_utils::opte::params::VpcFirewallRule;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
-use nexus_client::types::{ProbeExternalIp, ProbeInfo};
+use nexus_client::types::{
+    BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
+};
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -179,24 +181,44 @@ impl ProbeManagerInner {
                     }
                 };
 
-                self.add(target.difference(&current)).await;
+                let n_added = self.add(target.difference(&current)).await;
                 self.remove(current.difference(&target)).await;
                 self.check(current.intersection(&target)).await;
+
+                // If we have created some new probes, we may (in future) need the control plane
+                // to provide us with valid routes for the VPC the probe belongs to.
+                if n_added > 0 {
+                    if let Err(e) = self
+                        .nexus_client
+                        .client()
+                        .bgtask_activate(&BackgroundTasksActivateRequest {
+                            bgtask_names: vec!["vpc_route_manager".into()],
+                        })
+                        .await
+                    {
+                        error!(self.log, "get routes for probe: {e}");
+                    }
+                }
             }
         })
     }
 
     /// Add a set of probes to this sled.
-    async fn add<'a, I>(self: &Arc<Self>, probes: I)
+    ///
+    /// Returns the number of inserted probes.
+    async fn add<'a, I>(self: &Arc<Self>, probes: I) -> usize
     where
         I: Iterator<Item = &'a ProbeState>,
     {
+        let mut i = 0;
         for probe in probes {
             info!(self.log, "adding probe {}", probe.id);
             if let Err(e) = self.add_probe(probe).await {
                 error!(self.log, "add probe: {e}");
             }
+            i += 1;
         }
+        i
     }
 
     /// Add a probe to this sled. This sets up resources for the probe zone
