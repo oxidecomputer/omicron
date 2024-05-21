@@ -4549,13 +4549,13 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
-                Err(CondCheckError::Failed("v2p mappings are still present"))
+                Err(CondCheckError::NotYet::<()>)
             }
         };
         wait_for_condition(
             condition,
             &Duration::from_secs(1),
-            &Duration::from_secs(60),
+            &Duration::from_secs(30),
         )
         .await
         .expect("v2p mappings should be empty");
@@ -4667,15 +4667,13 @@ async fn assert_sled_v2p_mappings(
         if mapping.is_some() {
             Ok(())
         } else {
-            Err(CondCheckError::Failed(
-                "matching v2p mapping should be present",
-            ))
+            Err(CondCheckError::NotYet::<()>)
         }
     };
     wait_for_condition(
         condition,
         &Duration::from_secs(1),
-        &Duration::from_secs(60),
+        &Duration::from_secs(30),
     )
     .await
     .expect("matching v2p mapping should be present");
