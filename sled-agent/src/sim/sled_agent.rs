@@ -10,6 +10,9 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
@@ -26,6 +29,7 @@ use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
+use ipnetwork::Ipv6Network;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -35,6 +39,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::{
@@ -44,7 +49,7 @@ use propolis_mock_server::Context as PropolisContext;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -77,6 +82,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
     pub log: Logger,
 }
 
@@ -144,6 +150,23 @@ impl SledAgent {
         let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
+        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
+            generation: 0,
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: Vec::new(),
+                rack_network_config: Some(RackNetworkConfig {
+                    rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    ports: Vec::new(),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                }),
+            },
+        });
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -176,6 +199,7 @@ impl SledAgent {
             }),
             instance_ensure_state_error: Mutex::new(None),
             log,
+            bootstore_network_config,
         })
     }
 
@@ -451,6 +475,22 @@ impl SledAgent {
         }
 
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id)
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        Ok(instance.current())
     }
 
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {

@@ -5,9 +5,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
-use illumos_utils::zpool::ZpoolKind;
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

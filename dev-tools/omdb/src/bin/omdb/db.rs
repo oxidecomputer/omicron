@@ -15,6 +15,8 @@
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
+use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -49,6 +51,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
@@ -81,6 +84,9 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -93,6 +99,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -160,7 +167,12 @@ pub struct DbArgs {
 #[derive(Debug, Args)]
 pub struct DbUrlOptions {
     /// URL of the database SQL interface
-    #[clap(long, env("OMDB_DB_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_DB_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     db_url: Option<PostgresConfigWithUrl>,
 }
 
@@ -228,13 +240,20 @@ pub struct DbFetchOptions {
     #[clap(
         long = "fetch-limit",
         default_value_t = NonZeroU32::new(500).unwrap(),
-        env("OMDB_FETCH_LIMIT"),
+        env = "OMDB_FETCH_LIMIT",
+        global = true,
+        help_heading = DATABASE_OPTIONS_HEADING,
     )]
     fetch_limit: NonZeroU32,
 
     /// whether to include soft-deleted records when enumerating objects that
     /// can be soft-deleted
-    #[clap(long, default_value_t = false)]
+    #[clap(
+        long,
+        default_value_t = false,
+        global = true,
+        help_heading = DATABASE_OPTIONS_HEADING,
+    )]
     include_deleted: bool,
 }
 
@@ -252,7 +271,7 @@ enum DbCommands {
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about sleds
-    Sleds,
+    Sleds(SledsArgs),
     /// Print information about customer instances
     Instances(InstancesOptions),
     /// Print information about the network
@@ -364,6 +383,8 @@ enum InventoryCommands {
     Cabooses,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
+    /// show all physical disks every found
+    PhysicalDisks(PhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -391,10 +412,26 @@ struct CollectionsShowArgs {
     show_long_strings: bool,
 }
 
+#[derive(Debug, Args, Clone, Copy)]
+struct PhysicalDisksArgs {
+    #[clap(long)]
+    collection_id: Option<CollectionUuid>,
+
+    #[clap(long, requires("collection_id"))]
+    sled_id: Option<SledUuid>,
+}
+
 #[derive(Debug, Args)]
 struct ReconfiguratorSaveArgs {
     /// where to save the output
     output_file: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct SledsArgs {
+    /// Show sleds that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<SledFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -403,7 +440,7 @@ struct NetworkArgs {
     command: NetworkCommands,
 
     /// Print out raw data structures from the data store.
-    #[clap(long)]
+    #[clap(long, global = true)]
     verbose: bool,
 }
 
@@ -505,8 +542,8 @@ impl DbArgs {
                 )
                 .await
             }
-            DbCommands::Sleds => {
-                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts).await
+            DbCommands::Sleds(args) => {
+                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts, args).await
             }
             DbCommands::Instances(instances_options) => {
                 cmd_db_instances(
@@ -1416,6 +1453,8 @@ struct SledRow {
     serial: String,
     ip: String,
     role: &'static str,
+    policy: SledPolicy,
+    state: SledState,
     id: Uuid,
 }
 
@@ -1426,6 +1465,8 @@ impl From<Sled> for SledRow {
             serial: s.serial_number().to_string(),
             ip: s.address().to_string(),
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
+            policy: s.policy(),
+            state: s.state().into(),
         }
     }
 }
@@ -1435,10 +1476,22 @@ async fn cmd_db_sleds(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &SledsArgs,
 ) -> Result<(), anyhow::Error> {
     let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!(
+                "note: listing all commissioned sleds \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            SledFilter::Commissioned
+        }
+    };
+
     let sleds = datastore
-        .sled_list(&opctx, &first_page(limit))
+        .sled_list(&opctx, &first_page(limit), filter)
         .await
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
@@ -1446,7 +1499,7 @@ async fn cmd_db_sleds(
     let rows = sleds.into_iter().map(|s| SledRow::from(s));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
         .to_string();
 
     println!("{}", table);
@@ -2612,6 +2665,9 @@ async fn cmd_db_inventory(
             )
             .await
         }
+        InventoryCommands::PhysicalDisks(args) => {
+            cmd_db_inventory_physical_disks(&conn, limit, args).await
+        }
         InventoryCommands::RotPages => {
             cmd_db_inventory_rot_pages(&conn, limit).await
         }
@@ -2686,6 +2742,63 @@ async fn cmd_db_inventory_cabooses(
         version: caboose.version,
         git_commit: caboose.git_commit,
     });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_physical_disks(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+    args: PhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        slot: i64,
+        vendor: String,
+        model: String,
+        serial: String,
+        variant: String,
+    }
+
+    use db::schema::inv_physical_disk::dsl;
+    let mut query = dsl::inv_physical_disk.into_boxed();
+    query = query.limit(i64::from(u32::from(limit)));
+
+    if let Some(collection_id) = args.collection_id {
+        query = query.filter(
+            dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
+        );
+    }
+
+    if let Some(sled_id) = args.sled_id {
+        query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
+    }
+
+    let disks = query
+        .select(InvPhysicalDisk::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading physical disks")?;
+
+    let rows = disks.into_iter().map(|disk| DiskRow {
+        inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
+        sled_id: disk.sled_id.into_untyped_uuid(),
+        slot: disk.slot,
+        vendor: disk.vendor,
+        model: disk.model.clone(),
+        serial: disk.model.clone(),
+        variant: format!("{:?}", disk.variant),
+    });
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))

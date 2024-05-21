@@ -3,7 +3,6 @@
 #: name = "a4x2-deploy"
 #: variety = "basic"
 #: target = "lab-2.0-opte-0.27"
-#: rust_toolchain = "stable"
 #: output_rules = [
 #:	"/out/falcon/*.log",
 #:	"/out/falcon/*.err",

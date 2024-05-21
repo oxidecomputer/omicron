@@ -7,11 +7,11 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
-use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::ledger::Ledgerable;
+use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,16 @@ use crate::config::MountConfig;
 use crate::dataset;
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,

@@ -34,9 +34,6 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::SwitchPorts;
-use oximeter::types::ProducerResults;
-use oximeter_producer::collect;
-use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -54,6 +51,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
@@ -83,7 +81,6 @@ pub fn api() -> SledApiDescription {
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
         api.register(sled_add)?;
-        api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
@@ -478,6 +475,19 @@ async fn instance_put_state(
 }
 
 #[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
+}
+
+#[endpoint {
     method = PUT,
     path = "/instances/{instance_id}/migration-ids",
 }]
@@ -812,20 +822,6 @@ async fn sled_add(
         }
     })?;
     Ok(HttpResponseUpdatedNoContent())
-}
-
-/// Collect oximeter samples from the sled agent.
-#[endpoint {
-    method = GET,
-    path = "/metrics/collect/{producer_id}",
-}]
-async fn metrics_collect(
-    request_context: RequestContext<SledAgent>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let sa = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    collect(&sa.metrics_registry(), producer_id).await
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]

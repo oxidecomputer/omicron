@@ -209,6 +209,42 @@ table! {
         delay_open -> Int8,
         connect_retry -> Int8,
         keepalive -> Int8,
+        remote_asn -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
+        md5_auth_key -> Nullable<Text>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        local_pref -> Nullable<Int8>,
+        enforce_first_as -> Bool,
+        allow_import_list_active -> Bool,
+        allow_export_list_active -> Bool,
+        vlan_id -> Nullable<Int4>
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, addr, community) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        community -> Int8,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, addr, prefix) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        prefix -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_allow_import (port_settings_id, interface_name, addr, prefix) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        prefix -> Inet,
     }
 }
 
@@ -223,6 +259,8 @@ table! {
         asn -> Int8,
         bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+        shaper -> Nullable<Text>,
+        checker -> Nullable<Text>,
     }
 }
 
@@ -237,6 +275,13 @@ table! {
         hold_time -> Int8,
         idle_hold_time -> Int8,
         keepalive -> Int8,
+        remote_asn -> Nullable<Int8>,
+        min_ttl -> Nullable<Int8>,
+        md5_auth_key -> Nullable<Text>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        local_pref -> Nullable<Int8>,
+        enforce_first_as -> Bool,
+        vlan_id -> Nullable<Int8>,
     }
 }
 
@@ -418,7 +463,6 @@ table! {
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
-        base_route -> Text,
         oximeter_id -> Uuid,
     }
 }
@@ -1460,6 +1504,15 @@ table! {
 }
 
 table! {
+    bp_sled_state (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        sled_state -> crate::SledStateEnum,
+    }
+}
+
+table! {
     bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -1517,6 +1570,7 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
+        external_ip_id -> Nullable<Uuid>,
     }
 }
 
@@ -1624,6 +1678,15 @@ table! {
 }
 
 table! {
+    allow_list (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        allowed_ips -> Nullable<Array<Inet>>,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
@@ -1715,3 +1778,5 @@ allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
 allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
 joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
+
+allow_tables_to_appear_in_same_query!(sled, sled_instance);

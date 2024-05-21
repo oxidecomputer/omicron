@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
@@ -526,11 +527,20 @@ impl JsonSchema for RoleName {
 // in the database as an i64.  Constraining it here ensures that we can't fail
 // to serialize the value.
 //
-// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ByteCount(u64);
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;
@@ -847,6 +857,7 @@ impl JsonSchema for Hostname {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AllowList,
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
@@ -1223,6 +1234,13 @@ impl DiskState {
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
+    /// Constructs a new `Ipv4Net` representing a single IP.
+    pub fn single(ip: Ipv4Addr) -> Self {
+        Ipv4Net(
+            ipnetwork::Ipv4Network::new(ip, 32).expect("32 is within range"),
+        )
+    }
+
     /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
     /// address space.
     pub fn is_private(&self) -> bool {
@@ -1290,6 +1308,13 @@ impl Ipv6Net {
     /// The prefix length for all VPC Sunets
     pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
 
+    /// Constructs a new `Ipv6Net` representing a single IPv6 address.
+    pub fn single(ip: Ipv6Addr) -> Self {
+        Ipv6Net(
+            ipnetwork::Ipv6Network::new(ip, 128).expect("128 is within range"),
+        )
+    }
+
     /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
     /// range defined in RFC 4193, e.g., `fd00:/8`
     pub fn is_unique_local(&self) -> bool {
@@ -1334,6 +1359,60 @@ impl From<ipnetwork::Ipv6Network> for Ipv6Net {
     }
 }
 
+const IPV6_NET_REGEX: &str = concat!(
+    r#"^("#,
+    r#"([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,7}:|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"#,
+    r#"[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"#,
+    r#":((:[0-9a-fA-F]{1,4}){1,7}|:)|"#,
+    r#"fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|"#,
+    r#"::(ffff(:0{1,4}){0,1}:){0,1}"#,
+    r#"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"#,
+    r#"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|"#,
+    r#"([0-9a-fA-F]{1,4}:){1,4}:"#,
+    r#"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"#,
+    r#"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"#,
+    r#")\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
+);
+
+#[cfg(test)]
+#[test]
+fn test_ipv6_regex() {
+    let re = regress::Regex::new(IPV6_NET_REGEX).unwrap();
+    for case in [
+        "1:2:3:4:5:6:7:8",
+        "1:a:2:b:3:c:4:d",
+        "1::",
+        "::1",
+        "::",
+        "1::3:4:5:6:7:8",
+        "1:2::4:5:6:7:8",
+        "1:2:3::5:6:7:8",
+        "1:2:3:4::6:7:8",
+        "1:2:3:4:5::7:8",
+        "1:2:3:4:5:6::8",
+        "1:2:3:4:5:6:7::",
+        "2001::",
+        "fd00::",
+        "::100:1",
+        "fd12:3456::",
+    ] {
+        for prefix in 0..=128 {
+            let net = format!("{case}/{prefix}");
+            assert!(
+                re.find(&net).is_some(),
+                "Expected to match IPv6 case: {}",
+                prefix,
+            );
+        }
+    }
+}
+
 impl JsonSchema for Ipv6Net {
     fn schema_name() -> String {
         "Ipv6Net".to_string()
@@ -1354,18 +1433,7 @@ impl JsonSchema for Ipv6Net {
             })),
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(
-                    // Conforming to unique local addressing scheme,
-                    // `fd00::/8`.
-                    concat!(
-                        r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
-                        r#"([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}"#,
-                        r#"|([0-9a-fA-F]{1,4}:){1,6}:)"#,
-                        r#"([0-9a-fA-F]{1,4})?"#,
-                        r#"\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
-                    )
-                    .to_string(),
-                ),
+                pattern: Some(IPV6_NET_REGEX.to_string()),
                 ..Default::default()
             })),
             ..Default::default()
@@ -1382,6 +1450,14 @@ pub enum IpNet {
 }
 
 impl IpNet {
+    /// Constructs a new `IpNet` representing a single IP.
+    pub fn single(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(ip) => IpNet::V4(Ipv4Net::single(ip)),
+            IpAddr::V6(ip) => IpNet::V6(Ipv6Net::single(ip)),
+        }
+    }
+
     /// Return the underlying address.
     pub fn ip(&self) -> IpAddr {
         match self {
@@ -1431,6 +1507,18 @@ impl IpNet {
             }
         }
     }
+
+    /// Return true if the provided address is contained in self.
+    ///
+    /// This returns false if the address and the network are of different IP
+    /// families.
+    pub fn contains(&self, addr: IpAddr) -> bool {
+        match (self, addr) {
+            (IpNet::V4(net), IpAddr::V4(ip)) => net.contains(ip),
+            (IpNet::V6(net), IpAddr::V6(ip)) => net.contains(ip),
+            (_, _) => false,
+        }
+    }
 }
 
 impl From<ipnetwork::IpNetwork> for IpNet {
@@ -1442,36 +1530,19 @@ impl From<ipnetwork::IpNetwork> for IpNet {
     }
 }
 
+// NOTE: We deliberately do *NOT* implement `From<Ip{v4,v6,}Addr> for IpNet`.
+// This is because there are many ways to convert an address into a network.
+// See https://github.com/oxidecomputer/omicron/issues/5687.
+
 impl From<Ipv4Net> for IpNet {
     fn from(n: Ipv4Net) -> IpNet {
         IpNet::V4(n)
     }
 }
 
-impl From<Ipv4Addr> for IpNet {
-    fn from(n: Ipv4Addr) -> IpNet {
-        IpNet::V4(Ipv4Net(ipnetwork::Ipv4Network::from(n)))
-    }
-}
-
 impl From<Ipv6Net> for IpNet {
     fn from(n: Ipv6Net) -> IpNet {
         IpNet::V6(n)
-    }
-}
-
-impl From<Ipv6Addr> for IpNet {
-    fn from(n: Ipv6Addr) -> IpNet {
-        IpNet::V6(Ipv6Net(ipnetwork::Ipv6Network::from(n)))
-    }
-}
-
-impl From<IpAddr> for IpNet {
-    fn from(n: IpAddr) -> IpNet {
-        match n {
-            IpAddr::V4(v4) => IpNet::from(v4),
-            IpAddr::V6(v6) => IpNet::from(v6),
-        }
     }
 }
 
@@ -2440,7 +2511,7 @@ pub struct SwitchPortSettingsView {
     pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
-    pub bgp_peers: Vec<SwitchPortBgpPeerConfig>,
+    pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<SwitchPortAddressConfig>,
@@ -2494,6 +2565,74 @@ pub struct SwitchPortConfig {
     pub geometry: SwitchPortGeometry,
 }
 
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode forward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+impl From<crate::api::internal::shared::PortFec> for LinkFec {
+    fn from(x: crate::api::internal::shared::PortFec) -> LinkFec {
+        match x {
+            crate::api::internal::shared::PortFec::Firecode => Self::Firecode,
+            crate::api::internal::shared::PortFec::None => Self::None,
+            crate::api::internal::shared::PortFec::Rs => Self::Rs,
+        }
+    }
+}
+
+impl From<crate::api::internal::shared::PortSpeed> for LinkSpeed {
+    fn from(x: crate::api::internal::shared::PortSpeed) -> Self {
+        match x {
+            crate::api::internal::shared::PortSpeed::Speed0G => Self::Speed0G,
+            crate::api::internal::shared::PortSpeed::Speed1G => Self::Speed1G,
+            crate::api::internal::shared::PortSpeed::Speed10G => Self::Speed10G,
+            crate::api::internal::shared::PortSpeed::Speed25G => Self::Speed25G,
+            crate::api::internal::shared::PortSpeed::Speed40G => Self::Speed40G,
+            crate::api::internal::shared::PortSpeed::Speed50G => Self::Speed50G,
+            crate::api::internal::shared::PortSpeed::Speed100G => {
+                Self::Speed100G
+            }
+            crate::api::internal::shared::PortSpeed::Speed200G => {
+                Self::Speed200G
+            }
+            crate::api::internal::shared::PortSpeed::Speed400G => {
+                Self::Speed400G
+            }
+        }
+    }
+}
+
 /// A link configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortLinkConfig {
@@ -2509,6 +2648,15 @@ pub struct SwitchPortLinkConfig {
 
     /// The maximum transmission unit for this link.
     pub mtu: u16,
+
+    /// The forward error correction mode of the link.
+    pub fec: LinkFec,
+
+    /// The configured speed of the link.
+    pub speed: LinkSpeed,
+
+    /// Whether or not the link has autonegotiation enabled.
+    pub autoneg: bool,
 }
 
 /// A link layer discovery protocol (LLDP) service configuration.
@@ -2617,6 +2765,7 @@ pub struct SwitchPortRouteConfig {
     pub vlan_id: Option<u16>,
 }
 
+/*
 /// A BGP peer configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortBgpPeerConfig {
@@ -2634,6 +2783,74 @@ pub struct SwitchPortBgpPeerConfig {
 
     /// The address of the peer.
     pub addr: IpAddr,
+}
+*/
+
+/// A BGP peer configuration for an interface. Includes the set of announcements
+/// that will be advertised to the peer identified by `addr`. The `bgp_config`
+/// parameter is a reference to global BGP parameters. The `interface_name`
+/// indicates what interface the peer should be contacted on.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeer {
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: String,
+
+    /// The address of the host to peer with.
+    pub addr: IpAddr,
+
+    /// How long to hold peer connections between keepalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
+
+    /// Require that a peer has a specified ASN.
+    pub remote_asn: Option<u32>,
+
+    /// Require messages from a peer have a minimum IP time to live field.
+    pub min_ttl: Option<u8>,
+
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    pub md5_auth_key: Option<String>,
+
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    pub multi_exit_discriminator: Option<u32>,
+
+    /// Include the provided communities in updates sent to the peer.
+    pub communities: Vec<u32>,
+
+    /// Apply a local preference to routes received from this peer.
+    pub local_pref: Option<u32>,
+
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    pub enforce_first_as: bool,
+
+    /// Define import policy for a peer.
+    pub allowed_import: ImportExportPolicy,
+
+    /// Define export policy for a peer.
+    pub allowed_export: ImportExportPolicy,
+
+    /// Associate a VLAN ID with a peer.
+    pub vlan_id: Option<u16>,
 }
 
 /// A base BGP configuration.
@@ -2695,7 +2912,7 @@ pub struct SwitchPortAddressConfig {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum BgpPeerState {
-    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// Initial state. Refuse all incoming BGP connections. No resources
     /// allocated to peer.
     Idle,
 
@@ -2714,7 +2931,7 @@ pub enum BgpPeerState {
     /// Synchronizing with peer.
     SessionSetup,
 
-    /// Session established. Able to exchange update, notification and keepliave
+    /// Session established. Able to exchange update, notification and keepalive
     /// messages with peers.
     Established,
 }
@@ -2943,6 +3160,27 @@ pub struct Probe {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub sled: Uuid,
+}
+
+/// Define policy relating to the import and export of prefixes from a BGP
+/// peer.
+#[derive(
+    Default,
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    JsonSchema,
+    Eq,
+    PartialEq,
+    Hash,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ImportExportPolicy {
+    /// Do not perform any filtering.
+    #[default]
+    NoFiltering,
+    Allow(Vec<IpNet>),
 }
 
 #[cfg(test)]

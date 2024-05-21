@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 # NOTE:
 #
 # This crate is depended on by several other workspaces! Be careful of adding
@@ -55,6 +58,7 @@ libc.workspace = true
 regress.workspace = true
 serde_urlencoded.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+toml.workspace = true
 
 [features]
 testing = ["proptest", "test-strategy"]

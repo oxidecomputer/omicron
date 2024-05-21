@@ -3,6 +3,9 @@ name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -11,7 +14,6 @@ anyhow.workspace = true
 dns-service-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
-illumos-utils.workspace = true
 internal-dns.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true
@@ -34,6 +36,8 @@ pq-sys = "*"
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+async-bb8-diesel.workspace = true
+diesel.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
 nexus-reconfigurator-planning.workspace = true

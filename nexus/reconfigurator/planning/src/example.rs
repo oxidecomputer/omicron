@@ -9,15 +9,13 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
 pub struct ExampleSystem {
@@ -55,7 +53,7 @@ impl ExampleSystem {
 
         // Start with an empty blueprint containing only our sleds, no zones.
         let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::All),
+            base_input.all_sled_ids(SledFilter::Commissioned),
             "test suite",
             (test_name, "ExampleSystem initial"),
         );
@@ -70,7 +68,7 @@ impl ExampleSystem {
         .unwrap();
         builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
         for (sled_id, sled_resources) in
-            base_input.all_sled_resources(SledFilter::All)
+            base_input.all_sled_resources(SledFilter::Commissioned)
         {
             let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
             let _ = builder
@@ -81,6 +79,7 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
+            let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             for pool_name in sled_resources.zpools.keys() {
                 let _ = builder
                     .sled_ensure_zone_crucible(sled_id, *pool_name)
@@ -94,33 +93,23 @@ impl ExampleSystem {
         builder.set_rng_seed((test_name, "ExampleSystem collection"));
 
         for sled_id in blueprint.sleds() {
-            // TODO-cleanup use `TypedUuid` everywhere
-            let Some(zones) =
-                blueprint.blueprint_zones.get(sled_id.as_untyped_uuid())
-            else {
+            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
             for zone in zones.zones.iter() {
                 let service_id = zone.id;
-                if let Some(ip) = zone.zone_type.external_ip() {
+                if let Some((external_ip, nic)) =
+                    zone.zone_type.external_networking()
+                {
                     input_builder
-                        .add_omicron_zone_external_ip(
-                            service_id,
-                            OmicronZoneExternalIp {
-                                id: ExternalIpUuid::new_v4(),
-                                // TODO-cleanup This is potentially wrong;
-                                // zone_type should tell us the IP kind.
-                                kind: OmicronZoneExternalIpKind::Floating(ip),
-                            },
-                        )
+                        .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
-                }
-                if let Some(nic) = zone.zone_type.opte_vnic() {
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
                             OmicronZoneNic {
-                                id: nic.id,
+                                // TODO-cleanup use `TypedUuid` everywhere
+                                id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
                                 ip: nic.ip,
                                 slot: nic.slot,

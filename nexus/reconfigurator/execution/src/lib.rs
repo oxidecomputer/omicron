@@ -11,6 +11,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -24,10 +26,11 @@ use std::net::SocketAddrV6;
 
 mod datasets;
 mod dns;
+mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
-mod resource_allocation;
+mod sled_state;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
@@ -109,7 +112,23 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    resource_allocation::ensure_zone_resources_allocated(
+    // Deallocate external networking resources for non-externally-reachable
+    // zones first. This will allow external networking resource allocation to
+    // succeed if we are swapping an external IP between two zones (e.g., moving
+    // a specific external IP from an old external DNS zone to a new one).
+    external_networking::ensure_zone_external_networking_deallocated(
+        &opctx,
+        datastore,
+        blueprint
+            .all_omicron_zones_not_in(
+                BlueprintZoneFilter::ShouldBeExternallyReachable,
+            )
+            .map(|(_sled_id, zone)| zone),
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
+    external_networking::ensure_zone_external_networking_allocated(
         &opctx,
         datastore,
         blueprint
@@ -120,7 +139,7 @@ where
     .map_err(|err| vec![err])?;
 
     let sleds_by_id: BTreeMap<SledUuid, _> = datastore
-        .sled_list_all_batched(&opctx)
+        .sled_list_all_batched(&opctx, SledFilter::InService)
         .await
         .context("listing all sleds")
         .map_err(|e| vec![e])?
@@ -179,10 +198,21 @@ where
         String::from(nexus_label),
         blueprint,
         &sleds_by_id,
-        &overrides,
+        overrides,
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
+
+    sled_state::decommission_sleds(
+        &opctx,
+        datastore,
+        blueprint
+            .sled_state
+            .iter()
+            .filter(|&(_, &state)| state == SledState::Decommissioned)
+            .map(|(&sled_id, _)| sled_id),
+    )
+    .await?;
 
     Ok(())
 }

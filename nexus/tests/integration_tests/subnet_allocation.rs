@@ -91,8 +91,12 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
-    let subnet_size =
-        cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
+    let subnet_size = cptestctx
+        .server
+        .server_context()
+        .nexus
+        .tunables()
+        .max_vpc_ipv4_subnet_prefix;
     let vpc_selector = format!("project={}&vpc=default", project_name);
     let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";

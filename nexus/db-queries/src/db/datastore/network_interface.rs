@@ -371,12 +371,19 @@ impl DataStore {
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean. The meaning of return values are:
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_interface: &authz::InstanceNetworkInterface,
-    ) -> Result<(), network_interface::DeleteError> {
+    ) -> Result<bool, network_interface::DeleteError> {
         opctx
             .authorize(authz::Action::Delete, authz_interface)
             .await
@@ -388,26 +395,30 @@ impl DataStore {
         );
         query
             .clone()
-            .execute_async(
+            .execute_and_check(
                 &*self
                     .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
-            .map_err(|e| {
-                network_interface::DeleteError::from_diesel(e, &query)
-            })?;
-        Ok(())
+            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Delete a `ServiceNetworkInterface` attached to a provided service.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean. The meaning of return values are:
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
     pub async fn service_delete_network_interface(
         &self,
         opctx: &OpContext,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<(), network_interface::DeleteError> {
+    ) -> Result<bool, network_interface::DeleteError> {
         // See the comment in `service_create_network_interface`. There's no
         // obvious parent for a service network interface (as opposed to
         // instance network interfaces, which require permissions on the
@@ -429,17 +440,14 @@ impl DataStore {
         );
         query
             .clone()
-            .execute_async(
+            .execute_and_check(
                 &*self
                     .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
-            .map_err(|e| {
-                network_interface::DeleteError::from_diesel(e, &query)
-            })?;
-        Ok(())
+            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Return information about network interfaces required for the sled

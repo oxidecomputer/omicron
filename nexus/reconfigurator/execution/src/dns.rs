@@ -445,7 +445,7 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,
                 ..
-            }) => Some(external_ip),
+            }) => Some(external_ip.ip),
             _ => None,
         })
         .collect()
@@ -477,8 +477,10 @@ mod test {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -494,7 +496,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -556,25 +558,34 @@ mod test {
         // `BlueprintZonesConfig`. This is going to get more painful over time
         // as we add to blueprints, but for now we can make this work.
         let mut blueprint_zones = BTreeMap::new();
+
+        // Also assume any sled in the collection is active.
+        let mut sled_state = BTreeMap::new();
+
         for (sled_id, zones_config) in collection.omicron_zones {
             blueprint_zones.insert(
-                sled_id.into_untyped_uuid(),
+                sled_id,
                 BlueprintZonesConfig {
                     generation: zones_config.zones.generation,
                     zones: zones_config
                         .zones
                         .zones
                         .into_iter()
-                        .map(|config| {
+                        .map(|config| -> BlueprintZoneConfig {
                             BlueprintZoneConfig::from_omicron_zone_config(
                                 config,
                                 BlueprintZoneDisposition::InService,
+                                // We don't get external IP IDs in inventory
+                                // collections. We'll just make one up for every
+                                // zone that needs one here. This is gross.
+                                Some(ExternalIpUuid::new_v4()),
                             )
                             .expect("failed to convert zone config")
                         })
                         .collect(),
                 },
             );
+            sled_state.insert(sled_id, SledState::Active);
         }
 
         let dns_empty = dns_config_empty();
@@ -584,6 +595,7 @@ mod test {
             id: Uuid::new_v4(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            sled_state,
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
@@ -622,9 +634,8 @@ mod test {
             .zip(possible_sled_subnets)
             .enumerate()
             .map(|(i, (sled_id, subnet))| {
-                let sled_id = SledUuid::from_untyped_uuid(*sled_id);
                 let sled_info = Sled {
-                    id: sled_id,
+                    id: *sled_id,
                     sled_agent_address: get_sled_address(Ipv6Subnet::new(
                         subnet.network(),
                     )),
@@ -632,7 +643,7 @@ mod test {
                     // Scrimlets.
                     is_scrimlet: i < 2,
                 };
-                (sled_id, sled_info)
+                (*sled_id, sled_info)
             })
             .collect();
 
@@ -1115,7 +1126,7 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
@@ -1182,7 +1193,10 @@ mod test {
         // Now, go through the motions of provisioning a new Nexus zone.
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
-        let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
+        let sled_rows = datastore
+            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
+            .await
+            .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows = {

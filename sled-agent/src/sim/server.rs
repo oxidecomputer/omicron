@@ -34,6 +34,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
@@ -502,7 +503,10 @@ pub async fn run_standalone_server(
 
     let disks = server.sled_agent.omicron_physical_disks_list().await?;
     let mut sled_configs = BTreeMap::new();
-    sled_configs.insert(config.id, SledConfig { disks, zones });
+    sled_configs.insert(
+        SledUuid::from_untyped_uuid(config.id),
+        SledConfig { disks, zones },
+    );
 
     let rack_init_request = NexusTypes::RackInitializationRequest {
         blueprint: build_initial_blueprint_from_sled_configs(
@@ -530,6 +534,7 @@ pub async fn run_standalone_server(
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
+        allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

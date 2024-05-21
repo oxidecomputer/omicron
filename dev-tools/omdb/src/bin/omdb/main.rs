@@ -33,15 +33,20 @@
 //!    find strange things when debugging but we need our tools to tell us as
 //!    much as they can!)
 
+use anyhow::anyhow;
+use anyhow::ensure;
 use anyhow::Context;
 use clap::Parser;
 use clap::Subcommand;
+use futures::StreamExt;
 use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use tokio::net::TcpSocket;
 
 mod crucible_agent;
 mod db;
+mod helpers;
 mod mgs;
 mod nexus;
 mod oximeter;
@@ -80,14 +85,25 @@ struct Omdb {
         long,
         value_parser = parse_dropshot_log_level,
         default_value = "warn",
+        global = true,
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
-    #[arg(env = "OMDB_DNS_SERVER", long)]
+    #[arg(
+        long,
+        env = "OMDB_DNS_SERVER",
+        global = true,
+        help_heading = helpers::CONNECTION_OPTIONS_HEADING,
+    )]
     dns_server: Option<SocketAddr>,
 
-    /// allow potentially-destructive subcommands
-    #[arg(short = 'w', long = "destructive")]
+    /// Allow potentially-destructive subcommands.
+    #[arg(
+        short = 'w',
+        long = "destructive",
+        global = true,
+        help_heading = helpers::SAFETY_OPTIONS_HEADING,
+    )]
     allow_destructive: bool,
 
     #[command(subcommand)]
@@ -117,6 +133,7 @@ mod check_allow_destructive {
 }
 
 impl Omdb {
+    /// Return the socket addresses of all instances of a service in DNS
     async fn dns_lookup_all(
         &self,
         log: slog::Logger,
@@ -127,6 +144,65 @@ impl Omdb {
             .lookup_all_socket_v6(service_name)
             .await
             .with_context(|| format!("looking up {:?} in DNS", service_name))
+    }
+
+    /// Return the socket address of one instance of a service that we can at
+    /// least successfully connect to
+    async fn dns_lookup_one(
+        &self,
+        log: slog::Logger,
+        service_name: internal_dns::ServiceName,
+    ) -> Result<SocketAddrV6, anyhow::Error> {
+        let addrs = self.dns_lookup_all(log, service_name).await?;
+        ensure!(
+            !addrs.is_empty(),
+            "expected at least one address from successful DNS lookup for {:?}",
+            service_name
+        );
+
+        // The caller is going to pick one of these addresses to connect to.
+        // Let's try to pick one that's at least not obviously broken by
+        // attempting to connect to whatever we found and returning any that we
+        // successfully connected to.  It'd be nice if we could return the
+        // socket directly, but our callers are creating reqwest clients that
+        // cannot easily consume a socket directly.
+        //
+        // This approach scales poorly and there are many failure modes that
+        // this does not cover.  But in the absence of better connection
+        // management, and with the risks in `omdb` being pretty low, and the
+        // value of it working pretty high, here we are.  This approach should
+        // not be replicated elsewhere.
+        async fn try_connect(
+            sockaddr_v6: SocketAddrV6,
+        ) -> Result<(), anyhow::Error> {
+            let _ = TcpSocket::new_v6()
+                .context("creating socket")?
+                .connect(SocketAddr::from(sockaddr_v6))
+                .await
+                .with_context(|| format!("connect \"{}\"", sockaddr_v6))?;
+            Ok(())
+        }
+
+        let mut socket_stream = futures::stream::iter(addrs)
+            .map(|sockaddr_v6| async move {
+                (sockaddr_v6, try_connect(sockaddr_v6).await)
+            })
+            .buffer_unordered(3);
+
+        while let Some((sockaddr, connect_result)) = socket_stream.next().await
+        {
+            match connect_result {
+                Ok(()) => return Ok(sockaddr),
+                Err(error) => {
+                    eprintln!(
+                        "warning: failed to connect to {:?} at {}: {:#}",
+                        service_name, sockaddr, error
+                    );
+                }
+            }
+        }
+
+        Err(anyhow!("failed to connect to any instances of {:?}", service_name))
     }
 
     async fn dns_resolver(

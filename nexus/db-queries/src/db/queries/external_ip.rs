@@ -888,8 +888,9 @@ mod tests {
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
-    use nexus_types::deployment::OmicronZoneExternalIpKind;
+    use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfig;
@@ -1345,21 +1346,26 @@ mod tests {
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         let ip_10_0_0_2 =
-            OmicronZoneExternalIpKind::Floating("10.0.0.2".parse().unwrap());
+            OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: "10.0.0.2".parse().unwrap(),
+            });
         let ip_10_0_0_3 =
-            OmicronZoneExternalIpKind::Floating("10.0.0.3".parse().unwrap());
+            OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: "10.0.0.3".parse().unwrap(),
+            });
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let service_id = OmicronZoneUuid::new_v4();
-        let id = ExternalIpUuid::new_v4();
         let ip = context
             .db_datastore
             .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp { id, kind: ip_10_0_0_3 },
+                ip_10_0_0_3,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1376,7 +1382,7 @@ mod tests {
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp { id, kind: ip_10_0_0_3 },
+                ip_10_0_0_3,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1392,10 +1398,10 @@ mod tests {
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp {
+                OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
                     id: ExternalIpUuid::new_v4(),
-                    kind: ip_10_0_0_3,
-                },
+                    ip: ip_10_0_0_3.ip(),
+                }),
             )
             .await
             .expect_err("Should have failed to re-allocate same IP address (different UUID)");
@@ -1412,10 +1418,10 @@ mod tests {
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp {
-                    id,
-                    kind: ip_10_0_0_2,
-                },
+                OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                    id: ip_10_0_0_3.id(),
+                    ip: ip_10_0_0_2.ip(),
+                }),
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (same UUID)");
@@ -1426,17 +1432,19 @@ mod tests {
 
         // Try allocating the same service IP once more, but do it with a
         // different port range.
-        let ip_10_0_0_3_snat_0 = OmicronZoneExternalIpKind::Snat(
-            SourceNatConfig::new("10.0.0.3".parse().unwrap(), 0, 16383)
-                .unwrap(),
-        );
+        let ip_10_0_0_3_snat_0 =
+            OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                id: ip_10_0_0_3.id(),
+                snat_cfg: SourceNatConfig::new(ip_10_0_0_3.ip(), 0, 16383)
+                    .unwrap(),
+            });
         let err = context
             .db_datastore
             .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::BoundaryNtp,
-                OmicronZoneExternalIp { id, kind: ip_10_0_0_3_snat_0 },
+                ip_10_0_0_3_snat_0,
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (different port range)");
@@ -1446,22 +1454,24 @@ mod tests {
         );
 
         // This time start with an explicit SNat
-        let ip_10_0_0_1_snat_32768 = OmicronZoneExternalIpKind::Snat(
-            SourceNatConfig::new("10.0.0.1".parse().unwrap(), 32768, 49151)
+        let ip_10_0_0_1_snat_32768 =
+            OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                id: ExternalIpUuid::new_v4(),
+                snat_cfg: SourceNatConfig::new(
+                    "10.0.0.1".parse().unwrap(),
+                    32768,
+                    49151,
+                )
                 .unwrap(),
-        );
+            });
         let snat_service_id = OmicronZoneUuid::new_v4();
-        let snat_id = ExternalIpUuid::new_v4();
         let snat_ip = context
             .db_datastore
             .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
-                OmicronZoneExternalIp {
-                    id: snat_id,
-                    kind: ip_10_0_0_1_snat_32768,
-                },
+                ip_10_0_0_1_snat_32768,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1482,10 +1492,7 @@ mod tests {
                 &context.opctx,
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
-                OmicronZoneExternalIp {
-                    id: snat_id,
-                    kind: ip_10_0_0_1_snat_32768,
-                },
+                ip_10_0_0_1_snat_32768,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1497,20 +1504,23 @@ mod tests {
 
         // Try allocating the same service IP once more, but do it with a
         // different port range.
-        let ip_10_0_0_1_snat_49152 = OmicronZoneExternalIpKind::Snat(
-            SourceNatConfig::new("10.0.0.1".parse().unwrap(), 49152, 65535)
+        let ip_10_0_0_1_snat_49152 =
+            OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                id: ip_10_0_0_1_snat_32768.id(),
+                snat_cfg: SourceNatConfig::new(
+                    ip_10_0_0_1_snat_32768.ip(),
+                    49152,
+                    65535,
+                )
                 .unwrap(),
-        );
+            });
         let err = context
             .db_datastore
             .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
-                OmicronZoneExternalIp {
-                    id: snat_id,
-                    kind: ip_10_0_0_1_snat_49152,
-                },
+                ip_10_0_0_1_snat_49152,
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (different port range)");
@@ -1536,19 +1546,20 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
-        let ip_10_0_0_5 = OmicronZoneExternalIpKind::Floating(IpAddr::V4(
-            Ipv4Addr::new(10, 0, 0, 5),
-        ));
+        let ip_10_0_0_5 =
+            OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: "10.0.0.5".parse().unwrap(),
+            });
 
         let service_id = OmicronZoneUuid::new_v4();
-        let id = ExternalIpUuid::new_v4();
         let err = context
             .db_datastore
             .external_ip_allocate_omicron_zone(
                 &context.opctx,
                 service_id,
                 ZoneKind::Nexus,
-                OmicronZoneExternalIp { id, kind: ip_10_0_0_5 },
+                ip_10_0_0_5,
             )
             .await
             .expect_err("Should have failed to allocate out-of-bounds IP");

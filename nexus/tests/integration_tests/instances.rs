@@ -4,6 +4,8 @@
 
 //! Tests basic instance support in the API
 
+use crate::integration_tests::metrics::wait_for_producer;
+
 use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
@@ -114,7 +116,9 @@ fn default_vpc_subnets_url() -> String {
     format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
 }
 
-async fn create_project_and_pool(client: &ClientTestContext) -> views::Project {
+pub async fn create_project_and_pool(
+    client: &ClientTestContext,
+) -> views::Project {
     create_default_ip_pool(client).await;
     create_project(client, PROJECT_NAME).await
 }
@@ -276,7 +280,7 @@ async fn test_instances_create_reboot_halt(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
@@ -581,7 +585,7 @@ async fn test_instance_start_creates_networking_state(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "series-of-tubes";
 
@@ -684,7 +688,7 @@ async fn test_instance_start_creates_networking_state(
 #[nexus_test]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
 
@@ -780,7 +784,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -932,7 +936,7 @@ async fn test_instance_failed_after_sled_agent_error(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "losing-is-fun";
 
@@ -1058,18 +1062,17 @@ async fn assert_metrics(
 
 #[nexus_test]
 async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
     // Create an IP pool and project that we'll use for testing.
     let project = create_project_and_pool(&client).await;
     let project_id = project.identity.id;
+
+    // Wait until Nexus is registered as a metric producer with Oximeter.
+    wait_for_producer(&cptestctx.oximeter, nexus.id()).await;
 
     // Query the view of these metrics stored within CRDB
     let opctx =
@@ -1140,9 +1143,16 @@ async fn test_instance_metrics_with_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
+
+    // Wait until Nexus registers as a producer with Oximeter.
+    wait_for_producer(
+        &cptestctx.oximeter,
+        cptestctx.server.server_context().nexus.id(),
+    )
+    .await;
 
     // Create a second sled to migrate to/from.
     let default_sled_id: Uuid =
@@ -1266,7 +1276,7 @@ async fn test_instances_create_stopped_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
@@ -1317,7 +1327,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
@@ -1839,7 +1849,7 @@ async fn test_instance_create_delete_network_interface(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let instance_name = "nic-attach-test-inst";
 
     create_project_and_pool(&client).await;
@@ -2080,7 +2090,7 @@ async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let instance_name = "nic-update-test-inst";
 
     create_project_and_pool(&client).await;
@@ -2700,7 +2710,7 @@ async fn test_instance_create_attach_disks_undo(
     let faulted_disk = create_disk(&client, PROJECT_NAME, "faulted-disk").await;
 
     // set `faulted_disk` to the faulted state
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     assert!(nexus
         .set_disk_as_faulted(&faulted_disk.identity.id)
@@ -2961,7 +2971,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 8);
 
     // Set the 7th to FAULTED
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     assert!(nexus.set_disk_as_faulted(&disks[6].identity.id).await.unwrap());
 
@@ -3119,7 +3129,7 @@ async fn test_disks_detached_when_instance_destroyed(
     // sled.
     let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
     let instance = instance_get(&client, &instance_url).await;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let sa = nexus
         .instance_sled_by_id(&instance.identity.id)
@@ -3646,7 +3656,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
 
     // Make the started instance transition to Running, shut it down, and verify
     // that the other reasonably-sized instance can now start.
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instances[1].identity.id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
     instance_simulate(nexus, &instances[1].identity.id).await;
@@ -3752,7 +3762,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
 
     // Make the started instance transition to Running, shut it down, and verify
     // that the other reasonably-sized instance can now start.
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instances[1].identity.id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
     instance_simulate(nexus, &instances[1].identity.id).await;
@@ -3762,7 +3772,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
 #[nexus_test]
 async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "kris-picks";
 
@@ -4042,7 +4052,7 @@ async fn stop_and_delete_instance(
     let client = &cptestctx.external_client;
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance.identity.id).await;
     let url =
         format!("/v1/instances/{}?project={}", instance_name, PROJECT_NAME);
@@ -4426,7 +4436,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // Make sure the instance can actually start even though a collaborator
     // created it.
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let authn = AuthnMode::SiloUser(user_id);
     let instance_url = get_instance_url(instance_name);
@@ -4523,7 +4533,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Validate that every sled (except the instance's sled) now has a V2P
     // mapping for this instance
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
     let opctx =

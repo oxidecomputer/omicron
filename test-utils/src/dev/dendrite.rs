@@ -139,8 +139,8 @@ async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
 async fn find_dendrite_port_in_log(
     logfile: String,
 ) -> Result<u16, anyhow::Error> {
-    let re = regex::Regex::new(r#""local_addr":"\[::1\]:?([0-9]+)""#).unwrap();
-    let reader = BufReader::new(File::open(logfile).await?);
+    let re = regex::Regex::new(r#""local_addr":"\[::1\]:([0-9]+)""#).unwrap();
+    let mut reader = BufReader::new(File::open(&logfile).await?);
     let mut lines = reader.lines();
     loop {
         match lines.next_line().await? {
@@ -155,6 +155,11 @@ async fn find_dendrite_port_in_log(
             }
             None => {
                 sleep(Duration::from_millis(10)).await;
+
+                // We might have gotten a partial line; close the file, reopen
+                // it, and start reading again from the beginning.
+                reader = BufReader::new(File::open(&logfile).await?);
+                lines = reader.lines();
             }
         }
     }

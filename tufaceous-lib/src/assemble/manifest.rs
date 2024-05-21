@@ -294,11 +294,14 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::SwitchRot => "fake-sidecar-rot",
         };
 
+        // For our purposes sign = board represents what we want for the RoT
+        // and we don't care about the SP at this point
         let caboose = CabooseBuilder::default()
             .git_commit("this-is-fake-data")
             .board(board)
             .version(self.version.to_string())
             .name(self.name)
+            .sign(board)
             .build();
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();
@@ -524,6 +527,8 @@ impl DeserializedFileArtifactSource {
 pub enum DeserializedControlPlaneZoneSource {
     File {
         path: Utf8PathBuf,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file_name: Option<String>,
     },
     Fake {
         name: String,
@@ -542,12 +547,15 @@ impl DeserializedControlPlaneZoneSource {
         F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,
     {
         let (name, data, mtime_source) = match self {
-            DeserializedControlPlaneZoneSource::File { path } => {
+            DeserializedControlPlaneZoneSource::File { path, file_name } => {
                 let data = std::fs::read(path)
                     .with_context(|| format!("failed to read {path}"))?;
-                let name = path.file_name().with_context(|| {
-                    format!("zone path missing file name: {path}")
-                })?;
+                let name = file_name
+                    .as_deref()
+                    .or_else(|| path.file_name())
+                    .with_context(|| {
+                        format!("zone path missing file name: {path}")
+                    })?;
                 // For now, always use the current time as the source. (Maybe
                 // change this to use the mtime on disk in the future?)
                 (name, data, MtimeSource::Now)

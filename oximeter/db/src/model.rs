@@ -391,7 +391,7 @@ declare_field_row! {I32FieldRow, i32, "i32"}
 declare_field_row! {U32FieldRow, u32, "u32"}
 declare_field_row! {I64FieldRow, i64, "i64"}
 declare_field_row! {U64FieldRow, u64, "u64"}
-declare_field_row! {StringFieldRow, String, "string"}
+declare_field_row! {StringFieldRow, std::borrow::Cow<'static, str>, "string"}
 declare_field_row! {IpAddrFieldRow, Ipv6Addr, "ipaddr"}
 declare_field_row! {UuidFieldRow, Uuid, "uuid"}
 
@@ -1716,6 +1716,7 @@ pub(crate) fn parse_field_select_row(
                         .as_str()
                         .expect("Expected a UUID string for a Uuid field from the database")
                         .to_string()
+                        .into()
                     )
             }
         };
