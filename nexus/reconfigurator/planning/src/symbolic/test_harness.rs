@@ -18,6 +18,32 @@ use std::net::Ipv4Addr;
 use std::{collections::BTreeMap, hash::Hash};
 use typed_rng::TypedUuidRng;
 
+#[derive(Debug)]
+pub struct TestHarnessRng {
+    /// Various RNGs, all from a configured seed
+    pub sled_rng: TypedUuidRng<SledKind>,
+    pub zone_rng: TypedUuidRng<OmicronZoneKind>,
+    pub physical_disks_rng: TypedUuidRng<PhysicalDiskKind>,
+}
+
+impl TestHarnessRng {
+    pub fn new<H: Hash>(seed: H) -> TestHarnessRng {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "symbolic-test-harness";
+        let mut parent: StdRng = typed_rng::from_seed(seed, SEED_EXTRA);
+
+        TestHarnessRng {
+            sled_rng: TypedUuidRng::from_parent_rng(&mut parent, "sleds"),
+            zone_rng: TypedUuidRng::from_parent_rng(&mut parent, "zones"),
+            physical_disks_rng: TypedUuidRng::from_parent_rng(
+                &mut parent,
+                "physical disks",
+            ),
+        }
+    }
+}
+
 // TODO: Instead of callbacks via a trait, allow the symbolic and dynamic
 // execution to use iterators to run each op and check invariants. This will
 // make things much easier with regards to the borrow checker. Update comment
@@ -61,13 +87,8 @@ pub struct TestHarness {
     pub symbolic_history: Vec<SymbolicEvent>,
     pub discarded_symbolic_ops: Vec<DiscardedOp>,
 
-    /// Various RNGs, all from a configured seed
-    /// TODO: Put these in a new type just like `BlueprintBuilderRng`.
-    /// This will allow all of them to be passed in to a top-level reify-function
-    /// as one parameter.
-    pub sled_rng: TypedUuidRng<SledKind>,
-    pub zone_rng: TypedUuidRng<OmicronZoneKind>,
-    pub physical_disks_rng: TypedUuidRng<PhysicalDiskKind>,
+    /// All our RNGs derived from a parent based on a provided seed
+    pub rng: TestHarnessRng,
 }
 
 impl TestHarness {
@@ -81,11 +102,6 @@ impl TestHarness {
             initial_fleet_description.to_fleet(&mut symbolic_id_gen);
         let symbolic_history = Vec::with_capacity(ops.len());
 
-        // Important to add some more bytes here, so that builders with the
-        // same seed but different purposes don't end up with the same UUIDs.
-        const SEED_EXTRA: &str = "symbolic-test-harness";
-        let mut parent: StdRng = typed_rng::from_seed(seed, SEED_EXTRA);
-
         TestHarness {
             initial_fleet_description,
             initial_fleet,
@@ -93,12 +109,7 @@ impl TestHarness {
             symbolic_id_gen: Some(symbolic_id_gen),
             symbolic_history,
             discarded_symbolic_ops: vec![],
-            sled_rng: TypedUuidRng::from_parent_rng(&mut parent, "sleds"),
-            zone_rng: TypedUuidRng::from_parent_rng(&mut parent, "zones"),
-            physical_disks_rng: TypedUuidRng::from_parent_rng(
-                &mut parent,
-                "physical disks",
-            ),
+            rng: TestHarnessRng::new(seed),
         }
     }
 

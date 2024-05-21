@@ -6,7 +6,9 @@
 //! operations on racks that can be useful for reconfigurator testing.
 
 use nexus_types::deployment::{PlanningInput, Policy};
-use nexus_types::external_api::views::{SledPolicy, SledState};
+use nexus_types::external_api::views::{
+    PhysicalDiskPolicy, PhysicalDiskState, SledPolicy, SledState,
+};
 use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -24,8 +26,7 @@ pub use omicron_zones::{
 };
 
 pub use physical_disks::{
-    ControlPlanePhysicalDisk, DiskIdentity, PhysicalDiskPolicy,
-    PhysicalDiskState, PhysicalDiskUuid, ZpoolUuid,
+    ControlPlanePhysicalDisk, DiskIdentity, PhysicalDiskUuid, ZpoolUuid,
 };
 
 pub use ops::Op;

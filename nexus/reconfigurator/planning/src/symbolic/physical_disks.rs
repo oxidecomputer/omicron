@@ -5,9 +5,10 @@
 //! Symbolic representations of physical disks
 
 use super::{
-    Enumerable, ReificationError, SymbolMap, SymbolicId, SymbolicIdGenerator,
-    TestPool,
+    test_harness::TestHarnessRng, Enumerable, ReificationError, SymbolMap,
+    SymbolicId, SymbolicIdGenerator, TestPool,
 };
+use nexus_types::external_api::views::{PhysicalDiskPolicy, PhysicalDiskState};
 use omicron_uuid_kinds::PhysicalDiskKind;
 use serde::{Deserialize, Serialize};
 use typed_rng::TypedUuidRng;
@@ -104,20 +105,22 @@ impl ControlPlanePhysicalDisk {
             state: PhysicalDiskState::Active,
         }
     }
-}
 
-/// Symbolic representation of a `PhysicalDiskPolicy`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PhysicalDiskPolicy {
-    InService,
-    Expunged,
-}
-
-/// Symbolic representation of `PhysicalDiskState`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PhysicalDiskState {
-    Active,
-    Decommissioned,
+    pub fn reify(
+        &self,
+        pool: &mut TestPool,
+        symbol_map: &mut SymbolMap,
+        rng: &mut TestHarnessRng,
+    ) -> Result<nexus_types::deployment::SledDisk, ReificationError> {
+        Ok(nexus_types::deployment::SledDisk {
+            disk_identity: self.disk_identity.reify(pool, symbol_map)?,
+            disk_id: self
+                .disk_id
+                .reify(symbol_map, &mut rng.physical_disks_rng),
+            policy: self.policy,
+            state: self.state,
+        })
+    }
 }
 
 /// A symbolic representation of a `ZpoolUuid`
