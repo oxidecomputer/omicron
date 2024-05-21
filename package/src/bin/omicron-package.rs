@@ -12,7 +12,7 @@ use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::target::KnownTarget;
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
-use omicron_zone_package::config::Config as PackageConfig;
+use omicron_zone_package::config::{Config as PackageConfig, PackageMap};
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::Target;
@@ -24,6 +24,7 @@ use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
@@ -143,8 +144,7 @@ async fn do_for_all_rust_packages(
     // First, filter out all Rust packages from the configuration that should be
     // built, and partition them into "release" and "debug" categories.
     let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
-        .package_config
-        .packages_to_build(&config.target)
+        .packages_to_build()
         .0
         .into_iter()
         .filter_map(|(name, pkg)| match &pkg.source {
@@ -204,9 +204,7 @@ async fn do_list_outputs(
     output_directory: &Utf8Path,
     intermediate: bool,
 ) -> Result<()> {
-    for (name, package) in
-        config.package_config.packages_to_build(&config.target).0
-    {
+    for (name, package) in config.packages_to_build().0 {
         if !intermediate
             && package.output
                 == (PackageOutput::Zone { intermediate_only: true })
@@ -497,7 +495,7 @@ async fn do_package(
 
     do_build(&config).await?;
 
-    let packages = config.package_config.packages_to_build(&config.target);
+    let packages = config.packages_to_build();
 
     let package_iter = packages.build_order();
     for batch in package_iter {
@@ -901,6 +899,8 @@ struct Config {
     package_config: PackageConfig,
     // Description of the target we're trying to operate on.
     target: Target,
+    // The list of packages the user wants us to build (all, if empty)
+    only: Vec<String>,
     // True if we should skip confirmations for destructive operations.
     force: bool,
     // Number of times to retry failed downloads.
@@ -924,6 +924,62 @@ impl Config {
         match input.as_str().trim() {
             "y" | "Y" => Ok(()),
             _ => bail!("Aborting"),
+        }
+    }
+
+    /// Returns target packages to be assembled on the builder machine, limited
+    /// to those specified in `only` (if set).
+    // TODO: should this be moved to omicron-zone-package?
+    fn packages_to_build(&self) -> PackageMap<'_> {
+        let packages = self.package_config.packages_to_build(&self.target);
+        if self.only.is_empty() {
+            packages
+        } else {
+            // create a new PackageMap and copy over the selected packages
+            let mut filtered_packages = PackageMap(BTreeMap::new());
+            for package_name in &self.only {
+                if let Some(package) = packages.0.get(package_name) {
+                    filtered_packages.0.insert(package_name, package);
+                }
+            }
+            // recursively find and copy over the dependencies
+            let lookup_by_output = packages
+                .0
+                .iter()
+                .map(|(name, package)| {
+                    (package.get_output_file(name), (*name, *package))
+                })
+                .collect::<BTreeMap<_, _>>();
+            loop {
+                let to_add = filtered_packages
+                    .0
+                    .values()
+                    .filter_map(|package| {
+                        if let PackageSource::Composite { packages } =
+                            &package.source
+                        {
+                            Some(packages)
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .map(|output| {
+                        *lookup_by_output.get(output).unwrap_or_else(|| {
+                            panic!(
+                                "Could not find a package which creates '{}'",
+                                output
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let old_len = filtered_packages.0.len();
+                filtered_packages.0.extend(to_add);
+                if old_len == filtered_packages.0.len() {
+                    break;
+                }
+            }
+            filtered_packages
         }
     }
 }
@@ -978,6 +1034,7 @@ async fn main() -> Result<()> {
             log: log.clone(),
             package_config,
             target,
+            only: Vec::new(),
             force: args.force,
             retry_count: args.retry_count,
             retry_duration: args.retry_duration,
@@ -993,7 +1050,7 @@ async fn main() -> Result<()> {
         })?;
     }
 
-    match &args.subcommand {
+    match args.subcommand {
         SubCommand::Build(BuildCommand::Target { subcommand }) => {
             do_target(&args.artifact_dir, &args.target, &subcommand).await?;
         }
@@ -1001,16 +1058,22 @@ async fn main() -> Result<()> {
             do_dot(&get_config()?).await?;
         }
         SubCommand::Build(BuildCommand::ListOutputs { intermediate }) => {
-            do_list_outputs(&get_config()?, &args.artifact_dir, *intermediate)
+            do_list_outputs(&get_config()?, &args.artifact_dir, intermediate)
                 .await?;
         }
-        SubCommand::Build(BuildCommand::Package { disable_cache }) => {
-            do_package(&get_config()?, &args.artifact_dir, *disable_cache)
-                .await?;
+        SubCommand::Build(BuildCommand::Package { disable_cache, only }) => {
+            let mut config = get_config()?;
+            config.only = only;
+            do_package(&config, &args.artifact_dir, disable_cache).await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
-            do_stamp(&get_config()?, &args.artifact_dir, package_name, version)
-                .await?;
+            do_stamp(
+                &get_config()?,
+                &args.artifact_dir,
+                &package_name,
+                &version,
+            )
+            .await?;
         }
         SubCommand::Build(BuildCommand::Check) => {
             do_check(&get_config()?).await?
