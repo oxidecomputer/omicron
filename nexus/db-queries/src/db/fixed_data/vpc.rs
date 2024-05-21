@@ -24,11 +24,19 @@ pub static SERVICES_VPC_ROUTER_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 });
 
 /// UUID of default route for built-in Services VPC.
-pub static SERVICES_VPC_DEFAULT_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-074c-4000-8000-000000000002"
-        .parse()
-        .expect("invalid uuid for builtin services vpc default route id")
-});
+pub static SERVICES_VPC_DEFAULT_V4_ROUTE_ID: Lazy<uuid::Uuid> =
+    Lazy::new(|| {
+        "001de000-074c-4000-8000-000000000002"
+            .parse()
+            .expect("invalid uuid for builtin services vpc default route id")
+    });
+
+pub static SERVICES_VPC_DEFAULT_V6_ROUTE_ID: Lazy<uuid::Uuid> =
+    Lazy::new(|| {
+        "001de000-074c-4000-8000-000000000003"
+            .parse()
+            .expect("invalid uuid for builtin services vpc default route id")
+    });
 
 /// Built-in VPC for internal services on the rack.
 pub static SERVICES_VPC: Lazy<db::model::IncompleteVpc> = Lazy::new(|| {

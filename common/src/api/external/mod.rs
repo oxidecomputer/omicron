@@ -1680,6 +1680,9 @@ pub enum RouteTarget {
     #[display("inetgw:{0}")]
     /// Forward traffic to an internet gateway
     InternetGateway(Name),
+    #[display("drop")]
+    /// Drop matching traffic
+    Drop,
 }
 
 /// A `RouteDestination` is used to match traffic with a routing rule, on the

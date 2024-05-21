@@ -1099,6 +1099,7 @@ table! {
         rcgen -> Int8,
         ipv4_block -> Inet,
         ipv6_block -> Inet,
+        custom_router_id -> Nullable<Uuid>,
     }
 }
 

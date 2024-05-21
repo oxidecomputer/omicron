@@ -25,6 +25,7 @@ use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv6Cfg;
 use oxide_vpc::api::MacAddr;
+use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
@@ -339,9 +340,16 @@ impl PortManager {
             (port, ticket)
         };
 
+        // TODO: These should not be filled in like this, and should be informed
+        //       by either our existing knowledge of current knowledge of system + custom
+        //       routers OR we just await the router RPW filling this in for us.
+        //       In future, ∃ VPCs *without* an Internet Gateway so we can't just
+        //       plumb that in as well...
+
         // Add a router entry for this interface's subnet, directing traffic to the
         // VPC subnet.
         let route = AddRouterEntryReq {
+            class: RouterClass::System,
             port_name: port_name.clone(),
             dest: vpc_subnet,
             target: RouterTarget::VpcSubnet(vpc_subnet),
@@ -378,6 +386,7 @@ impl PortManager {
         .parse()
         .unwrap();
         let route = AddRouterEntryReq {
+            class: RouterClass::System,
             port_name: port_name.clone(),
             dest,
             target: RouterTarget::InternetGateway,

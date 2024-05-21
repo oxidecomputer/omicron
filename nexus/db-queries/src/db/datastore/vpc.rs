@@ -74,7 +74,8 @@ impl DataStore {
     ) -> Result<(), Error> {
         use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
         use crate::db::fixed_data::vpc::SERVICES_VPC;
-        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_ROUTE_ID;
+        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_V4_ROUTE_ID;
+        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_V6_ROUTE_ID;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -135,35 +136,41 @@ impl DataStore {
                 .map(|(authz_router, _)| authz_router)?
         };
 
-        let route = RouterRoute::new(
-            *SERVICES_VPC_DEFAULT_ROUTE_ID,
-            SERVICES_VPC.system_router_id,
-            RouterRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "default".parse().unwrap(),
-                    description:
-                        "Default internet gateway route for Oxide Services"
-                            .to_string(),
+        // Unwrap safety: these are known valid CIDR blocks.
+        let default_ips = [
+            ("0.0.0.0/0".parse().unwrap(), *SERVICES_VPC_DEFAULT_V4_ROUTE_ID),
+            ("::/0".parse().unwrap(), *SERVICES_VPC_DEFAULT_V6_ROUTE_ID),
+        ];
+
+        for (default, uuid) in default_ips {
+            let route = RouterRoute::new(
+                uuid,
+                SERVICES_VPC.system_router_id,
+                RouterRouteKind::Default,
+                nexus_types::external_api::params::RouterRouteCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "default".parse().unwrap(),
+                        description:
+                            "Default internet gateway route for Oxide Services"
+                                .to_string(),
+                    },
+                    target: RouteTarget::InternetGateway(
+                        "outbound".parse().unwrap(),
+                    ),
+                    destination: RouteDestination::IpNet(default),
                 },
-                target: RouteTarget::InternetGateway(
-                    "outbound".parse().unwrap(),
-                ),
-                destination: RouteDestination::Vpc(
-                    SERVICES_VPC.identity.name.clone().into(),
-                ),
-            },
-        );
-        self.router_create_route(opctx, &authz_router, route)
-            .await
-            .map(|_| ())
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            })?;
+            );
+            self.router_create_route(opctx, &authz_router, route)
+                .await
+                .map(|_| ())
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+        }
 
         self.load_builtin_vpc_fw_rules(opctx).await?;
-        self.load_builtin_vpc_subnets(opctx).await?;
+        self.load_builtin_vpc_subnets(opctx, &authz_router).await?;
 
         info!(opctx.log, "created built-in services vpc");
 
@@ -228,10 +235,14 @@ impl DataStore {
     async fn load_builtin_vpc_subnets(
         &self,
         opctx: &OpContext,
+        authz_router: &authz::VpcRouter,
     ) -> Result<(), Error> {
         use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+        use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET_ROUTE_ID;
         use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+        use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ROUTE_ID;
         use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+        use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET_ROUTE_ID;
 
         debug!(opctx.log, "attempting to create built-in VPC Subnets");
 
@@ -242,9 +253,11 @@ impl DataStore {
             .lookup_for(authz::Action::CreateChild)
             .await
             .internal_context("lookup built-in services vpc")?;
-        for vpc_subnet in
-            [&*DNS_VPC_SUBNET, &*NEXUS_VPC_SUBNET, &*NTP_VPC_SUBNET]
-        {
+        for (vpc_subnet, route_id) in [
+            (&*DNS_VPC_SUBNET, *DNS_VPC_SUBNET_ROUTE_ID),
+            (&*NEXUS_VPC_SUBNET, *NEXUS_VPC_SUBNET_ROUTE_ID),
+            (&*NTP_VPC_SUBNET, *NTP_VPC_SUBNET_ROUTE_ID),
+        ] {
             if let Ok(_) = db::lookup::LookupPath::new(opctx, self)
                 .vpc_subnet_id(vpc_subnet.id())
                 .fetch()
@@ -256,6 +269,31 @@ impl DataStore {
                 .await
                 .map(|_| ())
                 .map_err(SubnetError::into_external)
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+
+            let route = RouterRoute::new(
+                route_id,
+                *SERVICES_VPC_ID,
+                RouterRouteKind::Default,
+                nexus_types::external_api::params::RouterRouteCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "default".parse().unwrap(),
+                        description:
+                            "Default internet gateway route for Oxide Services"
+                                .to_string(),
+                    },
+                    target: RouteTarget::Subnet(vpc_subnet.name().clone()),
+                    destination: RouteDestination::Subnet(
+                        vpc_subnet.name().clone(),
+                    ),
+                },
+            );
+            self.router_create_route(opctx, &authz_router, route)
+                .await
+                .map(|_| ())
                 .or_else(|e| match e {
                     Error::ObjectAlreadyExists { .. } => Ok(()),
                     _ => Err(e),

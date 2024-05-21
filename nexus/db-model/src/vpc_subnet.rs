@@ -39,6 +39,7 @@ pub struct VpcSubnet {
     pub rcgen: Generation,
     pub ipv4_block: Ipv4Net,
     pub ipv6_block: Ipv6Net,
+    pub custom_router_id: Option<Uuid>,
 }
 
 impl VpcSubnet {
@@ -60,6 +61,7 @@ impl VpcSubnet {
             rcgen: Generation::new(),
             ipv4_block: Ipv4Net(ipv4_block),
             ipv6_block: Ipv6Net(ipv6_block),
+            custom_router_id: None,
         }
     }
 
@@ -102,6 +104,7 @@ impl From<VpcSubnet> for views::VpcSubnet {
             vpc_id: subnet.vpc_id,
             ipv4_block: subnet.ipv4_block.0,
             ipv6_block: subnet.ipv6_block.0,
+            custom_router_id: subnet.custom_router_id,
         }
     }
 }
