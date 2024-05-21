@@ -30,7 +30,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-vsss-rs = { version = "3.3.4", features = ["std", "curve25519"] }
+vsss-rs = { version = "=3.3.4", features = ["std", "curve25519"] }
 zeroize.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.

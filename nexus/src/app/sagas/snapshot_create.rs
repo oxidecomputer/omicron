@@ -401,7 +401,7 @@ async fn ssc_regions_ensure(
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
             blocks_per_extent,
-            extent_count: extent_count.try_into().unwrap(),
+            extent_count,
             gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,

@@ -73,9 +73,15 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
+        let Ok(extent_count) = u32::try_from(region.extent_count()) else {
+            return Err(Error::internal_error(
+                "Extent count out of range for a u32",
+            ));
+        };
+
         let region_request = CreateRegion {
             block_size: region.block_size().to_bytes(),
-            extent_count: region.extent_count(),
+            extent_count,
             extent_size: region.blocks_per_extent(),
             // TODO: Can we avoid casting from UUID to string?
             // NOTE: This'll require updating the crucible agent client.
