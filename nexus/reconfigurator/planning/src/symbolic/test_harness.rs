@@ -4,10 +4,19 @@
 
 //! A test harness for symbolic model based testing.
 
-use super::{
-    Error, Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator,
+use crate::symbolic::{
+    self, Error, Fleet, FleetDescription, Op, SymbolicId, SymbolicIdGenerator,
 };
+use omicron_common::address::IpRange;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::{
+    OmicronZoneKind, PhysicalDiskKind, PhysicalDiskUuid, SledKind, SledUuid,
+};
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
+use std::net::Ipv4Addr;
+use std::{collections::BTreeMap, hash::Hash};
+use typed_rng::TypedUuidRng;
 
 // TODO: Instead of callbacks via a trait, allow the symbolic and dynamic
 // execution to use iterators to run each op and check invariants. This will
@@ -42,7 +51,7 @@ use serde::{Deserialize, Serialize};
 /// callbacks that allow specific tests to ensure that the output `Blueprint`
 /// matches what is expected given the input symbolic input, and concrete parent
 /// `Blueprint`, `PlanningInput`, and `Inventory`.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct TestHarness {
     pub initial_fleet_description: FleetDescription,
     pub initial_fleet: Fleet,
@@ -51,17 +60,31 @@ pub struct TestHarness {
     pub symbolic_id_gen: Option<SymbolicIdGenerator>,
     pub symbolic_history: Vec<SymbolicEvent>,
     pub discarded_symbolic_ops: Vec<DiscardedOp>,
+
+    /// Various RNGs, all from a configured seed
+    /// TODO: Put these in a new type just like `BlueprintBuilderRng`.
+    /// This will allow all of them to be passed in to a top-level reify-function
+    /// as one parameter.
+    pub sled_rng: TypedUuidRng<SledKind>,
+    pub zone_rng: TypedUuidRng<OmicronZoneKind>,
+    pub physical_disks_rng: TypedUuidRng<PhysicalDiskKind>,
 }
 
 impl TestHarness {
-    pub fn new(
+    pub fn new<H: Hash>(
         mut symbolic_id_gen: SymbolicIdGenerator,
         initial_fleet_description: FleetDescription,
         ops: Vec<Op>,
+        seed: H,
     ) -> TestHarness {
         let initial_fleet =
             initial_fleet_description.to_fleet(&mut symbolic_id_gen);
         let symbolic_history = Vec::with_capacity(ops.len());
+
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "symbolic-test-harness";
+        let mut parent: StdRng = typed_rng::from_seed(seed, SEED_EXTRA);
 
         TestHarness {
             initial_fleet_description,
@@ -70,6 +93,12 @@ impl TestHarness {
             symbolic_id_gen: Some(symbolic_id_gen),
             symbolic_history,
             discarded_symbolic_ops: vec![],
+            sled_rng: TypedUuidRng::from_parent_rng(&mut parent, "sleds"),
+            zone_rng: TypedUuidRng::from_parent_rng(&mut parent, "zones"),
+            physical_disks_rng: TypedUuidRng::from_parent_rng(
+                &mut parent,
+                "physical disks",
+            ),
         }
     }
 
@@ -108,7 +137,7 @@ impl TestHarness {
 ///
 /// This is an element in the totally ordered `TestHarness::symbolic_history`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SymbolicEvent {
+pub struct SymbolicEvent {
     symbolic_id: SymbolicId,
     op: Op,
     next_fleet: Fleet,
@@ -126,13 +155,77 @@ impl SymbolicEvent {
 
 /// Operations discarded during symbolic execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DiscardedOp {
+pub struct DiscardedOp {
     // The index of the entry in `symbolic_history` where this operation would have
     // gone when it was discarded.
     history_index: usize,
     op: Op,
     // The reason we discarded the operation
     reason: Error,
+}
+
+// Maps of [`SymbolicId`]s or symbolic wrapper types to the runtime values of
+// their dynamic types.
+//
+// Each `SymbolicId` has a 1:1 mapping to an instance of a concrete type. The
+// concrete instance value is unknown during the symbolic execution phase, and
+// will be filled in during dynamic execution, the first time it is encountered.
+// Each subsquent occurrence, the `SymbolicId` will refer to the same value as stored
+// in the `SymbolMap`. As such, every `SymbolicId` must map to an _immutable_ value.
+//
+// Values that are able to mutate are treated as "model" state as part of the
+// symbolic `Fleet` model, and not do not have corresponding [`SymbolicId`]s.
+// These model variables often contain `SymbolicId`s to simplify creation
+// of the model. The actual test runs fill in the actual values either via
+// a deterministic mechanism or by pulling from a pool of values like the
+// `TestPool`.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct SymbolMap {
+    pub ip_ranges: BTreeMap<SymbolicId, IpRange>,
+    pub sled_ids: BTreeMap<symbolic::SledUuid, SledUuid>,
+    pub disk_identities: BTreeMap<SymbolicId, DiskIdentity>,
+    pub disk_uuids: BTreeMap<SymbolicId, PhysicalDiskUuid>,
+}
+
+/// A pool of resources that symbolic tests can use to generate values
+/// for various concrete types.
+///
+/// Values are removed from the pool as they are used. They may also be added
+/// back when they are "freed", although this isn't done yet.
+///
+/// Note: Some values are copied from `SystemDescription` as used in our
+/// `ExampleSystem` for current tests, and others are just generated. We generate
+/// values ahead of time to make the tests deterministic, as the values in a pool
+/// do not matter for the reconfigurator.
+pub struct TestPool {
+    pub service_ip_pool_ranges: Vec<IpRange>,
+    pub disk_identities: Vec<DiskIdentity>,
+}
+
+impl TestPool {
+    pub fn new(num_sleds: usize) -> TestPool {
+        // IPs from TEST-NET-1 (RFC 5737)
+        let service_ip_pool_ranges = vec![IpRange::try_from((
+            "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
+            "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
+        ))
+        .unwrap()];
+
+        // Allocate a unique `DiskIdentity` for num_sleds * 10 disks/sled U.2
+        // disks
+        // TODO: Should probably do a deterministic UUID construction
+        // so we can add and remove infinite disks without running out.
+        let disk_identities = (0..10 * num_sleds)
+            .into_iter()
+            .map(|i| DiskIdentity {
+                vendor: "fake-vendor".to_string(),
+                model: "fake-model".to_string(),
+                serial: format!("serial-{i}"),
+            })
+            .collect();
+
+        TestPool { service_ip_pool_ranges, disk_identities }
+    }
 }
 
 #[cfg(test)]
@@ -148,8 +241,12 @@ mod test {
         let initial_fleet_description = FleetDescription::single_sled();
         let ops =
             vec![Op::AddSledToDbState { sled: SledUuid::new(id_gen.next()) }];
-        let mut harness =
-            TestHarness::new(id_gen, initial_fleet_description, ops);
+        let mut harness = TestHarness::new(
+            id_gen,
+            initial_fleet_description,
+            ops,
+            "basic_symbolic_sled_add",
+        );
 
         // The initial fleet has one sled that is in the db and has zones
         // deployed to the rack

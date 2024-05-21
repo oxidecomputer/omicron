@@ -4,30 +4,23 @@
 
 //! A mechanism used to generate symbolic representations of racks and
 //! operations on racks that can be useful for reconfigurator testing.
-//!
-//! The symbolic types in this module are self contained and are used to
-//! generate concrete implementations. In some cases the symbolic and concrete
-//! types may look exactly the same - especially in the case of simple enums.
-//! In the case that the concrete type changes  the symbolic type may also have
-//! to change. This should not happen frequently, and will easily be caught by
-//! tests if the change is breaking. If the change is additive, such as adding
-//! a new enum variant, this may not be noticed right away and the symbolic type
-//! needs to change only when a new test is written to utilize that variant.
-//! Otherwise the existing symbolic type will just generate the known concrete
-//! variants.
+
+use nexus_types::deployment::{PlanningInput, Policy};
+use nexus_types::external_api::views::{SledPolicy, SledState};
+use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 mod omicron_zones;
 mod ops;
 mod physical_disks;
 mod test_harness;
 
-pub use test_harness::TestHarness;
+pub use test_harness::{SymbolMap, TestHarness, TestPool};
 
 pub use omicron_zones::{
     OmicronZoneExternalIp, OmicronZoneExternalIpUuid,
-    OmicronZoneNetworkResources, OmicronZoneNic, OmicronZoneUuid, ZoneCount,
+    OmicronZoneNetworkResources, OmicronZoneNic, OmicronZoneUuid,
 };
 
 pub use physical_disks::{
@@ -37,10 +30,6 @@ pub use physical_disks::{
 
 pub use ops::Op;
 
-/// The number of IPs in a range
-type IpRangeSize = usize;
-
-const DEFAULT_IP_RANGE_SIZE: usize = 5;
 const SLOTS_PER_RACK: usize = 32;
 const MAX_DISKS_PER_SLED: usize = 10;
 
@@ -56,9 +45,9 @@ const MAX_DISKS_PER_SLED: usize = 10;
 pub struct FleetDescription {
     // We only support one rack right now
     num_racks: usize,
+    num_ip_ranges: usize,
     pub num_sleds: usize,
     pub num_nexus_zones: usize,
-    pub ip_ranges: Vec<IpRangeSize>,
 }
 
 impl FleetDescription {
@@ -72,21 +61,17 @@ impl FleetDescription {
             num_racks: 1,
             num_sleds: 1,
             num_nexus_zones: 1,
-            ip_ranges: vec![DEFAULT_IP_RANGE_SIZE],
+            num_ip_ranges: 1,
         }
     }
 
     fn policy(&self, id_gen: &mut SymbolicIdGenerator) -> FleetPolicy {
         FleetPolicy {
-            service_ip_pool_ranges: self
-                .ip_ranges
-                .iter()
-                .map(|size| IpRange { symbolic_id: id_gen.next(), size: *size })
-                .collect(),
-            target_nexus_zone_count: ZoneCount::new(
-                id_gen.next(),
-                self.num_nexus_zones,
-            ),
+            // We only support one range for now
+            service_ip_pool_ranges: vec![IpRange {
+                symbolic_id: id_gen.next(),
+            }],
+            target_nexus_zone_count: self.num_nexus_zones,
         }
     }
 
@@ -98,17 +83,12 @@ impl FleetDescription {
 
         for _ in 0..self.num_sleds {
             let zpools = sled_disks(MAX_DISKS_PER_SLED, id_gen);
-            let physical_disks = zpools
-                .iter()
-                .map(|(_, cp_disk)| cp_disk.disk_identity.clone())
-                .collect();
             sleds.insert(
                 SledUuid::new(id_gen.next()),
                 Sled {
-                    policy: SledPolicy::InServiceProvisionable,
+                    policy: SledPolicy::provisionable(),
                     state: SledState::Active,
                     resources: SledResources {
-                        physical_disks,
                         zpools,
                         subnet: SledSubnet::new(id_gen.next()),
                     },
@@ -125,6 +105,8 @@ impl FleetDescription {
         let network_resources = BTreeMap::new();
         let db_state = DbState {
             policy: self.policy(id_gen),
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
             sleds: sleds.clone(),
             zones: zones.clone(),
             network_resources: network_resources.clone(),
@@ -163,6 +145,16 @@ pub enum Error {
     NoSlotsAvailable,
     /// The same sled already exists in the db
     SledAlreadyPresent,
+}
+
+/// An error that results when trying to turn a symbolic type into a concrete
+/// type
+// TODO: thiserror
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReificationError {
+    SymbolAlreadyMapped(SymbolicId),
+    OutOfIpRanges,
+    OutOfDiskIdentities,
 }
 
 /// A symbolic representation of a Fleet at a given point in time
@@ -223,6 +215,9 @@ impl Fleet {
 pub struct DbState {
     pub policy: FleetPolicy,
 
+    pub internal_dns_version: Generation,
+    pub external_dns_version: Generation,
+
     // These are the control plane versions of what exist in `Rack`. `Rack` may
     // not be in sync until the blueprint gets "executed" using this information
     pub sleds: BTreeMap<SledUuid, Sled>,
@@ -238,9 +233,11 @@ impl DbState {
         self.sleds.len() < SLOTS_PER_RACK
     }
 
-    /// Add a sled to the db state. This maps to a sled being added by the operator
-    /// and then being announced to nexus over the underlay and stored in CRDB.
-    /// All present disks should be treated as adopted here.
+    /// Add a sled to the db state.
+
+    /// This maps to a sled being added by the operator  and then being
+    /// announced to nexus over the underlay and stored in CRDB. All present
+    /// physical disks should be treated as adopted by the control plane here.
     ///
     /// For now we use a full sled with 10 disks, but will allow flexibility
     /// here later.
@@ -254,18 +251,12 @@ impl DbState {
         }
 
         let zpools = sled_disks(MAX_DISKS_PER_SLED, id_gen);
-        let physical_disks = zpools
-            .iter()
-            .map(|(_, cp_disk)| cp_disk.disk_identity.clone())
-            .collect();
-
         self.sleds.insert(
             sled_id,
             Sled {
-                policy: SledPolicy::InServiceProvisionable,
+                policy: SledPolicy::provisionable(),
                 state: SledState::Active,
                 resources: SledResources {
-                    physical_disks,
                     zpools,
                     subnet: SledSubnet::new(id_gen.next()),
                 },
@@ -273,6 +264,17 @@ impl DbState {
         );
 
         Ok(())
+    }
+
+    /// Generate a concrete `PlanningInput` given a symbolic `DbState`
+    pub fn to_planning_input(
+        &self,
+        pool: &mut TestPool,
+        symbol_map: &mut SymbolMap,
+    ) -> Result<PlanningInput, ReificationError> {
+        let policy = self.policy.reify(pool, symbol_map)?;
+
+        todo!()
     }
 }
 
@@ -320,7 +322,26 @@ impl Enumerable for RackUuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FleetPolicy {
     pub service_ip_pool_ranges: Vec<IpRange>,
-    pub target_nexus_zone_count: ZoneCount,
+    pub target_nexus_zone_count: usize,
+}
+
+impl FleetPolicy {
+    /// Generate a [`nexus_types::deployment::Policy`] from a [`FleetPolicy`]
+    pub fn reify(
+        &self,
+        pool: &mut TestPool,
+        symbol_map: &mut SymbolMap,
+    ) -> Result<nexus_types::deployment::Policy, ReificationError> {
+        let mut service_ip_pool_ranges = vec![];
+        for range in &self.service_ip_pool_ranges {
+            let range = range.reify(pool, symbol_map)?;
+            service_ip_pool_ranges.push(range);
+        }
+        Ok(Policy {
+            service_ip_pool_ranges,
+            target_nexus_zone_count: self.target_nexus_zone_count,
+        })
+    }
 }
 
 /// An abstract type representing the size of something, where the absolute
@@ -370,22 +391,6 @@ pub trait Enumerable {
     fn symbolic_id(&self) -> SymbolicId;
 }
 
-/// Symbolic representation of a sled policy
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SledPolicy {
-    InServiceProvisionable,
-    InServiceNonProvisionable,
-    Expunged,
-}
-
-/// Symbolic representation of the actual state of a sled as reflected
-/// via the latest inventory collection.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SledState {
-    Active,
-    Decommissioned,
-}
-
 /// A symbolic representation of the sled's Ipv6 subnet on the underlay network
 #[derive(
     Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
@@ -413,7 +418,7 @@ impl Enumerable for SledSubnet {
 /// by a user, such as a physical disk being inserted into a sled, and not
 /// resources, such as `zones` that may be allocated to one or more sleds by
 /// the planner. The symbolic representation does not try to reproduce planner
-/// logic and therefore does not attempt pinpoint which sled  a resource is
+/// logic and therefore does not attempt pinpoint which sled a resource is
 /// deployed to when there are multiple possible choices. Instead, the resources
 /// themselves are tracked individually inside a `Rack` for now, and eventually
 /// perhaps a fleet if reconfigurator and DBs span fleets. The tracked resources
@@ -422,21 +427,8 @@ impl Enumerable for SledSubnet {
 /// and generates a `Blueprint`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    physical_disks: BTreeSet<DiskIdentity>,
-    /// All zpools must map to `physical_disks` in the above field
-    /// This is actually an example of an assertion that can be performed on
-    /// symbolic state.
     zpools: BTreeMap<ZpoolUuid, ControlPlanePhysicalDisk>,
     subnet: SledSubnet,
-}
-
-impl SledResources {
-    pub fn assert_invariants(&self) {
-        // Any adopted logical disk must match a physical disk in this sled
-        for (_, cp_disk) in &self.zpools {
-            assert!(self.physical_disks.contains(&cp_disk.disk_identity));
-        }
-    }
 }
 
 /// Symbolic representation of a sled at a given point in time
@@ -474,7 +466,33 @@ impl Enumerable for SledUuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpRange {
     symbolic_id: SymbolicId,
-    size: usize,
+}
+
+impl IpRange {
+    /// Return a concrete type that maps to this symbolic_id or an error if this
+    /// is not possible.
+    pub fn reify(
+        &self,
+        pool: &mut TestPool,
+        symbol_map: &mut SymbolMap,
+    ) -> Result<omicron_common::address::IpRange, ReificationError> {
+        // First lets check to see if we already have an allocation for this
+        // symbolic IpRange. If so, we'll just go ahead and return that.
+        if let Some(range) = symbol_map.ip_ranges.get(&self.symbolic_id) {
+            return Ok(range.clone());
+        }
+
+        // We don't already have an allocation. Attempt to get one from the
+        // pool if one exists, and return an error if not.
+        let range = pool
+            .service_ip_pool_ranges
+            .pop()
+            .ok_or(ReificationError::OutOfIpRanges)?;
+
+        // Save the range for later
+        symbol_map.ip_ranges.insert(self.symbolic_id, range.clone());
+        Ok(range)
+    }
 }
 
 impl Enumerable for IpRange {
@@ -482,11 +500,6 @@ impl Enumerable for IpRange {
         self.symbolic_id
     }
 }
-
-/// A symbolic representation of a `Generation` that can be incremented and
-/// compared.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Generation {}
 
 #[cfg(test)]
 mod test {

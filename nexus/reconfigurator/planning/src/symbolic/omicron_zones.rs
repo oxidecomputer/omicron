@@ -103,22 +103,3 @@ pub enum ZoneType {
     Nexus,
     Oximeter,
 }
-
-/// A symbolic version of the number of given types of zone
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZoneCount {
-    symbolic_id: SymbolicId,
-    val: usize,
-}
-
-impl ZoneCount {
-    pub fn new(symbolic_id: SymbolicId, val: usize) -> ZoneCount {
-        ZoneCount { symbolic_id, val }
-    }
-}
-
-impl Enumerable for ZoneCount {
-    fn symbolic_id(&self) -> SymbolicId {
-        self.symbolic_id
-    }
-}

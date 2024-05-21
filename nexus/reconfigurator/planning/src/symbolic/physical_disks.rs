@@ -4,8 +4,13 @@
 
 //! Symbolic representations of physical disks
 
-use super::{Enumerable, SymbolicId, SymbolicIdGenerator};
+use super::{
+    Enumerable, ReificationError, SymbolMap, SymbolicId, SymbolicIdGenerator,
+    TestPool,
+};
+use omicron_uuid_kinds::PhysicalDiskKind;
 use serde::{Deserialize, Serialize};
+use typed_rng::TypedUuidRng;
 
 /// A symbolic representation of a `DiskIdentity`
 #[derive(
@@ -18,6 +23,28 @@ pub struct DiskIdentity {
 impl DiskIdentity {
     pub fn new(symbolic_id: SymbolicId) -> Self {
         DiskIdentity { symbolic_id }
+    }
+
+    pub fn reify(
+        &self,
+        pool: &mut TestPool,
+        symbol_map: &mut SymbolMap,
+    ) -> Result<omicron_common::disk::DiskIdentity, ReificationError> {
+        // Check to see if we have a cached value
+        if let Some(disk_id) = symbol_map.disk_identities.get(&self.symbolic_id)
+        {
+            return Ok(disk_id.clone());
+        }
+
+        // Get a new value from the pool if possible.
+        let disk_id = pool
+            .disk_identities
+            .pop()
+            .ok_or(ReificationError::OutOfDiskIdentities)?;
+
+        // Save for later
+        symbol_map.disk_identities.insert(self.symbolic_id, disk_id.clone());
+        Ok(disk_id)
     }
 }
 
@@ -38,6 +65,17 @@ pub struct PhysicalDiskUuid {
 impl PhysicalDiskUuid {
     fn new(symbolic_id: SymbolicId) -> Self {
         PhysicalDiskUuid { symbolic_id }
+    }
+
+    pub fn reify(
+        &self,
+        symbol_map: &mut SymbolMap,
+        rng: &mut TypedUuidRng<PhysicalDiskKind>,
+    ) -> omicron_uuid_kinds::PhysicalDiskUuid {
+        match symbol_map.disk_uuids.get(&self.symbolic_id) {
+            Some(uuid) => *uuid,
+            None => rng.next(),
+        }
     }
 }
 
