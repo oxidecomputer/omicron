@@ -11,6 +11,7 @@ use omicron_common::address::IpRange;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::{
     OmicronZoneKind, PhysicalDiskKind, PhysicalDiskUuid, SledKind, SledUuid,
+    ZpoolKind, ZpoolUuid,
 };
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,7 @@ pub struct TestHarnessRng {
     pub sled_rng: TypedUuidRng<SledKind>,
     pub zone_rng: TypedUuidRng<OmicronZoneKind>,
     pub physical_disks_rng: TypedUuidRng<PhysicalDiskKind>,
+    pub zpool_rng: TypedUuidRng<ZpoolKind>,
 }
 
 impl TestHarnessRng {
@@ -40,6 +42,7 @@ impl TestHarnessRng {
                 &mut parent,
                 "physical disks",
             ),
+            zpool_rng: TypedUuidRng::from_parent_rng(&mut parent, "zpools"),
         }
     }
 }
@@ -196,6 +199,7 @@ pub struct SymbolMap {
     pub sled_ids: BTreeMap<symbolic::SledUuid, SledUuid>,
     pub disk_identities: BTreeMap<SymbolicId, DiskIdentity>,
     pub disk_uuids: BTreeMap<SymbolicId, PhysicalDiskUuid>,
+    pub zpool_uuids: BTreeMap<SymbolicId, ZpoolUuid>,
 }
 
 /// A pool of resources that symbolic tests can use to generate values

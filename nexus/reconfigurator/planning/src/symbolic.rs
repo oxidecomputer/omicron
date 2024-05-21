@@ -235,13 +235,13 @@ impl DbState {
     }
 
     /// Add a sled to the db state.
-
-    /// This maps to a sled being added by the operator  and then being
+    ///
+    /// This maps to a sled being added by the operator and then being
     /// announced to nexus over the underlay and stored in CRDB. All present
     /// physical disks should be treated as adopted by the control plane here.
     ///
     /// For now we use a full sled with 10 disks, but will allow flexibility
-    /// here later.
+    /// here in the future.
     pub fn add_sled(
         &mut self,
         sled_id: SledUuid,

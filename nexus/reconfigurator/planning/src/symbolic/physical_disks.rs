@@ -9,7 +9,7 @@ use super::{
     SymbolicId, SymbolicIdGenerator, TestPool,
 };
 use nexus_types::external_api::views::{PhysicalDiskPolicy, PhysicalDiskState};
-use omicron_uuid_kinds::PhysicalDiskKind;
+use omicron_uuid_kinds::{PhysicalDiskKind, ZpoolKind};
 use serde::{Deserialize, Serialize};
 use typed_rng::TypedUuidRng;
 
@@ -134,6 +134,17 @@ pub struct ZpoolUuid {
 impl ZpoolUuid {
     pub fn new(symbolic_id: SymbolicId) -> ZpoolUuid {
         ZpoolUuid { symbolic_id }
+    }
+
+    pub fn reify(
+        &self,
+        symbol_map: &mut SymbolMap,
+        rng: &mut TypedUuidRng<ZpoolKind>,
+    ) -> omicron_uuid_kinds::ZpoolUuid {
+        match symbol_map.zpool_uuids.get(&self.symbolic_id) {
+            Some(uuid) => *uuid,
+            None => rng.next(),
+        }
     }
 }
 
