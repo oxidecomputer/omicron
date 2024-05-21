@@ -125,6 +125,7 @@ mod test {
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneType, BlueprintZonesConfig,
     };
+    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::GenericUuid;
@@ -147,6 +148,12 @@ mod test {
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
+        // Assume all sleds are active.
+        let sled_state = blueprint_zones
+            .keys()
+            .copied()
+            .map(|sled_id| (sled_id, SledState::Active))
+            .collect::<BTreeMap<_, _>>();
         (
             BlueprintTarget {
                 target_id: id,
@@ -157,6 +164,7 @@ mod test {
                 id,
                 blueprint_zones,
                 blueprint_disks,
+                sled_state,
                 cockroachdb_setting_preserve_downgrade: None,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_version,
@@ -172,7 +180,7 @@ mod test {
     #[nexus_test(server = crate::Server)]
     async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
         // Set up the test.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),

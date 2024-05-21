@@ -393,7 +393,7 @@ async fn test_cannot_mount_import_ready_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -424,7 +424,7 @@ async fn test_cannot_mount_import_from_bulk_writes_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -448,7 +448,7 @@ async fn test_import_blocks_with_bulk_write(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -489,7 +489,7 @@ async fn test_import_blocks_with_bulk_write_with_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -732,7 +732,7 @@ async fn test_cannot_bulk_write_start_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -762,7 +762,7 @@ async fn test_cannot_bulk_write_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -792,7 +792,7 @@ async fn test_cannot_bulk_write_stop_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -821,7 +821,7 @@ async fn test_cannot_finalize_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;

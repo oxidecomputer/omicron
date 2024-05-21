@@ -450,13 +450,16 @@ impl Sled {
         hardware_slot: u16,
         nzpools: u8,
     ) -> Sled {
+        use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
+        let mut zpool_rng =
+            TypedUuidRng::from_seed("SystemSimultatedSled", "ZpoolUuid");
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
-                let zpool = ZpoolUuid::new_v4();
+                let zpool = ZpoolUuid::from(zpool_rng.next());
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: String::from("fake-vendor"),

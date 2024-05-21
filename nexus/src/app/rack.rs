@@ -790,11 +790,11 @@ impl super::Nexus {
             .await?
         {
             SledUnderlayAllocationResult::New(allocation) => allocation,
-            SledUnderlayAllocationResult::Existing(allocation) => {
+            SledUnderlayAllocationResult::CommissionedSled(allocation) => {
                 return Err(Error::ObjectAlreadyExists {
                     type_name: ResourceType::Sled,
                     object_name: format!(
-                        "{} / {} ({})",
+                        "{} ({}): {}",
                         sled.serial, sled.part, allocation.sled_id
                     ),
                 });

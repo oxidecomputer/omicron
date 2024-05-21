@@ -6,6 +6,7 @@
 //! (most of) the rack setup configuration.
 
 use omicron_common::address::IpRange;
+use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use serde::Serialize;
@@ -98,6 +99,11 @@ impl TomlTemplate {
             );
         }
 
+        populate_allowed_source_ips(
+            &mut doc,
+            config.allowed_source_ips.as_ref(),
+        );
+
         *doc.get_mut("bootstrap_sleds").unwrap().as_array_mut().unwrap() =
             build_sleds_array(&config.bootstrap_sleds);
 
@@ -108,6 +114,53 @@ impl TomlTemplate {
 
         Self { doc }
     }
+}
+
+// Populate the allowed source IP list, which can be specified as a specified as
+// a string "any" or a list of IP addresses.
+fn populate_allowed_source_ips(
+    doc: &mut DocumentMut,
+    allowed_source_ips: Option<&AllowedSourceIps>,
+) {
+    const ALLOWLIST_COMMENT: &str = r#"
+# Allowlist of source IPs that can make requests to user-facing services.
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
+# Use the below two lines to only allow requests from the specified IP subnets.
+# Requests from any other source IPs are refused. Note that individual addresses
+# must include the netmask, e.g., "1.2.3.4/32".
+#
+# allow = "list"
+# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+"#;
+
+    let mut table = toml_edit::Table::new();
+    table.decor_mut().set_prefix(ALLOWLIST_COMMENT);
+    match allowed_source_ips {
+        None | Some(AllowedSourceIps::Any) => {
+            table.insert(
+                "allow",
+                Item::Value(Value::String(Formatted::new("any".to_string()))),
+            );
+        }
+        Some(AllowedSourceIps::List(list)) => {
+            let entries = list
+                .iter()
+                .map(|ip| Value::String(Formatted::new(ip.to_string())))
+                .collect();
+            table.insert(
+                "allow",
+                Item::Value(Value::String(Formatted::new("list".to_string()))),
+            );
+            table.insert("ips", Item::Value(Value::Array(entries)));
+        }
+    }
+    doc.insert("allowed_source_ips", Item::Table(table)).unwrap();
 }
 
 impl fmt::Display for TomlTemplate {

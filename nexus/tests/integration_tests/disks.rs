@@ -191,7 +191,7 @@ async fn test_disk_create_attach_detach_delete(
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_project_and_pool(client).await;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -365,7 +365,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     let disk_names = ["a", "b", "c", "d"];
     let mut disks = Vec::new();
@@ -391,7 +391,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
         get_disk_attach_url(&instance.identity.id.into());
 
     async fn get_disk_slot(ctx: &ControlPlaneTestContext, disk_id: Uuid) -> u8 {
-        let apictx = &ctx.server.apictx();
+        let apictx = &ctx.server.server_context();
         let nexus = &apictx.nexus;
         let datastore = nexus.datastore();
         let opctx =
@@ -469,7 +469,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
     let disks_url = get_disks_url();
@@ -1043,7 +1043,7 @@ async fn test_disk_virtual_provisioning_collection(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let _test = DiskTest::new(&cptestctx).await;
@@ -1251,7 +1251,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
 ) {
     // Confirm that there's no panic deleting a project if a disk deletion fails
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let disk_test = DiskTest::new(&cptestctx).await;
@@ -1391,7 +1391,7 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
     // faulted
 
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let _disk_test = DiskTest::new(&cptestctx).await;
@@ -1512,7 +1512,7 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     // Create three 10 GiB zpools, each with one dataset.
@@ -1973,7 +1973,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
     // Call project_delete_disk_no_auth twice, ensuring that the disk is either
     // there before deleting and not afterwards.
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2013,7 +2013,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
 // Test allocating a single region
 #[nexus_test]
 async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2085,7 +2085,7 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
 async fn test_region_allocation_strategy_random_is_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2152,7 +2152,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2208,7 +2208,7 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
 async fn test_single_region_allocate_for_replace(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2297,7 +2297,7 @@ async fn test_single_region_allocate_for_replace(
 async fn test_single_region_allocate_for_replace_not_enough_zpools(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2387,7 +2387,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
 async fn test_region_allocation_after_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());

@@ -90,6 +90,11 @@ pub enum BuildCommand {
     },
     /// Make a `dot` graph to visualize the package tree
     Dot,
+    /// List the output packages for the current target
+    ListOutputs {
+        #[clap(long)]
+        intermediate: bool,
+    },
     /// Builds the packages specified in a manifest, and places them into an
     /// 'out' directory.
     Package {

@@ -5,6 +5,9 @@ edition = "2021"
 description = "The oximeter metric collection server"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true

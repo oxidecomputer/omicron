@@ -53,7 +53,7 @@ mod test {
     async fn test_ensure_preserve_downgrade_option(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(

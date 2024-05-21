@@ -233,7 +233,7 @@ mod test {
         let read_cfg = SetupServiceConfig::from_file(&cfg_path)
             .expect("failed to read generated config with certificate");
         assert_eq!(read_cfg.external_certificates.len(), 1);
-        let cert = read_cfg.external_certificates.iter().next().unwrap();
+        let cert = read_cfg.external_certificates.first().unwrap();
         let _ = rcgen::KeyPair::from_pem(&cert.key)
             .expect("generated PEM did not parse as KeyPair");
     }

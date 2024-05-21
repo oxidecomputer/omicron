@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
@@ -45,7 +46,12 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct NexusArgs {
     /// URL of the Nexus internal API
-    #[clap(long, env("OMDB_NEXUS_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_NEXUS_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     nexus_internal_url: Option<String>,
 
     #[command(subcommand)]
@@ -889,8 +895,95 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "instance_watcher" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// total number of instances checked
+            total_instances: usize,
+
+            /// number of stale instance metrics that were deleted
+            pruned_instances: usize,
+
+            /// instance states from completed checks.
+            ///
+            /// this is a mapping of stringified instance states to the number
+            /// of instances in that state. these stringified states correspond
+            /// to the `state` field recorded by the instance watcher's
+            /// `virtual_machine:check` timeseries with the `healthy` field set
+            /// to `true`. any changes to the instance state type which cause it
+            /// to print differently will be counted as a distinct state.
+            instance_states: BTreeMap<String, usize>,
+
+            /// instance check failures.
+            ///
+            /// this is a mapping of stringified instance check failure reasons
+            /// to the number of instances with checks that failed for that
+            /// reason. these stringified  failure reasons correspond to the
+            /// `state` field recorded by the instance watcher's
+            /// `virtual_machine:check` timeseries with the `healthy` field set
+            /// to `false`. any changes to the instance state type which cause
+            /// it to print differently will be counted as a distinct failure
+            /// reason.
+            failed_checks: BTreeMap<String, usize>,
+
+            /// instance checks that could not be completed successfully.
+            ///
+            /// this is a mapping of stringified instance check errors
+            /// to the number of instance checks that were not completed due to
+            /// that error. these stringified errors correspond to the `reason `
+            /// field recorded by the instance watcher's
+            /// `virtual_machine:incomplete_check` timeseries. any changes to
+            /// the check error type which cause it to print
+            /// differently will be counted as a distinct check error.
+            incomplete_checks: BTreeMap<String, usize>,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(TaskSuccess {
+                total_instances,
+                pruned_instances,
+                instance_states,
+                failed_checks,
+                incomplete_checks,
+            }) => {
+                let total_successes: usize = instance_states.values().sum();
+                let total_failures: usize = failed_checks.values().sum();
+                let total_incomplete: usize = incomplete_checks.values().sum();
+                println!("    total instances checked: {total_instances}",);
+                println!(
+                    "    checks completed: {}",
+                    total_successes + total_failures
+                );
+                println!("       successful checks: {total_successes}",);
+                for (state, count) in &instance_states {
+                    println!("       -> {count} instances {state}")
+                }
+
+                println!("       failed checks: {total_failures}");
+                for (failure, count) in &failed_checks {
+                    println!("       -> {count} {failure}")
+                }
+                println!(
+                    "    checks that could not be completed: {total_incomplete}",
+                );
+                for (error, count) in &incomplete_checks {
+                    println!("       -> {count} {error} errors")
+                }
+                println!(
+                    "    stale instance metrics pruned: {pruned_instances}"
+                );
+            }
+        };
     } else if name == "service_firewall_rule_propagation" {
         match serde_json::from_value::<serde_json::Value>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
             Ok(serde_json::Value::Object(map)) => {
                 if !map.is_empty() {
                     eprintln!(
@@ -902,11 +995,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             Ok(val) => {
                 eprintln!("    unexpected return value from task: {:?}", val)
             }
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-        }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -1082,7 +1171,7 @@ async fn cmd_nexus_blueprints_diff(
         args.blueprint2_id.resolve_to_blueprint(client),
     )
     .await?;
-    let diff = b2.diff_since_blueprint(&b1).context("diffing blueprints")?;
+    let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     Ok(())
 }

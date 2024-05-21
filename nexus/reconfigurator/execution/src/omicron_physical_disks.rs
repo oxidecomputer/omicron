@@ -136,6 +136,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks,
+                sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade: None,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
@@ -150,7 +151,7 @@ mod test {
 
     #[nexus_test]
     async fn test_deploy_omicron_disks(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),

@@ -131,8 +131,9 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let sled_rows =
-            datastore.sled_list_all_batched(opctx, SledFilter::All).await?;
+        let sled_rows = datastore
+            .sled_list_all_batched(opctx, SledFilter::Commissioned)
+            .await?;
         let zpool_rows =
             datastore.zpool_list_all_external_batched(opctx).await?;
         let ip_pool_range_rows = {
