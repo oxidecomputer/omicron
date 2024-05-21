@@ -1684,6 +1684,58 @@ impl DataStore {
 
         Ok(out)
     }
+
+    /// Trigger an RPW version bump on a single VPC router in response
+    /// to CRUD operations on individual routes.
+    pub async fn vpc_router_increment_rpw_version(
+        &self,
+        opctx: &OpContext,
+        authz_router: &authz::VpcRouter,
+    ) -> UpdateResult<()> {
+        opctx.authorize(authz::Action::Modify, authz_router).await?;
+
+        use db::schema::vpc_router::dsl;
+        diesel::update(dsl::vpc_router)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_router.id()))
+            .set(dsl::resolved_version.eq(dsl::resolved_version + 1))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_router),
+                )
+            })?;
+
+        Ok(())
+    }
+
+    /// Trigger an RPW version bump on all routers within a VPC in
+    /// response to changes to named entities (e.g., subnets, instances).
+    pub async fn vpc_increment_rpw_version(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+    ) -> UpdateResult<()> {
+        opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
+
+        use db::schema::vpc_router::dsl;
+        diesel::update(dsl::vpc_router)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
+            .set(dsl::resolved_version.eq(dsl::resolved_version + 1))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_vpc),
+                )
+            })?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

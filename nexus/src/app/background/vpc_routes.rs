@@ -192,7 +192,7 @@ impl BackgroundTask for VpcRouteManager {
                     let Some(db_router) = db_routers.get(&set.id) else {
                         // The sled wants to know about rules for a VPC
                         // subnet with no custom router set. Send them
-                        // the empty list, unset its table version.
+                        // the empty list, and unset its table version.
                         set_rules(set.id, None, HashSet::new());
                         continue;
                     };
@@ -203,12 +203,11 @@ impl BackgroundTask for VpcRouteManager {
                         router_id,
                     };
 
-                    // Only attempt to resolve/push a ruleset if we have a different
-                    // router ID than the sled, or a higher version number.
+                    // Only attempt to resolve/push a ruleset if we have a
+                    // different router ID than the sled, or a higher version
+                    // number.
                     match &set.version {
-                        Some(v)
-                            if v.router_id == router_id
-                                && v.generation >= version.generation =>
+                        Some(v) if !v.is_replaced_by(&version) =>
                         {
                             continue;
                         }

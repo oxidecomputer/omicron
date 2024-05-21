@@ -56,6 +56,7 @@ progenitor::generate_api!(
         ReifiedVpcRoute = omicron_common::api::internal::shared::ReifiedVpcRoute,
         ReifiedVpcRouteSet = omicron_common::api::internal::shared::ReifiedVpcRouteSet,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
+        RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         Vni = omicron_common::api::external::Vni,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
