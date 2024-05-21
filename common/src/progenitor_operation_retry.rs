@@ -53,14 +53,13 @@ pub struct ProgenitorOperationRetry<
     gone_check: BF,
 }
 
-impl<
-        T,
+impl<T, E, F, Fut, BF, BFut> ProgenitorOperationRetry<T, E, F, Fut, BF, BFut>
+where
         E: std::fmt::Debug,
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
         BF: FnMut() -> BFut,
         BFut: Future<Output = Result<bool, Error>>,
-    > ProgenitorOperationRetry<T, E, F, Fut, BF, BFut>
 {
     pub fn new(operation: F, gone_check: BF) -> Self {
         Self { operation, gone_check }

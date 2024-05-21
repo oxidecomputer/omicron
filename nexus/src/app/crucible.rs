@@ -127,18 +127,14 @@ impl super::Nexus {
 
                         ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                             crucible_agent_client::Error::ErrorResponse(rv) => {
-                                match rv.status() {
-                                    status if status.is_client_error() => {
-                                        Err(BackoffError::Permanent(WaitError::Permanent(
-                                            Error::invalid_request(&rv.message)
-                                        )))
-                                    }
-
-                                    _ => {
-                                        Err(BackoffError::Permanent(WaitError::Permanent(
-                                            Error::internal_error(&rv.message)
-                                        )))
-                                    }
+                                if rv.status.is_client_error() {
+                                    Err(BackoffError::Permanent(WaitError::Permanent(
+                                        Error::invalid_request(&rv.message)
+                                    )))
+                                } else {
+                                    Err(BackoffError::Permanent(WaitError::Permanent(
+                                        Error::internal_error(&rv.message)
+                                    )))
                                 }
                             }
 
@@ -321,14 +317,11 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            match rv.status() {
-                                status if status.is_client_error() => {
-                                    Err(Error::invalid_request(&rv.message))
-                                }
-
-                                _ => {
-                                    Err(Error::internal_error(&rv.message))
-                                }
+                            if rv.status().is_client_error() => {
+                                Err(Error::invalid_request(&rv.message))
+                            } else {
+                                Err(Error::internal_error(&rv.message))
+                            }
                             }
                         }
 
@@ -389,14 +382,10 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            match rv.status() {
-                                status if status.is_client_error() => {
-                                    Err(Error::invalid_request(&rv.message))
-                                }
-
-                                _ => {
-                                    Err(Error::internal_error(&rv.message))
-                                }
+                            if rv.status().is_client_error() => {
+                                Err(Error::invalid_request(&rv.message))
+                            } else {
+                                Err(Error::internal_error(&rv.message))
                             }
                         }
 
@@ -464,14 +453,10 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            match rv.status() {
-                                status if status.is_client_error() => {
-                                    Err(Error::invalid_request(&rv.message))
-                                }
-
-                                _ => {
-                                    Err(Error::internal_error(&rv.message))
-                                }
+                            if rv.status().is_client_error() => {
+                                Err(Error::invalid_request(&rv.message))
+                            } else {
+                                Err(Error::internal_error(&rv.message))
                             }
                         }
 
@@ -539,14 +524,10 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            match rv.status() {
-                                status if status.is_client_error() => {
-                                    Err(Error::invalid_request(&rv.message))
-                                }
-
-                                _ => {
-                                    Err(Error::internal_error(&rv.message))
-                                }
+                            if rv.status().is_client_error() => {
+                                Err(Error::invalid_request(&rv.message))
+                            } else {
+                                Err(Error::internal_error(&rv.message))
                             }
                         }
 
@@ -583,17 +564,12 @@ impl super::Nexus {
                 return Ok(());
             }
 
-            Err(e) => match e {
-                Error::Gone => {
-                    // Return Ok if the dataset's agent is gone, no delete call
-                    // is required.
-                    return Ok(());
-                }
 
-                _ => {
-                    return Err(e);
-                }
-            },
+            // Return Ok if the dataset's agent is gone, no delete call
+            // is required.
+            Err(Error::Gone) => return Ok(()),
+            
+            Err(e) => return Err(e),
         }
 
         // Past here, the region exists (or existed at some point): ensure it is
@@ -622,17 +598,11 @@ impl super::Nexus {
 
                     Ok(Some(v)) => Ok(v),
 
-                    Err(e) => match e {
-                        Error::Gone => {
-                            // Return Ok if the dataset's agent is gone, no
-                            // delete call is required.
-                            return Ok(());
-                        }
-
-                        _ => {
-                            Err(BackoffError::Permanent(WaitError::Permanent(e)))
-                        }
-                    }
+                    // Return Ok if the dataset's agent is gone, no
+                    // delete call is required.
+                    Err(Error::Gone) => return Ok(()),
+                    
+                    Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
                 }?;
 
                 match region.state {
@@ -707,17 +677,10 @@ impl super::Nexus {
                 )
                 .await {
                     Ok(v) => Ok(v),
-                    Err(e) => match e {
-                        Error::Gone => {
-                            // Return Ok if the dataset's agent is gone, no
-                            // delete call is required.
-                            return Ok(());
-                        }
-
-                        _ => {
-                            Err(BackoffError::Permanent(WaitError::Permanent(e)))
-                        }
-                    }
+                    // Return Ok if the dataset's agent is gone, no
+                    // delete call is required.
+                    Err(Error::Gone) => return Ok(()),
+                    Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
                 }?;
 
                 match response.running_snapshots.get(&snapshot_id.to_string()) {
@@ -850,17 +813,13 @@ impl super::Nexus {
                 {
                     Ok(v) => Ok(v),
 
-                    Err(e) => match e {
-                        Error::Gone => {
-                            // Return Ok if the dataset's agent is gone, no
-                            // delete call is required.
-                            return Ok(());
-                        }
-
-                        _ => Err(BackoffError::Permanent(
-                            WaitError::Permanent(e),
-                        )),
-                    },
+                    // Return Ok if the dataset's agent is gone, no
+                    // delete call is required.
+                    Err(Error::Gone) => return Ok(()),
+                    
+                    Err(e) => Err(BackoffError::Permanent(
+                         WaitError::Permanent(e),
+                    )),
                 }?;
 
                 if response
