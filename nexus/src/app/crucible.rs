@@ -127,7 +127,7 @@ impl super::Nexus {
 
                         ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                             crucible_agent_client::Error::ErrorResponse(rv) => {
-                                if rv.status.is_client_error() {
+                                if rv.status().is_client_error() {
                                     Err(BackoffError::Permanent(WaitError::Permanent(
                                         Error::invalid_request(&rv.message)
                                     )))
@@ -317,11 +317,10 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() => {
+                            if rv.status().is_client_error() {
                                 Err(Error::invalid_request(&rv.message))
                             } else {
                                 Err(Error::internal_error(&rv.message))
-                            }
                             }
                         }
 
@@ -382,7 +381,7 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() => {
+                            if rv.status().is_client_error() {
                                 Err(Error::invalid_request(&rv.message))
                             } else {
                                 Err(Error::internal_error(&rv.message))
@@ -453,7 +452,7 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() => {
+                            if rv.status().is_client_error() {
                                 Err(Error::invalid_request(&rv.message))
                             } else {
                                 Err(Error::internal_error(&rv.message))
@@ -524,7 +523,7 @@ impl super::Nexus {
 
                     ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() => {
+                            if rv.status().is_client_error() {
                                 Err(Error::invalid_request(&rv.message))
                             } else {
                                 Err(Error::internal_error(&rv.message))
@@ -564,11 +563,10 @@ impl super::Nexus {
                 return Ok(());
             }
 
-
             // Return Ok if the dataset's agent is gone, no delete call
             // is required.
             Err(Error::Gone) => return Ok(()),
-            
+
             Err(e) => return Err(e),
         }
 
@@ -601,7 +599,7 @@ impl super::Nexus {
                     // Return Ok if the dataset's agent is gone, no
                     // delete call is required.
                     Err(Error::Gone) => return Ok(()),
-                    
+
                     Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
                 }?;
 
@@ -677,9 +675,11 @@ impl super::Nexus {
                 )
                 .await {
                     Ok(v) => Ok(v),
+
                     // Return Ok if the dataset's agent is gone, no
                     // delete call is required.
                     Err(Error::Gone) => return Ok(()),
+
                     Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
                 }?;
 
@@ -816,10 +816,10 @@ impl super::Nexus {
                     // Return Ok if the dataset's agent is gone, no
                     // delete call is required.
                     Err(Error::Gone) => return Ok(()),
-                    
-                    Err(e) => Err(BackoffError::Permanent(
-                         WaitError::Permanent(e),
-                    )),
+
+                    Err(e) => {
+                        Err(BackoffError::Permanent(WaitError::Permanent(e)))
+                    }
                 }?;
 
                 if response
