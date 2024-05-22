@@ -430,7 +430,7 @@ task: "metrics_producer_gc"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED        TIMESTAMP>"), "pruned": Array []})
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every 30s

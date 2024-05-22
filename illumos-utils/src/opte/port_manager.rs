@@ -60,6 +60,7 @@ const XDE_LINK_PREFIX: &str = "opte";
 struct RouteSet {
     version: Option<RouterVersion>,
     routes: HashSet<ReifiedVpcRoute>,
+    active_ports: usize,
 }
 
 #[derive(Debug)]
@@ -76,9 +77,6 @@ struct PortManagerInner {
     // (which includes the Uuid of the parent instance or service)
     ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
 
-    // XX: Should this be the UUID of the VPC? The rulesets are
-    //     arguably shared v4+v6, although today we don't yet
-    //     allow dual-stack, let alone v6.
     // Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
 }
@@ -380,12 +378,9 @@ impl PortManager {
             (port, ticket)
         };
 
-        // XX: need to delete safely after all subnet-holders leave
-        //     to not get flooded with useless rules.
         let mut routes = self.inner.routes.lock().unwrap();
-        let system_routes = routes
-            .entry(RouterId { vni: nic.vni, subnet: None })
-            .or_insert_with(|| {
+        let system_routes =
+            routes.entry(port.system_router_key()).or_insert_with(|| {
                 let mut routes = HashSet::new();
 
                 // Services do not talk to one another via OPTE, but do need
@@ -402,16 +397,20 @@ impl PortManager {
                     });
                 }
 
-                RouteSet { version: None, routes }
-            })
-            .clone();
+                RouteSet { version: None, routes, active_ports: 0 }
+            });
+        system_routes.active_ports += 1;
+        // Needed to get borrowck on our side, sadly.
+        let system_routes = system_routes.clone();
 
         let custom_routes = routes
-            .entry(RouterId { vni: nic.vni, subnet: Some(nic.subnet) })
+            .entry(port.custom_router_key())
             .or_insert_with(|| RouteSet {
                 version: None,
                 routes: HashSet::default(),
+                active_ports: 0,
             });
+        custom_routes.active_ports += 1;
 
         for (class, routes) in [
             (RouterClass::System, &system_routes),
@@ -460,11 +459,16 @@ impl PortManager {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
         for set in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(old) = routes.get(&set.id) else {
+                continue;
+            };
+
             // We have to handle subnet router changes, as well as
             // spurious updates from multiple Nexus instances.
             // If there's a UUID match, only update if vers increased,
             // otherwise take the update verbatim (including loss of version).
-            let (to_add, to_delete) = if let Some(old) = routes.get(&set.id) {
+            let (to_add, to_delete): (HashSet<_>, HashSet<_>) =
                 match (old.version, set.version) {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
@@ -475,30 +479,29 @@ impl PortManager {
                         set.routes.difference(&old.routes).cloned().collect(),
                         old.routes.difference(&set.routes).cloned().collect(),
                     ),
-                }
-            } else {
-                (set.routes.clone(), HashSet::new())
-            };
+                };
             deltas.insert(set.id, (to_add, to_delete));
 
+            let active_ports = old.active_ports;
             routes.insert(
                 set.id,
-                RouteSet { version: set.version, routes: set.routes },
+                RouteSet {
+                    version: set.version,
+                    routes: set.routes,
+                    active_ports,
+                },
             );
         }
-        drop(routes);
 
         let ports = self.inner.ports.lock().unwrap();
         #[cfg(target_os = "illumos")]
         let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
 
         for port in ports.values() {
-            let vni = external::Vni::try_from(port.vni().as_u32()).unwrap();
-            let system_id = RouterId { vni, subnet: None };
+            let system_id = port.system_router_key();
             let system_delta = deltas.get(&system_id);
 
-            let custom_id = RouterId { vni, subnet: Some(*port.subnet()) };
-
+            let custom_id = port.custom_router_key();
             let custom_delta = deltas.get(&custom_id);
 
             #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
@@ -821,6 +824,29 @@ impl PortTicket {
             );
             return Err(Error::ReleaseMissingPort(self.id, self.kind));
         };
+        drop(ports);
+
+        // Cleanup the set of subnets we want to receive routes for.
+        let mut routes = self.manager.routes.lock().unwrap();
+        for key in [port.system_router_key(), port.custom_router_key()] {
+            let should_remove = routes
+                .get_mut(&key)
+                .map(|v| {
+                    v.active_ports = v.active_ports.saturating_sub(1);
+                    v.active_ports == 0
+                })
+                .unwrap_or_default();
+
+            if should_remove {
+                routes.remove(&key);
+                info!(
+                    self.manager.log,
+                    "Removed route set for subnet";
+                    "id" => ?&key,
+                );
+            }
+        }
+
         debug!(
             self.manager.log,
             "Removed OPTE port from manager";

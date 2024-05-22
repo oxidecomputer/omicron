@@ -7,7 +7,9 @@
 use crate::opte::Gateway;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
+use omicron_common::api::external;
 use omicron_common::api::external::IpNet;
+use omicron_common::api::internal::shared::RouterId;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -133,5 +135,15 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
+    }
+
+    pub fn system_router_key(&self) -> RouterId {
+        // Unwrap safety: both of these VNI types represent validated u24s.
+        let vni = external::Vni::try_from(self.vni().as_u32()).unwrap();
+        RouterId { vni, subnet: None }
+    }
+
+    pub fn custom_router_key(&self) -> RouterId {
+        RouterId { subnet: Some(*self.subnet()), ..self.system_router_key() }
     }
 }
