@@ -960,14 +960,16 @@ impl ServicePortBuilder {
         let external_dns_ips = config.external_dns_ips.clone().into_iter();
 
         let dns_v4_ips = Box::new(
-            DNS_OPTE_IPV4_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            DNS_OPTE_IPV4_SUBNET
+                .addr_iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let dns_v6_ips = Box::new(
             DNS_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let nexus_v4_ips = Box::new(
             NEXUS_OPTE_IPV4_SUBNET
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let nexus_v6_ips = Box::new(
@@ -976,7 +978,9 @@ impl ServicePortBuilder {
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let ntp_v4_ips = Box::new(
-            NTP_OPTE_IPV4_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            NTP_OPTE_IPV4_SUBNET
+                .addr_iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let ntp_v6_ips = Box::new(
             NTP_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),

@@ -1291,22 +1291,22 @@ mod test {
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let external_dns_id = OmicronZoneUuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp1_pip = NTP_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let ntp1_id = OmicronZoneUuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp2_pip = NTP_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
         let ntp2_id = OmicronZoneUuid::new_v4();
         let ntp3_id = OmicronZoneUuid::new_v4();
@@ -1627,10 +1627,10 @@ mod test {
         let nexus_id1 = OmicronZoneUuid::new_v4();
         let nexus_id2 = OmicronZoneUuid::new_v4();
         let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
@@ -1899,7 +1899,7 @@ mod test {
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
@@ -1997,11 +1997,11 @@ mod test {
         // Request two services which happen to be using the same IP address.
         let external_dns_id = OmicronZoneUuid::new_v4();
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 

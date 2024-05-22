@@ -45,14 +45,14 @@ impl Ipv4Net {
         }
         // Only the first N addresses are reserved
         if self
-            .iter()
+            .addr_iter()
             .take(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .any(|this| this == addr)
         {
             return Err(RequestAddressError::Reserved);
         }
         // Last address in the subnet is reserved
-        if addr == self.broadcast() {
+        if addr == self.broadcast().expect("narrower subnet than expected") {
             return Err(RequestAddressError::Broadcast);
         }
 

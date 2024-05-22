@@ -162,8 +162,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     // Create a VPC Subnet.
     let ipv4_block = "10.0.0.0/24".parse().unwrap();
     let other_ipv4_block = "172.31.0.0/16".parse().unwrap();
-    // Create the first two available IPv6 address ranges. */
-    let prefix = vpc.ipv6_prefix.network();
+    // Create the first two available IPv6 address ranges.
+    let prefix = vpc.ipv6_prefix.prefix();
     let ipv6_block = Ipv6Net::new(prefix, 64).unwrap();
     let mut segments = prefix.segments();
     segments[3] = 1;

@@ -291,7 +291,7 @@ async fn svc_create_subnet(
 
     // Allocate the first /64 sub-range from the requested or created
     // prefix.
-    let ipv6_block = oxnet::Ipv6Net::new(db_vpc.ipv6_prefix.network(), 64)
+    let ipv6_block = oxnet::Ipv6Net::new(db_vpc.ipv6_prefix.prefix(), 64)
         .map_err(|_| {
             external::Error::internal_error(
                 "Failed to allocate default IPv6 subnet",

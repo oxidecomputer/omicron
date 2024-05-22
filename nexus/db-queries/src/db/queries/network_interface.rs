@@ -2019,9 +2019,11 @@ mod tests {
             self.subnets
                 .iter()
                 .map(|subnet| {
-                    subnet.ipv4_block.size() as usize
-                        - NUM_INITIAL_RESERVED_IP_ADDRESSES
-                        - 1
+                    let size_minus_1 = match subnet.ipv4_block.size() {
+                        Some(n) => n - 1,
+                        None => u32::MAX,
+                    } as usize;
+                    size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES
                 })
                 .collect()
         }
@@ -2134,7 +2136,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let interface = IncompleteNetworkInterface::new_service(
@@ -2302,7 +2304,7 @@ mod tests {
             TestContext::new("test_insert_sequential_ip_allocation", 2).await;
         let addresses = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
@@ -2398,7 +2400,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let mac = MacAddr::random_system();
@@ -2433,7 +2435,7 @@ mod tests {
         let mut used_macs = HashSet::new();
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
         for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
             let service_id = Uuid::new_v4();
@@ -2473,7 +2475,7 @@ mod tests {
 
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         // Insert a service NIC
@@ -2533,12 +2535,12 @@ mod tests {
 
         let ip0 = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let ip1 = context.net1.subnets[1]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
 

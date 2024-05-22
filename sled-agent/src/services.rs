@@ -2711,7 +2711,7 @@ impl ServiceManager {
                                     // network address, without the mask.
                                     smfh.setprop(
                                         format!("config/techport{i}_prefix"),
-                                        prefix.net().network().to_string(),
+                                        prefix.net().addr(),
                                     )?;
                                 }
                                 smfh.setprop("config/pkt_source", pkt_source)?;

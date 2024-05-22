@@ -65,26 +65,22 @@ impl FromVpcFirewallRule for VpcFirewallRule {
             Some(ref hosts) if !hosts.is_empty() => hosts
                 .iter()
                 .map(|host| match host {
-                    HostIdentifier::Ip(IpNet::V4(net))
-                        if net.prefix() == 32 =>
-                    {
+                    HostIdentifier::Ip(IpNet::V4(net)) if net.is_host_net() => {
                         Address::Ip(IpAddr::Ip4(net.addr().into()))
                     }
                     HostIdentifier::Ip(IpNet::V4(net)) => {
                         Address::Subnet(IpCidr::Ip4(Ipv4Cidr::new(
                             net.addr().into(),
-                            Ipv4PrefixLen::new(net.prefix()).unwrap(),
+                            Ipv4PrefixLen::new(net.width()).unwrap(),
                         )))
                     }
-                    HostIdentifier::Ip(IpNet::V6(net))
-                        if net.prefix() == 128 =>
-                    {
+                    HostIdentifier::Ip(IpNet::V6(net)) if net.is_host_net() => {
                         Address::Ip(IpAddr::Ip6(net.addr().into()))
                     }
                     HostIdentifier::Ip(IpNet::V6(net)) => {
                         Address::Subnet(IpCidr::Ip6(Ipv6Cidr::new(
                             net.addr().into(),
-                            Ipv6PrefixLen::new(net.prefix()).unwrap(),
+                            Ipv6PrefixLen::new(net.width()).unwrap(),
                         )))
                     }
                     HostIdentifier::Vpc(vni) => {

@@ -491,7 +491,6 @@ mod tests {
                 },
                 name: "test-nexus".parse().expect("bad name"),
                 ip: NEXUS_OPTE_IPV4_SUBNET
-                    .iter()
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
@@ -517,7 +516,6 @@ mod tests {
                 },
                 name: "test-external-dns".parse().expect("bad name"),
                 ip: DNS_OPTE_IPV4_SUBNET
-                    .iter()
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
@@ -546,7 +544,6 @@ mod tests {
                 },
                 name: "test-external-ntp".parse().expect("bad name"),
                 ip: NTP_OPTE_IPV4_SUBNET
-                    .iter()
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),

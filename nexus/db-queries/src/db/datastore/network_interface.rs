@@ -838,7 +838,7 @@ mod tests {
 
         // Insert 10 Nexus NICs
         let ip_range = NEXUS_OPTE_IPV4_SUBNET
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
         let mut macs = external::MacAddr::iter_system();

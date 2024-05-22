@@ -75,13 +75,13 @@ impl super::Nexus {
         let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
 
         // Validate IPv4 range
-        if !params.ipv4_block.network().is_private() {
+        if !params.ipv4_block.prefix().is_private() {
             return Err(external::Error::invalid_request(
                 "VPC Subnet IPv4 address ranges must be from a private range",
             ));
         }
-        if params.ipv4_block.prefix() < MIN_VPC_IPV4_SUBNET_PREFIX
-            || params.ipv4_block.prefix()
+        if params.ipv4_block.width() < MIN_VPC_IPV4_SUBNET_PREFIX
+            || params.ipv4_block.width()
                 > self.tunables.max_vpc_ipv4_subnet_prefix
         {
             return Err(external::Error::invalid_request(&format!(

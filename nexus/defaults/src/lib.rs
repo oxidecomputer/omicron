@@ -86,7 +86,7 @@ mod tests {
     fn test_random_vpc_ipv6_prefix() {
         let network = random_vpc_ipv6_prefix().unwrap();
         assert!(network.is_vpc_prefix());
-        let octets = network.network().octets();
+        let octets = network.prefix().octets();
         assert!(octets[6..].iter().all(|x| *x == 0));
     }
 }

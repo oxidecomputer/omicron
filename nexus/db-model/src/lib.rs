@@ -511,11 +511,11 @@ mod tests {
         );
         let subnet = base.random_subnet(64).unwrap();
         assert_eq!(
-            subnet.prefix(),
+            subnet.width(),
             64,
             "random_subnet() returned an incorrect prefix"
         );
-        let octets = subnet.network().octets();
+        let octets = subnet.prefix().octets();
         const EXPECTED_RANDOM_BYTES: [u8; 8] = [253, 0, 0, 0, 0, 0, 111, 127];
         assert_eq!(octets[..8], EXPECTED_RANDOM_BYTES);
         assert!(
@@ -526,7 +526,7 @@ mod tests {
             base.is_supernet_of(&subnet.0),
             "random_subnet should generate an actual subnet"
         );
-        assert_eq!(base.random_subnet(base.prefix()), Some(base));
+        assert_eq!(base.random_subnet(base.width()), Some(base));
     }
 
     #[test]

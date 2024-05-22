@@ -516,11 +516,11 @@ impl<'a> EarlyNetworkSetup<'a> {
                                     .iter()
                                     .map(|x| match x {
                                         IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.prefix(),
+                                            length: p.width(),
                                             value: p.addr(),
                                         }),
                                         IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.prefix(),
+                                            length: p.width(),
                                             value: p.addr(),
                                         }),
                                     })
@@ -538,11 +538,11 @@ impl<'a> EarlyNetworkSetup<'a> {
                                     .iter()
                                     .map(|x| match x {
                                         IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.prefix(),
+                                            length: p.width(),
                                             value: p.addr(),
                                         }),
                                         IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.prefix(),
+                                            length: p.width(),
                                             value: p.addr(),
                                         }),
                                     })

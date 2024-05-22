@@ -47,10 +47,10 @@ impl Ipv6Net {
         use rand::RngCore;
 
         const MAX_IPV6_SUBNET_PREFIX: u8 = 128;
-        if prefix < self.prefix() || prefix > MAX_IPV6_SUBNET_PREFIX {
+        if prefix < self.width() || prefix > MAX_IPV6_SUBNET_PREFIX {
             return None;
         }
-        if prefix == self.prefix() {
+        if prefix == self.width() {
             return Some(*self);
         }
 
@@ -71,8 +71,8 @@ impl Ipv6Net {
         let full_mask = !(u128::MAX >> prefix);
 
         // Get the existing network address and mask.
-        let network = u128::from(self.network());
-        let network_mask = u128::from(self.mask());
+        let network = u128::from(self.prefix());
+        let network_mask = u128::from(self.mask_addr());
 
         // Take random bits _only_ where the new mask is set.
         let random_mask = full_mask ^ network_mask;

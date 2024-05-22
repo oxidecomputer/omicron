@@ -198,7 +198,7 @@ impl<const N: u8> Ipv6Subnet<N> {
         // Create a network with the compile-time prefix length.
         let net = Ipv6Net::new(addr, N).unwrap();
         // Ensure the address is set to within-prefix only components.
-        let net = Ipv6Net::new(net.network(), N).unwrap();
+        let net = Ipv6Net::new(net.prefix(), N).unwrap();
         Self { net }
     }
 
@@ -228,13 +228,13 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
         }
 
         let Inner { net } = Inner::deserialize(deserializer)?;
-        if net.prefix() == N {
+        if net.width() == N {
             Ok(Self { net })
         } else {
             Err(<D::Error as serde::de::Error>::custom(format!(
                 "expected prefix {} but found {}",
                 N,
-                net.prefix(),
+                net.width(),
             )))
         }
     }
@@ -340,7 +340,7 @@ pub fn get_64_subnet(
     rack_subnet: Ipv6Subnet<RACK_PREFIX>,
     index: u8,
 ) -> Ipv6Subnet<SLED_PREFIX> {
-    let mut rack_network = rack_subnet.net().network().octets();
+    let mut rack_network = rack_subnet.net().addr().octets();
 
     // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
     rack_network[7] = index;

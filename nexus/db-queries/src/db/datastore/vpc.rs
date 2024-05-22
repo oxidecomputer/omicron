@@ -1508,7 +1508,7 @@ mod tests {
             let mut nexus_external_ips =
                 "192.0.2.0/24".parse::<ipnetwork::IpNetwork>().unwrap().iter();
             let mut nexus_nic_ips = NEXUS_OPTE_IPV4_SUBNET
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                 .map(IpAddr::from);
             let mut nexus_macs = MacAddr::iter_system();

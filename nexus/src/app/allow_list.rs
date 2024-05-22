@@ -60,7 +60,7 @@ impl super::Nexus {
                         any source to connect to user-facing services.",
                     ));
                 }
-                if entry.prefix() == 0 {
+                if entry.width() == 0 {
                     return Err(Error::invalid_request(
                         "Source IP allowlist entries may not have \
                         a netmask of /0.",
