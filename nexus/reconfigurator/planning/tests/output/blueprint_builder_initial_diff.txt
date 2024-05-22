@@ -8,16 +8,16 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1b3e8ba1-6c25-44bd-b46f-227655a7c9c8
-    fake-vendor   fake-model   serial-28a6e976-36d3-4189-bf9a-4dcd22c0eb8e
-    fake-vendor   fake-model   serial-2f44e42a-9a41-4047-82e7-528e81b87ec7
-    fake-vendor   fake-model   serial-3324f6a4-b883-4b02-9d4b-0536db89594d
-    fake-vendor   fake-model   serial-739c856c-4b3e-4857-9f75-1be7263a6fe5
-    fake-vendor   fake-model   serial-78175b19-8c33-46bf-b49c-c44bbd660ddc
-    fake-vendor   fake-model   serial-877acafc-a01b-438d-8b21-587106fc11de
-    fake-vendor   fake-model   serial-a9348a50-bfb1-4818-8b66-3248ccdd8bfb
-    fake-vendor   fake-model   serial-afd8dce8-e70e-46dc-a068-4adbd08d7cb6
-    fake-vendor   fake-model   serial-db5e8668-7649-4a7f-8942-408b3fccf95b
+    fake-vendor   fake-model   serial-3fb05590-2632-413e-989f-aaaabaf01fab
+    fake-vendor   fake-model   serial-4711ce46-43f6-4732-9769-a69ea519b62d
+    fake-vendor   fake-model   serial-4a2cc08d-8e18-4f0e-8fc6-443cb2016858
+    fake-vendor   fake-model   serial-7032a67e-2ff6-45cc-af34-8b3502965cc9
+    fake-vendor   fake-model   serial-908218e9-26ea-4d75-86f9-4b99ff72dcb5
+    fake-vendor   fake-model   serial-9bc4e63d-b8fe-4ac6-ac3a-cf097d06cc6d
+    fake-vendor   fake-model   serial-9f343299-ef7a-46aa-9904-061be15abfeb
+    fake-vendor   fake-model   serial-c8523dd7-4e87-4e4b-8e46-04b806f0763c
+    fake-vendor   fake-model   serial-e02245bc-ca0d-4f08-ac1e-870c4fa2a17c
+    fake-vendor   fake-model   serial-f9bcdb70-6846-4330-9d37-bfdd5583aea6
 
 
     omicron zones at generation 2:
@@ -44,16 +44,16 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-0c51b77e-6bb3-49d7-b284-441e03d49710
-    fake-vendor   fake-model   serial-34949fdc-e9ff-4f40-bc46-c4c7328c553f
-    fake-vendor   fake-model   serial-6ceff927-3495-4ac0-bda5-68c122717143
-    fake-vendor   fake-model   serial-70f5f06a-b673-427a-af32-2826b2521b03
-    fake-vendor   fake-model   serial-81826c3d-5a89-4a73-a4c3-433ab37b4f0c
-    fake-vendor   fake-model   serial-a3166c5c-ff02-4e10-928e-f7f11a57afb2
-    fake-vendor   fake-model   serial-b8e20293-e367-4ae7-b8e4-b1feba911a6e
-    fake-vendor   fake-model   serial-d1be5b77-fc0f-45c5-81c7-74c9443a279c
-    fake-vendor   fake-model   serial-eaa5d53d-4dd6-4527-9574-87b95a061640
-    fake-vendor   fake-model   serial-fdce7347-a318-408e-af83-c89fc7909be0
+    fake-vendor   fake-model   serial-092eaf94-328b-45b6-99da-c850a06e8592
+    fake-vendor   fake-model   serial-3195b46a-d32d-458e-ad7f-b0b2f91af483
+    fake-vendor   fake-model   serial-327bdbbb-c40e-4784-888e-18492a753708
+    fake-vendor   fake-model   serial-4f067c20-2860-49b1-8a03-6715a3c12c0e
+    fake-vendor   fake-model   serial-564460fe-7357-4883-a3af-1c931f473e83
+    fake-vendor   fake-model   serial-66f85be6-1143-48a1-a898-504c6b540035
+    fake-vendor   fake-model   serial-97b3f199-b488-4ce0-bd34-484d4d3bd194
+    fake-vendor   fake-model   serial-a38f8150-2efd-4b55-9ffb-3c98e2939e13
+    fake-vendor   fake-model   serial-d788bf53-35dd-4fa7-a820-c1233e859d03
+    fake-vendor   fake-model   serial-ff66a45c-38a8-4b62-825e-e7c9470bc8bc
 
 
     omicron zones at generation 2:
@@ -80,16 +80,16 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-085fec3d-1e5f-45c4-a3be-83c219b380fc
-    fake-vendor   fake-model   serial-268f593b-e253-4061-aa8e-f4ffbc83ef86
-    fake-vendor   fake-model   serial-2f0f7730-3793-4966-b006-c1c6ce521ea1
-    fake-vendor   fake-model   serial-3d857e9d-5da4-47fa-b002-78100e71b6f8
-    fake-vendor   fake-model   serial-7b8541a0-c5fe-4a8d-9e9f-fcd9da447f6d
-    fake-vendor   fake-model   serial-8fa5fb04-6a38-44cd-8943-0c14ceb2baca
-    fake-vendor   fake-model   serial-92dde820-47f4-4db4-91b5-122336a5adf3
-    fake-vendor   fake-model   serial-98fadd91-7bc3-42d0-a0df-95499d2ad094
-    fake-vendor   fake-model   serial-a8e43380-03e5-4b10-a8d6-604e3f6821b2
-    fake-vendor   fake-model   serial-f56fbcb3-e2b9-49de-aae8-b1a9f4a486ce
+    fake-vendor   fake-model   serial-29867b4d-f12b-40ea-b59e-5169d0b2a831
+    fake-vendor   fake-model   serial-54b3613b-a80e-4eda-aa1c-0d92050de367
+    fake-vendor   fake-model   serial-75939bd0-28f6-428b-8ce2-e55241d201ce
+    fake-vendor   fake-model   serial-7bcb41c3-6fc7-4cab-ac5f-b2e09f62567d
+    fake-vendor   fake-model   serial-92aeebc3-4154-4147-b721-0ccf5e337d8d
+    fake-vendor   fake-model   serial-960229b6-dbb2-4df0-ad93-83ddb28484bc
+    fake-vendor   fake-model   serial-9e1428de-ad48-4655-8ccc-bbf4cb1badda
+    fake-vendor   fake-model   serial-e03fee18-20c9-4c61-8927-bf80525f9b78
+    fake-vendor   fake-model   serial-e25482d4-7111-4acf-b621-4aab851ffda5
+    fake-vendor   fake-model   serial-e90056a4-dd19-4ebb-b484-c677aea31d80
 
 
     omicron zones at generation 2:

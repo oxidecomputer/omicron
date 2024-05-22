@@ -622,7 +622,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Return the number of zones of a given kind that would be configured to
-    /// run on the given sled if this builder generated a blueprint
+    /// run on the given sled if this builder generated a blueprint.
     ///
     /// This value may change before a blueprint is actually generated if
     /// further changes are made to the builder.
