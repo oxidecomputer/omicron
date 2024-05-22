@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 72b902d1405681df2dd46efc097da6840ff1234dc9d0d7c0ecf07bed0b0e7d8d # shrinks to input = _TestPlaceOmicronZonesArgs { input: ArbitraryTestInput { existing_sleds: {[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]: ExistingSled { zones: ZonesToPlace { zones: [] }, waiting_for_ntp: false, num_disks: 1 }}, zones_to_place: ZonesToPlace { zones: [Nexus] } } }
