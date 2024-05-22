@@ -93,7 +93,8 @@ use nexus_client::{
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig, InvalidOmicronZoneType,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -1437,7 +1438,8 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         external_dns_version: Generation::new(),
         // Avoid making decisions about CockroachDB settings before Nexus is up.
         cockroachdb_fingerprint: String::new(),
-        cockroachdb_setting_preserve_downgrade: None,
+        cockroachdb_setting_preserve_downgrade:
+            CockroachDbPreserveDowngrade::DoNotModify,
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

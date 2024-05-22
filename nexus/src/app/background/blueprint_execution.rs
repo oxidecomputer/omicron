@@ -123,7 +123,7 @@ mod test {
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneType, BlueprintZonesConfig,
+        BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneDataset;
@@ -165,7 +165,8 @@ mod test {
                 blueprint_zones,
                 blueprint_disks,
                 sled_state,
-                cockroachdb_setting_preserve_downgrade: None,
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_version,
                 external_dns_version: dns_version,

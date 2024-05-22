@@ -129,12 +129,10 @@ impl DataStore {
 mod test {
     use super::{CockroachDbSettings, OpContext};
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::CockroachDbClusterVersion;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::sync::Arc;
-
-    const COCKROACHDB_VERSION: &str =
-        include_str!("../../../../../tools/cockroachdb_version");
 
     #[tokio::test]
     async fn test_preserve_downgrade() {
@@ -146,14 +144,9 @@ mod test {
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
 
-        let version = COCKROACHDB_VERSION
-            .trim_start_matches('v')
-            .rsplit_once('.')
-            .unwrap()
-            .0;
-
         let settings = datastore.cockroachdb_settings(&opctx).await.unwrap();
         // With a fresh cluster, this is the expected state
+        let version = CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string();
         assert_eq!(settings.version, version);
         assert_eq!(settings.preserve_downgrade, "");
 
@@ -164,7 +157,7 @@ mod test {
                 &opctx,
                 String::new(),
                 "cluster.preserve_downgrade_option",
-                version.to_string(),
+                version.clone(),
             )
             .await
         else {
@@ -189,7 +182,7 @@ mod test {
                     &opctx,
                     settings.state_fingerprint.clone(),
                     "cluster.preserve_downgrade_option",
-                    version.to_string(),
+                    version.clone(),
                 )
                 .await
                 .unwrap();
@@ -197,8 +190,8 @@ mod test {
                 datastore.cockroachdb_settings(&opctx).await.unwrap(),
                 CockroachDbSettings {
                     state_fingerprint: settings.state_fingerprint.clone(),
-                    version: version.to_string(),
-                    preserve_downgrade: version.to_string(),
+                    version: version.clone(),
+                    preserve_downgrade: version.clone(),
                 }
             );
         }
@@ -218,7 +211,7 @@ mod test {
                 datastore.cockroachdb_settings(&opctx).await.unwrap(),
                 CockroachDbSettings {
                     state_fingerprint: settings.state_fingerprint.clone(),
-                    version: version.to_string(),
+                    version: version.clone(),
                     preserve_downgrade: String::new(),
                 }
             );

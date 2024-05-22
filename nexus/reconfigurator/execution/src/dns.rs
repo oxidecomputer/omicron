@@ -477,9 +477,10 @@ mod test {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::SledFilter;
-    use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::external_api::views::SledState;
@@ -598,7 +599,8 @@ mod test {
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             sled_state,
-            cockroachdb_setting_preserve_downgrade: None,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
@@ -1230,7 +1232,8 @@ mod test {
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
-                target_cockroachdb_cluster_version: COCKROACHDB_CLUSTER_VERSION,
+                target_cockroachdb_cluster_version:
+                    CockroachDbClusterVersion::POLICY,
                 log,
             }
             .build()

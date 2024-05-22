@@ -1747,9 +1747,12 @@
             "type": "string"
           },
           "cockroachdb_setting_preserve_downgrade": {
-            "nullable": true,
-            "description": "if Some, the value to ensure the CockroachDB setting `cluster.preserve_downgrade_option` is set to",
-            "type": "string"
+            "description": "Whether to set `cluster.preserve_downgrade_option` and what to set it to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CockroachDbPreserveDowngrade"
+              }
+            ]
           },
           "comment": {
             "description": "human-readable string describing why this blueprint was created (for debugging)",
@@ -1803,6 +1806,7 @@
           "blueprint_disks",
           "blueprint_zones",
           "cockroachdb_fingerprint",
+          "cockroachdb_setting_preserve_downgrade",
           "comment",
           "creator",
           "external_dns_version",
@@ -2380,6 +2384,67 @@
         "required": [
           "cert",
           "key"
+        ]
+      },
+      "CockroachDbClusterVersion": {
+        "description": "CockroachDB cluster versions we are aware of.\n\nCockroachDB can be upgraded from one major version to the next, e.g. v22.1 -> v22.2. Each major version introduces changes in how it stores data on disk to support new features, and each major version has support for reading the previous version's data so that it can perform an upgrade. The version of the data format is called the \"cluster version\", which is distinct from but related to the software version that's being run.\n\nWhile software version v22.2 is using cluster version v22.1, it's possible to downgrade back to v22.1. Once the cluster version is upgraded, there's no going back.\n\nTo give us some time to evaluate new versions of the software while retaining a downgrade path, we currently deploy new versions of CockroachDB across two releases of the Oxide software, in a \"tick-tock\" model:\n\n- In \"tick\" releases, we upgrade the version of the CockroachDB software to a new major version, and update `CockroachDbClusterVersion::NEWLY_INITIALIZED`. On upgraded racks, the new version is running with the previous cluster version; on newly-initialized racks, the new version is running with the new cluser version. - In \"tock\" releases, we change `CockroachDbClusterVersion::POLICY` to the major version we upgraded to in the last \"tick\" release. This results in a new blueprint that upgrades the cluster version, destroying the downgrade path but allowing us to eventually upgrade to the next release.\n\nThese presently describe major versions of CockroachDB. The order of these must be maintained in the correct order (the first variant must be the earliest version).",
+        "type": "string",
+        "enum": [
+          "V22_1"
+        ]
+      },
+      "CockroachDbPreserveDowngrade": {
+        "description": "Whether to set `cluster.preserve_downgrade_option` and what to set it to.",
+        "oneOf": [
+          {
+            "description": "Do not modify the setting.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "do_not_modify"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Ensure the setting is set to an empty string.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "allow_upgrade"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Ensure the setting is set to a given cluster version.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "set"
+                ]
+              },
+              "data": {
+                "$ref": "#/components/schemas/CockroachDbClusterVersion"
+              }
+            },
+            "required": [
+              "action",
+              "data"
+            ]
+          }
         ]
       },
       "CurrentStatus": {

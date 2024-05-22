@@ -26,6 +26,9 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parse_display::Display;
+use parse_display::FromStr;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
@@ -89,8 +92,10 @@ impl PlanningInput {
         self.policy.target_nexus_zone_count
     }
 
-    pub fn target_cockroachdb_cluster_version(&self) -> &str {
-        &self.policy.target_cockroachdb_cluster_version
+    pub fn target_cockroachdb_cluster_version(
+        &self,
+    ) -> CockroachDbClusterVersion {
+        self.policy.target_cockroachdb_cluster_version
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -170,8 +175,17 @@ pub struct CockroachDbSettings {
     pub preserve_downgrade: String,
 }
 
-/// The hardcoded CockroachDB cluster version we want to have, used in
-/// [`Policy`].
+impl CockroachDbSettings {
+    pub const fn empty() -> CockroachDbSettings {
+        CockroachDbSettings {
+            state_fingerprint: String::new(),
+            version: String::new(),
+            preserve_downgrade: String::new(),
+        }
+    }
+}
+
+/// CockroachDB cluster versions we are aware of.
 ///
 /// CockroachDB can be upgraded from one major version to the next, e.g. v22.1
 /// -> v22.2. Each major version introduces changes in how it stores data on
@@ -188,24 +202,106 @@ pub struct CockroachDbSettings {
 /// retaining a downgrade path, we currently deploy new versions of CockroachDB
 /// across two releases of the Oxide software, in a "tick-tock" model:
 ///
-/// - In "tick" releases, we upgrade the version of the CockroachDB software to
-///   a new major version. The new version is running with the previous cluster
-///   version.
-/// - In "tock" releases, we change this `const` to the major version we
-///   upgraded to in the last "tick" release. This results in a new blueprint
-///   that upgrades the cluster version, destroying the downgrade path but
-///   allowing us to eventually upgrade to the next release.
+/// - In "tick" releases, we upgrade the version of the
+///   CockroachDB software to a new major version, and update
+///   `CockroachDbClusterVersion::NEWLY_INITIALIZED`. On upgraded racks, the new
+///   version is running with the previous cluster version; on newly-initialized
+///   racks, the new version is running with the new cluser version.
+/// - In "tock" releases, we change `CockroachDbClusterVersion::POLICY` to the
+///   major version we upgraded to in the last "tick" release. This results in a
+///   new blueprint that upgrades the cluster version, destroying the downgrade
+///   path but allowing us to eventually upgrade to the next release.
 ///
-/// /!\ WARNING: If you change this, there is no going back. /!\
-pub const COCKROACHDB_CLUSTER_VERSION: &str = "22.1";
+/// These presently describe major versions of CockroachDB. The order of these
+/// must be maintained in the correct order (the first variant must be the
+/// earliest version).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Display,
+    FromStr,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub enum CockroachDbClusterVersion {
+    #[display("22.1")]
+    V22_1,
+}
 
-impl CockroachDbSettings {
-    pub const fn empty() -> CockroachDbSettings {
-        CockroachDbSettings {
-            state_fingerprint: String::new(),
-            version: String::new(),
-            preserve_downgrade: String::new(),
+impl CockroachDbClusterVersion {
+    /// The hardcoded CockroachDB cluster version we want to be on, used in
+    /// [`Policy`].
+    ///
+    /// /!\ WARNING: If you change this, there is no going back. /!\
+    pub const POLICY: CockroachDbClusterVersion =
+        CockroachDbClusterVersion::V22_1;
+
+    /// The CockroachDB cluster version created as part of newly-initialized
+    /// racks.
+    ///
+    /// CockroachDB knows how to create a new cluster with the current cluster
+    /// version, and how to upgrade the cluster version from the previous major
+    /// release, but it does not have any ability to create a new cluster with
+    /// the previous major release's cluster version.
+    ///
+    /// During "tick" releases, newly-initialized racks will be running
+    /// this cluster version, which will be one major version newer than the
+    /// version specified by `CockroachDbClusterVersion::POLICY`. During "tock"
+    /// releases, these versions are the same.
+    pub const NEWLY_INITIALIZED: CockroachDbClusterVersion =
+        CockroachDbClusterVersion::V22_1;
+}
+
+/// Whether to set `cluster.preserve_downgrade_option` and what to set it to.
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(tag = "action", content = "data", rename_all = "snake_case")]
+pub enum CockroachDbPreserveDowngrade {
+    /// Do not modify the setting.
+    DoNotModify,
+    /// Ensure the setting is set to an empty string.
+    AllowUpgrade,
+    /// Ensure the setting is set to a given cluster version.
+    Set(CockroachDbClusterVersion),
+}
+
+impl CockroachDbPreserveDowngrade {
+    pub fn from_optional_string(
+        value: &Option<String>,
+    ) -> Result<Self, parse_display::ParseError> {
+        Ok(match value {
+            Some(version) => {
+                if version.is_empty() {
+                    CockroachDbPreserveDowngrade::AllowUpgrade
+                } else {
+                    CockroachDbPreserveDowngrade::Set(version.parse()?)
+                }
+            }
+            None => CockroachDbPreserveDowngrade::DoNotModify,
+        })
+    }
+
+    pub fn to_optional_string(self) -> Option<String> {
+        match self {
+            CockroachDbPreserveDowngrade::DoNotModify => None,
+            CockroachDbPreserveDowngrade::AllowUpgrade => Some(String::new()),
+            CockroachDbPreserveDowngrade::Set(version) => {
+                Some(version.to_string())
+            }
         }
+    }
+}
+
+impl From<CockroachDbClusterVersion> for CockroachDbPreserveDowngrade {
+    fn from(value: CockroachDbClusterVersion) -> Self {
+        CockroachDbPreserveDowngrade::Set(value)
     }
 }
 
@@ -524,7 +620,7 @@ pub struct Policy {
     /// desired CockroachDB `cluster.preserve_downgrade_option` setting.
     /// at present this is hardcoded based on the version of CockroachDB we
     /// presently ship and the tick-tock pattern described in RFD 469.
-    pub target_cockroachdb_cluster_version: String,
+    pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -573,7 +669,8 @@ impl PlanningInputBuilder {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
                 target_nexus_zone_count: 0,
-                target_cockroachdb_cluster_version: String::new(),
+                target_cockroachdb_cluster_version:
+                    CockroachDbClusterVersion::POLICY,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -673,5 +770,37 @@ impl PlanningInputBuilder {
             sleds: self.sleds,
             network_resources: self.network_resources,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CockroachDbClusterVersion;
+
+    #[test]
+    fn cockroachdb_cluster_versions() {
+        // This should always be true.
+        assert!(
+            CockroachDbClusterVersion::POLICY
+                <= CockroachDbClusterVersion::NEWLY_INITIALIZED
+        );
+
+        let cockroachdb_version =
+            include_str!("../../../../tools/cockroachdb_version")
+                .trim_start_matches('v')
+                .rsplit_once('.')
+                .unwrap()
+                .0;
+        assert_eq!(
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            cockroachdb_version
+        );
+
+        // In the next "tick" release, this version will be stored in a
+        // different file.
+        assert_eq!(
+            CockroachDbClusterVersion::POLICY.to_string(),
+            cockroachdb_version
+        );
     }
 }

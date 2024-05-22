@@ -16,6 +16,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
@@ -27,7 +28,6 @@ use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
@@ -60,7 +60,7 @@ pub struct PlanningInputFromDb<'a> {
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_nexus_zone_count: usize,
-    pub target_cockroachdb_cluster_version: &'a str,
+    pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
@@ -75,8 +75,7 @@ impl PlanningInputFromDb<'_> {
             service_ip_pool_ranges,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_cockroachdb_cluster_version: self
-                .target_cockroachdb_cluster_version
-                .to_owned(),
+                .target_cockroachdb_cluster_version,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -235,7 +234,7 @@ pub async fn reconfigurator_state_load(
         zpool_rows: &zpool_rows,
         ip_pool_range_rows: &ip_pool_range_rows,
         target_nexus_zone_count: NEXUS_REDUNDANCY,
-        target_cockroachdb_cluster_version: COCKROACHDB_CLUSTER_VERSION,
+        target_cockroachdb_cluster_version: CockroachDbClusterVersion::POLICY,
         external_ip_rows: &external_ip_rows,
         service_nic_rows: &service_nic_rows,
         log: &opctx.log,

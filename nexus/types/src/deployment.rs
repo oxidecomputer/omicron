@@ -62,6 +62,8 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use planning_input::CockroachDbClusterVersion;
+pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
 pub use planning_input::PlanningInput;
@@ -73,7 +75,6 @@ pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
-pub use planning_input::COCKROACHDB_CLUSTER_VERSION;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 
@@ -162,9 +163,9 @@ pub struct Blueprint {
     // on this.
     pub cockroachdb_fingerprint: String,
 
-    /// if Some, the value to ensure the CockroachDB setting
-    /// `cluster.preserve_downgrade_option` is set to
-    pub cockroachdb_setting_preserve_downgrade: Option<String>,
+    /// Whether to set `cluster.preserve_downgrade_option` and what to set it
+    /// to.
+    pub cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,

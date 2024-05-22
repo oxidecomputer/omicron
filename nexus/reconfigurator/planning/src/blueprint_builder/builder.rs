@@ -20,6 +20,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -146,7 +147,7 @@ pub struct BlueprintBuilder<'a> {
     pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
     sled_state: BTreeMap<SledUuid, SledState>,
-    cockroachdb_setting_preserve_downgrade: Option<String>,
+    cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
     creator: String,
     comments: Vec<String>,
@@ -210,7 +211,8 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             cockroachdb_fingerprint: String::new(),
-            cockroachdb_setting_preserve_downgrade: None,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -268,8 +270,7 @@ impl<'a> BlueprintBuilder<'a> {
             disks: BlueprintDisksBuilder::new(parent_blueprint),
             sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
-                .cockroachdb_setting_preserve_downgrade
-                .clone(),
+                .cockroachdb_setting_preserve_downgrade,
             creator: creator.to_owned(),
             comments: Vec::new(),
             rng: BlueprintBuilderRng::new(),
@@ -748,8 +749,11 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Added(num_nexus_to_add))
     }
 
-    pub fn cockroachdb_preserve_downgrade(&mut self, version: String) {
-        self.cockroachdb_setting_preserve_downgrade = Some(version);
+    pub fn cockroachdb_preserve_downgrade(
+        &mut self,
+        version: CockroachDbPreserveDowngrade,
+    ) {
+        self.cockroachdb_setting_preserve_downgrade = version;
     }
 
     fn sled_add_zone(

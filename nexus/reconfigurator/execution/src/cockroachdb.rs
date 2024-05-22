@@ -15,7 +15,9 @@ pub(crate) async fn ensure_settings(
     datastore: &DataStore,
     blueprint: &Blueprint,
 ) -> anyhow::Result<()> {
-    if let Some(value) = &blueprint.cockroachdb_setting_preserve_downgrade {
+    if let Some(value) =
+        blueprint.cockroachdb_setting_preserve_downgrade.to_optional_string()
+    {
         datastore
             .cockroachdb_setting_set_string(
                 opctx,
@@ -43,7 +45,8 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintTarget;
-    use nexus_types::deployment::COCKROACHDB_CLUSTER_VERSION;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use std::sync::Arc;
 
     type ControlPlaneTestContext =
@@ -75,7 +78,10 @@ mod test {
             .expect("failed to get blueprint from datastore");
         eprintln!("blueprint: {}", blueprint.display());
         assert!(blueprint.cockroachdb_fingerprint.is_empty());
-        assert!(blueprint.cockroachdb_setting_preserve_downgrade.is_none());
+        assert_eq!(
+            blueprint.cockroachdb_setting_preserve_downgrade,
+            CockroachDbPreserveDowngrade::DoNotModify
+        );
         // Execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint_with_overrides(
@@ -110,8 +116,8 @@ mod test {
             settings.state_fingerprint
         );
         assert_eq!(
-            blueprint2.cockroachdb_setting_preserve_downgrade.as_deref(),
-            Some(COCKROACHDB_CLUSTER_VERSION)
+            blueprint2.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into(),
         );
         // Set the new blueprint as the target and execute it.
         datastore
@@ -142,6 +148,9 @@ mod test {
         // The cluster version should not have changed.
         assert_eq!(settings.version, settings2.version);
         // The current "preserve downgrade option" setting should be set.
-        assert_eq!(settings2.preserve_downgrade, COCKROACHDB_CLUSTER_VERSION);
+        assert_eq!(
+            settings2.preserve_downgrade,
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string()
+        );
     }
 }

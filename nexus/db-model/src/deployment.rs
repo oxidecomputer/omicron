@@ -58,7 +58,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             cockroachdb_fingerprint: bp.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: bp
                 .cockroachdb_setting_preserve_downgrade
-                .clone(),
+                .to_optional_string(),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
