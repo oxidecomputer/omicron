@@ -1970,8 +1970,7 @@ mod test {
                                 name: "nexus".parse().unwrap(),
                                 ip: nexus_pip.into(),
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET)
-                                    .into(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
@@ -2073,8 +2072,7 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET)
-                                        .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -2105,8 +2103,7 @@ mod test {
                                     mac: macs.next().unwrap(),
                                     subnet: IpNet::from(
                                         *NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
