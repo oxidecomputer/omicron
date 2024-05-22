@@ -344,41 +344,10 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::Nexus,
             DiscretionaryOmicronZone::CockroachDb,
         ] {
-            // Count the number of `kind` zones on all in-service sleds. This
-            // will include sleds that are in service but not eligible for new
-            // services, but will not include sleds that have been expunged or
-            // decommissioned.
-            let mut num_existing_kind_zones = 0;
-            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-                let num_zones_of_kind = self
-                    .blueprint
-                    .sled_num_zones_of_kind(sled_id, zone_kind.into());
-                num_existing_kind_zones += num_zones_of_kind;
-            }
-
-            let target_count = match zone_kind {
-                DiscretionaryOmicronZone::Nexus => {
-                    self.input.target_nexus_zone_count()
-                }
-                DiscretionaryOmicronZone::CockroachDb => {
-                    self.input.target_cockroachdb_zone_count()
-                }
-            };
-
-            // TODO-correctness What should we do if we have _too many_
-            // `zone_kind` zones? For now, just log it the number of zones any
-            // time we have at least the minimum number.
-            let num_zones_to_add =
-                target_count.saturating_sub(num_existing_kind_zones);
+            let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
             if num_zones_to_add == 0 {
-                info!(
-                    self.log, "sufficient {zone_kind:?} zones exist in plan";
-                    "desired_count" => target_count,
-                    "current_count" => num_existing_kind_zones,
-                );
                 continue;
             }
-
             // We need to add at least one zone; construct our `zone_placement`
             // (or reuse the existing one if a previous loop iteration already
             // created it).
@@ -426,6 +395,48 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    // Given the current blueprint state and policy, returns the number of
+    // additional zones needed of the given `zone_kind` to satisfy the policy.
+    fn num_additional_zones_needed(
+        &mut self,
+        zone_kind: DiscretionaryOmicronZone,
+    ) -> usize {
+        // Count the number of `kind` zones on all in-service sleds. This
+        // will include sleds that are in service but not eligible for new
+        // services, but will not include sleds that have been expunged or
+        // decommissioned.
+        let mut num_existing_kind_zones = 0;
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            let num_zones_of_kind = self
+                .blueprint
+                .sled_num_zones_of_kind(sled_id, zone_kind.into());
+            num_existing_kind_zones += num_zones_of_kind;
+        }
+
+        let target_count = match zone_kind {
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::CockroachDb => {
+                self.input.target_cockroachdb_zone_count()
+            }
+        };
+
+        // TODO-correctness What should we do if we have _too many_
+        // `zone_kind` zones? For now, just log it the number of zones any
+        // time we have at least the minimum number.
+        let num_zones_to_add =
+            target_count.saturating_sub(num_existing_kind_zones);
+        if num_zones_to_add == 0 {
+            info!(
+                self.log, "sufficient {zone_kind:?} zones exist in plan";
+                "desired_count" => target_count,
+                "current_count" => num_existing_kind_zones,
+            );
+        }
+        num_zones_to_add
     }
 
     // Attempts to place `num_zones_to_add` new zones of `kind`.
