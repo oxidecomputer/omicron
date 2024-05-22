@@ -9,8 +9,10 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::InstanceState as DbInstanceState;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
+use crate::db::pagination::paginated;
 use crate::db::schema::vmm::dsl;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -18,7 +20,10 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceState as ApiInstanceState;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -50,9 +55,6 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &Uuid,
     ) -> UpdateResult<bool> {
-        use crate::db::model::InstanceState as DbInstanceState;
-        use omicron_common::api::external::InstanceState as ApiInstanceState;
-
         let valid_states = vec![
             DbInstanceState::new(ApiInstanceState::Destroyed),
             DbInstanceState::new(ApiInstanceState::Failed),
@@ -163,5 +165,45 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(vmm)
+    }
+
+    /// Lists VMMs which have been abandoned by their instances after a
+    /// migration and are in need of cleanup.
+    ///
+    /// A VMM is considered "abandoned" if (and only if):
+    ///
+    /// - It is in the `Destroyed` state.
+    /// - It has previously been asigned to an instance.
+    /// - It is not currently running the instance, and it is also not the
+    ///   migration target of that instance (i.e. it is no longer pointed to by
+    ///   the instance record's `active_propolis_id` and `target_propolis_id`
+    ///   fields).
+    /// - It has not been deleted yet.
+    pub async fn vmm_list_abandoned(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Vmm> {
+        use crate::db::schema::instance::dsl as instance_dsl;
+        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        paginated(dsl::vmm, dsl::id, pagparams)
+            // In order to be considered "abandoned", a VMM must be:
+            // - in the `Destroyed` state
+            .filter(dsl::state.eq(destroyed))
+            // - not deleted yet
+            .filter(dsl::time_deleted.is_null())
+            // - not pointed to by their corresponding instances
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                instance_dsl::instance.filter(
+                    instance_dsl::active_propolis_id
+                        .eq(dsl::id.nullable())
+                        .or(instance_dsl::target_propolis_id
+                            .eq(dsl::id.nullable())),
+                ),
+            )))
+            .select(Vmm::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

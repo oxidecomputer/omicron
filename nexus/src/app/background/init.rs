@@ -4,6 +4,7 @@
 
 //! Background task initialization
 
+use super::abandoned_vmm_reaper;
 use super::bfd;
 use super::blueprint_execution;
 use super::blueprint_load;
@@ -100,6 +101,10 @@ pub struct BackgroundTasks {
     /// task handle for propagation of VPC firewall rules for Omicron services
     /// with external network connectivity,
     pub task_service_firewall_propagation: common::TaskHandle,
+
+    /// task handle for deletion of database records for VMMs abandoned by their
+    /// instances.
+    pub task_abandoned_vmm_reaper: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -377,11 +382,25 @@ impl BackgroundTasks {
             ),
             config.service_firewall_propagation.period_secs,
             Box::new(service_firewall_rules::ServiceRulePropagator::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx.child(BTreeMap::new()),
             vec![],
         );
+
+        // Background task: abandoned VMM reaping
+        let task_abandoned_vmm_reaper = driver.register(
+        String::from("abandoned_vmm_reaper"),
+        String::from(
+            "deletes sled reservations for VMMs that have been abandoned by their instances",
+        ),
+        config.abandoned_vmm_reaper.period_secs,
+        Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
+            datastore,
+        )),
+        opctx.child(BTreeMap::new()),
+        vec![],
+    );
 
         BackgroundTasks {
             driver,
@@ -404,6 +423,7 @@ impl BackgroundTasks {
             task_region_replacement,
             task_instance_watcher,
             task_service_firewall_propagation,
+            task_abandoned_vmm_reaper,
         }
     }
 
