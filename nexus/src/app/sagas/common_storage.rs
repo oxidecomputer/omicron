@@ -17,7 +17,6 @@ use internal_dns::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
