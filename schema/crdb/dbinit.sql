@@ -3244,10 +3244,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
 
     -- CockroachDB settings managed by blueprints.
     --
-    -- Settings are typed and not null; we use NULL in these columns to reflect
-    -- that blueprint execution should not modify these options. There is no
-    -- value that represents "please reset this setting to the default value";
-    -- that is represented by the presence of the default value in that field.
+    -- We use NULL in these columns to reflect that blueprint execution should
+    -- not modify the option; we're able to do this because CockroachDB settings
+    -- require the value to be the correct type and not NULL. There is no value
+    -- that represents "please reset this setting to the default value"; that is
+    -- represented by the presence of the default value in that field.
     --
     -- `cluster.preserve_downgrade_option`
     cockroachdb_setting_preserve_downgrade TEXT
