@@ -663,8 +663,8 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-[patch."https://github.com/oxidecomputer/dropshot"]
-dropshot = { path = "../dropshot/dropshot" }
+#[patch."https://github.com/oxidecomputer/dropshot"]
+#dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
