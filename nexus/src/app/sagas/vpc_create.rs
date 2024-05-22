@@ -587,12 +587,25 @@ pub(crate) mod test {
             .await
             .expect("Failed to delete default Subnet");
 
-        // Default route
+        // Default gateway routes
         let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
-            .router_route_name(&default_name.clone().into())
+            .router_route_name(&"default-v4".parse::<Name>().unwrap().into())
+            .fetch()
+            .await
+            .expect("Failed to fetch default route");
+        datastore
+            .router_delete_route(&opctx, &authz_route)
+            .await
+            .expect("Failed to delete default route");
+
+        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+            .project_id(project_id)
+            .vpc_name(&default_name.clone().into())
+            .vpc_router_name(&system_name.clone().into())
+            .router_route_name(&"default-v6".parse::<Name>().unwrap().into())
             .fetch()
             .await
             .expect("Failed to fetch default route");

@@ -291,6 +291,10 @@ task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
 
+task: "vpc_route_manager"
+    propagates updated VPC routes to all OPTE ports
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -426,7 +430,7 @@ task: "metrics_producer_gc"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED        TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every 30s
@@ -470,6 +474,13 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "vpc_route_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
 stderr:

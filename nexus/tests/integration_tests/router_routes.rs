@@ -10,6 +10,8 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use omicron_common::api::external::IpNet;
+use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteKind,
@@ -59,27 +61,48 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     .await
     .items;
 
-    // The system should start with a single, pre-configured route
-    assert_eq!(system_router_routes.len(), 1);
+    // The system should start with three preconfigured routes:
+    // - a default v4 gateway route
+    // - a default v6 gateway route
+    // - a managed subnet route for the 'default' subnet
+    assert_eq!(system_router_routes.len(), 3);
 
-    // That route should be the default route
-    let default_route = &system_router_routes[0];
-    assert_eq!(default_route.kind, RouterRouteKind::Default);
+    let mut v4_route = None;
+    let mut v6_route = None;
+    let mut subnet_route = None;
+    for route in system_router_routes {
+        match (&route.kind, &route.destination, &route.target) {
+            (RouterRouteKind::Default, RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::InternetGateway(_)) => {v4_route = Some(route);},
+            (RouterRouteKind::Default, RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::InternetGateway(_)) => {v6_route = Some(route);},
+            (RouterRouteKind::VpcSubnet, RouteDestination::Subnet(n0), RouteTarget::Subnet(n1)) if n0 == n1 && n0.as_str() == "default" => {subnet_route = Some(route);},
+            _ => panic!("unexpected system route {route:?} -- wanted gateway and subnet"),
+        }
+    }
 
-    // It errors if you try to delete the default route
-    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::DELETE,
-        get_route_url("system", "default").as_str(),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "DELETE not allowed on system routes");
+    let v4_route =
+        v4_route.expect("no v4 gateway route found in system router");
+    let v6_route =
+        v6_route.expect("no v6 gateway route found in system router");
+    let subnet_route =
+        subnet_route.expect("no default subnet route found in system router");
+
+    // Deleting any default system route is disallowed.
+    for route in &[&v4_route, &v6_route, &subnet_route] {
+        let error: dropshot::HttpErrorResponseBody =
+            NexusRequest::expect_failure(
+                client,
+                StatusCode::BAD_REQUEST,
+                Method::DELETE,
+                get_route_url("system", route.name().as_str()).as_str(),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+        assert_eq!(error.message, "DELETE not allowed on system routes");
+    }
 
     // Create a custom router
     create_router(&client, project_name, vpc_name, router_name).await;
