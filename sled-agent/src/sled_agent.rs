@@ -37,9 +37,7 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -171,16 +169,15 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::Instance(instance_manager_error) => {
-                match instance_manager_error {
-                    crate::instance_manager::Error::Instance(
-                        instance_error,
-                    ) => match instance_error {
-                        crate::instance::Error::Propolis(propolis_error) => {
-                            // Work around dropshot#693: HttpError::for_status
-                            // only accepts client errors and asserts on server
-                            // errors, so convert server errors by hand.
-                            match propolis_error.status() {
+            Error::Instance(crate::instance_manager::Error::Instance(
+                instance_error,
+            )) => {
+                match instance_error {
+                    crate::instance::Error::Propolis(propolis_error) => {
+                        // Work around dropshot#693: HttpError::for_status
+                        // only accepts client errors and asserts on server
+                        // errors, so convert server errors by hand.
+                        match propolis_error.status() {
                                 None => HttpError::for_internal_error(
                                     propolis_error.to_string(),
                                 ),
@@ -196,18 +193,22 @@ impl From<Error> for dropshot::HttpError {
                                         HttpError::for_internal_error(propolis_error.to_string()),
                                 }
                             }
-                        }
-                        crate::instance::Error::Transition(omicron_error) => {
-                            // Preserve the status associated with the wrapped
-                            // Omicron error so that Nexus will see it in the
-                            // Progenitor client error it gets back.
-                            HttpError::from(omicron_error)
-                        }
-                        e => HttpError::for_internal_error(e.to_string()),
-                    },
+                    }
+                    crate::instance::Error::Transition(omicron_error) => {
+                        // Preserve the status associated with the wrapped
+                        // Omicron error so that Nexus will see it in the
+                        // Progenitor client error it gets back.
+                        HttpError::from(omicron_error)
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
+            Error::Instance(
+                e @ crate::instance_manager::Error::NoSuchInstance(_),
+            ) => HttpError::for_not_found(
+                Some("NO_SUCH_INSTANCE".to_string()),
+                e.to_string(),
+            ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
@@ -982,6 +983,18 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Returns the state of the instance with the provided ID.
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, Error> {
+        self.inner
+            .instances
+            .get_instance_state(instance_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
     /// Idempotently ensures that the given virtual disk is attached (or not) as
     /// specified.
     ///
@@ -1036,9 +1049,15 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
+    pub async fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        self.inner.port_manager.list_virtual_nics().map_err(Error::from)
+    }
+
     pub async fn set_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager
@@ -1048,7 +1067,7 @@ impl SledAgent {
 
     pub async fn unset_virtual_nic_host(
         &self,
-        mapping: &DeleteVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager

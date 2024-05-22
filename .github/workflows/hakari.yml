@@ -17,14 +17,14 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4
+      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1
         with:
           toolchain: stable
       - name: Install cargo-hakari
-        uses: taiki-e/install-action@00a67321d66e038602baf558d366a594a7019ea2 # v2
+        uses: taiki-e/install-action@0fc560009ad92371154ca652dcf2620d19331eee # v2
         with:
           tool: cargo-hakari
       - name: Check workspace-hack Cargo.toml is up-to-date

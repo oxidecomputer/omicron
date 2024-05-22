@@ -31,7 +31,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.

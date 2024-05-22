@@ -1137,7 +1137,7 @@ pub mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1264,7 +1264,7 @@ pub mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         // Check that no partial artifacts of instance creation exist
         assert!(no_instance_records_exist(datastore).await);
@@ -1287,9 +1287,7 @@ pub mod test {
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
 
         let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
-        for (_nic_id, mappings) in v2p_mappings {
-            assert!(mappings.is_empty());
-        }
+        assert!(v2p_mappings.is_empty());
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1300,7 +1298,7 @@ pub mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1329,7 +1327,7 @@ pub mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
         let opctx = test_helpers::test_opctx(&cptestctx);
 
@@ -1353,7 +1351,7 @@ pub mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

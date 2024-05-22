@@ -110,18 +110,8 @@ pub struct ProducerEndpoint {
     /// The IP address and port at which `oximeter` can collect metrics from the
     /// producer.
     pub address: SocketAddr,
-    /// NOTE: This field is deprecated, and will be ignored. It will be removed
-    /// in future releases.
-    pub base_route: String,
     /// The interval on which `oximeter` should collect metrics.
     pub interval: Duration,
-}
-
-impl ProducerEndpoint {
-    /// Return the route that can be used to request metric data.
-    pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, &self.id)
-    }
 }
 
 /// Response to a successful producer registration.

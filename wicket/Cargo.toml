@@ -6,6 +6,9 @@ edition = "2021"
 license = "MPL-2.0"
 default-run = "wicket"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 buf-list.workspace = true

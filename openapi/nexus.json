@@ -12420,6 +12420,11 @@
                 "type": "string",
                 "format": "ip"
               },
+              "ip_pool_id": {
+                "description": "The ID of the IP pool this resource belongs to.",
+                "type": "string",
+                "format": "uuid"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -12454,6 +12459,7 @@
               "description",
               "id",
               "ip",
+              "ip_pool_id",
               "kind",
               "name",
               "project_id",
@@ -12896,6 +12902,11 @@
             "type": "string",
             "format": "ip"
           },
+          "ip_pool_id": {
+            "description": "The ID of the IP pool this resource belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -12924,6 +12935,7 @@
           "description",
           "id",
           "ip",
+          "ip_pool_id",
           "name",
           "project_id",
           "time_created",
@@ -15958,7 +15970,6 @@
           "signing_keypair": {
             "nullable": true,
             "description": "request signing key pair",
-            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"

@@ -286,6 +286,17 @@ table! {
 }
 
 table! {
+    v2p_mapping_view (nic_id) {
+        nic_id -> Uuid,
+        sled_id -> Uuid,
+        sled_ip -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        ip -> Inet,
+    }
+}
+
+table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -463,7 +474,6 @@ table! {
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
-        base_route -> Text,
         oximeter_id -> Uuid,
     }
 }
@@ -1505,6 +1515,15 @@ table! {
 }
 
 table! {
+    bp_sled_state (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        sled_state -> crate::SledStateEnum,
+    }
+}
+
+table! {
     bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -1770,3 +1789,5 @@ allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
 allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
 joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
+
+allow_tables_to_appear_in_same_query!(sled, sled_instance);

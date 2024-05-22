@@ -148,14 +148,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     sled_state omicron.public.sled_state NOT NULL,
 
     /* Generation number owned and incremented by the sled-agent */
-    sled_agent_gen INT8 NOT NULL DEFAULT 1,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT serial_part_revision_unique UNIQUE (
-      serial_number, part_number, revision
-    )
+    sled_agent_gen INT8 NOT NULL DEFAULT 1
 );
+
+-- Add an index that ensures a given physical sled (identified by serial and
+-- part number) can only be a commissioned member of the control plane once.
+--
+-- TODO Should `sled` reference `hw_baseboard_id` instead of having its own
+-- serial/part columns?
+CREATE UNIQUE INDEX IF NOT EXISTS commissioned_sled_uniqueness
+    ON omicron.public.sled (serial_number, part_number)
+    WHERE sled_state != 'decommissioned';
 
 /* Add an index which lets us look up sleds on a rack */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
@@ -222,7 +225,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     -- The physical identity of the sled
     -- (foreign key into `hw_baseboard_id` table)
-    hw_baseboard_id UUID PRIMARY KEY,
+    hw_baseboard_id UUID,
 
     -- The rack to which a sled is being added
     -- (foreign key into `rack` table)
@@ -240,7 +243,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     -- The octet that extends a /56 rack subnet to a /64 sled subnet
     --
     -- Always between 33 and 255 inclusive
-    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
+    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255),
+
+    PRIMARY KEY (hw_baseboard_id, sled_id)
 );
 
 -- Add an index which allows pagination by {rack_id, sled_id} pairs.
@@ -1289,8 +1294,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
-    /* TODO: Is this length appropriate? */
-    base_route STRING(512) NOT NULL,
     /* Oximeter collector instance to which this metric producer is assigned. */
     oximeter_id UUID NOT NULL
 );
@@ -3262,6 +3265,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+-- state of a sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    sled_id UUID NOT NULL,
+    sled_state omicron.public.sled_state NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
 -- description of a collection of omicron physical disks stored in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
     -- foreign key into `blueprint` table
@@ -3425,6 +3438,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
 );
+
+CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
+    sled_id
+) WHERE time_deleted IS NULL;
 
 /*
  * A special view of an instance provided to operators for insights into what's
@@ -3782,6 +3799,73 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
+COMMIT;
+BEGIN;
+
+-- view for v2p mapping rpw
+CREATE VIEW IF NOT EXISTS omicron.public.v2p_mapping_view
+AS
+WITH VmV2pMappings AS (
+  SELECT
+    n.id as nic_id,
+    s.id as sled_id,
+    s.ip as sled_ip,
+    v.vni,
+    n.mac,
+    n.ip
+  FROM omicron.public.network_interface n
+  JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
+  JOIN omicron.public.vpc v ON v.id = n.vpc_id
+  JOIN omicron.public.vmm vmm ON n.parent_id = vmm.instance_id
+  JOIN omicron.public.sled s ON vmm.sled_id = s.id
+  WHERE n.time_deleted IS NULL
+  AND n.kind = 'instance'
+  AND s.sled_policy = 'in_service'
+  AND s.sled_state = 'active'
+),
+ProbeV2pMapping AS (
+  SELECT
+    n.id as nic_id,
+    s.id as sled_id,
+    s.ip as sled_ip,
+    v.vni,
+    n.mac,
+    n.ip
+  FROM omicron.public.network_interface n
+  JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
+  JOIN omicron.public.vpc v ON v.id = n.vpc_id
+  JOIN omicron.public.probe p ON n.parent_id = p.id
+  JOIN omicron.public.sled s ON p.sled = s.id
+  WHERE n.time_deleted IS NULL
+  AND n.kind = 'probe'
+  AND s.sled_policy = 'in_service'
+  AND s.sled_state = 'active'
+)
+SELECT nic_id, sled_id, sled_ip, vni, mac, ip FROM VmV2pMappings
+UNION
+SELECT nic_id, sled_id, sled_ip, vni, mac, ip FROM ProbeV2pMapping;
+
+CREATE INDEX IF NOT EXISTS network_interface_by_parent
+ON omicron.public.network_interface (parent_id)
+STORING (name, kind, vpc_id, subnet_id, mac, ip, slot);
+
+CREATE INDEX IF NOT EXISTS sled_by_policy_and_state
+ON omicron.public.sled (sled_policy, sled_state, id) STORING (ip);
+
+CREATE INDEX IF NOT EXISTS active_vmm
+ON omicron.public.vmm (time_deleted, sled_id, instance_id);
+
+CREATE INDEX IF NOT EXISTS v2p_mapping_details
+ON omicron.public.network_interface (
+  time_deleted, kind, subnet_id, vpc_id, parent_id
+) STORING (mac, ip);
+
+CREATE INDEX IF NOT EXISTS sled_by_policy
+ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
+
+CREATE INDEX IF NOT EXISTS vmm_by_instance_id
+ON omicron.public.vmm (instance_id) STORING (sled_id);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3842,7 +3926,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '59.0.0', NULL)
+    (TRUE, NOW(), NOW(), '64.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

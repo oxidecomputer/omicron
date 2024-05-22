@@ -13,6 +13,7 @@ mod dns_propagation;
 mod dns_servers;
 mod external_endpoints;
 mod init;
+mod instance_watcher;
 mod inventory_collection;
 mod metrics_producer_gc;
 mod nat_cleanup;
@@ -24,5 +25,6 @@ mod service_firewall_rules;
 mod status;
 mod sync_service_zone_nat;
 mod sync_switch_configuration;
+mod v2p_mappings;
 
 pub use init::BackgroundTasks;

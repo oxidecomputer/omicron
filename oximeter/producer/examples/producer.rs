@@ -120,7 +120,6 @@ async fn main() -> anyhow::Result<()> {
         id: registry.producer_id(),
         kind: ProducerKind::Service,
         address: args.address,
-        base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
     let config = Config {

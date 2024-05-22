@@ -80,7 +80,7 @@ stdout:
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
-note: listing all sleds (use -F to filter, e.g. -F in-service)
+note: listing all commissioned sleds (use -F to filter, e.g. -F in-service)
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
@@ -249,6 +249,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_watcher"
+    periodically checks instance states
+
+
 task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
@@ -285,6 +289,10 @@ task: "service_zone_nat_tracker"
 
 task: "switch_port_config_manager"
     manages switch port settings for rack switches
+
+
+task: "v2p_manager"
+    manages opte v2p mappings for vpc networking
 
 
 ---------------------------------------------
@@ -396,6 +404,18 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_watcher"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances checked: 0
+    checks completed: 0
+       successful checks: 0
+       failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
+
 task: "inventory_collection"
   configured period: every 10m
   currently executing: no
@@ -410,7 +430,7 @@ task: "metrics_producer_gc"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: metric producer gc disabled (omicron#5284)
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every 30s
@@ -455,6 +475,13 @@ task: "switch_port_config_manager"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
+task: "v2p_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -485,27 +512,28 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  -----------------------------------------------------------------------------------------
-    zone type         zone ID                                disposition  underlay IP      
-  -----------------------------------------------------------------------------------------
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-   (no zones)                                                                              
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
-    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
-    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+!..........<REDACTED_UUID>...........
+WARNING: Zones exist without physical disks!
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
-METADATA:
-  created by:            nexus-test-utils        
-  created at:            <REDACTED     TIMESTAMP>
-  comment:               initial test blueprint  
-  internal DNS version:  1                       
-  external DNS version:  2                       
+
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED     TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
 
 ---------------------------------------------
 stderr:
@@ -518,27 +546,28 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  -----------------------------------------------------------------------------------------
-    zone type         zone ID                                disposition  underlay IP      
-  -----------------------------------------------------------------------------------------
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-   (no zones)                                                                              
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2               
-    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
-    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
-    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+!..........<REDACTED_UUID>...........
+WARNING: Zones exist without physical disks!
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
-METADATA:
-  created by:            nexus-test-utils        
-  created at:            <REDACTED     TIMESTAMP>
-  comment:               initial test blueprint  
-  internal DNS version:  1                       
-  external DNS version:  2                       
+
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED     TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
 
 ---------------------------------------------
 stderr:
@@ -551,23 +580,28 @@ stdout:
 from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
 to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
-  ---------------------------------------------------------------------------------------------------
-     zone type         zone ID                                disposition   underlay IP       status 
-  ---------------------------------------------------------------------------------------------------
-                                                                                                     
-  UNCHANGED SLEDS:                                                                                   
-                                                                                                     
-   sled ..........<REDACTED_UUID>...........: blueprint zones at generation 2                        
-     clickhouse        ..........<REDACTED_UUID>...........   in service    ::1                      
-     cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1                      
-     crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1                      
-     external_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
-     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1                      
-     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1         
+ UNCHANGED SLEDS:
 
-  METADATA:
-    internal DNS version:  1 (unchanged)
-    external DNS version:  2 (unchanged)
+  sled ..........<REDACTED_UUID>...........:
+
+  sled ..........<REDACTED_UUID>...........:
+
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   2 (unchanged)
+
 
 ---------------------------------------------
 stderr:

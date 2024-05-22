@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lib]
 proc-macro = true
 
+[lints]
+workspace = true
+
 [dependencies]
 heck.workspace = true
 nexus-macros-common.workspace = true

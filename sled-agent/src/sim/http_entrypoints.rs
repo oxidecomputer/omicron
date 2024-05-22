@@ -20,8 +20,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use illumos_utils::opte::params::DeleteVirtualNetworkInterfaceHost;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
@@ -41,6 +40,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(instance_put_external_ip)?;
@@ -53,6 +53,7 @@ pub fn api() -> SledApiDescription {
         api.register(vpc_firewall_rules_put)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
+        api.register(list_v2p)?;
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config)?;
         api.register(write_network_bootstore_config)?;
@@ -132,6 +133,19 @@ async fn instance_put_state(
     Ok(HttpResponseOk(
         sa.instance_ensure_state(instance_id, body_args.state).await?,
     ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
 }
 
 #[endpoint {
@@ -329,27 +343,19 @@ async fn vpc_firewall_rules_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Path parameters for V2P mapping related requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-struct V2pPathParam {
-    interface_id: Uuid,
-}
-
 /// Create a mapping from a virtual NIC to a physical host
 #[endpoint {
     method = PUT,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn set_v2p(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<V2pPathParam>,
-    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let interface_id = path_params.into_inner().interface_id;
     let body_args = body.into_inner();
 
-    sa.set_virtual_nic_host(interface_id, &body_args)
+    sa.set_virtual_nic_host(&body_args)
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
@@ -359,22 +365,35 @@ async fn set_v2p(
 /// Delete a mapping from a virtual NIC to a physical host
 #[endpoint {
     method = DELETE,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn del_v2p(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<V2pPathParam>,
-    body: TypedBody<DeleteVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let interface_id = path_params.into_inner().interface_id;
     let body_args = body.into_inner();
 
-    sa.unset_virtual_nic_host(interface_id, &body_args)
+    sa.unset_virtual_nic_host(&body_args)
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// List v2p mappings present on sled
+#[endpoint {
+    method = GET,
+    path = "/v2p/",
+}]
+async fn list_v2p(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError> {
+    let sa = rqctx.context();
+
+    let vnics = sa.list_virtual_nics().await.map_err(HttpError::from)?;
+
+    Ok(HttpResponseOk(vnics))
 }
 
 #[endpoint {

@@ -13,6 +13,8 @@ use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use std::net::IpAddr;
 
+use crate::context::ServerKind;
+
 impl super::Nexus {
     /// Fetch the allowlist of source IPs that can reach user-facing services.
     pub async fn allow_list_view(
@@ -30,6 +32,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         remote_addr: IpAddr,
+        server_kind: ServerKind,
         params: params::AllowListUpdate,
     ) -> Result<AllowList, Error> {
         if let external::AllowedSourceIps::List(list) = &params.allowed_ips {
@@ -50,9 +53,17 @@ impl super::Nexus {
             // the request came from is on the allowlist. This is our only real
             // guardrail to prevent accidentally preventing any future access to
             // the rack!
+            //
+            // Note that we elide this check when handling a request proxied
+            // from `wicketd`. This is intentional and used as a safety
+            // mechanism in the even of lockout or other recovery scenarios.
+            let check_remote_addr = match server_kind {
+                ServerKind::External => true,
+                ServerKind::Techport | ServerKind::Internal => false,
+            };
             let mut contains_remote = false;
             for entry in list.iter() {
-                contains_remote = entry.contains(remote_addr);
+                contains_remote |= entry.contains(remote_addr);
                 if entry.addr().is_unspecified() {
                     return Err(Error::invalid_request(
                         "Source IP allowlist may not contain the \
@@ -67,7 +78,7 @@ impl super::Nexus {
                     ));
                 }
             }
-            if !contains_remote {
+            if check_remote_addr && !contains_remote {
                 return Err(Error::invalid_request(
                     "The source IP allow list would prevent access \
                     from the current client! Ensure that the allowlist \

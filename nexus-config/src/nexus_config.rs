@@ -375,8 +375,12 @@ pub struct BackgroundTaskConfig {
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement task
     pub region_replacement: RegionReplacementConfig,
+    /// configuration for instance watcher task
+    pub instance_watcher: InstanceWatcherConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
+    /// configuration for v2p mapping propagation task
+    pub v2p_mapping_propagation: V2PMappingPropagationConfig,
 }
 
 #[serde_as]
@@ -523,7 +527,23 @@ pub struct RegionReplacementConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstanceWatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ServiceFirewallPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct V2PMappingPropagationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -765,7 +785,9 @@ mod test {
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
+            instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
+            v2p_mapping_propagation.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -894,10 +916,16 @@ mod test {
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        instance_watcher: InstanceWatcherConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
-                            }
+                            },
+                        v2p_mapping_propagation: V2PMappingPropagationConfig {
+                            period_secs: Duration::from_secs(30)
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -964,7 +992,9 @@ mod test {
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
+            instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
+            v2p_mapping_propagation.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

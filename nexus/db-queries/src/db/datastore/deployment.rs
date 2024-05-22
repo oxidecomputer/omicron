@@ -40,12 +40,14 @@ use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
+use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::external_api::views::SledState;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -108,6 +110,16 @@ impl DataStore {
         // so that we can produce the `Error` type that we want here.
         let row_blueprint = DbBlueprint::from(blueprint);
         let blueprint_id = row_blueprint.id;
+
+        let sled_states = blueprint
+            .sled_state
+            .iter()
+            .map(|(&sled_id, &state)| BpSledState {
+                blueprint_id,
+                sled_id: sled_id.into(),
+                sled_state: state.into(),
+            })
+            .collect::<Vec<_>>();
 
         let sled_omicron_physical_disks = blueprint
             .blueprint_disks
@@ -183,6 +195,16 @@ impl DataStore {
                 use db::schema::blueprint::dsl;
                 let _: usize = diesel::insert_into(dsl::blueprint)
                     .values(row_blueprint)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert all the sled states for this blueprint.
+            {
+                use db::schema::bp_sled_state::dsl as sled_state;
+
+                let _ = diesel::insert_into(sled_state::bp_sled_state)
+                    .values(sled_states)
                     .execute_async(&conn)
                     .await?;
             }
@@ -288,6 +310,41 @@ impl DataStore {
                 blueprint.creator,
                 blueprint.comment,
             )
+        };
+
+        // Load the sled states for this blueprint.
+        let sled_state: BTreeMap<SledUuid, SledState> = {
+            use db::schema::bp_sled_state::dsl;
+
+            let mut sled_state = BTreeMap::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_sled_state,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpSledState::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|s| s.sled_id);
+
+                for s in batch {
+                    let old = sled_state
+                        .insert(s.sled_id.into(), s.sled_state.into());
+                    bail_unless!(
+                        old.is_none(),
+                        "found duplicate sled ID in bp_sled_state: {}",
+                        s.sled_id
+                    );
+                }
+            }
+            sled_state
         };
 
         // Read this blueprint's `bp_sled_omicron_zones` rows, which describes
@@ -550,6 +607,7 @@ impl DataStore {
             id: blueprint_id,
             blueprint_zones,
             blueprint_disks,
+            sled_state,
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
@@ -578,6 +636,7 @@ impl DataStore {
 
         let (
             nblueprints,
+            nsled_states,
             nsled_physical_disks,
             nphysical_disks,
             nsled_agent_zones,
@@ -616,6 +675,17 @@ impl DataStore {
                         authz_blueprint.not_found(),
                     ));
                 }
+
+                // Remove rows associated with sled states.
+                let nsled_states = {
+                    use db::schema::bp_sled_state::dsl;
+                    diesel::delete(
+                        dsl::bp_sled_state
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
 
                 // Remove rows associated with Omicron physical disks
                 let nsled_physical_disks = {
@@ -670,6 +740,7 @@ impl DataStore {
 
                 Ok((
                     nblueprints,
+                    nsled_states,
                     nsled_physical_disks,
                     nphysical_disks,
                     nsled_agent_zones,
@@ -688,6 +759,7 @@ impl DataStore {
         info!(&opctx.log, "removed blueprint";
             "blueprint_id" => blueprint_id.to_string(),
             "nblueprints" => nblueprints,
+            "nsled_states" => nsled_states,
             "nsled_physical_disks" => nsled_physical_disks,
             "nphysical_disks" => nphysical_disks,
             "nsled_agent_zones" => nsled_agent_zones,
@@ -1267,7 +1339,6 @@ mod tests {
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::disk::DiskIdentity;
@@ -1275,6 +1346,7 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use once_cell::sync::Lazy;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
@@ -1282,8 +1354,8 @@ mod tests {
     use std::mem;
     use std::net::Ipv6Addr;
 
-    static EMPTY_PLANNING_INPUT: PlanningInput =
-        PlanningInputBuilder::empty_input();
+    static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
+        Lazy::new(|| PlanningInputBuilder::empty_input());
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific
@@ -1482,7 +1554,7 @@ mod tests {
         // Check the number of blueprint elements against our collection.
         assert_eq!(
             blueprint1.blueprint_zones.len(),
-            planning_input.all_sled_ids(SledFilter::All).count(),
+            planning_input.all_sled_ids(SledFilter::Commissioned).count(),
         );
         assert_eq!(
             blueprint1.blueprint_zones.len(),
@@ -1586,7 +1658,7 @@ mod tests {
         let blueprint2 = builder.build();
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("b1 -> b2: {}", diff.display());
         println!("b1 disks: {:?}", blueprint1.blueprint_disks);
         println!("b2 disks: {:?}", blueprint2.blueprint_disks);
@@ -1627,9 +1699,7 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        let diff = blueprint_read
-            .diff_since_blueprint(&blueprint2)
-            .expect("failed to diff blueprints");
+        let diff = blueprint_read.diff_since_blueprint(&blueprint2);
         println!("diff: {}", diff.display());
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);

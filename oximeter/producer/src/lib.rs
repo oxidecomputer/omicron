@@ -210,14 +210,6 @@ impl Server {
             return Err(Error::UuidMismatch);
         }
 
-        // Overwrite any provided base_route.
-        //
-        // This will be removed in future releases, as users no longer have or
-        // need any control over the route the producer server exposes.
-        //
-        // TODO-cleanup: Remove this field entirely.
-        server_info.base_route = String::from("/");
-
         // Build the logger / server.
         let log = Self::build_logger(log)?;
         let dropshot = ConfigDropshot {
@@ -284,7 +276,6 @@ impl Server {
         info!(
             log,
             "starting oximeter metric producer server";
-            "route" => server_info.collection_route(),
             "producer_id" => ?registry.producer_id(),
             "address" => server.local_addr(),
             "interval" => ?server_info.interval,
@@ -542,7 +533,6 @@ mod tests {
                 id: Uuid::new_v4(),
                 kind: ProducerKind::Service,
                 address,
-                base_route: String::new(),
                 interval: Duration::from_secs(10),
             },
             registration_address: Some(fake_nexus.local_addr()),
