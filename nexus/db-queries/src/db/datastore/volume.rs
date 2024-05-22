@@ -1648,6 +1648,86 @@ impl DataStore {
         //
         // This function's effects can be undone by calling it with swapped
         // parameters.
+        //
+        // # Example #
+        //
+        // Imagine `volume_replace_region` is called with the following,
+        // pretending that UUIDs are just eight uppercase letters:
+        //
+        //   let target = VolumeReplacementParams {
+        //     volume_id: AAAAAAAA,
+        //     region_id: BBBBBBBB,
+        //     region_addr: "[fd00:1122:3344:145::10]:40001",
+        //   }
+        //
+        //   let replace = VolumeReplacementParams {
+        //     volume_id: CCCCCCCC,
+        //     region_id: DDDDDDDD,
+        //     region_addr: "[fd00:1122:3344:322::4]:3956",
+        //   }
+        //
+        // In the database, the relevant records (and columns) of the region
+        // table look like this prior to the transaction:
+        //
+        //         id | volume_id
+        //  ----------| ---------
+        //   BBBBBBBB | AAAAAAAA
+        //   DDDDDDDD | CCCCCCCC
+        //
+        // Volume AAAAAAAA (from `target`) has a volume construction request,
+        // where one of the targets list will contain the target region's
+        // (BBBBBBBB) address:
+        //
+        //   {
+        //     "type": "volume",
+        //     "block_size": 512,
+        //     "id": "AAAAAAAA",
+        //     "read_only_parent": {
+        //       ...
+        //     },
+        //     "sub_volumes": [
+        //       {
+        //         ...
+        //         "opts": {
+        //           ...
+        //           "target": [
+        //             "[fd00:1122:3344:103::3]:19004",
+        //             "[fd00:1122:3344:79::12]:27015",
+        //             "[fd00:1122:3344:145::10]:40001"  <-----
+        //           ]
+        //         }
+        //       }
+        //     ]
+        //   }
+        //
+        // Note it is not required for the replacement volume to exist as a
+        // database record for this transaction.
+        //
+        // The first part of the transaction will swap the volume IDs of the
+        // target and replacement region records:
+        //
+        //         id | volume_id
+        //  ----------| ---------
+        //   BBBBBBBB | CCCCCCCC
+        //   DDDDDDDD | AAAAAAAA
+        //
+        // The second part of the transaction will update the volume
+        // construction request of AAAAAAAA by finding and replacing BBBBBBBB's
+        // address (in the appropriate targets array) with DDDDDDDD's address:
+        //
+        //   {
+        //           ...
+        //           "target": [
+        //             "[fd00:1122:3344:103::3]:19004",
+        //             "[fd00:1122:3344:79::12]:27015",
+        //             "[fd00:1122:3344:322::4]:3956"  <-----
+        //           ]
+        //           ...
+        //   }
+        //
+        // After the transaction, the caller should ensure that region BBBBBBBB
+        // is referenced (via the socket address) in volume CCCCCCCC. For an
+        // example, this is done as part of the region replacement start saga.
 
         #[derive(Debug, thiserror::Error)]
         enum VolumeReplaceRegionError {
