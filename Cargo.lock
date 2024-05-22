@@ -5227,6 +5227,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-cockroach-admin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "csv",
+ "dropshot",
+ "http 0.2.12",
+ "illumos-utils",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "thiserror",
+ "tokio",
+ "toml 0.8.13",
+]
+
+[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [

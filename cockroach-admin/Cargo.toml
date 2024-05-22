@@ -1,0 +1,30 @@
+[package]
+name = "omicron-cockroach-admin"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+chrono.workspace = true
+clap.workspace = true
+csv.workspace = true
+dropshot.workspace = true
+http.workspace = true
+illumos-utils.workspace = true
+omicron-common.workspace = true
+schemars.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-dtrace.workspace = true
+slog-error-chain.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[lints]
+workspace = true
