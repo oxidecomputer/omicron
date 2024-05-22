@@ -1338,8 +1338,7 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET)
-                                        .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1365,8 +1364,7 @@ mod test {
                                     name: "ntp1".parse().unwrap(),
                                     ip: ntp1_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET)
-                                        .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1412,8 +1410,7 @@ mod test {
                                     mac: macs.next().unwrap(),
                                     subnet: IpNet::from(
                                         *NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1439,8 +1436,7 @@ mod test {
                                     name: "ntp2".parse().unwrap(),
                                     ip: ntp2_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET)
-                                        .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1663,8 +1659,7 @@ mod test {
                                     mac: macs.next().unwrap(),
                                     subnet: IpNet::from(
                                         *NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
