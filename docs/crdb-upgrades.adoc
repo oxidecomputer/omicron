@@ -44,34 +44,38 @@ a tick, but they must occur in that order.)
 
 == Process for a tick release
 
-1. Determine whether to move to the next major release of CockroachDB.
-   We have generally avoided being early adopters of new major releases
-   and prefer to see the rate of https://www.cockroachlabs.com/docs/advisories/[technical
-   advisories] that solely affect the new major version drop off. (This
-   generally won't stop you from working on building and testing the
-   next major version, however, as the build process sometimes changes
-   significantly from release to release.)
-2. Build a new version of CockroachDB for illumos. You will want to
-   update the https://github.com/oxidecomputer/garbage-compactor/tree/master/cockroach[build
-   scripts in garbage-compactor].
-3. In your local Omicron checkout on a Helios machine, unpack the
-   resulting tarball to `out/ cockroachdb`, and update `tools/
-   cockroachdb_version` to the version you've built. You can now run
-   the test suite, which should catch any unexpected SQL compatibility
-   issues between releases and help validate that your build works.
-4. Submit a PR for your changes to garbage-compactor; when merged,
-   publish the final build to the `oxide-cockroachdb-build` S3 bucket.
-5. Update `tools/cockroachdb_checksums`. For non-illumos checksums, use
-   the https://www.cockroachlabs.com/docs/releases/[official releases]
-   matching the version you built.
-6. Submit a PR with your changes to `tools/cockroachdb_version` and
-   `tools/cockroachdb_checksums`.
+. Determine whether to move to the next major release of CockroachDB.
+  We have generally avoided being early adopters of new major releases
+  and prefer to see the rate of https://www.cockroachlabs.com/docs/advisories/[technical
+  advisories] that solely affect the new major version drop off. (This
+  generally won't stop you from working on building and testing the
+  next major version, however, as the build process sometimes changes
+  significantly from release to release.)
+. Build a new version of CockroachDB for illumos. You will want to
+  update the https://github.com/oxidecomputer/garbage-compactor/tree/master/cockroach[build
+  scripts in garbage-compactor].
+. In your local Omicron checkout on a Helios machine, unpack the
+  resulting tarball to `out/cockroachdb`, and update `tools/cockroachdb_version`
+  to the version you've built.
+. Add an enum variant for the new version to `CockroachDbClusterVersion`
+  in `nexus/types/src/deployment/planning_input.rs`, and change the
+  associated constant `NEWLY_INITIALIZED` to that value.
+. Run the test suite, which should catch any unexpected SQL
+  compatibility issues between releases and help validate that your
+  build works.
+. Submit a PR for your changes to garbage-compactor; when merged,
+  publish the final build to the `oxide-cockroachdb-build` S3 bucket.
+. Update `tools/cockroachdb_checksums`. For non-illumos checksums, use
+  the https://www.cockroachlabs.com/docs/releases/[official releases]
+  matching the version you built.
+. Submit a PR with your changes (including `tools/cockroachdb_version`
+  and `tools/cockroachdb_checksums`) to Omicron.
 
 == Process for a tock release
 
-1. Change the `pub const COCKROACHDB_CLUSTER_VERSION` in
-   `nexus/types/src/deployment/planning_input.rs` from the previous
-   major version to the current major version.
+. Change the associated constant `CockroachDbClusterVersion::POLICY` in
+  `nexus/types/src/deployment/planning_input.rs` from the previous major
+  version to the current major version.
 
 == What Nexus does
 
