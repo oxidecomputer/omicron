@@ -533,10 +533,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source.commit = "23b0cf439f9f62b9a4933e55cc72bcaddc9596cd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "f2ee54b6a654daa1c1f817440317e9b11c5ddc71249df261bb5cfa0e6057dc24"
+source.sha256 = "1ea0e73e149a68bf91b5ce2e0db2a8a1af50dcdbbf381b672aa9ac7e36a3a181"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -549,10 +549,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source.commit = "23b0cf439f9f62b9a4933e55cc72bcaddc9596cd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "bb98815f759f38abee9f5aea0978cd33e66e75079cc8c171036be21bf9049c96"
+source.sha256 = "3334b0a9d5956e3117a6b493b9a5a31220391fab1ecbfb3a4bd8e94d7030771a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -564,7 +564,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source.commit = "23b0cf439f9f62b9a4933e55cc72bcaddc9596cd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 source.sha256 = "e0907de39ca9f8ab45d40d361a1dbeed4bd8e9b157f8d3d8fe0a4bc259d933bd"

@@ -1287,9 +1287,7 @@ pub mod test {
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
 
         let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
-        for (_nic_id, mappings) in v2p_mappings {
-            assert!(mappings.is_empty());
-        }
+        assert!(v2p_mappings.is_empty());
     }
 
     #[nexus_test(server = crate::Server)]

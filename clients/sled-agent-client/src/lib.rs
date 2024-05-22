@@ -35,7 +35,8 @@ progenitor::generate_api!(
         PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
         IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] }
+        VirtualNetworkInterfaceHost = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
+        OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] },
     },
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
