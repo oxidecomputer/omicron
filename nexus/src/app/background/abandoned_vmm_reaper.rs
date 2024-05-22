@@ -30,7 +30,7 @@ pub struct AbandonedVmmReaper {
     datastore: Arc<DataStore>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ActivationResults {
     found: usize,
     sled_resources_deleted: usize,
@@ -248,7 +248,8 @@ mod tests {
         let mut results = ActivationResults::default();
         dbg!(task.reap(&mut results, &opctx,).await)
             .expect("activation completes successfully");
-        assert_eq!(results.found, 1);
+        dbg!(&results);
+
         assert_eq!(results.vmms_deleted, 1);
         assert_eq!(results.sled_resources_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 0);

@@ -193,14 +193,23 @@ impl DataStore {
             // - not deleted yet
             .filter(dsl::time_deleted.is_null())
             // - not pointed to by their corresponding instances
-            .filter(diesel::dsl::not(diesel::dsl::exists(
-                instance_dsl::instance.filter(
-                    instance_dsl::active_propolis_id
-                        .eq(dsl::id.nullable())
-                        .or(instance_dsl::target_propolis_id
-                            .eq(dsl::id.nullable())),
+            .left_join(
+                instance_dsl::instance
+                    .on(instance_dsl::id.eq(dsl::instance_id)),
+            )
+            .filter(
+                instance_dsl::active_propolis_id.ne(dsl::id.nullable()).and(
+                    instance_dsl::target_propolis_id.ne(dsl::id.nullable()),
                 ),
-            )))
+            )
+            // .filter(diesel::dsl::not(diesel::dsl::exists(
+            //     instance_dsl::instance.filter(
+            //         instance_dsl::active_propolis_id
+            //             .eq(dsl::id.nullable())
+            //             .or(instance_dsl::target_propolis_id
+            //                 .eq(dsl::id.nullable())),
+            //     ),
+            // )))
             .select(Vmm::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
