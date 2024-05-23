@@ -200,6 +200,9 @@ pub struct Nexus {
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
+
+    /// Channel for notifying background task of change to opte v2p state
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 }
 
 impl Nexus {
@@ -390,6 +393,8 @@ impl Nexus {
             Arc::clone(&db_datastore),
         );
 
+        let v2p_watcher_channel = tokio::sync::watch::channel(());
+
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
         let background_tasks = background::BackgroundTasks::start(
@@ -400,6 +405,7 @@ impl Nexus {
             config.deployment.id,
             resolver.clone(),
             saga_request,
+            v2p_watcher_channel.clone(),
             producer_registry,
         );
 
@@ -453,6 +459,7 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
+            v2p_notification_tx: v2p_watcher_channel.0,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

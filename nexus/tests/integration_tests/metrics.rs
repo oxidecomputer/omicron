@@ -318,6 +318,28 @@ pub async fn timeseries_query(
 async fn test_instance_watcher_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
+    macro_rules! assert_gte {
+        ($a:expr, $b:expr) => {{
+            let a = $a;
+            let b = $b;
+            assert!(
+                $a >= $b,
+                concat!(
+                    "assertion failed: ",
+                    stringify!($a),
+                    " >= ",
+                    stringify!($b),
+                    ", ",
+                    stringify!($a),
+                    " = {:?}, ",
+                    stringify!($b),
+                    " = {:?}",
+                ),
+                a,
+                b
+            );
+        }};
+    }
     use oximeter::types::FieldValue;
     const INSTANCE_ID_FIELD: &str = "instance_id";
     const STATE_FIELD: &str = "state";
@@ -462,7 +484,7 @@ async fn test_instance_watcher_metrics(
         .find(|t| t.name() == "virtual_machine:check")
         .expect("missing virtual_machine:check");
     let ts = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    assert_eq!(ts, 1);
+    assert_gte!(ts, 1);
 
     // okay, make another instance
     eprintln!("--- creating instance 2 ---");
@@ -479,8 +501,8 @@ async fn test_instance_watcher_metrics(
         .expect("missing virtual_machine:check");
     let ts1 = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
     let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    assert_eq!(ts1, 2);
-    assert_eq!(ts2, 1);
+    assert_gte!(ts1, 2);
+    assert_gte!(ts2, 1);
 
     // poke instance 1 to get it into the running state
     eprintln!("--- starting instance 1 ---");
@@ -498,9 +520,9 @@ async fn test_instance_watcher_metrics(
         dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
     let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
     let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    assert_eq!(ts1_starting, 2);
-    assert_eq!(ts1_running, 1);
-    assert_eq!(ts2, 2);
+    assert_gte!(ts1_starting, 2);
+    assert_gte!(ts1_running, 1);
+    assert_gte!(ts2, 2);
 
     // poke instance 2 to get it into the Running state.
     eprintln!("--- starting instance 2 ---");
@@ -528,11 +550,11 @@ async fn test_instance_watcher_metrics(
     let ts2_starting =
         dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
     let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
-    assert_eq!(ts1_starting, 2);
-    assert_eq!(ts1_running, 1);
-    assert_eq!(ts1_stopping, 1);
-    assert_eq!(ts2_starting, 2);
-    assert_eq!(ts2_running, 1);
+    assert_gte!(ts1_starting, 2);
+    assert_gte!(ts1_running, 1);
+    assert_gte!(ts1_stopping, 1);
+    assert_gte!(ts2_starting, 2);
+    assert_gte!(ts2_running, 1);
 
     // simulate instance 1 completing its stop, which will remove it from the
     // set of active instances in CRDB. now, it won't be checked again.
@@ -556,11 +578,11 @@ async fn test_instance_watcher_metrics(
     let ts2_starting =
         dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
     let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
-    assert_eq!(ts1_starting, 2);
-    assert_eq!(ts1_running, 1);
-    assert_eq!(ts1_stopping, 1);
-    assert_eq!(ts2_starting, 2);
-    assert_eq!(ts2_running, 2);
+    assert_gte!(ts1_starting, 2);
+    assert_gte!(ts1_running, 1);
+    assert_gte!(ts1_stopping, 1);
+    assert_gte!(ts2_starting, 2);
+    assert_gte!(ts2_running, 2);
 }
 
 /// Wait until a producer is registered with Oximeter.

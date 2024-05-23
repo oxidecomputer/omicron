@@ -96,7 +96,6 @@ static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
     dir
 });
 
-#[derive(Parser)]
 /// Run the Oxide release engineering process and produce a TUF repo that can be
 /// used to update a rack.
 ///
@@ -104,6 +103,8 @@ static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
 ///
 /// Note that `--host-dataset` and `--recovery-dataset` must be set to different
 /// values to build the two OS images in parallel. This is strongly recommended.
+#[derive(Parser)]
+#[command(name = "cargo xtask releng", bin_name = "cargo xtask releng")]
 struct Args {
     /// ZFS dataset to use for `helios-build` when building the host image
     #[clap(long, default_value_t = Self::default_dataset("host"))]
@@ -544,7 +545,18 @@ async fn main() -> Result<()> {
     jobs.select("host-image").after("host-profile");
 
     stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
-        .after("host-stamp");
+        .after("host-stamp")
+        .after("recovery-stamp");
+
+    // Run `cargo xtask verify-libraries --release`. (This was formerly run in
+    // the build-and-test Buildomat job, but this fits better here where we've
+    // already built most of the binaries.)
+    jobs.push_command(
+        "verify-libraries",
+        Command::new(&cargo).args(["xtask", "verify-libraries", "--release"]),
+    )
+    .after("host-package")
+    .after("recovery-package");
 
     for (name, base_url) in [
         ("staging", "https://permslip-staging.corp.oxide.computer"),

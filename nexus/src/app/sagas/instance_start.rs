@@ -447,50 +447,18 @@ async fn sis_dpd_ensure_undo(
 async fn sis_v2p_ensure(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
-    let instance_id = params.db_instance.id();
-
-    info!(osagactx.log(), "start saga: ensuring v2p mappings are configured";
-          "instance_id" => %instance_id);
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    osagactx
-        .nexus()
-        .create_instance_v2p_mappings(&opctx, instance_id, sled_uuid)
-        .await
-        .map_err(ActionError::action_failed)?;
-
+    let nexus = osagactx.nexus();
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
 
 async fn sis_v2p_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
-    let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
-    info!(osagactx.log(), "start saga: undoing v2p configuration";
-          "instance_id" => %instance_id,
-          "sled_id" => %sled_id);
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    osagactx
-        .nexus()
-        .delete_instance_v2p_mappings(&opctx, instance_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
+    let nexus = osagactx.nexus();
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
 

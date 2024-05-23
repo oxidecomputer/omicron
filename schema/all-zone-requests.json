@@ -668,7 +668,6 @@
           }
         },
         "dataset": {
-          "default": null,
           "anyOf": [
             {
               "$ref": "#/definitions/DatasetRequest"

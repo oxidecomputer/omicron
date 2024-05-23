@@ -80,11 +80,7 @@ async fn perform_collection(
 ) {
     debug!(log, "collecting from producer");
     let res = client
-        .get(format!(
-            "http://{}{}",
-            producer.address,
-            producer.collection_route()
-        ))
+        .get(format!("http://{}/{}", producer.address, producer.id,))
         .send()
         .await;
     match res {
@@ -155,10 +151,7 @@ async fn collection_task(
     mut inbox: mpsc::Receiver<CollectionMessage>,
     outbox: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
 ) {
-    let mut log = orig_log.new(o!(
-        "route" => producer.collection_route(),
-        "address" => producer.address,
-    ));
+    let mut log = orig_log.new(o!("address" => producer.address));
     let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
     collection_timer.tick().await; // completes immediately
@@ -199,10 +192,7 @@ async fn collection_task(
                         );
 
                         // Update the logger with the new information as well.
-                        log = orig_log.new(o!(
-                            "route" => producer.collection_route(),
-                            "address" => producer.address,
-                        ));
+                        log = orig_log.new(o!("address" => producer.address));
                         collection_timer = interval(producer.interval);
                         collection_timer.tick().await; // completes immediately
                     }
@@ -940,7 +930,6 @@ mod tests {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address,
-            base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -1009,7 +998,6 @@ mod tests {
                 0,
                 0,
             )),
-            base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -1089,7 +1077,6 @@ mod tests {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address,
-            base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
         };
         collector

@@ -548,6 +548,12 @@ impl PlanningInputBuilder {
         Ok(self.network_resources.add_nic(zone_id, nic)?)
     }
 
+    pub fn network_resources_mut(
+        &mut self,
+    ) -> &mut OmicronZoneNetworkResources {
+        &mut self.network_resources
+    }
+
     pub fn policy_mut(&mut self) -> &mut Policy {
         &mut self.policy
     }

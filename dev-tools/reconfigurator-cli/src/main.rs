@@ -780,9 +780,7 @@ fn cmd_blueprint_diff(
     let blueprint1 = sim.blueprint_lookup(blueprint1_id)?;
     let blueprint2 = sim.blueprint_lookup(blueprint2_id)?;
 
-    let sled_diff = blueprint2
-        .diff_since_blueprint(&blueprint1)
-        .context("failed to diff blueprints")?;
+    let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
 
     // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
@@ -897,9 +895,7 @@ fn cmd_blueprint_diff_inventory(
         anyhow!("no such inventory collection: {}", collection_id)
     })?;
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
-    let diff = blueprint
-        .diff_since_collection(&collection)
-        .context("failed to diff blueprint from inventory collection")?;
+    let diff = blueprint.diff_since_collection(&collection);
     Ok(Some(diff.display().to_string()))
 }
 

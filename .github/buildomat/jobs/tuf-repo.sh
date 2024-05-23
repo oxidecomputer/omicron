@@ -3,7 +3,7 @@
 #: name = "helios / build TUF repo"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.77.2"
+#: rust_toolchain = "1.78.0"
 #: output_rules = [
 #:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
@@ -65,4 +65,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo run --release --bin omicron-releng -- --output-dir /work
+cargo xtask releng --output-dir /work

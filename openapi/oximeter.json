@@ -200,10 +200,6 @@
             "description": "The IP address and port at which `oximeter` can collect metrics from the producer.",
             "type": "string"
           },
-          "base_route": {
-            "description": "NOTE: This field is deprecated, and will be ignored. It will be removed in future releases.",
-            "type": "string"
-          },
           "id": {
             "description": "A unique ID for this producer.",
             "type": "string",
@@ -228,7 +224,6 @@
         },
         "required": [
           "address",
-          "base_route",
           "id",
           "interval",
           "kind"

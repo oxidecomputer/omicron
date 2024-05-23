@@ -35,6 +35,7 @@ pub(crate) struct InstanceWatcher {
     resolver: internal_dns::resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
     id: WatcherIdentity,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -48,12 +49,13 @@ impl InstanceWatcher {
         resolver: internal_dns::resolver::Resolver,
         producer_registry: &ProducerRegistry,
         id: WatcherIdentity,
+        v2p_notification_tx: tokio::sync::watch::Sender<()>,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, resolver, metrics, id }
+        Self { datastore, resolver, metrics, id, v2p_notification_tx }
     }
 
     fn check_instance(
@@ -73,6 +75,7 @@ impl InstanceWatcher {
             .collect(),
         );
         let client = client.clone();
+        let v2p_notification_tx = self.v2p_notification_tx.clone();
 
         async move {
             slog::trace!(opctx.log, "checking on instance...");
@@ -153,6 +156,7 @@ impl InstanceWatcher {
                 &opctx.log,
                 &target.instance_id,
                 &new_runtime_state,
+                v2p_notification_tx,
             )
             .await
             .map_err(|e| {
