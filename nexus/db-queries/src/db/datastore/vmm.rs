@@ -179,7 +179,7 @@ impl DataStore {
     /// A VMM is considered "abandoned" if (and only if):
     ///
     /// - It is in the `Destroyed` state.
-    /// - It has previously been asigned to an instance.
+    /// - It has previously been assigned to an instance.
     /// - It is not currently running the instance, and it is also not the
     ///   migration target of that instance (i.e. it is no longer pointed to by
     ///   the instance record's `active_propolis_id` and `target_propolis_id`
