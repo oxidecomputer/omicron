@@ -140,7 +140,7 @@
       }
     },
     "Ipv6Subnet": {
-      "description": "Wraps an [`Ipv6Network`] with a compile-time prefix length.",
+      "description": "Wraps an [`Ipv6Net`] with a compile-time prefix length.",
       "type": "object",
       "required": [
         "net"
