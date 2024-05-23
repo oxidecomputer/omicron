@@ -55,6 +55,7 @@ mod project;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
+mod v2p_mapping;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -193,6 +194,7 @@ pub use typed_uuid::to_db_typed_uuid;
 pub use upstairs_repair::*;
 pub use user_builtin::*;
 pub use utilization::*;
+pub use v2p_mapping::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;

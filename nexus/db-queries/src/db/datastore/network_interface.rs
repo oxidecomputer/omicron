@@ -792,6 +792,62 @@ impl DataStore {
             public_error_from_diesel(e, ErrorHandler::Server)
         })
     }
+
+    /// List all network interfaces associated with all instances, making as
+    /// many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    ///
+    /// This particular method was added for propagating v2p mappings via RPWs
+    pub async fn instance_network_interfaces_all_list_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_interfaces = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .instance_network_interfaces_all_list(
+                    opctx,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|nic: &InstanceNetworkInterface| {
+                    nic.id()
+                });
+            all_interfaces.extend(batch);
+        }
+        Ok(all_interfaces)
+    }
+
+    /// List one page of all network interfaces associated with instances
+    pub async fn instance_network_interfaces_all_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        use db::schema::instance_network_interface::dsl;
+
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+
+        paginated(dsl::instance_network_interface, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(InstanceNetworkInterface::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]

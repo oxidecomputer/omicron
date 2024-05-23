@@ -37,9 +37,7 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -1051,9 +1049,15 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
+    pub async fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        self.inner.port_manager.list_virtual_nics().map_err(Error::from)
+    }
+
     pub async fn set_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager
@@ -1063,7 +1067,7 @@ impl SledAgent {
 
     pub async fn unset_virtual_nic_host(
         &self,
-        mapping: &DeleteVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager

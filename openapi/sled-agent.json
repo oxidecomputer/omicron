@@ -842,26 +842,41 @@
         }
       }
     },
-    "/v2p/{interface_id}": {
+    "/v2p": {
+      "get": {
+        "summary": "List v2p mappings present on sled",
+        "operationId": "list_v2p",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_VirtualNetworkInterfaceHost",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VirtualNetworkInterfaceHost"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "put": {
         "summary": "Create a mapping from a virtual NIC to a physical host",
         "operationId": "set_v2p",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "interface_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/VirtualNetworkInterfaceHost"
               }
             }
           },
@@ -882,22 +897,11 @@
       "delete": {
         "summary": "Delete a mapping from a virtual NIC to a physical host",
         "operationId": "del_v2p",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "interface_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeleteVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/VirtualNetworkInterfaceHost"
               }
             }
           },
@@ -1465,7 +1469,6 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
-            "default": null,
             "type": "string"
           },
           "originate": {
@@ -1478,7 +1481,6 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
-            "default": null,
             "type": "string"
           }
         },
@@ -1576,7 +1578,6 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
-            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1584,13 +1585,11 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
-            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
-            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -1598,7 +1597,6 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
-            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1610,7 +1608,6 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
-            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1618,7 +1615,6 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
-            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -2022,29 +2018,6 @@
           "lossy",
           "read_only",
           "target"
-        ]
-      },
-      "DeleteVirtualNetworkInterfaceHost": {
-        "description": "The data needed to identify a virtual IP for which a sled maintains an OPTE virtual-to-physical mapping such that that mapping can be deleted.",
-        "type": "object",
-        "properties": {
-          "virtual_ip": {
-            "description": "The virtual IP whose mapping should be deleted.",
-            "type": "string",
-            "format": "ip"
-          },
-          "vni": {
-            "description": "The VNI for the network containing the virtual IP whose mapping should be deleted.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Vni"
-              }
-            ]
-          }
-        },
-        "required": [
-          "virtual_ip",
-          "vni"
         ]
       },
       "DhcpConfig": {
@@ -4279,7 +4252,6 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
-            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -4293,32 +4265,6 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-      },
-      "SetVirtualNetworkInterfaceHost": {
-        "description": "A mapping from a virtual NIC to a physical host",
-        "type": "object",
-        "properties": {
-          "physical_host_ip": {
-            "type": "string",
-            "format": "ipv6"
-          },
-          "virtual_ip": {
-            "type": "string",
-            "format": "ip"
-          },
-          "virtual_mac": {
-            "$ref": "#/components/schemas/MacAddr"
-          },
-          "vni": {
-            "$ref": "#/components/schemas/Vni"
-          }
-        },
-        "required": [
-          "physical_host_ip",
-          "virtual_ip",
-          "virtual_mac",
-          "vni"
-        ]
       },
       "SledInstanceState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
@@ -4586,6 +4532,32 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "VirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
         ]
       },
       "VmmRuntimeState": {
