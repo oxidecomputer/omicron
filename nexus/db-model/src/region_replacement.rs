@@ -63,6 +63,7 @@ pub struct RegionReplacement {
 
     pub request_time: DateTime<Utc>,
 
+    /// The region being replaced
     pub old_region_id: Uuid,
 
     /// The volume whose region is being replaced
@@ -71,6 +72,7 @@ pub struct RegionReplacement {
     /// A synthetic volume that only is used to later delete the old region
     pub old_region_volume_id: Option<Uuid>,
 
+    /// The new region that will be used to replace the old one
     pub new_region_id: Option<Uuid>,
 
     pub replacement_state: RegionReplacementState,
