@@ -862,7 +862,7 @@ mod test {
         // is cleared.
 
         let actual_request = datastore
-            .get_region_replacement_request(&opctx, request.id)
+            .get_region_replacement_request_by_id(&opctx, request.id)
             .await
             .unwrap();
 
