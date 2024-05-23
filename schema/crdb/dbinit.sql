@@ -3866,6 +3866,78 @@ ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
 CREATE INDEX IF NOT EXISTS vmm_by_instance_id
 ON omicron.public.vmm (instance_id) STORING (sled_id);
 
+CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_state AS ENUM (
+  'requested',
+  'allocating',
+  'running',
+  'driving',
+  'replacement_done',
+  'completing',
+  'complete'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_replacement (
+    /* unique ID for this region replacement */
+    id UUID PRIMARY KEY,
+
+    request_time TIMESTAMPTZ NOT NULL,
+
+    old_region_id UUID NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    old_region_volume_id UUID,
+
+    new_region_id UUID,
+
+    replacement_state omicron.public.region_replacement_state NOT NULL,
+
+    operating_saga_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_replacement_by_state on omicron.public.region_replacement (replacement_state);
+
+CREATE TABLE IF NOT EXISTS omicron.public.volume_repair (
+    volume_id UUID PRIMARY KEY,
+    repair_id UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_repair_by_repair_id on omicron.public.volume_repair (
+    repair_id
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_step_type AS ENUM (
+  'propolis',
+  'pantry'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_replacement_step (
+    replacement_id UUID NOT NULL,
+
+    step_time TIMESTAMPTZ NOT NULL,
+
+    step_type omicron.public.region_replacement_step_type NOT NULL,
+
+    step_associated_instance_id UUID,
+    step_associated_vmm_id UUID,
+
+    step_associated_pantry_ip INET,
+    step_associated_pantry_port INT4 CHECK (step_associated_pantry_port BETWEEN 0 AND 65535),
+    step_associated_pantry_job_id UUID,
+
+    PRIMARY KEY (replacement_id, step_time, step_type)
+);
+
+CREATE INDEX IF NOT EXISTS step_time_order on omicron.public.region_replacement_step (step_time);
+
+CREATE INDEX IF NOT EXISTS search_for_repair_notifications ON omicron.public.upstairs_repair_notification (region_id, notification_type);
+
+CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
+    volume_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3926,7 +3998,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '64.0.0', NULL)
+    (TRUE, NOW(), NOW(), '65.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
