@@ -193,8 +193,6 @@ pub struct Ipv6Subnet<const N: u8> {
 
 impl<const N: u8> Ipv6Subnet<N> {
     pub fn new(addr: Ipv6Addr) -> Self {
-        // TODO should Ipv6Net either validate that the address is canonical or
-        // mask it appropriately? i.e. rendering these steps unnecessary?
         // Create a network with the compile-time prefix length.
         let net = Ipv6Net::new(addr, N).unwrap();
         // Ensure the address is set to within-prefix only components.
@@ -253,7 +251,7 @@ impl DnsSubnet {
     /// This is the first address within the subnet.
     pub fn dns_address(&self) -> Ipv6Net {
         Ipv6Net::new(
-            self.subnet.net().iter().nth(DNS_ADDRESS_INDEX).unwrap(),
+            self.subnet.net().nth(DNS_ADDRESS_INDEX as u128).unwrap(),
             SLED_PREFIX,
         )
         .unwrap()
@@ -266,7 +264,7 @@ impl DnsSubnet {
     /// This is the second address within the subnet.
     pub fn gz_address(&self) -> Ipv6Net {
         Ipv6Net::new(
-            self.subnet.net().iter().nth(GZ_ADDRESS_INDEX).unwrap(),
+            self.subnet.net().nth(GZ_ADDRESS_INDEX as u128).unwrap(),
             SLED_PREFIX,
         )
         .unwrap()
@@ -320,7 +318,7 @@ const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 /// This address will come from the first address of the [`SLED_PREFIX`] subnet.
 pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
     let sled_agent_ip =
-        sled_subnet.net().iter().nth(SLED_AGENT_ADDRESS_INDEX).unwrap();
+        sled_subnet.net().nth(SLED_AGENT_ADDRESS_INDEX as u128).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
 }
 
@@ -330,7 +328,7 @@ pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
 pub fn get_switch_zone_address(
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
 ) -> Ipv6Addr {
-    sled_subnet.net().iter().nth(SWITCH_ZONE_ADDRESS_INDEX).unwrap()
+    sled_subnet.net().nth(SWITCH_ZONE_ADDRESS_INDEX as u128).unwrap()
 }
 
 /// Returns a sled subnet within a rack subnet.
