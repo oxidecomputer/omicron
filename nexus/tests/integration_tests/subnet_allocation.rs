@@ -132,14 +132,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         },
     ]);
 
-    // Create enough instances to fill the subnet. There are subnet.size() total
-    // addresses, 6 of which are reserved.
-    let subnet_size = match subnet.size() {
+    // Create enough instances to fill the subnet. There are subnet.size()
+    // total addresses, 6 of which are reserved.
+    let subnet_size_minus_1 = match subnet.size() {
         Some(n) => n - 1,
         None => u32::MAX,
     } as usize;
-    let subnet_size = subnet_size - NUM_INITIAL_RESERVED_IP_ADDRESSES;
-    // let subnet_size = subnet.size() as usize - n_reserved_addresses;
+    let subnet_size = subnet_size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES;
     for i in 0..subnet_size {
         create_instance_with(
             client,

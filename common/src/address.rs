@@ -184,7 +184,7 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 // to assume that addresses in this subnet are available.
 pub const SLED_RESERVED_ADDRESSES: u16 = 32;
 
-/// Wraps an [`Ipv6Network`] with a compile-time prefix length.
+/// Wraps an [`Ipv6Net`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
 #[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
@@ -245,7 +245,6 @@ pub struct DnsSubnet {
 }
 
 impl DnsSubnet {
-    // TODO why are we returning a subnet?
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
@@ -257,7 +256,6 @@ impl DnsSubnet {
         .unwrap()
     }
 
-    // TODO why are we returning a subnet?
     /// Returns the address which the Global Zone should create
     /// to be able to contact the DNS server.
     ///

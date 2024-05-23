@@ -510,7 +510,7 @@ pub(crate) async fn instance_ensure_dpd_config(
         ));
     }
 
-    let sled_address = Ipv6Net::new(*sled_ip_address.ip(), 128).unwrap();
+    let sled_address = Ipv6Net::host_net(*sled_ip_address.ip());
 
     // If all of our IPs are attached or are guaranteed to be owned
     // by the saga calling this fn, then we need to disregard and
@@ -651,7 +651,7 @@ pub(crate) async fn probe_ensure_dpd_config(
         }
     }
 
-    let sled_address = Ipv6Net::new(sled_ip_address, 128).unwrap();
+    let sled_address = Ipv6Net::host_net(sled_ip_address);
 
     for target_ip in ips
         .iter()
@@ -1009,7 +1009,6 @@ async fn ensure_nat_entry(
     match target_ip.ip {
         IpNetwork::V4(v4net) => {
             let nat_entry = Ipv4NatValues {
-                // TODO could simplify this conversion?
                 external_address: Ipv4Net::from(v4net).into(),
                 first_port: target_ip.first_port,
                 last_port: target_ip.last_port,

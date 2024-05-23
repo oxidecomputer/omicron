@@ -3433,56 +3433,6 @@ mod test {
         assert!("hash:super_random".parse::<Digest>().is_err());
     }
 
-    // #[test]
-    // fn test_ipnet_first_last_address() {
-    //     use oxnet::IpNet;
-    //     use std::net::IpAddr;
-    //     use std::net::Ipv4Addr;
-    //     use std::net::Ipv6Addr;
-
-    //     let net: IpNet = "fd00::/128".parse().unwrap();
-    //     assert_eq!(
-    //         net.first_address(),
-    //         IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-    //     );
-    //     assert_eq!(
-    //         net.last_address(),
-    //         IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-    //     );
-
-    //     let net: IpNet = "fd00::/64".parse().unwrap();
-    //     assert_eq!(
-    //         net.first_address(),
-    //         IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-    //     );
-    //     assert_eq!(
-    //         net.last_address(),
-    //         IpAddr::from(Ipv6Addr::new(
-    //             0xfd00, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff
-    //         )),
-    //     );
-
-    //     let net: IpNet = "10.0.0.0/16".parse().unwrap();
-    //     assert_eq!(
-    //         net.first_address(),
-    //         IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-    //     );
-    //     assert_eq!(
-    //         net.last_address(),
-    //         IpAddr::from(Ipv4Addr::new(10, 0, 255, 255)),
-    //     );
-
-    //     let net: IpNet = "10.0.0.0/32".parse().unwrap();
-    //     assert_eq!(
-    //         net.first_address(),
-    //         IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-    //     );
-    //     assert_eq!(
-    //         net.last_address(),
-    //         IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-    //     );
-    // }
-
     #[test]
     fn test_macaddr() {
         use super::MacAddr;
