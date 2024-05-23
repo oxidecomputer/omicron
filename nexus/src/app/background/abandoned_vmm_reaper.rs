@@ -18,6 +18,7 @@ use super::common::BackgroundTask;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -50,7 +51,8 @@ impl AbandonedVmmReaper {
         Self { datastore }
     }
 
-    async fn reap(
+    /// List abandoned VMMs and clean up all of their database records.
+    async fn reap_all(
         &mut self,
         results: &mut ActivationResults,
         opctx: &OpContext,
@@ -66,56 +68,99 @@ impl AbandonedVmmReaper {
                 .await
                 .context("failed to list abandoned VMMs")?;
             paginator = p.found_batch(&vmms, &|vmm| vmm.id);
-            results.found += vmms.len();
-            slog::debug!(opctx.log, "Found abandoned VMMs"; "count" => vmms.len());
-
-            for vmm in vmms {
-                let vmm_id = vmm.id;
-                slog::trace!(opctx.log, "Deleting abandoned VMM"; "vmm" => %vmm_id);
-                // Attempt to remove the abandoned VMM from the virtual
-                // provisioning collection.
-                match self
-                    .datastore
-                    .sled_reservation_delete(opctx, vmm_id)
-                    .await
-                {
-                    Ok(_) => results.sled_resources_deleted += 1,
-                    Err(Error::ObjectNotFound { .. }) => {
-                        results.sled_resources_already_deleted += 1;
-                    }
-                    Err(e) => {
-                        slog::warn!(opctx.log, "Failed to delete sled reservation for abandoned VMM";
-                            "vmm" => %vmm_id,
-                            "error" => %e,
-                        );
-                        results.error_count += 1;
-                        last_err = Err(e).with_context(|| {
-                            format!("failed to delete sled reservation for {vmm_id}")
-                        });
-                    }
-                }
-
-                // Now, attempt to mark the VMM record as deleted.
-                match self.datastore.vmm_mark_deleted(opctx, &vmm_id).await {
-                    Ok(_) => results.vmms_deleted += 1,
-                    Err(Error::ObjectNotFound { .. }) => {
-                        results.vmms_already_deleted += 1;
-                    }
-                    Err(e) => {
-                        slog::warn!(opctx.log, "Failed to mark abandoned VMM as deleted";
-                            "vmm" => %vmm_id,
-                            "error" => %e,
-                        );
-                        results.error_count += 1;
-                        last_err = Err(e).with_context(|| {
-                            format!("failed to mark {vmm_id} as deleted")
-                        });
-                    }
-                }
-            }
+            self.reap_batch(results, &mut last_err, opctx, &vmms).await;
         }
 
         last_err
+    }
+
+    /// Clean up a batch of abandoned VMMs.
+    ///
+    /// This is separated out from `reap_all` to facilitate testing situations
+    /// where we race with another Nexus instance to delete an abandoned VMM. In
+    /// order to deterministically simulate such cases, we have to perform the
+    /// query to list abandoned VMMs, ensure that the VMM record is deleted, and
+    /// *then* perform the cleanup with the stale list of abandoned VMMs, rather
+    /// than doing it all in one go. Thus, this is factored out.
+    async fn reap_batch(
+        &mut self,
+        results: &mut ActivationResults,
+        last_err: &mut Result<(), anyhow::Error>,
+        opctx: &OpContext,
+        vmms: &[Vmm],
+    ) {
+        results.found += vmms.len();
+        slog::debug!(opctx.log, "Found abandoned VMMs"; "count" => vmms.len());
+
+        for vmm in vmms {
+            let vmm_id = vmm.id;
+            slog::trace!(opctx.log, "Deleting abandoned VMM"; "vmm" => %vmm_id);
+            // Attempt to remove the abandoned VMM's sled resource reservation.
+            match self.datastore.sled_reservation_delete(opctx, vmm_id).await {
+                Ok(_) => {
+                    slog::trace!(
+                        opctx.log,
+                        "Deleted abandoned VMM's sled reservation";
+                        "vmm" => %vmm_id,
+                    );
+                    results.sled_resources_deleted += 1;
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    slog::trace!(
+                        opctx.log,
+                        "Abandoned VMM's sled reservation was already deleted";
+                        "vmm" => %vmm_id,
+                    );
+                    results.sled_resources_already_deleted += 1;
+                }
+                Err(e) => {
+                    slog::warn!(
+                        opctx.log,
+                        "Failed to delete sled reservation for abandoned VMM";
+                        "vmm" => %vmm_id,
+                        "error" => %e,
+                    );
+                    results.error_count += 1;
+                    *last_err = Err(e).with_context(|| {
+                        format!(
+                            "failed to delete sled reservation for {vmm_id}"
+                        )
+                    });
+                }
+            }
+
+            // Now, attempt to mark the VMM record as deleted.
+            match self.datastore.vmm_mark_deleted(opctx, &vmm_id).await {
+                Ok(true) => {
+                    slog::trace!(
+                        opctx.log,
+                        "Deleted abandoned VMM";
+                        "vmm" => %vmm_id,
+                    );
+                    results.vmms_deleted += 1;
+                }
+                Ok(false) => {
+                    slog::trace!(
+                        opctx.log,
+                        "Abandoned VMM was already deleted";
+                        "vmm" => %vmm_id,
+                    );
+                    results.vmms_already_deleted += 1;
+                }
+                Err(e) => {
+                    slog::warn!(
+                        opctx.log,
+                        "Failed to mark abandoned VMM as deleted";
+                        "vmm" => %vmm_id,
+                        "error" => %e,
+                    );
+                    results.error_count += 1;
+                    *last_err = Err(e).with_context(|| {
+                        format!("failed to mark {vmm_id} as deleted")
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -126,7 +171,7 @@ impl BackgroundTask for AbandonedVmmReaper {
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
             let mut results = ActivationResults::default();
-            let error = match self.reap(&mut results, opctx).await {
+            let error = match self.reap_all(&mut results, opctx).await {
                 Ok(_) => {
                     slog::info!(opctx.log, "Abandoned VMMs reaped";
                         "found" => results.found,
@@ -170,10 +215,10 @@ mod tests {
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Resources;
+    use nexus_db_model::SledResource;
     use nexus_db_model::SledResourceKind;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmRuntimeState;
-    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::InstanceState as ApiInstanceState;
@@ -183,6 +228,108 @@ mod tests {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const PROJECT_NAME: &str = "carcosa";
+
+    struct TestFixture {
+        destroyed_vmm_id: Uuid,
+    }
+
+    impl TestFixture {
+        async fn setup(
+            client: &dropshot::test_util::ClientTestContext,
+            datastore: &Arc<DataStore>,
+            opctx: &OpContext,
+        ) -> Self {
+            resource_helpers::create_default_ip_pool(&client).await;
+
+            let _project =
+                resource_helpers::create_project(client, PROJECT_NAME).await;
+            let instance = resource_helpers::create_instance(
+                client,
+                PROJECT_NAME,
+                "cassilda",
+            )
+            .await;
+
+            let destroyed_vmm_id = Uuid::new_v4();
+            datastore
+                .vmm_insert(
+                    &opctx,
+                    dbg!(Vmm {
+                        id: destroyed_vmm_id,
+                        time_created: Utc::now(),
+                        time_deleted: None,
+                        instance_id: instance.identity.id,
+                        sled_id: Uuid::new_v4(),
+                        propolis_ip: "::1".parse().unwrap(),
+                        propolis_port: 12345.into(),
+                        runtime: VmmRuntimeState {
+                            state: InstanceState::new(
+                                ApiInstanceState::Destroyed
+                            ),
+                            time_state_updated: Utc::now(),
+                            gen: Generation::new(),
+                        }
+                    }),
+                )
+                .await
+                .expect("destroyed vmm record should be created successfully");
+            let resources = Resources::new(
+                1,
+                // Just require the bare non-zero amount of RAM.
+                ByteCount::try_from(1024).unwrap(),
+                ByteCount::try_from(1024).unwrap(),
+            );
+            let constraints =
+                nexus_db_model::SledReservationConstraints::none();
+            dbg!(datastore
+                .sled_reservation_create(
+                    &opctx,
+                    destroyed_vmm_id,
+                    SledResourceKind::Instance,
+                    resources.clone(),
+                    constraints,
+                )
+                .await
+                .expect("sled reservation should be created successfully"));
+            Self { destroyed_vmm_id }
+        }
+
+        async fn assert_reaped(&self, datastore: &DataStore) {
+            use async_bb8_diesel::AsyncRunQueryDsl;
+            use diesel::{
+                ExpressionMethods, OptionalExtension, QueryDsl,
+                SelectableHelper,
+            };
+            use nexus_db_queries::db::schema::sled_resource::dsl as sled_resource_dsl;
+            use nexus_db_queries::db::schema::vmm::dsl as vmm_dsl;
+
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let fetched_vmm = vmm_dsl::vmm
+                .filter(vmm_dsl::id.eq(self.destroyed_vmm_id))
+                .filter(vmm_dsl::time_deleted.is_null())
+                .select(Vmm::as_select())
+                .first_async::<Vmm>(&*conn)
+                .await
+                .optional()
+                .expect("VMM query should succeed");
+            assert!(
+                dbg!(fetched_vmm).is_none(),
+                "VMM record should have been deleted"
+            );
+
+            let fetched_sled_resource = sled_resource_dsl::sled_resource
+                .filter(sled_resource_dsl::id.eq(self.destroyed_vmm_id))
+                .select(SledResource::as_select())
+                .first_async::<SledResource>(&*conn)
+                .await
+                .optional()
+                .expect("sled resource query should succeed");
+            assert!(
+                dbg!(fetched_sled_resource).is_none(),
+                "sled resource record should have been deleted"
+            );
+        }
+    }
 
     #[nexus_test(server = crate::Server)]
     async fn test_abandoned_vmms_are_reaped(
@@ -194,59 +341,14 @@ mod tests {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let client = &cptestctx.external_client;
-        resource_helpers::create_default_ip_pool(&client).await;
-
-        let _project =
-            dbg!(resource_helpers::create_project(client, PROJECT_NAME).await);
-        let instance = dbg!(
-            resource_helpers::create_instance(client, PROJECT_NAME, "cassilda")
-                .await
-        );
-
-        let destroyed_vmm_id = Uuid::new_v4();
-        datastore
-            .vmm_insert(
-                &opctx,
-                dbg!(Vmm {
-                    id: destroyed_vmm_id,
-                    time_created: Utc::now(),
-                    time_deleted: None,
-                    instance_id: instance.identity.id,
-                    sled_id: Uuid::new_v4(),
-                    propolis_ip: "::1".parse().unwrap(),
-                    propolis_port: 12345.into(),
-                    runtime: VmmRuntimeState {
-                        state: InstanceState::new(ApiInstanceState::Destroyed),
-                        time_state_updated: Utc::now(),
-                        gen: Generation::new(),
-                    }
-                }),
-            )
-            .await
-            .expect("it should work");
-        let resources = Resources::new(
-            1,
-            // Just require the bare non-zero amount of RAM.
-            ByteCount::try_from(1024).unwrap(),
-            ByteCount::try_from(1024).unwrap(),
-        );
-        let constraints = nexus_db_model::SledReservationConstraints::none();
-        let resource = dbg!(datastore
-            .sled_reservation_create(
-                &opctx,
-                destroyed_vmm_id,
-                SledResourceKind::Instance,
-                resources.clone(),
-                constraints,
-            )
-            .await
-            .expect("should work"));
+        let fixture =
+            TestFixture::setup(&cptestctx.external_client, datastore, &opctx)
+                .await;
 
         let mut task = AbandonedVmmReaper::new(datastore.clone());
 
         let mut results = ActivationResults::default();
-        dbg!(task.reap(&mut results, &opctx,).await)
+        dbg!(task.reap_all(&mut results, &opctx,).await)
             .expect("activation completes successfully");
         dbg!(&results);
 
@@ -255,5 +357,108 @@ mod tests {
         assert_eq!(results.vmms_already_deleted, 0);
         assert_eq!(results.sled_resources_already_deleted, 0);
         assert_eq!(results.error_count, 0);
+        fixture.assert_reaped(datastore).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn vmm_already_deleted(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let fixture =
+            TestFixture::setup(&cptestctx.external_client, datastore, &opctx)
+                .await;
+
+        // For this test, we separate the database query run by the background
+        // task to list abandoned VMMs from the actual cleanup of those VMMs, in
+        // order to simulate a condition where the VMM record was deleted
+        // between when the listing query was run and when the bg task attempted
+        // to delete the VMM record.
+        let paginator = Paginator::new(MAX_BATCH);
+        let p = paginator.next().unwrap();
+        let abandoned_vmms = datastore
+            .vmm_list_abandoned(&opctx, &p.current_pagparams())
+            .await
+            .expect("must list abandoned vmms");
+
+        assert!(!abandoned_vmms.is_empty());
+
+        datastore
+            .vmm_mark_deleted(&opctx, &fixture.destroyed_vmm_id)
+            .await
+            .expect("simulate another nexus marking the VMM deleted");
+
+        let mut results = ActivationResults::default();
+        let mut last_err = Ok(());
+        let mut task = AbandonedVmmReaper::new(datastore.clone());
+        task.reap_batch(&mut results, &mut last_err, &opctx, &abandoned_vmms)
+            .await;
+        dbg!(last_err).expect("should not have errored");
+        dbg!(&results);
+
+        assert_eq!(results.found, 1);
+        assert_eq!(results.vmms_deleted, 0);
+        assert_eq!(results.sled_resources_deleted, 1);
+        assert_eq!(results.vmms_already_deleted, 1);
+        assert_eq!(results.sled_resources_already_deleted, 0);
+        assert_eq!(results.error_count, 0);
+
+        fixture.assert_reaped(datastore).await
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn sled_resource_already_deleted(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let fixture =
+            TestFixture::setup(&cptestctx.external_client, datastore, &opctx)
+                .await;
+
+        // For this test, we separate the database query run by the background
+        // task to list abandoned VMMs from the actual cleanup of those VMMs, in
+        // order to simulate a condition where the sled reservation record was
+        // deleted between when the listing query was run and when the bg task
+        // attempted to delete the sled reservation..
+        let paginator = Paginator::new(MAX_BATCH);
+        let p = paginator.next().unwrap();
+        let abandoned_vmms = datastore
+            .vmm_list_abandoned(&opctx, &p.current_pagparams())
+            .await
+            .expect("must list abandoned vmms");
+
+        assert!(!abandoned_vmms.is_empty());
+
+        datastore
+            .sled_reservation_delete(&opctx, fixture.destroyed_vmm_id)
+            .await
+            .expect(
+                "simulate another nexus marking the sled reservation deleted",
+            );
+
+        let mut results = ActivationResults::default();
+        let mut last_err = Ok(());
+        let mut task = AbandonedVmmReaper::new(datastore.clone());
+        task.reap_batch(&mut results, &mut last_err, &opctx, &abandoned_vmms)
+            .await;
+        dbg!(last_err).expect("should not have errored");
+        dbg!(&results);
+
+        assert_eq!(results.found, 1);
+        assert_eq!(results.vmms_deleted, 1);
+        assert_eq!(results.sled_resources_deleted, 0);
+        assert_eq!(results.vmms_already_deleted, 0);
+        assert_eq!(results.sled_resources_already_deleted, 1);
+        assert_eq!(results.error_count, 0);
+
+        fixture.assert_reaped(datastore).await
     }
 }
