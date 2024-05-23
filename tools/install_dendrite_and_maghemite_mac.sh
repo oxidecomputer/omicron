@@ -1,7 +1,7 @@
 #! /usr/bin/env bash
 
 # Updated from https://gist.github.com/david-crespo/d8aa7ea1afb877ff585e6ad90fc5bc2c.
-# Installs: yq, gh
+# Installs: yq, gh.
 
 set -euo pipefail
 

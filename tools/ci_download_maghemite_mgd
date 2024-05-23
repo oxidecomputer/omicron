@@ -166,7 +166,7 @@ function linux_binaries
 function osx_binaries
 {
 	echo "OSX binaries not officially supported"
-	./tools/omicron-install-dendrite-mac.sh
+	./tools/install_dendrite_and_maghemite_mac.sh
 }
 
 function unsupported_os
