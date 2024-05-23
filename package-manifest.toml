@@ -232,7 +232,7 @@ source.type = "local"
 source.rust.binary_names = ["cockroach-admin"]
 source.rust.release = true
 source.paths = [
-  { from = "smf/cockroach-admin/manifest.xml", to = "/opt/oxide/lib/svc/cockroach-admin/manifest.xml" },
+  { from = "smf/cockroach-admin/manifest.xml", to = "/var/svc/manifest/site/cockroach-admin/manifest.xml" },
   { from = "smf/cockroach-admin/config.toml", to = "/opt/oxide/lib/svc/cockroach-admin/config.toml" },
   { from = "smf/cockroach-admin/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroach-admin.sh" },
 ]
