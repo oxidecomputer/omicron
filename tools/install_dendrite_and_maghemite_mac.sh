@@ -1,14 +1,9 @@
 #! /usr/bin/env bash
 
 # Updated from https://gist.github.com/david-crespo/d8aa7ea1afb877ff585e6ad90fc5bc2c.
-# Installs: yq, gh.
+# Relies on the `brew install` of `yq` from the install_builder_prerequisites.sh script.
 
 set -euo pipefail
-
-# Auth first via GH client.
-if ! gh auth status 2>/dev/null ; then
-  exit 1
-fi
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
