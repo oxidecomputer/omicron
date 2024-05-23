@@ -26,6 +26,14 @@ impl_enum_type!(
 );
 
 /// Database representation of a Region replacement repair step
+///
+/// As region replacement takes place, Nexus will be making calls to services in
+/// order to trigger the necessary Crucible operations meant to actually perform
+/// the replacement. These steps are recorded in the database so that they can
+/// be consulted by subsequent steps, and additionally act as breadcrumbs if
+/// there is an issue.
+///
+/// See also: RegionReplacement records
 #[derive(
     Queryable,
     Insertable,
