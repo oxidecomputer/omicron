@@ -75,7 +75,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn get_region_replacement_request(
+    pub async fn get_region_replacement_request_by_id(
         &self,
         opctx: &OpContext,
         id: Uuid,
