@@ -2069,16 +2069,20 @@ fn replace_region_in_vcr(
 }
 
 /// Find Regions in a Volume's subvolumes list whose target match the argument
-/// IP
+/// IP, and add them to the supplied Vec.
 fn find_matching_rw_regions_in_volume(
     vcr: &VolumeConstructionRequest,
     ip: &std::net::Ipv6Addr,
-    targets: &mut Vec<SocketAddrV6>,
+    matched_targets: &mut Vec<SocketAddrV6>,
 ) -> anyhow::Result<()> {
     match vcr {
         VolumeConstructionRequest::Volume { sub_volumes, .. } => {
             for sub_volume in sub_volumes {
-                find_matching_rw_regions_in_volume(sub_volume, ip, targets)?;
+                find_matching_rw_regions_in_volume(
+                    sub_volume,
+                    ip,
+                    matched_targets,
+                )?;
             }
         }
 
@@ -2089,7 +2093,7 @@ fn find_matching_rw_regions_in_volume(
                 for target in &opts.target {
                     let parsed_target: SocketAddrV6 = target.parse()?;
                     if parsed_target.ip() == ip {
-                        targets.push(parsed_target);
+                        matched_targets.push(parsed_target);
                     }
                 }
             }
