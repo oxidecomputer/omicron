@@ -7,10 +7,9 @@
 //! A VMM is considered "abandoned" if (and only if):
 //!
 //! - It is in the `Destroyed` state.
-//! - It has previously been assigned to an instance.
-//! - It is not currently running the instance, and it is also not the
-//!   migration target of that instance (i.e. it is no longer pointed to by
-//!   the instance record's `active_propolis_id` and `target_propolis_id`
+//! - It is not currently running an instance, and it is also not the
+//!   migration target of any instance (i.e. it is not pointed to by
+//!   any instance record's `active_propolis_id` and `target_propolis_id`
 //!   fields).
 //! - It has not been deleted yet.
 
@@ -113,7 +112,7 @@ impl AbandonedVmmReaper {
                     results.error_count += 1;
                     *last_err = Err(e).with_context(|| {
                         format!(
-                            "failed to delete sled reservation for {vmm_id}"
+                            "failed to delete sled reservation for VMM {vmm_id}"
                         )
                     });
                 }
@@ -146,7 +145,7 @@ impl AbandonedVmmReaper {
                     );
                     results.error_count += 1;
                     *last_err = Err(e).with_context(|| {
-                        format!("failed to mark {vmm_id} as deleted")
+                        format!("failed to mark VMM {vmm_id} as deleted")
                     });
                 }
             }
