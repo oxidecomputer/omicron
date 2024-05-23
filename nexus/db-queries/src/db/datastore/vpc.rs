@@ -66,7 +66,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
-use omicron_common::api::internal::shared::ReifiedVpcRoute;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
@@ -1064,6 +1064,17 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
+        // Unlink all subnets from this router.
+        // XXX: We might this want to error out before the delete fires.
+        use db::schema::vpc_subnet::dsl as vpc;
+        diesel::update(vpc::vpc_subnet)
+            .filter(vpc::time_deleted.is_null())
+            .filter(vpc::custom_router_id.eq(authz_router.id()))
+            .set(vpc::custom_router_id.eq(Option::<Uuid>::None))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -1312,7 +1323,8 @@ impl DataStore {
         // aren't something which they can meaningfully interact with,
         // so uuid stability on e.g. VPC rename is not a primary concern.
         // We make sure only to alter VPC subnet rules here: users may
-        // modify other system routes like internet gateways.
+        // modify other system routes like internet gateways (which are
+        // `RouteKind::Default`).
         let conn = self.pool_connection_authorized(opctx).await?;
         let log = opctx.log.clone();
         self.transaction_retry_wrapper("vpc_subnet_route_reconcile")
@@ -1364,7 +1376,7 @@ impl DataStore {
                     }
                 }
 
-                // Add/Remove routes. Retry if numebr is incorrect due to
+                // Add/Remove routes. Retry if number is incorrect due to
                 // concurrent modification.
                 let now = Utc::now();
                 let to_update = invalid.len();
@@ -1407,6 +1419,27 @@ impl DataStore {
                     }
                 }
 
+                // Verify that route set is exactly as intended, and rollback otherwise.
+                let current_rules: Vec<RouterRoute> = dsl::router_route
+                    .filter(dsl::kind.eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)))
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::vpc_router_id.eq(system_router_id))
+                    .select(RouterRoute::as_select())
+                    .load_async(&conn)
+                    .await?;
+
+                if current_rules.len() != expected_names.len() {
+                    return Err(DieselError::RollbackTransaction)
+                }
+
+                for rule in current_rules {
+                    match (rule.kind.0, rule.target.0) {
+                        (ExternalRouteKind::VpcSubnet, RouteTarget::Subnet(n))
+                            if expected_names.contains(Name::ref_cast(&n)) => {},
+                        _ => return Err(DieselError::RollbackTransaction),
+                    }
+                }
+
                 Ok(())
             }}).await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -1420,7 +1453,6 @@ impl DataStore {
         opctx: &OpContext,
         vpc_id: Uuid,
     ) -> LookupResult<VpcRouter> {
-        // use db::schema::vpc::dsl as vpc_dsl;
         use db::schema::vpc::dsl as vpc_dsl;
         use db::schema::vpc_router::dsl as router_dsl;
 
@@ -1486,7 +1518,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         vpc_router_id: Uuid,
-    ) -> Result<HashSet<ReifiedVpcRoute>, Error> {
+    ) -> Result<HashSet<ResolvedVpcRoute>, Error> {
         // Get all rules in target router.
         opctx.check_complex_operations_allowed()?;
 
@@ -1511,7 +1543,12 @@ impl DataStore {
             all_rules.extend(batch);
         }
 
-        // XXX: transaction based on generation number?
+        // This is not in a transaction, because...
+        // We're not necessarily too concerned about getting partially
+        // updated state when resolving these names. See the header discussion
+        // in `nexus/src/app/background/vpc_routes.rs`: any state updates
+        // are followed by a version bump/notify, so we will be eventually
+        // consistent with route resolution.
         let mut subnet_names = HashSet::new();
         let mut vpc_names = HashSet::new();
         let mut inetgw_names = HashSet::new();
@@ -1544,7 +1581,7 @@ impl DataStore {
             }
         }
 
-        // TODO: transact these, and/or solve in fewer queries.
+        // TODO: This would be nice to solve in fewer queries.
         let mut subnets = HashMap::new();
         for name in subnet_names.drain() {
             if let Ok((.., subnet)) = db::lookup::LookupPath::new(opctx, self)
@@ -1576,7 +1613,7 @@ impl DataStore {
                     .fetch()
                     .await
             {
-                // XXX: currently an instance can have one primary,
+                // XXX: currently an instance can have one primary NIC,
                 //      and it is not dual-stack (v4 + v6). We need
                 //      to clarify what should be resolved in the v6 case.
                 if let Ok(primary_nic) = self
@@ -1676,11 +1713,11 @@ impl DataStore {
             };
 
             if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
-                out.insert(ReifiedVpcRoute { dest, target });
+                out.insert(ResolvedVpcRoute { dest, target });
             }
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
-                out.insert(ReifiedVpcRoute { dest, target });
+                out.insert(ResolvedVpcRoute { dest, target });
             }
         }
 
@@ -2506,5 +2543,21 @@ mod tests {
         }
 
         routes
+    }
+
+    // Test to verify that VPC routers resolve to the primary addr
+    // of an instance NIC.
+    #[tokio::test]
+    async fn test_vpc_router_rule_instance_resolve() {
+        // use vpc_resolve_router_rules.
+        todo!()
+    }
+
+    // Test to verify that VPC routers resolve rules intelligently
+    // across dual IPv4 / IPv6 targets/destinations.
+    #[tokio::test]
+    async fn test_vpc_router_rule_v4_v6_resolve() {
+        // use vpc_resolve_router_rules.
+        todo!()
     }
 }

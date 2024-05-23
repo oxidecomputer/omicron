@@ -594,7 +594,7 @@ impl TryFrom<&[IpNetwork]> for IpAllowList {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct ReifiedVpcRoute {
+pub struct ResolvedVpcRoute {
     pub dest: IpNet,
     pub target: RouterTarget,
 }
@@ -611,23 +611,28 @@ pub enum RouterTarget {
     VpcSubnet(IpNet),
 }
 
-/// XXX
+/// Information on the current parent router (and version) of a route set
+/// according to the control plane.
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct RouterVersion {
     pub router_id: Uuid,
-    pub generation: u64,
+    pub version: u64,
 }
 
 impl RouterVersion {
+    /// Return whether a new route set should be applied over the current
+    /// values.
+    ///
+    /// This will occur when seeing a new version and a matching parent,
+    /// or a new parent router on the control plane.
     pub fn is_replaced_by(&self, other: &Self) -> bool {
-        (self.router_id != other.router_id)
-            || self.generation < other.generation
+        (self.router_id != other.router_id) || self.version < other.version
     }
 }
 
-/// Implementation details on XXX
+/// Identifier for a VPC and/or subnet.
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -636,19 +641,19 @@ pub struct RouterId {
     pub subnet: Option<IpNet>,
 }
 
-/// Version information
+/// Version information for routes on a given VPC subnet.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct ReifiedVpcRouteState {
+pub struct ResolvedVpcRouteState {
     pub id: RouterId,
     pub version: Option<RouterVersion>,
 }
 
-/// An updated set of routes for a given
+/// An updated set of routes for a given VPC and/or subnet.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct ReifiedVpcRouteSet {
+pub struct ResolvedVpcRouteSet {
     pub id: RouterId,
     pub version: Option<RouterVersion>,
-    pub routes: HashSet<ReifiedVpcRoute>,
+    pub routes: HashSet<ResolvedVpcRoute>,
 }
 
 #[cfg(test)]

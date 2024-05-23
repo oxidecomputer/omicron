@@ -23,7 +23,7 @@ pub static SERVICES_VPC_ROUTER_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
         .expect("invalid uuid for builtin services vpc router id")
 });
 
-/// UUID of default route for built-in Services VPC.
+/// UUID of default IPv4 route for built-in Services VPC.
 pub static SERVICES_VPC_DEFAULT_V4_ROUTE_ID: Lazy<uuid::Uuid> =
     Lazy::new(|| {
         "001de000-074c-4000-8000-000000000002"
@@ -31,6 +31,7 @@ pub static SERVICES_VPC_DEFAULT_V4_ROUTE_ID: Lazy<uuid::Uuid> =
             .expect("invalid uuid for builtin services vpc default route id")
     });
 
+/// UUID of default IPv6 route for built-in Services VPC.
 pub static SERVICES_VPC_DEFAULT_V6_ROUTE_ID: Lazy<uuid::Uuid> =
     Lazy::new(|| {
         "001de000-074c-4000-8000-000000000003"

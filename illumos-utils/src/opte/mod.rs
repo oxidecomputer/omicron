@@ -73,6 +73,7 @@ impl Gateway {
     }
 }
 
+/// Convert a nexus `IpNet` to an OPTE `IpCidr`.
 fn net_to_cidr(net: IpNet) -> IpCidr {
     match net {
         IpNet::V4(net) => IpCidr::Ip4(Ipv4Cidr::new(
@@ -86,6 +87,7 @@ fn net_to_cidr(net: IpNet) -> IpCidr {
     }
 }
 
+/// Convert a nexus `RouterTarget` to an OPTE `RouterTarget`.
 fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
     use shared::RouterTarget::*;
     match target {

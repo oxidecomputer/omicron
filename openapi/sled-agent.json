@@ -967,10 +967,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_ReifiedVpcRouteState",
+                  "title": "Array_of_ResolvedVpcRouteState",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ReifiedVpcRouteState"
+                    "$ref": "#/components/schemas/ResolvedVpcRouteState"
                   }
                 }
               }
@@ -991,10 +991,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "title": "Array_of_ReifiedVpcRouteSet",
+                "title": "Array_of_ResolvedVpcRouteSet",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/ReifiedVpcRouteSet"
+                  "$ref": "#/components/schemas/ResolvedVpcRouteSet"
                 }
               }
             }
@@ -4290,7 +4290,7 @@
           "rack_subnet"
         ]
       },
-      "ReifiedVpcRoute": {
+      "ResolvedVpcRoute": {
         "description": "A VPC route resolved into a concrete target.",
         "type": "object",
         "properties": {
@@ -4306,8 +4306,8 @@
           "target"
         ]
       },
-      "ReifiedVpcRouteSet": {
-        "description": "An updated set of routes for a given",
+      "ResolvedVpcRouteSet": {
+        "description": "An updated set of routes for a given VPC and/or subnet.",
         "type": "object",
         "properties": {
           "id": {
@@ -4316,7 +4316,7 @@
           "routes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ReifiedVpcRoute"
+              "$ref": "#/components/schemas/ResolvedVpcRoute"
             },
             "uniqueItems": true
           },
@@ -4334,8 +4334,8 @@
           "routes"
         ]
       },
-      "ReifiedVpcRouteState": {
-        "description": "Version information",
+      "ResolvedVpcRouteState": {
+        "description": "Version information for routes on a given VPC subnet.",
         "type": "object",
         "properties": {
           "id": {
@@ -4384,7 +4384,7 @@
         ]
       },
       "RouterId": {
-        "description": "Implementation details on XXX",
+        "description": "Identifier for a VPC and/or subnet.",
         "type": "object",
         "properties": {
           "subnet": {
@@ -4474,22 +4474,22 @@
         ]
       },
       "RouterVersion": {
-        "description": "XXX",
+        "description": "Information on the current parent router (and version) of a route set according to the control plane.",
         "type": "object",
         "properties": {
-          "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "router_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
-          "generation",
-          "router_id"
+          "router_id",
+          "version"
         ]
       },
       "SemverVersion": {

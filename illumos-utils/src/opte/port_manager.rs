@@ -16,9 +16,9 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_common::api::internal::shared::ReifiedVpcRoute;
-use omicron_common::api::internal::shared::ReifiedVpcRouteSet;
-use omicron_common::api::internal::shared::ReifiedVpcRouteState;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
+use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
+use omicron_common::api::internal::shared::ResolvedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
@@ -55,10 +55,11 @@ use uuid::Uuid;
 // Prefix used to identify xde data links.
 const XDE_LINK_PREFIX: &str = "opte";
 
+/// Stored routes (and usage count) for a given VPC/subnet.
 #[derive(Debug, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
-    routes: HashSet<ReifiedVpcRoute>,
+    routes: HashSet<ResolvedVpcRoute>,
     active_ports: usize,
 }
 
@@ -66,17 +67,17 @@ struct RouteSet {
 struct PortManagerInner {
     log: Logger,
 
-    // Sequential identifier for each port on the system.
+    /// Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
 
-    // IP address of the hosting sled on the underlay.
+    /// IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the interface Uuid and its kind
-    // (which includes the Uuid of the parent instance or service)
+    /// Map of all ports, keyed on the interface Uuid and its kind
+    /// (which includes the Uuid of the parent instance or service)
     ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
 
-    // Map of all current resolved routes.
+    /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
 }
 
@@ -377,6 +378,10 @@ impl PortManager {
             (port, ticket)
         };
 
+        // Check locally to see whether we have any routes from the
+        // control plane for this port already installed. If not,
+        // create a record to show that we're interested in receiving
+        // those routes.
         let mut routes = self.inner.routes.lock().unwrap();
         let system_routes =
             routes.entry(port.system_router_key()).or_insert_with(|| {
@@ -386,11 +391,11 @@ impl PortManager {
                 // to reach out over the Internet *before* nexus is up to give
                 // us real rules. The easiest bet is to instantiate these here.
                 if is_service {
-                    routes.insert(ReifiedVpcRoute {
+                    routes.insert(ResolvedVpcRoute {
                         dest: "0.0.0.0/0".parse().unwrap(),
                         target: ApiRouterTarget::InternetGateway,
                     });
-                    routes.insert(ReifiedVpcRoute {
+                    routes.insert(ResolvedVpcRoute {
                         dest: "::/0".parse().unwrap(),
                         target: ApiRouterTarget::InternetGateway,
                     });
@@ -399,7 +404,7 @@ impl PortManager {
                 RouteSet { version: None, routes, active_ports: 0 }
             });
         system_routes.active_ports += 1;
-        // Needed to get borrowck on our side, sadly.
+        // Clone is needed to get borrowck on our side, sadly.
         let system_routes = system_routes.clone();
 
         let custom_routes = routes
@@ -443,23 +448,23 @@ impl PortManager {
         Ok((port, ticket))
     }
 
-    pub fn vpc_routes_list(&self) -> Vec<ReifiedVpcRouteState> {
+    pub fn vpc_routes_list(&self) -> Vec<ResolvedVpcRouteState> {
         let routes = self.inner.routes.lock().unwrap();
         routes
             .iter()
-            .map(|(k, v)| ReifiedVpcRouteState { id: *k, version: v.version })
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
             .collect()
     }
 
     pub fn vpc_routes_ensure(
         &self,
-        new_routes: Vec<ReifiedVpcRouteSet>,
+        new_routes: Vec<ResolvedVpcRouteSet>,
     ) -> Result<(), Error> {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
-        for set in new_routes {
+        for new in new_routes {
             // Disregard any route information for a subnet we don't have.
-            let Some(old) = routes.get(&set.id) else {
+            let Some(old) = routes.get(&new.id) else {
                 continue;
             };
 
@@ -468,34 +473,38 @@ impl PortManager {
             // If there's a UUID match, only update if vers increased,
             // otherwise take the update verbatim (including loss of version).
             let (to_add, to_delete): (HashSet<_>, HashSet<_>) =
-                match (old.version, set.version) {
+                match (old.version, new.version) {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
                     {
                         continue;
                     }
                     _ => (
-                        set.routes.difference(&old.routes).cloned().collect(),
-                        old.routes.difference(&set.routes).cloned().collect(),
+                        new.routes.difference(&old.routes).cloned().collect(),
+                        old.routes.difference(&new.routes).cloned().collect(),
                     ),
                 };
-            deltas.insert(set.id, (to_add, to_delete));
+            deltas.insert(new.id, (to_add, to_delete));
 
             let active_ports = old.active_ports;
             routes.insert(
-                set.id,
+                new.id,
                 RouteSet {
-                    version: set.version,
-                    routes: set.routes,
+                    version: new.version,
+                    routes: new.routes,
                     active_ports,
                 },
             );
         }
 
+        // Note: We're deliberately holding both locks here
+        // to prevent several nexuses computng and applying deltas
+        // out of order.
         let ports = self.inner.ports.lock().unwrap();
         #[cfg(target_os = "illumos")]
         let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
 
+        // Propagate deltas out to all ports.
         for port in ports.values() {
             let system_id = port.system_router_key();
             let system_delta = deltas.get(&system_id);

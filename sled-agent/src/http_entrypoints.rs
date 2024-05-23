@@ -32,7 +32,7 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::{
-    ReifiedVpcRouteSet, ReifiedVpcRouteState, SwitchPorts,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1036,7 +1036,7 @@ async fn bootstore_status(
 }]
 async fn list_vpc_routes(
     request_context: RequestContext<SledAgent>,
-) -> Result<HttpResponseOk<Vec<ReifiedVpcRouteState>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
     let sa = request_context.context();
     Ok(HttpResponseOk(sa.list_vpc_routes()))
 }
@@ -1048,7 +1048,7 @@ async fn list_vpc_routes(
 }]
 async fn set_vpc_routes(
     request_context: RequestContext<SledAgent>,
-    body: TypedBody<Vec<ReifiedVpcRouteSet>>,
+    body: TypedBody<Vec<ResolvedVpcRouteSet>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = request_context.context();
     sa.set_vpc_routes(body.into_inner())?;

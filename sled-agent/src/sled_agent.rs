@@ -49,7 +49,8 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, ReifiedVpcRouteSet, ReifiedVpcRouteState,
+    HostPortConfig, RackNetworkConfig, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -1095,13 +1096,13 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
-    pub fn list_vpc_routes(&self) -> Vec<ReifiedVpcRouteState> {
+    pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
         self.inner.port_manager.vpc_routes_list()
     }
 
     pub fn set_vpc_routes(
         &self,
-        routes: Vec<ReifiedVpcRouteSet>,
+        routes: Vec<ResolvedVpcRouteSet>,
     ) -> Result<(), Error> {
         self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
     }

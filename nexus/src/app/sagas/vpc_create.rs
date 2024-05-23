@@ -228,8 +228,6 @@ async fn svc_create_router_undo(
     Ok(())
 }
 
-// XX: possibly do these as a subsaga?
-
 async fn svc_create_v4_route(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {

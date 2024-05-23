@@ -149,8 +149,8 @@ impl DataStore {
         // NIC of that instance. Accordingly, NIC create may cause dangling
         // entries to re-resolve to a valid instance (even if it is not yet
         // started).
-        // This will not trigger the RPW directly, we still need to do so
-        // in e.g. the instance watcher task.
+        // This will not trigger the route RPW directly, we still need to do
+        // so in e.g. the instance watcher task.
         if out.primary {
             self.vpc_increment_rpw_version(opctx, out.vpc_id)
                 .await

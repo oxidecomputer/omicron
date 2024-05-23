@@ -15,7 +15,7 @@ use nexus_types::{
     identity::Resource,
 };
 use omicron_common::api::internal::shared::{
-    ReifiedVpcRoute, ReifiedVpcRouteSet, RouterId, RouterVersion,
+    ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId, RouterVersion,
 };
 use serde_json::json;
 use std::collections::hash_map::Entry;
@@ -78,7 +78,7 @@ impl BackgroundTask for VpcRouteManager {
                 })
                 .collect();
 
-            let mut known_rules: HashMap<Uuid, HashSet<ReifiedVpcRoute>> =
+            let mut known_rules: HashMap<Uuid, HashSet<ResolvedVpcRoute>> =
                 HashMap::new();
             let mut db_routers = HashMap::new();
             let mut vni_to_vpc = HashMap::new();
@@ -184,7 +184,7 @@ impl BackgroundTask for VpcRouteManager {
 
                 let mut to_push = Vec::new();
                 let mut set_rules = |id, version, routes| {
-                    to_push.push(ReifiedVpcRouteSet { id, routes, version });
+                    to_push.push(ResolvedVpcRouteSet { id, routes, version });
                 };
 
                 // resolve into known_rules on an as-needed basis.
@@ -199,7 +199,7 @@ impl BackgroundTask for VpcRouteManager {
 
                     let router_id = db_router.id();
                     let version = RouterVersion {
-                        generation: db_router.resolved_version as u64,
+                        version: db_router.resolved_version as u64,
                         router_id,
                     };
 

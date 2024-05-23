@@ -185,7 +185,7 @@ impl ProbeManagerInner {
                 self.remove(current.difference(&target)).await;
                 self.check(current.intersection(&target)).await;
 
-                // If we have created some new probes, we may (in future) need the control plane
+                // If we have created some new probes, we may need the control plane
                 // to provide us with valid routes for the VPC the probe belongs to.
                 if n_added > 0 {
                     if let Err(e) = self
