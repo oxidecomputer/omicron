@@ -63,9 +63,15 @@ impl DataStore {
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(*vmm_id))
             .filter(dsl::state.eq_any(valid_states))
+            .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .check_if_exists::<Vmm>(*vmm_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
@@ -76,7 +82,7 @@ impl DataStore {
                 )
             })?;
 
-        Ok(updated != 0)
+        Ok(updated)
     }
 
     pub async fn vmm_fetch(
