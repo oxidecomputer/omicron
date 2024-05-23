@@ -33,7 +33,7 @@ pub struct AbandonedVmmReaper {
 #[derive(Debug, Default)]
 struct ActivationResults {
     found: usize,
-    sled_resources_deleted: usize,
+    sled_reservations_deleted: usize,
     vmms_deleted: usize,
     vmms_already_deleted: usize,
     error_count: usize,
@@ -101,7 +101,7 @@ impl AbandonedVmmReaper {
                         "Deleted abandoned VMM's sled reservation";
                         "vmm" => %vmm_id,
                     );
-                    results.sled_resources_deleted += 1;
+                    results.sled_reservations_deleted += 1;
                 }
                 Err(e) => {
                     slog::warn!(
@@ -165,7 +165,7 @@ impl BackgroundTask for AbandonedVmmReaper {
                 Ok(_) => {
                     slog::info!(opctx.log, "Abandoned VMMs reaped";
                         "found" => results.found,
-                        "sled_resources_deleted" => results.sled_resources_deleted,
+                        "sled_reservations_deleted" => results.sled_reservations_deleted,
                         "vmms_deleted" => results.vmms_deleted,
                         "vmms_already_deleted" => results.vmms_already_deleted,
                     );
@@ -175,7 +175,7 @@ impl BackgroundTask for AbandonedVmmReaper {
                     slog::error!(opctx.log, "Abandoned VMM reaper activation failed";
                         "error" => %err,
                         "found" => results.found,
-                        "sled_resources_deleted" => results.sled_resources_deleted,
+                        "sled_reservations_deleted" => results.sled_reservations_deleted,
                         "vmms_deleted" => results.vmms_deleted,
                         "vmms_already_deleted" => results.vmms_already_deleted,
                     );
@@ -186,7 +186,7 @@ impl BackgroundTask for AbandonedVmmReaper {
                 "found": results.found,
                 "vmms_deleted": results.vmms_deleted,
                 "vmms_already_deleted": results.vmms_already_deleted,
-                "sled_resources_deleted": results.sled_resources_deleted,
+                "sled_reservations_deleted": results.sled_reservations_deleted,
                 "error_count": results.error_count,
                 "error": error,
             })
@@ -342,7 +342,7 @@ mod tests {
         dbg!(&results);
 
         assert_eq!(results.vmms_deleted, 1);
-        assert_eq!(results.sled_resources_deleted, 1);
+        assert_eq!(results.sled_reservations_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 0);
         assert_eq!(results.error_count, 0);
         fixture.assert_reaped(datastore).await;
@@ -389,7 +389,7 @@ mod tests {
 
         assert_eq!(results.found, 1);
         assert_eq!(results.vmms_deleted, 0);
-        assert_eq!(results.sled_resources_deleted, 1);
+        assert_eq!(results.sled_reservations_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 1);
         assert_eq!(results.error_count, 0);
 
@@ -441,7 +441,7 @@ mod tests {
 
         assert_eq!(results.found, 1);
         assert_eq!(results.vmms_deleted, 1);
-        assert_eq!(results.sled_resources_deleted, 1);
+        assert_eq!(results.sled_reservations_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 0);
         assert_eq!(results.error_count, 0);
 

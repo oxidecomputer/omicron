@@ -202,6 +202,11 @@ EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+task: "abandoned_vmm_reaper"
+    deletes sled reservations for VMMs that have been abandoned by their
+    instances
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -375,6 +380,16 @@ task: "blueprint_executor"
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
+
+task: "abandoned_vmm_reaper"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total abandoned VMMs found: 0
+      VMM records deleted: 0
+      VMM records already deleted by another Nexus: 0
+    sled resource reservations deleted: 0
 
 task: "bfd_manager"
   configured period: every 30s
