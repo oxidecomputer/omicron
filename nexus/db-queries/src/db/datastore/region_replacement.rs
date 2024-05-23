@@ -161,6 +161,7 @@ impl DataStore {
             .filter(
                 dsl::replacement_state.eq(RegionReplacementState::Requested),
             )
+            .filter(dsl::operating_saga_id.is_null())
             .set((
                 dsl::replacement_state.eq(RegionReplacementState::Allocating),
                 dsl::operating_saga_id.eq(operating_saga_id),
@@ -354,6 +355,7 @@ impl DataStore {
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(dsl::replacement_state.eq(RegionReplacementState::Running))
+            .filter(dsl::operating_saga_id.is_null())
             .set((
                 dsl::replacement_state.eq(RegionReplacementState::Driving),
                 dsl::operating_saga_id.eq(operating_saga_id),
@@ -538,6 +540,7 @@ impl DataStore {
                 dsl::replacement_state
                     .eq(RegionReplacementState::ReplacementDone),
             )
+            .filter(dsl::operating_saga_id.is_null())
             .set((
                 dsl::replacement_state.eq(RegionReplacementState::Completing),
                 dsl::operating_saga_id.eq(operating_saga_id),
