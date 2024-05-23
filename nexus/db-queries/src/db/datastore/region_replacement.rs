@@ -435,7 +435,7 @@ impl DataStore {
         }
     }
 
-    /// Transition a RegionReplacement record from Running to ReplacementDone,
+    /// Transition a RegionReplacement record from Driving to ReplacementDone,
     /// clearing the operating saga id.
     pub async fn set_region_replacement_from_driving_to_done(
         &self,
