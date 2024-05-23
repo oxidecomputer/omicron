@@ -22,7 +22,6 @@ use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::external::Error;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -35,7 +34,6 @@ pub struct AbandonedVmmReaper {
 struct ActivationResults {
     found: usize,
     sled_resources_deleted: usize,
-    sled_resources_already_deleted: usize,
     vmms_deleted: usize,
     vmms_already_deleted: usize,
     error_count: usize,
@@ -105,14 +103,6 @@ impl AbandonedVmmReaper {
                     );
                     results.sled_resources_deleted += 1;
                 }
-                Err(Error::ObjectNotFound { .. }) => {
-                    slog::trace!(
-                        opctx.log,
-                        "Abandoned VMM's sled reservation was already deleted";
-                        "vmm" => %vmm_id,
-                    );
-                    results.sled_resources_already_deleted += 1;
-                }
                 Err(e) => {
                     slog::warn!(
                         opctx.log,
@@ -176,8 +166,8 @@ impl BackgroundTask for AbandonedVmmReaper {
                     slog::info!(opctx.log, "Abandoned VMMs reaped";
                         "found" => results.found,
                         "sled_resources_deleted" => results.sled_resources_deleted,
-                        "sled_resources_already_deleted" => results.sled_resources_already_deleted,
                         "vmms_deleted" => results.vmms_deleted,
+                        "vmms_already_deleted" => results.vmms_already_deleted,
                     );
                     None
                 }
@@ -186,8 +176,8 @@ impl BackgroundTask for AbandonedVmmReaper {
                         "error" => %err,
                         "found" => results.found,
                         "sled_resources_deleted" => results.sled_resources_deleted,
-                        "sled_resources_already_deleted" => results.sled_resources_already_deleted,
                         "vmms_deleted" => results.vmms_deleted,
+                        "vmms_already_deleted" => results.vmms_already_deleted,
                     );
                     Some(err.to_string())
                 }
@@ -197,7 +187,6 @@ impl BackgroundTask for AbandonedVmmReaper {
                 "vmms_deleted": results.vmms_deleted,
                 "vmms_already_deleted": results.vmms_already_deleted,
                 "sled_resources_deleted": results.sled_resources_deleted,
-                "sled_resources_already_deleted": results.sled_resources_already_deleted,
                 "error_count": results.error_count,
                 "error": error,
             })
@@ -355,7 +344,6 @@ mod tests {
         assert_eq!(results.vmms_deleted, 1);
         assert_eq!(results.sled_resources_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 0);
-        assert_eq!(results.sled_resources_already_deleted, 0);
         assert_eq!(results.error_count, 0);
         fixture.assert_reaped(datastore).await;
     }
@@ -403,7 +391,6 @@ mod tests {
         assert_eq!(results.vmms_deleted, 0);
         assert_eq!(results.sled_resources_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 1);
-        assert_eq!(results.sled_resources_already_deleted, 0);
         assert_eq!(results.error_count, 0);
 
         fixture.assert_reaped(datastore).await
@@ -454,9 +441,8 @@ mod tests {
 
         assert_eq!(results.found, 1);
         assert_eq!(results.vmms_deleted, 1);
-        assert_eq!(results.sled_resources_deleted, 0);
+        assert_eq!(results.sled_resources_deleted, 1);
         assert_eq!(results.vmms_already_deleted, 0);
-        assert_eq!(results.sled_resources_already_deleted, 1);
         assert_eq!(results.error_count, 0);
 
         fixture.assert_reaped(datastore).await
