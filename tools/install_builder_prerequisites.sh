@@ -106,7 +106,7 @@ HOST_OS=$(uname -s)
 function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
     # If Nix is in use, we don't need to install any packagess here,
-    # as they're provided by the Nix flake. 
+    # as they're provided by the Nix flake.
     if nix flake show &> /dev/null; then
       return
     fi
@@ -170,6 +170,8 @@ function install_packages {
       'postgresql'
       'pkg-config'
       'libxmlsec1'
+      'yq'
+      'gh'
     )
     confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
   else

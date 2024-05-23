@@ -29,7 +29,7 @@ PACKAGE_BASE_URL="$ARTIFACT_URL/$REPO/image/$COMMIT"
 
 function main
 {
-    rm -rf $DOWNLOAD_DIR/root
+	rm -rf $DOWNLOAD_DIR/root
 
 	#
 	# Process command-line arguments. We generally don't expect any, but
@@ -88,6 +88,9 @@ function configure_os
 		  	;;
 		solaris*)
 			SET_BINARIES=""
+			;;
+		darwin*)
+			SET_BINARIES="osx_binaries"
 			;;
 		*)
 			echo "WARNING: binaries for $1 are not published by maghemite"
@@ -160,11 +163,17 @@ function linux_binaries
 	cp "$DOWNLOAD_DIR/mgd" "$BIN_DIR"
 }
 
+function osx_binaries
+{
+	echo "OSX binaries not officially supported"
+	./tools/omicron-install-dendrite-mac.sh
+}
+
 function unsupported_os
 {
 	mkdir -p "$BIN_DIR"
-	echo "echo 'unsupported os' && exit 1" >> "$BIN_DIR/dpd"
-	chmod +x "$BIN_DIR/dpd"
+	echo "echo 'unsupported os' && exit 1" >> "$BIN_DIR/mgd"
+	chmod +x "$BIN_DIR/mgd"
 }
 
 main "$@"
