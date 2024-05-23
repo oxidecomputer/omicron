@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn test_deserialize_allowed_source_ips() {
         let parsed: AllowedSourceIps = serde_json::from_str(
-            r#"{"allow":"list","ips":["127.0.0.1","10.0.0.0/24","fd00::1/64"]}"#,
+            r#"{"allow":"list","ips":["127.0.0.1/32","10.0.0.0/24","fd00::1/64"]}"#,
         )
         .unwrap();
         assert_eq!(
