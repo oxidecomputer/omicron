@@ -52,6 +52,7 @@ impl std::str::FromStr for RegionReplacementState {
 /// orchestrate replacing a region in a volume. It transitions through the
 /// following states:
 ///
+/// ```text
 ///     Requested   <--              ---
 ///                   |              |
 ///         |         |              |
@@ -83,6 +84,7 @@ impl std::str::FromStr for RegionReplacementState {
 ///         v                        |
 ///                                  |
 ///     Completed                    ---
+/// ```
 ///
 /// which are captured in the RegionReplacementState enum. Annotated on the
 /// right are which sagas are responsible for which state transitions. The state
