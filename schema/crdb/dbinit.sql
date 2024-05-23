@@ -3866,8 +3866,6 @@ ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
 CREATE INDEX IF NOT EXISTS vmm_by_instance_id
 ON omicron.public.vmm (instance_id) STORING (sled_id);
 
-/* REGION-REPLACEMENT SCHEMA CHANGE START */
-/* up01.sql */
 CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_state AS ENUM (
   'requested',
   'allocating',
@@ -3877,7 +3875,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_state AS ENUM (
   'completing',
   'complete'
 );
-/* up02.sql */
+
 CREATE TABLE IF NOT EXISTS omicron.public.region_replacement (
     /* unique ID for this region replacement */
     id UUID PRIMARY KEY,
@@ -3896,23 +3894,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_replacement (
 
     operating_saga_id UUID
 );
-/* up03.sql */
+
 CREATE INDEX IF NOT EXISTS lookup_region_replacement_by_state on omicron.public.region_replacement (replacement_state);
-/* up04.sql */
+
 CREATE TABLE IF NOT EXISTS omicron.public.volume_repair (
     volume_id UUID PRIMARY KEY,
     repair_id UUID NOT NULL
 );
-/* up05.sql */
+
 CREATE INDEX IF NOT EXISTS lookup_volume_repair_by_repair_id on omicron.public.volume_repair (
     repair_id
 );
-/* up06.sql */
+
 CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_step_type AS ENUM (
   'propolis',
   'pantry'
 );
-/* up07.sql */
+
 CREATE TABLE IF NOT EXISTS omicron.public.region_replacement_step (
     replacement_id UUID NOT NULL,
 
@@ -3929,17 +3927,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_replacement_step (
 
     PRIMARY KEY (replacement_id, step_time, step_type)
 );
-/* up08.sql */
+
 CREATE INDEX IF NOT EXISTS step_time_order on omicron.public.region_replacement_step (step_time);
-/* up09.sql */
+
 CREATE INDEX IF NOT EXISTS search_for_repair_notifications ON omicron.public.upstairs_repair_notification (region_id, notification_type);
-/* up10.sql */
+
 CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
     volume_id
 );
-/* up11.sql */
+
 CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
-/* REGION-REPLACEMENT SCHEMA CHANGE END */
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
