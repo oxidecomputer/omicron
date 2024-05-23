@@ -26,5 +26,6 @@ mod service_firewall_rules;
 mod status;
 mod sync_service_zone_nat;
 mod sync_switch_configuration;
+mod v2p_mappings;
 
 pub use init::BackgroundTasks;

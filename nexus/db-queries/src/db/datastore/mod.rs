@@ -94,6 +94,7 @@ mod switch_port;
 pub(crate) mod test_utils;
 mod update;
 mod utilization;
+mod v2p_mapping;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;
@@ -983,8 +984,8 @@ mod test {
                 // This is a little goofy, but it catches a bug that has
                 // happened before. The returned columns share names (like
                 // "id"), so we need to process them in-order.
-                assert!(regions.get(&dataset.id()).is_none());
-                assert!(disk_datasets.get(&region.id()).is_none());
+                assert!(!regions.contains(&dataset.id()));
+                assert!(!disk_datasets.contains(&region.id()));
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =

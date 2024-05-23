@@ -551,7 +551,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         // Same thing as above, check to see if we've already built the announce set,
                         // if so we'll skip this step
-                        if bgp_announce_prefixes.get(&bgp_config.bgp_announce_set_id).is_none() {
+                        #[allow(clippy::map_entry)]
+                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
                             let announcements = match self
                                 .datastore
                                 .bgp_announce_list(

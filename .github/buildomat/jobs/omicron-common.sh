@@ -3,7 +3,7 @@
 #: name = "omicron-common (helios)"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.77.2"
+#: rust_toolchain = "1.78.0"
 #: output_rules = []
 
 # Verify that omicron-common builds successfully when used as a dependency
