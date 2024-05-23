@@ -35,10 +35,20 @@ impl VpcRouteManager {
     }
 }
 
-// There's a sort of eventual consistency happening here.
-// ... DETAIL XX ...
-// version bumps must happen AFTER other changes occur in
-// children etc. to keep this sane and working. :)
+// This RPW doesn't concern itself overly much with resolved router targets
+// and destinations being partial wrt. the current generation, in the same
+// vein as how firewall rules are handled. Gating *pushing* this update on a
+// generation number can be a bit more risky, but there's a sort of eventual
+// consistency happening here that keeps this safe.
+//
+// Any location which updates name-resolvable state follows the pattern:
+//  * Update state.
+//  * Update (VPC-wide) router generation numbers.
+//  * Awaken this task. This might happen indirectly via e.g. instance start.
+//
+// As a result, any update which accidentally sees partial state will be followed
+// by re-triggering this RPW with a higher generation number, giving us a re-resolved
+// route set and pushing to any relevant sleds.
 impl BackgroundTask for VpcRouteManager {
     fn activate<'a>(
         &'a mut self,
@@ -47,7 +57,6 @@ impl BackgroundTask for VpcRouteManager {
         async {
             let log = &opctx.log;
 
-            // XX: copied from omicron#5566
             let sleds = match self
                 .datastore
                 .sled_list_all_batched(opctx, SledFilter::InService)
@@ -99,7 +108,7 @@ impl BackgroundTask for VpcRouteManager {
                 // based on the set of VNIs reported by this sled.
                 // These provide the versions we'll stick with -- in the worst
                 // case we push newer state to a sled with an older generation
-                // number, which
+                // number, which will be fixed up on the next activation.
                 for set in &route_sets {
                     let db_vni = Vni(set.id.vni);
                     let maybe_vpc = vni_to_vpc.entry(set.id.vni);
