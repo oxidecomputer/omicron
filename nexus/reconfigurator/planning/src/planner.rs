@@ -10,6 +10,7 @@ use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
+use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::PlanningInput;
@@ -24,6 +25,12 @@ use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
+
+use self::omicron_zone_placement::DiscretionaryOmicronZone;
+use self::omicron_zone_placement::OmicronZonePlacement;
+use self::omicron_zone_placement::OmicronZonePlacementSledState;
+
+mod omicron_zone_placement;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -214,7 +221,7 @@ impl<'a> Planner<'a> {
         // We will not mark sleds getting Crucible zones as ineligible; other
         // control plane service zones starting concurrently with Crucible zones
         // is fine.
-        let mut sleds_waiting_for_ntp_zones = BTreeSet::new();
+        let mut sleds_waiting_for_ntp_zone = BTreeSet::new();
 
         for (sled_id, sled_resources) in
             self.input.all_sled_resources(SledFilter::InService)
@@ -252,7 +259,7 @@ impl<'a> Planner<'a> {
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
-                sleds_waiting_for_ntp_zones.insert(sled_id);
+                sleds_waiting_for_ntp_zone.insert(sled_id);
                 continue;
             }
 
@@ -321,9 +328,7 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.ensure_correct_number_of_nexus_zones(
-            &sleds_waiting_for_ntp_zones,
-        )?;
+        self.ensure_correct_number_of_nexus_zones(&sleds_waiting_for_ntp_zone)?;
 
         Ok(())
     }
@@ -344,7 +349,7 @@ impl<'a> Planner<'a> {
         // TODO-correctness What should we do if we have _too many_ Nexus
         // instances? For now, just log it the number of zones any time we have
         // at least the minimum number.
-        let nexus_to_add = self
+        let mut nexus_to_add = self
             .input
             .target_nexus_zone_count()
             .saturating_sub(num_total_nexus);
@@ -357,70 +362,69 @@ impl<'a> Planner<'a> {
             return Ok(());
         }
 
-        // Now bin all the sleds which are eligible choices for a new Nexus zone
-        // by their current Nexus zone count. Skip sleds with a policy/state
-        // that should be eligible for Nexus but that don't yet have an NTP
-        // zone.
-        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<SledUuid>> =
-            BTreeMap::new();
-        for sled_id in self
-            .input
-            .all_sled_ids(SledFilter::Discretionary)
-            .filter(|sled_id| !sleds_waiting_for_ntp_zone.contains(sled_id))
-        {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
-            sleds_by_num_nexus.entry(num_nexus).or_default().push(sled_id);
-        }
+        let mut zone_placement = OmicronZonePlacement::new(
+            self.input
+                .all_sled_resources(SledFilter::Discretionary)
+                .filter(|(sled_id, _)| {
+                    !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                })
+                .map(|(sled_id, sled_resources)| {
+                    OmicronZonePlacementSledState {
+                        sled_id,
+                        num_zpools: sled_resources
+                            .all_zpools(ZpoolFilter::InService)
+                            .count(),
+                        discretionary_zones: self
+                            .blueprint
+                            .current_sled_zones(sled_id)
+                            .filter_map(|zone| {
+                                DiscretionaryOmicronZone::from_zone_type(
+                                    &zone.zone_type,
+                                )
+                            })
+                            .collect(),
+                    }
+                }),
+        );
 
-        // Ensure we have at least one sled on which we can add Nexus zones. If
-        // we don't, we have nothing else to do. This isn't a hard error,
-        // because we might be waiting for NTP on all eligible sleds (although
-        // it would be weird, since we're presumably running from within Nexus
-        // on some sled).
-        if sleds_by_num_nexus.is_empty() {
-            warn!(self.log, "want to add Nexus zones, but no eligible sleds");
-            return Ok(());
-        }
-
-        // Build a map of sled -> new nexus zone count.
+        // Build a map of sled -> new nexus zones to add.
         let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
-        'outer: for _ in 0..nexus_to_add {
-            // `sleds_by_num_nexus` is sorted by key already, and we want to
-            // pick from the lowest-numbered bin. We can just loop over its
-            // keys, expecting to stop on the first iteration, with the only
-            // exception being when we've removed all the sleds from a bin.
-            for (&num_nexus, sleds) in sleds_by_num_nexus.iter_mut() {
-                // `sleds` contains all sleds with the minimum number of Nexus
-                // zones. Pick one arbitrarily but deterministically.
-                let Some(sled_id) = sleds.pop() else {
-                    // We already drained this bin; move on.
-                    continue;
-                };
+        for i in 0..nexus_to_add {
+            match zone_placement.place_zone(DiscretionaryOmicronZone::Nexus) {
+                Ok(sled_id) => {
+                    *sleds_to_change.entry(sled_id).or_default() += 1;
+                }
+                Err(PlacementError::NoSledsEligible { .. }) => {
+                    // We won't treat this as a hard error; it's possible
+                    // (albeit unlikely?) we're in a weird state where we need
+                    // more sleds or disks to come online, and we may need to be
+                    // able to produce blueprints to achieve that status.
+                    warn!(
+                        self.log,
+                        "failed to place all new desired Nexus instances";
+                        "placed" => i,
+                        "wanted_to_place" => nexus_to_add,
+                    );
 
-                // This insert might overwrite an old value for this sled (e.g.,
-                // in the "we have 1 sled and need to add many Nexus instances
-                // to it" case). That's fine.
-                sleds_to_change.insert(sled_id, num_nexus + 1);
+                    // Adjust `nexus_to_add` downward so it's consistent with
+                    // the number of Nexuses we're actually adding.
+                    nexus_to_add = i;
 
-                // Put this sled back in our map, but now with one more Nexus.
-                sleds_by_num_nexus
-                    .entry(num_nexus + 1)
-                    .or_default()
-                    .push(sled_id);
-
-                continue 'outer;
+                    break;
+                }
             }
-
-            // This should be unreachable: it's only possible if we fail to find
-            // a nonempty vec in `sleds_by_num_nexus`, and we checked above that
-            // `sleds_by_num_nexus` is not empty.
-            unreachable!("logic error finding sleds for Nexus");
         }
 
         // For each sled we need to change, actually do so.
         let mut total_added = 0;
-        for (sled_id, new_nexus_count) in sleds_to_change {
+        for (sled_id, additional_nexus_count) in sleds_to_change {
+            // TODO-cleanup This is awkward: the builder wants to know how many
+            // total Nexus zones go on a given sled, but we have a count of how
+            // many we want to add. Construct a new target count. Maybe the
+            // builder should provide a different interface here?
+            let new_nexus_count = self.blueprint.sled_num_nexus_zones(sled_id)
+                + additional_nexus_count;
             match self
                 .blueprint
                 .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?

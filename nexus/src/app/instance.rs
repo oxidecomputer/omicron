@@ -1515,13 +1515,14 @@ impl super::Nexus {
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         notify_instance_updated(
-            &self.db_datastore,
+            &self.datastore(),
             &self.resolver().await,
             &self.opctx_alloc,
             opctx,
             &self.log,
             instance_id,
             new_runtime_state,
+            self.v2p_notification_tx.clone(),
         )
         .await?;
         Ok(())
@@ -1965,6 +1966,7 @@ pub(crate) struct InstanceUpdated {
 
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
+#[allow(clippy::too_many_arguments)] // :(
 pub(crate) async fn notify_instance_updated(
     datastore: &DataStore,
     resolver: &internal_dns::resolver::Resolver,
@@ -1973,6 +1975,7 @@ pub(crate) async fn notify_instance_updated(
     log: &slog::Logger,
     instance_id: &Uuid,
     new_runtime_state: &nexus::SledInstanceState,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 ) -> Result<Option<InstanceUpdated>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
@@ -2011,6 +2014,7 @@ pub(crate) async fn notify_instance_updated(
         &authz_instance,
         db_instance.runtime(),
         &new_runtime_state.instance_state,
+        v2p_notification_tx.clone(),
     )
     .await?;
 

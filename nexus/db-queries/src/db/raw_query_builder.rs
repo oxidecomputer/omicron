@@ -69,18 +69,6 @@ enum TrustedStrVariants {
     ValidatedExplicitly(String),
 }
 
-trait SqlQueryBinds {
-    fn add_bind(self, bind_counter: &BindParamCounter) -> Self;
-}
-
-impl<'a, Query> SqlQueryBinds
-    for diesel::query_builder::BoxedSqlQuery<'a, Pg, Query>
-{
-    fn add_bind(self, bind_counter: &BindParamCounter) -> Self {
-        self.sql("$").sql(bind_counter.next().to_string())
-    }
-}
-
 type BoxedQuery = diesel::query_builder::BoxedSqlQuery<
     'static,
     Pg,

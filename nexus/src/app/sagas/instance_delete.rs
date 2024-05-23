@@ -102,6 +102,7 @@ async fn sid_delete_network_interfaces(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -112,6 +113,7 @@ async fn sid_delete_network_interfaces(
         .instance_delete_all_network_interfaces(&opctx, &params.authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
 
