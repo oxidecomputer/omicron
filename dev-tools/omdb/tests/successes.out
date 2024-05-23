@@ -291,6 +291,10 @@ task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
 
+task: "v2p_manager"
+    manages opte v2p mappings for vpc networking
+
+
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
@@ -474,6 +478,13 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "v2p_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 
 task: "vpc_route_manager"
   configured period: every 30s

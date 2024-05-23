@@ -29,7 +29,8 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(64, "vpc-subnet-routing"),
+        KnownVersion::new(65, "vpc-subnet-routing"),
+        KnownVersion::new(64, "add-view-for-v2p-mappings"),
         KnownVersion::new(63, "remove-producer-base-route-column"),
         KnownVersion::new(62, "allocate-subnet-decommissioned-sleds"),
         KnownVersion::new(61, "blueprint-add-sled-state"),

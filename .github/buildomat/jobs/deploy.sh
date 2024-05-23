@@ -50,6 +50,7 @@ _exit_trap() {
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
 	pfexec /opt/oxide/opte/bin/opteadm dump-v2b
+	pfexec /opt/oxide/opte/bin/opteadm dump-v2p
 	z_swadm link ls
 	z_swadm addr list
 	z_swadm route list
