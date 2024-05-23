@@ -1132,7 +1132,7 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let all_disks = self.storage().get_latest_disks().await;
-        for (identity, variant, slot) in all_disks.iter_all() {
+        for (identity, variant, slot, _firmware) in all_disks.iter_all() {
             disks.push(crate::params::InventoryDisk {
                 identity: identity.clone(),
                 variant,

@@ -820,7 +820,7 @@ impl StorageManager {
             .resources
             .disks()
             .iter_all()
-            .filter_map(|(id, _variant, _slot)| {
+            .filter_map(|(id, _variant, _slot, _firmware)| {
                 if !all_ids.contains(id) {
                     Some(id.clone())
                 } else {

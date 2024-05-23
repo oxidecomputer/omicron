@@ -16,7 +16,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::DiskVariant;
+use sled_hardware::{DiskFirmware, DiskVariant};
 use slog::{info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -241,16 +241,17 @@ impl AllDisks {
     /// Returns an iterator over all disks, managed or not.
     pub fn iter_all(
         &self,
-    ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64)> {
+    ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64, &DiskFirmware)>
+    {
         self.values.iter().map(|(identity, disk)| match disk {
             ManagedDisk::ExplicitlyManaged(disk) => {
-                (identity, disk.variant(), disk.slot())
+                (identity, disk.variant(), disk.slot(), disk.firmware())
             }
             ManagedDisk::ImplicitlyManaged(disk) => {
-                (identity, disk.variant(), disk.slot())
+                (identity, disk.variant(), disk.slot(), disk.firmware())
             }
             ManagedDisk::Unmanaged(raw) => {
-                (identity, raw.variant(), raw.slot())
+                (identity, raw.variant(), raw.slot(), raw.firmware())
             }
         })
     }
