@@ -1153,11 +1153,14 @@ mod test {
             .expect("fetching initial external DNS");
 
         // Fetch the initial blueprint installed during rack initialization.
-        let (_blueprint_target, blueprint) = datastore
+        let (_blueprint_target, mut blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
             .expect("failed to read current target blueprint");
         eprintln!("blueprint: {}", blueprint.display());
+        // Override the CockroachDB settings so that we don't try to set them.
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::DoNotModify;
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);

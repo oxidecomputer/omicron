@@ -24,6 +24,7 @@ use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
@@ -227,6 +228,24 @@ impl super::Nexus {
         // match this update.
         let mut blueprint = request.blueprint;
         blueprint.external_dns_version = blueprint.external_dns_version.next();
+
+        // Fill in the CockroachDB metadata for the initial blueprint, and set
+        // the `cluster.preserve_downgrade_option` setting ahead of blueprint
+        // execution.
+        let cockroachdb_settings =
+            self.datastore().cockroachdb_settings(opctx).await?;
+        self.datastore()
+            .cockroachdb_setting_set_string(
+                opctx,
+                cockroachdb_settings.state_fingerprint.clone(),
+                "cluster.preserve_downgrade_option",
+                CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            )
+            .await?;
+        blueprint.cockroachdb_fingerprint =
+            cockroachdb_settings.state_fingerprint;
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into();
 
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
