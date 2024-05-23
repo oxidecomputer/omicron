@@ -76,7 +76,7 @@ pub const NTP_PORT: u16 = 123;
 /// The length for all VPC IPv6 prefixes
 pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
 
-/// The prefix length for all VPC Sunets
+/// The prefix length for all VPC subnets
 pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
 
 // The number of ports available to an SNAT IP.
