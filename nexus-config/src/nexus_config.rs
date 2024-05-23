@@ -559,7 +559,6 @@ pub struct AbandonedVmmReaperConfig {
     pub period_secs: Duration,
 }
 
-
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
