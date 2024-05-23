@@ -1156,6 +1156,7 @@ mod tests {
     use omicron_common::address::IpRange;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use oxnet::Ipv6Net;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1251,7 +1252,7 @@ mod tests {
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
             rack_network_config: RackNetworkConfig {
-                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
                 infra_ip_first: Ipv4Addr::LOCALHOST,
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),

@@ -70,13 +70,15 @@ impl SetupServiceConfig {
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_network_config.rack_subnet.ip())
+        Ipv6Subnet::<AZ_PREFIX>::new(
+            self.rack_network_config.rack_subnet.addr(),
+        )
     }
 
     /// Returns the subnet for our rack.
     pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
         Ipv6Subnet::<RACK_PREFIX>::new(
-            self.rack_network_config.rack_subnet.ip(),
+            self.rack_network_config.rack_subnet.addr(),
         )
     }
 

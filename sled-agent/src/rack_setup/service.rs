@@ -734,7 +734,7 @@ impl ServiceInner {
         let rack_network_config = {
             let config = &config.rack_network_config;
             NexusTypes::RackNetworkConfigV1 {
-                rack_subnet: config.rack_subnet,
+                rack_subnet: config.rack_subnet.into(),
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
                 ports: config
@@ -746,12 +746,12 @@ impl ServiceInner {
                             .routes
                             .iter()
                             .map(|r| NexusTypes::RouteConfig {
-                                destination: r.destination,
+                                destination: r.destination.into(),
                                 nexthop: r.nexthop,
                                 vlan_id: r.vlan_id,
                             })
                             .collect(),
-                        addresses: config.addresses.clone(),
+                        addresses: config.addresses.iter().cloned().map(Into::into).collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
@@ -787,7 +787,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config.originate.clone(),
+                        originate: config.originate.iter().cloned().map(Into::into).collect(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                     })

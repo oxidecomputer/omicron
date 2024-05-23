@@ -33,6 +33,7 @@ ipnetwork.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
 once_cell.workspace = true
+oxnet.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true

@@ -11,6 +11,7 @@ use crate::app::{
     },
     map_switch_zone_addrs,
 };
+use oxnet::Ipv4Net;
 use slog::o;
 
 use internal_dns::resolver::Resolver;
@@ -50,8 +51,8 @@ use omicron_common::{
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
-    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, Ipv4Network,
-    PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV1,
+    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -868,7 +869,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
-                    Some(IpNetwork::V6(subnet)) => subnet,
+                    Some(IpNetwork::V6(subnet)) => subnet.into(),
                     Some(IpNetwork::V4(_)) => {
                         error!(log, "rack subnet must be ipv6"; "rack" => ?rack);
                         continue;
@@ -881,14 +882,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
                 let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
-                    let announcements: Vec<Ipv4Network> = bgp_announce_prefixes
+                    let announcements = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
                         .expect("bgp config is present but announce set is not populated")
                         .iter()
                         .map(|prefix| {
-                            ipnetwork::Ipv4Network::new(prefix.value, prefix.length)
-                                .expect("Prefix4 and Ipv4Network's value types have diverged")
-                                .into()
+                            Ipv4Net::new(prefix.value, prefix.length)
+                                .expect("Prefix4 and Ipv4Net's value types have diverged")
                         }).collect();
 
                     SledBgpConfig {
@@ -923,7 +923,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let mut port_config = PortConfigV1 {
-                        addresses: info.addresses.iter().map(|a| a.address).collect(),
+                        addresses: info.addresses.iter().map(|a| a.address.into()).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -962,7 +962,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .routes
                             .iter()
                             .map(|r| SledRouteConfig {
-                                destination: r.dst,
+                                destination: r.dst.into(),
                                 nexthop: r.gw.ip(),
                                 vlan_id: r.vid.map(|x| x.0),
                             })
@@ -1401,7 +1401,7 @@ fn uplinks(
         };
         let config = HostPortConfig {
             port: port.port_name.clone(),
-            addrs: config.addresses.iter().map(|a| a.address).collect(),
+            addrs: config.addresses.iter().map(|a| a.address.into()).collect(),
         };
 
         match uplinks.entry(*location) {

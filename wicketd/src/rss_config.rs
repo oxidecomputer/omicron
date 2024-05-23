@@ -652,7 +652,7 @@ fn validate_rack_network_config(
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
-        rack_subnet: RACK_SUBNET.net().into(),
+        rack_subnet: RACK_SUBNET.net(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config
@@ -704,7 +704,7 @@ fn build_port_config(
                 vlan_id: r.vlan_id,
             })
             .collect(),
-        addresses: config.addresses.clone(),
+        addresses: config.addresses.iter().cloned().map(Into::into).collect(),
         bgp_peers: config
             .bgp_peers
             .iter()

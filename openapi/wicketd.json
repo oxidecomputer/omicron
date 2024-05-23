@@ -1055,7 +1055,7 @@
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Network"
+              "$ref": "#/components/schemas/Ipv4Net"
             }
           },
           "shaper": {
@@ -2752,7 +2752,7 @@
             "description": "The destination of the route.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNetwork"
+                "$ref": "#/components/schemas/IpNet"
               }
             ]
           },

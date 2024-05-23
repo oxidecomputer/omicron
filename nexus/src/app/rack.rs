@@ -61,6 +61,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
@@ -257,7 +258,8 @@ impl super::Nexus {
         // The `rack` row is created with the rack ID we know when Nexus starts,
         // but we didn't know the rack subnet until now. Set it.
         let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        rack.rack_subnet = Some(rack_network_config.rack_subnet.into());
+        rack.rack_subnet =
+            Some(IpNet::from(rack_network_config.rack_subnet).into());
         self.datastore().update_rack_subnet(opctx, &rack).await?;
 
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
@@ -398,8 +400,8 @@ impl super::Nexus {
                             .originate
                             .iter()
                             .map(|o| AddressLotBlockCreate {
-                                first_address: o.network().into(),
-                                last_address: o.broadcast().into(),
+                                first_address: o.first_addr().into(),
+                                last_address: o.last_addr().into(),
                             })
                             .collect(),
                     },
@@ -431,13 +433,13 @@ impl super::Nexus {
                         announcement: bgp_config
                             .originate
                             .iter()
-                            .map(|x| BgpAnnouncementCreate {
+                            .map(|ipv4_net| BgpAnnouncementCreate {
                                 address_lot_block: NameOrId::Name(
                                     format!("as{}", bgp_config.asn)
                                         .parse()
                                         .unwrap(),
                                 ),
-                                network: IpNetwork::from(*x).into(),
+                                network: ipv4_net.clone().into(),
                             })
                             .collect(),
                     },
@@ -523,7 +525,7 @@ impl super::Nexus {
                 .iter()
                 .map(|a| Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: (*a).into(),
+                    address: (*a),
                 })
                 .collect();
 
@@ -534,11 +536,7 @@ impl super::Nexus {
             let routes: Vec<Route> = uplink_config
                 .routes
                 .iter()
-                .map(|r| Route {
-                    dst: r.destination.into(),
-                    gw: r.nexthop,
-                    vid: None,
-                })
+                .map(|r| Route { dst: r.destination, gw: r.nexthop, vid: None })
                 .collect();
 
             port_settings_params
@@ -631,7 +629,8 @@ impl super::Nexus {
             .rack_set_initialized(
                 opctx,
                 RackInit {
-                    rack_subnet: rack_network_config.rack_subnet.into(),
+                    rack_subnet: IpNet::from(rack_network_config.rack_subnet)
+                        .into(),
                     rack_id,
                     blueprint,
                     physical_disks,
