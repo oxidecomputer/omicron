@@ -1572,12 +1572,9 @@ fn create_snapshot_from_disk(
 
             if let Some(socket_map) = socket_map {
                 for target in &mut opts.target {
-                    *target = socket_map
-                        .get(target)
-                        .ok_or_else(|| {
-                            anyhow!("target {} not found in map!", target)
-                        })?
-                        .clone();
+                    target.clone_from(socket_map.get(target).ok_or_else(
+                        || anyhow!("target {} not found in map!", target),
+                    )?);
                 }
             }
 

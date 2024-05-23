@@ -101,16 +101,6 @@ trait Attributes: DynClone {
     fn y_axis_label(&self) -> String;
     fn axis_value(&self, val: f64) -> String;
     fn legend_value(&self, val: f64) -> String;
-
-    fn increase(&mut self, _ndx: usize) -> Option<u8> {
-        None
-    }
-
-    fn decrease(&mut self, _ndx: usize) -> Option<u8> {
-        None
-    }
-
-    fn clear(&mut self) {}
 }
 
 dyn_clone::clone_trait_object!(Attributes);
