@@ -1249,8 +1249,6 @@ pub trait Ipv6NetExt {
 
 impl Ipv6NetExt for oxnet::Ipv6Net {
     fn is_vpc_prefix(&self) -> bool {
-        // /// The prefix length for all VPC subnets
-        // pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
         self.is_unique_local() && self.width() == Self::VPC_IPV6_PREFIX_LENGTH
     }
 
