@@ -198,18 +198,17 @@ impl DataStore {
                     .on(instance_dsl::id.eq(dsl::instance_id)),
             )
             .filter(
-                instance_dsl::active_propolis_id.ne(dsl::id.nullable()).and(
-                    instance_dsl::target_propolis_id.ne(dsl::id.nullable()),
-                ),
+                dsl::id
+                    .nullable()
+                    .ne(instance_dsl::active_propolis_id)
+                    .or(instance_dsl::active_propolis_id.is_null()),
             )
-            // .filter(diesel::dsl::not(diesel::dsl::exists(
-            //     instance_dsl::instance.filter(
-            //         instance_dsl::active_propolis_id
-            //             .eq(dsl::id.nullable())
-            //             .or(instance_dsl::target_propolis_id
-            //                 .eq(dsl::id.nullable())),
-            //     ),
-            // )))
+            .filter(
+                dsl::id
+                    .nullable()
+                    .ne(instance_dsl::target_propolis_id)
+                    .or(instance_dsl::target_propolis_id.is_null()),
+            )
             .select(Vmm::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
