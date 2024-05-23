@@ -21,6 +21,9 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
         // It's kind of unfortunate to pull in such a complex and unstable type
         // as "blueprint" this way, but we have really useful functionality
@@ -419,50 +422,16 @@ impl TryFrom<types::ProducerEndpoint>
     }
 }
 
-impl TryFrom<&oxnet::Ipv4Net> for types::Ipv4Net {
-    type Error = String;
-
-    fn try_from(net: &oxnet::Ipv4Net) -> Result<Self, Self::Error> {
-        types::Ipv4Net::try_from(net.to_string()).map_err(|e| e.to_string())
-    }
-}
-
-impl TryFrom<&oxnet::Ipv6Net> for types::Ipv6Net {
-    type Error = String;
-
-    fn try_from(net: &oxnet::Ipv6Net) -> Result<Self, Self::Error> {
-        types::Ipv6Net::try_from(net.to_string()).map_err(|e| e.to_string())
-    }
-}
-
-impl TryFrom<&oxnet::IpNet> for types::IpNet {
-    type Error = String;
-
-    fn try_from(net: &oxnet::IpNet) -> Result<Self, Self::Error> {
-        use oxnet::IpNet;
-        match net {
-            IpNet::V4(v4) => types::Ipv4Net::try_from(v4).map(types::IpNet::V4),
-            IpNet::V6(v6) => types::Ipv6Net::try_from(v6).map(types::IpNet::V6),
-        }
-    }
-}
-
-impl TryFrom<&omicron_common::api::external::AllowedSourceIps>
+impl From<&omicron_common::api::external::AllowedSourceIps>
     for types::AllowedSourceIps
 {
-    type Error = String;
-
-    fn try_from(
-        ips: &omicron_common::api::external::AllowedSourceIps,
-    ) -> Result<Self, Self::Error> {
+    fn from(ips: &omicron_common::api::external::AllowedSourceIps) -> Self {
         use omicron_common::api::external::AllowedSourceIps;
         match ips {
-            AllowedSourceIps::Any => Ok(types::AllowedSourceIps::Any),
-            AllowedSourceIps::List(list) => list
-                .iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()
-                .map(types::AllowedSourceIps::List),
+            AllowedSourceIps::Any => types::AllowedSourceIps::Any,
+            AllowedSourceIps::List(list) => {
+                types::AllowedSourceIps::List(list.iter().cloned().collect())
+            }
         }
     }
 }
