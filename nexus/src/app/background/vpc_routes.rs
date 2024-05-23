@@ -238,8 +238,15 @@ impl BackgroundTask for VpcRouteManager {
                         .await
                     {
                         Ok(rules) => {
-                            set_rules(set.id, Some(version), rules.clone());
-                            known_rules.insert(router_id, rules);
+                            let collapsed: HashSet<_> = rules
+                                .into_iter()
+                                .map(|(dest, target)| ResolvedVpcRoute {
+                                    dest,
+                                    target,
+                                })
+                                .collect();
+                            set_rules(set.id, Some(version), collapsed.clone());
+                            known_rules.insert(router_id, collapsed);
                         }
                         Err(e) => {
                             error!(

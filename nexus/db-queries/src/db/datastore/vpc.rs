@@ -66,7 +66,6 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
-use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
@@ -1518,16 +1517,16 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         vpc_router_id: Uuid,
-    ) -> Result<HashSet<ResolvedVpcRoute>, Error> {
+    ) -> Result<HashMap<IpNet, RouterTarget>, Error> {
         // Get all rules in target router.
         opctx.check_complex_operations_allowed()?;
 
         let (.., authz_project, authz_vpc, authz_router) =
             db::lookup::LookupPath::new(opctx, self)
                 .vpc_router_id(vpc_router_id)
-                .lookup_for(authz::Action::ListChildren)
+                .lookup_for(authz::Action::Read)
                 .await
-                .internal_context("lookup built-in services project")?;
+                .internal_context("lookup router by id for rules")?;
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let mut all_rules = vec![];
         while let Some(p) = paginator.next() {
@@ -1633,7 +1632,7 @@ impl DataStore {
         // how we should resolve name misses in route resolution.
         // This method adopts the same strategy: a lookup failure corresponds
         // to a NO-OP rule.
-        let mut out = HashSet::new();
+        let mut out = HashMap::new();
         for rule in all_rules {
             // Some dests/targets (e.g., subnet) resolve to *several* specifiers
             // to handle both v4 and v6. The user-facing API will prevent severe
@@ -1712,12 +1711,18 @@ impl DataStore {
                 RouteTarget::Vpc(_) => (None, None),
             };
 
+            // XXX: Is there another way we should be handling destination
+            //      collisions within a router? 'first/last wins' is fairly
+            //      arbitrary when lookups are sorted on UUID, but it's
+            //      unpredictable.
+            //      It would be really useful to raise collisions and
+            //      misses to users, somehow.
             if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
-                out.insert(ResolvedVpcRoute { dest, target });
+                out.insert(dest, target);
             }
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
-                out.insert(ResolvedVpcRoute { dest, target });
+                out.insert(dest, target);
             }
         }
 
@@ -1775,6 +1780,7 @@ mod tests {
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
+    use crate::db::fixed_data::silo::DEFAULT_SILO;
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
@@ -2295,17 +2301,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // Test to verify that subnet CRUD operations are correctly
-    // reflected in the nexus-managed system router attached to a VPC.
-    #[tokio::test]
-    async fn test_vpc_system_router_sync_to_subnets() {
-        usdt::register_probes().unwrap();
-        let logctx =
-            dev::test_setup_log("test_vpc_system_router_sync_to_subnets");
-        let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
+    async fn create_initial_vpc(
+        log: &slog::Logger,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> (authz::Project, authz::Vpc, Vpc, authz::VpcRouter, VpcRouter) {
         // Create a project and VPC.
         let project_params = params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -2313,7 +2313,7 @@ mod tests {
                 description: String::from("test project"),
             },
         };
-        let project = Project::new(Uuid::new_v4(), project_params);
+        let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore
             .project_create(&opctx, project)
             .await
@@ -2368,10 +2368,68 @@ mod tests {
             },
         );
 
-        let (_, db_router) = datastore
+        let (authz_router, db_router) = datastore
             .vpc_create_router(&opctx, &authz_vpc, router)
             .await
             .unwrap();
+
+        (authz_project, authz_vpc, db_vpc, authz_router, db_router)
+    }
+
+    async fn new_subnet_ez(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        db_vpc: &Vpc,
+        authz_vpc: &authz::Vpc,
+        name: &str,
+        ip: [u8; 4],
+        prefix_len: u8,
+    ) -> (authz::VpcSubnet, VpcSubnet) {
+        let ipv6_block = db_vpc
+            .ipv6_prefix
+            .random_subnet(external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
+            .map(|block| block.0)
+            .unwrap();
+
+        datastore
+            .vpc_create_subnet(
+                &opctx,
+                &authz_vpc,
+                db::model::VpcSubnet::new(
+                    Uuid::new_v4(),
+                    db_vpc.id(),
+                    IdentityMetadataCreateParams {
+                        name: name.parse().unwrap(),
+                        description: "A subnet...".into(),
+                    },
+                    external::Ipv4Net(
+                        Ipv4Network::new(
+                            core::net::Ipv4Addr::from(ip),
+                            prefix_len,
+                        )
+                        .unwrap(),
+                    ),
+                    ipv6_block,
+                ),
+            )
+            .await
+            .unwrap()
+    }
+
+    // Test to verify that subnet CRUD operations are correctly
+    // reflected in the nexus-managed system router attached to a VPC,
+    // and that these resolve to the v4/6 subnets of each.
+    #[tokio::test]
+    async fn test_vpc_system_router_sync_to_subnets() {
+        usdt::register_probes().unwrap();
+        let logctx =
+            dev::test_setup_log("test_vpc_system_router_sync_to_subnets");
+        let log = &logctx.log;
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let (_, authz_vpc, db_vpc, _, db_router) =
+            create_initial_vpc(log, &opctx, &datastore).await;
 
         // InternetGateway route creation is handled by the saga proper,
         // so we'll only have subnet routes here. Initially, we start with none:
@@ -2384,34 +2442,16 @@ mod tests {
         .await;
 
         // Add a new subnet and we should get a new route.
-        let ipv6_block = db_vpc
-            .ipv6_prefix
-            .random_subnet(external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
-            .map(|block| block.0)
-            .unwrap();
-        let (authz_sub0, sub0) = datastore
-            .vpc_create_subnet(
-                &opctx,
-                &authz_vpc,
-                db::model::VpcSubnet::new(
-                    Uuid::new_v4(),
-                    db_vpc.id(),
-                    IdentityMetadataCreateParams {
-                        name: "s0".parse().unwrap(),
-                        description: "The default subnet...".into(),
-                    },
-                    external::Ipv4Net(
-                        Ipv4Network::new(
-                            core::net::Ipv4Addr::new(172, 30, 0, 0),
-                            22,
-                        )
-                        .unwrap(),
-                    ),
-                    ipv6_block,
-                ),
-            )
-            .await
-            .unwrap();
+        let (authz_sub0, sub0) = new_subnet_ez(
+            &opctx,
+            &datastore,
+            &db_vpc,
+            &authz_vpc,
+            "s0",
+            [172, 30, 0, 0],
+            22,
+        )
+        .await;
 
         verify_all_subnet_routes_in_router(
             &opctx,
@@ -2422,34 +2462,16 @@ mod tests {
         .await;
 
         // Add another, and get another route.
-        let ipv6_block = db_vpc
-            .ipv6_prefix
-            .random_subnet(external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
-            .map(|block| block.0)
-            .unwrap();
-        let (_, sub1) = datastore
-            .vpc_create_subnet(
-                &opctx,
-                &authz_vpc,
-                db::model::VpcSubnet::new(
-                    Uuid::new_v4(),
-                    db_vpc.id(),
-                    IdentityMetadataCreateParams {
-                        name: "s1".parse().unwrap(),
-                        description: "A second subnet...".into(),
-                    },
-                    external::Ipv4Net(
-                        Ipv4Network::new(
-                            core::net::Ipv4Addr::new(172, 31, 0, 0),
-                            22,
-                        )
-                        .unwrap(),
-                    ),
-                    ipv6_block,
-                ),
-            )
-            .await
-            .unwrap();
+        let (_, sub1) = new_subnet_ez(
+            &opctx,
+            &datastore,
+            &db_vpc,
+            &authz_vpc,
+            "s1",
+            [172, 31, 0, 0],
+            22,
+        )
+        .await;
 
         verify_all_subnet_routes_in_router(
             &opctx,
@@ -2542,6 +2564,35 @@ mod tests {
             assert_eq!(count, 1, "subnet {name} should appear exactly once")
         }
 
+        // Resolve the routes: we should have two for each entry:
+        let resolved = datastore
+            .vpc_resolve_router_rules(&opctx, router_id)
+            .await
+            .unwrap();
+        assert_eq!(resolved.len(), 2 * subnets.len());
+
+        // And each subnet generates a v4->v4 and v6->v6.
+        for subnet in subnets {
+            assert!(resolved.iter().any(|(k, v)| {
+                *k == subnet.ipv4_block.0.into()
+                    && match v {
+                        RouterTarget::VpcSubnet(ip) => {
+                            *ip == subnet.ipv4_block.0.into()
+                        }
+                        _ => false,
+                    }
+            }));
+            assert!(resolved.iter().any(|(k, v)| {
+                *k == subnet.ipv6_block.0.into()
+                    && match v {
+                        RouterTarget::VpcSubnet(ip) => {
+                            *ip == subnet.ipv6_block.0.into()
+                        }
+                        _ => false,
+                    }
+            }));
+        }
+
         routes
     }
 
@@ -2549,15 +2600,143 @@ mod tests {
     // of an instance NIC.
     #[tokio::test]
     async fn test_vpc_router_rule_instance_resolve() {
-        // use vpc_resolve_router_rules.
-        todo!()
-    }
+        usdt::register_probes().unwrap();
+        let logctx =
+            dev::test_setup_log("test_vpc_router_rule_instance_resolve");
+        let log = &logctx.log;
+        let db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-    // Test to verify that VPC routers resolve rules intelligently
-    // across dual IPv4 / IPv6 targets/destinations.
-    #[tokio::test]
-    async fn test_vpc_router_rule_v4_v6_resolve() {
-        // use vpc_resolve_router_rules.
-        todo!()
+        let (authz_project, authz_vpc, db_vpc, authz_router, _) =
+            create_initial_vpc(log, &opctx, &datastore).await;
+
+        // Create a subnet for an instance to live in.
+        let (authz_sub0, sub0) = new_subnet_ez(
+            &opctx,
+            &datastore,
+            &db_vpc,
+            &authz_vpc,
+            "s0",
+            [172, 30, 0, 0],
+            22,
+        )
+        .await;
+
+        // Add a rule pointing to the instance before it is created.
+        // We're commiting some minor data integrity sins by putting
+        // these into a system router, but that's irrelevant to resolution.
+        let inst_name = "insty".parse::<external::Name>().unwrap();
+        let _ = datastore
+            .router_create_route(
+                &opctx,
+                &authz_router,
+                RouterRoute::new(
+                    Uuid::new_v4(),
+                    authz_router.id(),
+                    external::RouterRouteKind::Custom,
+                    params::RouterRouteCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "to-vpn".parse().unwrap(),
+                            description: "A rule...".into(),
+                        },
+                        target: external::RouteTarget::Instance(
+                            inst_name.clone(),
+                        ),
+                        destination: external::RouteDestination::IpNet(
+                            "192.168.0.0/16".parse().unwrap(),
+                        ),
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Resolve the rules: we will have two entries generated by the
+        // VPC subnet (v4, v6).
+        let routes = datastore
+            .vpc_resolve_router_rules(&opctx, authz_router.id())
+            .await
+            .unwrap();
+
+        assert_eq!(routes.len(), 2);
+
+        // Create an instance, this will have no effect for now as
+        // the instance lacks a NIC.
+        let db_inst = datastore
+            .project_create_instance(
+                &opctx,
+                &authz_project,
+                db::model::Instance::new(
+                    Uuid::new_v4(),
+                    authz_project.id(),
+                    &params::InstanceCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: inst_name.clone(),
+                            description: "An instance...".into(),
+                        },
+                        ncpus: external::InstanceCpuCount(1),
+                        memory: 10.into(),
+                        hostname: "insty".parse().unwrap(),
+                        user_data: vec![],
+                        network_interfaces:
+                            params::InstanceNetworkInterfaceAttachment::None,
+                        external_ips: vec![],
+                        disks: vec![],
+                        ssh_public_keys: None,
+                        start: false,
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+        let (.., authz_instance) =
+            db::lookup::LookupPath::new(&opctx, &datastore)
+                .instance_id(db_inst.id())
+                .lookup_for(authz::Action::CreateChild)
+                .await
+                .unwrap();
+
+        let routes = datastore
+            .vpc_resolve_router_rules(&opctx, authz_router.id())
+            .await
+            .unwrap();
+
+        assert_eq!(routes.len(), 2);
+
+        // Create a primary NIC on the instance; the route can now resolve
+        // to the instance's IP.
+        let nic = datastore
+            .instance_create_network_interface(
+                &opctx,
+                &authz_sub0,
+                &authz_instance,
+                IncompleteNetworkInterface::new_instance(
+                    Uuid::new_v4(),
+                    db_inst.id(),
+                    sub0,
+                    IdentityMetadataCreateParams {
+                        name: "nic".parse().unwrap(),
+                        description: "A NIC...".into(),
+                    },
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let routes = datastore
+            .vpc_resolve_router_rules(&opctx, authz_router.id())
+            .await
+            .unwrap();
+
+        // Verify we now have a route pointing at this instance.
+        assert_eq!(routes.len(), 3);
+        assert!(routes.iter().any(|(k, v)| (*k
+            == "192.168.0.0/16".parse::<IpNet>().unwrap())
+            && match v {
+                RouterTarget::Ip(ip) => *ip == nic.ip.ip(),
+                _ => false,
+            }));
     }
 }
