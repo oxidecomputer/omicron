@@ -50,15 +50,15 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     patch = {
-        HostPhase2RecoveryImageId = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        HostPhase2RecoveryImageId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        RotSlot = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
-        SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
     },
 );
 

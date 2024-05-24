@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema, PartialEq ],
+    derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -29,13 +29,13 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     patch = {
-        BfdPeerConfig = { derives = [PartialEq, Eq, Hash] },
-        BgpConfig = { derives = [PartialEq, Eq, Hash] },
-        BgpPeerConfig = { derives = [PartialEq, Eq, Hash] },
-        OmicronPhysicalDiskConfig = { derives = [PartialEq, Eq, Hash, PartialOrd, Ord] },
-        PortConfigV1 = { derives = [PartialEq, Eq, Hash] },
-        RouteConfig = { derives = [PartialEq, Eq, Hash] },
-        VirtualNetworkInterfaceHost = { derives = [PartialEq, Eq, Hash] },
+        BfdPeerConfig = { derives = [Eq, Hash] },
+        BgpConfig = { derives = [Eq, Hash] },
+        BgpPeerConfig = { derives = [Eq, Hash] },
+        OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        PortConfigV1 = { derives = [Eq, Hash] },
+        RouteConfig = { derives = [Eq, Hash] },
+        VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
         "oxnet" = "0.1.0",
