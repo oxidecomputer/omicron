@@ -37,7 +37,10 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, RouterId, RouterVersion,
+};
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::{
@@ -77,6 +80,7 @@ pub struct SledAgent {
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
     pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
@@ -189,6 +193,7 @@ impl SledAgent {
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
@@ -356,6 +361,26 @@ impl SledAgent {
         for disk_request in &hardware.disks {
             let vcr = &disk_request.volume_construction_request;
             self.map_disk_ids_to_region_ids(&vcr).await?;
+        }
+
+        let mut routes = self.vpc_routes.lock().await;
+        for nic in &hardware.nics {
+            let my_routers = [
+                RouterId {
+                    // system
+                    vni: nic.vni,
+                    subnet: None,
+                },
+                RouterId {
+                    // custom
+                    vni: nic.vni,
+                    subnet: Some(nic.subnet),
+                },
+            ];
+
+            for router in my_routers {
+                routes.entry(router).or_default();
+            }
         }
 
         Ok(instance_run_time_state)
@@ -861,4 +886,49 @@ impl SledAgent {
     ) {
         *self.fake_zones.lock().await = requested_zones;
     }
+
+    pub async fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.vpc_routes.lock().await;
+        routes
+            .iter()
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
+            .collect()
+    }
+
+    pub async fn set_vpc_routes(&self, new_routes: Vec<ResolvedVpcRouteSet>) {
+        let mut routes = self.vpc_routes.lock().await;
+        for new in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(old) = routes.get(&new.id) else {
+                continue;
+            };
+
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            match (old.version, new.version) {
+                (Some(old_vers), Some(new_vers))
+                    if !old_vers.is_replaced_by(&new_vers) =>
+                {
+                    continue;
+                }
+                _ => {}
+            };
+
+            routes.insert(
+                new.id,
+                RouteSet { version: new.version, routes: new.routes },
+            );
+        }
+    }
+}
+
+/// Stored routes (and usage count) for a given VPC/subnet.
+//  NB: We aren't doing post count tracking here to unsubscribe
+//      from (VNI, subnet) pairs.
+#[derive(Debug, Clone, Default)]
+pub struct RouteSet {
+    pub version: Option<RouterVersion>,
+    pub routes: HashSet<ResolvedVpcRoute>,
 }

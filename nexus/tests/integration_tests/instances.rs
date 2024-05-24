@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::DataStore;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -60,6 +61,8 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
+use omicron_common::api::internal::shared::RouterId;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
 use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
@@ -68,6 +71,7 @@ use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use sled_agent_client::TestInterfaces as _;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -670,6 +674,29 @@ async fn test_instance_start_creates_networking_state(
     for agent in &sled_agents {
         assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
     }
+
+    // Ensure that the target sled agent for our instance has received
+    // up-to-date VPC routes.
+    let with_vmm = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .unwrap();
+
+    let mut checked = false;
+    for agent in &sled_agents {
+        if Some(agent.id) == with_vmm.sled_id() {
+            assert_sled_vpc_routes(
+                agent,
+                &opctx,
+                datastore,
+                nics[0].subnet_id,
+                guest_nics[0].vni,
+            )
+            .await;
+            checked = true;
+        }
+    }
+    assert!(checked);
 }
 
 #[nexus_test]
@@ -769,7 +796,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
+async fn test_instance_migrate_v2p_and_routes(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
@@ -895,6 +924,15 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         if sled_agent.id != dst_sled_id {
             assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
                 .await;
+        } else {
+            assert_sled_vpc_routes(
+                sled_agent,
+                &opctx,
+                datastore,
+                nics[0].subnet_id,
+                guest_nics[0].vni,
+            )
+            .await;
         }
     }
 }
@@ -4677,6 +4715,75 @@ async fn assert_sled_v2p_mappings(
     )
     .await
     .expect("matching v2p mapping should be present");
+}
+
+/// Asserts that supplied sled agent's most recent VPC route sets
+/// contain up-to-date routes for a known subnet.
+pub async fn assert_sled_vpc_routes(
+    sled_agent: &Arc<SledAgent>,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    subnet_id: Uuid,
+    vni: Vni,
+) {
+    let (.., authz_vpc, _, db_subnet) = LookupPath::new(opctx, datastore)
+        .vpc_subnet_id(subnet_id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let custom_routes: HashSet<_> =
+        if let Some(router_id) = db_subnet.custom_router_id {
+            datastore
+                .vpc_resolve_router_rules(opctx, router_id)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(dest, target)| ResolvedVpcRoute { dest, target })
+                .collect()
+        } else {
+            Default::default()
+        };
+
+    let (.., vpc) = LookupPath::new(opctx, datastore)
+        .vpc_id(authz_vpc.id())
+        .fetch()
+        .await
+        .unwrap();
+
+    let system_routes: HashSet<_> = datastore
+        .vpc_resolve_router_rules(opctx, vpc.system_router_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(dest, target)| ResolvedVpcRoute { dest, target })
+        .collect();
+
+    assert!(!system_routes.is_empty());
+
+    let condition = || async {
+        let vpc_routes = sled_agent.vpc_routes.lock().await;
+        let sys_routes_found = vpc_routes.iter().any(|(id, set)| {
+            *id == RouterId { vni, subnet: None } && set.routes == system_routes
+        });
+        let custom_routes_found = vpc_routes.iter().any(|(id, set)| {
+            *id == RouterId { vni, subnet: Some(db_subnet.ipv4_block.0.into()) }
+                && set.routes == custom_routes
+        });
+
+        if sys_routes_found && custom_routes_found {
+            Ok(())
+        } else {
+            Err(CondCheckError::NotYet::<()>)
+        }
+    };
+    wait_for_condition(
+        condition,
+        &Duration::from_secs(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect("matching vpc routes should be present");
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we

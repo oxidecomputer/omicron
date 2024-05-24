@@ -24,7 +24,9 @@ use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
-use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_common::api::internal::shared::{
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_storage::resources::DisksManagementResult;
@@ -63,6 +65,8 @@ pub fn api() -> SledApiDescription {
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
         api.register(sled_add)?;
+        api.register(list_vpc_routes)?;
+        api.register(set_vpc_routes)?;
 
         Ok(())
     }
@@ -505,5 +509,29 @@ async fn sled_add(
     _rqctx: RequestContext<Arc<SledAgent>>,
     _body: TypedBody<AddSledRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/vpc-routes",
+}]
+async fn list_vpc_routes(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.list_vpc_routes().await))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/vpc-routes",
+}]
+async fn set_vpc_routes(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<Vec<ResolvedVpcRouteSet>>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.set_vpc_routes(body.into_inner()).await;
     Ok(HttpResponseUpdatedNoContent())
 }

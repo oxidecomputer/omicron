@@ -106,7 +106,7 @@ impl DataStore {
         Ok(())
     }
 
-    pub(crate) async fn silo_create_query(
+    async fn silo_create_query(
         opctx: &OpContext,
         silo: Silo,
     ) -> Result<impl RunnableQuery<Silo>, Error> {
