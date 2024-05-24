@@ -120,6 +120,7 @@ uuid = { version = "1.8.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.34", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
+zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
@@ -226,6 +227,7 @@ uuid = { version = "1.8.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.34", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
+zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
