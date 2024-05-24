@@ -58,6 +58,9 @@ declare_saga_actions! {
 
     DELETE_V2P_MAPPINGS -> "no_result4" {
         + siud_delete_v2p_mappings
+        // N.B. that the undo action is the same as the forward action, because
+        // all this does is kick the V2P manager background task.
+        // - siud_delete_v2p_mappings
     }
 
     DELETE_NAT_ENTRIES -> "no_result5" {
@@ -194,11 +197,8 @@ async fn siud_delete_v2p_mappings(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref instance, ref vmm, .. } =
+    let Params { ref instance, ref vmm, .. } =
         sagactx.saga_params::<Params>()?;
-
-    let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     info!(
         osagactx.log(),
@@ -208,22 +208,9 @@ async fn siud_delete_v2p_mappings(
         "instance_update" => %"VMM destroyed",
     );
 
-    // Per the commentary in instance_network::delete_instance_v2p_mappings`,
-    // this should be idempotent.
-    osagactx
-        .nexus()
-        .delete_instance_v2p_mappings(&opctx, instance.id())
-        .await
-        .or_else(|err| {
-            // Necessary for idempotency
-            match err {
-                Error::ObjectNotFound {
-                    type_name: ResourceType::Instance,
-                    lookup_type: _,
-                } => Ok(()),
-                _ => Err(ActionError::action_failed(err)),
-            }
-        })
+    let nexus = osagactx.nexus();
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
+    Ok(())
 }
 
 async fn siud_delete_nat_entries(
