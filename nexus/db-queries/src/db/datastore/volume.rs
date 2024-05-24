@@ -1636,15 +1636,15 @@ impl DataStore {
     /// Replace a read-write region in a Volume with a new region.
     pub async fn volume_replace_region(
         &self,
-        target: VolumeReplacementParams,
+        existing: VolumeReplacementParams,
         replacement: VolumeReplacementParams,
     ) -> Result<(), Error> {
         // In a single transaction:
         //
-        // - set the target region's volume id to the replacement's volume id
-        // - set the replacement region's volume id to the target's volume id
-        // - update the target volume's construction request to replace the
-        //   target region's SocketAddrV6 with the replacement region's
+        // - set the existing region's volume id to the replacement's volume id
+        // - set the replacement region's volume id to the existing's volume id
+        // - update the existing volume's construction request to replace the
+        // existing region's SocketAddrV6 with the replacement region's
         //
         // This function's effects can be undone by calling it with swapped
         // parameters.
@@ -1654,7 +1654,7 @@ impl DataStore {
         // Imagine `volume_replace_region` is called with the following,
         // pretending that UUIDs are just eight uppercase letters:
         //
-        //   let target = VolumeReplacementParams {
+        //   let existing = VolumeReplacementParams {
         //     volume_id: TARGET_VOL,
         //     region_id: TARGET_REG,
         //     region_addr: "[fd00:1122:3344:145::10]:40001",
@@ -1703,7 +1703,7 @@ impl DataStore {
         // database record for this transaction.
         //
         // The first part of the transaction will swap the volume IDs of the
-        // target and replacement region records:
+        // existing and replacement region records:
         //
         //           id | volume_id
         //  ------------| ---------
@@ -1753,10 +1753,10 @@ impl DataStore {
                     use db::schema::region::dsl as region_dsl;
                     use db::schema::volume::dsl as volume_dsl;
 
-                    // Set the target region's volume id to the replacement's
+                    // Set the existing region's volume id to the replacement's
                     // volume id
                     diesel::update(region_dsl::region)
-                        .filter(region_dsl::id.eq(target.region_id))
+                        .filter(region_dsl::id.eq(existing.region_id))
                         .set(region_dsl::volume_id.eq(replacement.volume_id))
                         .execute_async(&conn)
                         .await
@@ -1771,11 +1771,11 @@ impl DataStore {
                             })
                         })?;
 
-                    // Set the replacement region's volume id to the target's
+                    // Set the replacement region's volume id to the existing's
                     // volume id
                     diesel::update(region_dsl::region)
                         .filter(region_dsl::id.eq(replacement.region_id))
-                        .set(region_dsl::volume_id.eq(target.volume_id))
+                        .set(region_dsl::volume_id.eq(existing.volume_id))
                         .execute_async(&conn)
                         .await
                         .map_err(|e| {
@@ -1789,12 +1789,12 @@ impl DataStore {
                             })
                         })?;
 
-                    // Update the target volume's construction request to
-                    // replace the target region's SocketAddrV6 with the
+                    // Update the existing volume's construction request to
+                    // replace the existing region's SocketAddrV6 with the
                     // replacement region's
                     let maybe_old_volume = {
                         volume_dsl::volume
-                            .filter(volume_dsl::id.eq(target.volume_id))
+                            .filter(volume_dsl::id.eq(existing.volume_id))
                             .select(Volume::as_select())
                             .first_async::<Volume>(&conn)
                             .await
@@ -1814,7 +1814,7 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Target volume was deleted, so return an error, we
+                        // existing volume was deleted, so return an error, we
                         // can't perform the region replacement now!
                         return Err(err.bail(VolumeReplaceRegionError::TargetVolumeDeleted));
                     };
@@ -1831,7 +1831,7 @@ impl DataStore {
                     // for the new.
                     let new_vcr = match replace_region_in_vcr(
                         &old_vcr,
-                        target.region_addr,
+                        existing.region_addr,
                         replacement.region_addr,
                     ) {
                         Ok(new_vcr) => new_vcr,
@@ -1849,9 +1849,9 @@ impl DataStore {
                         err.bail(VolumeReplaceRegionError::SerdeError(e))
                     })?;
 
-                    // Update the target volume's data
+                    // Update the existing volume's data
                     diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(target.volume_id))
+                        .filter(volume_dsl::id.eq(existing.volume_id))
                         .set(volume_dsl::data.eq(new_volume_data))
                         .execute_async(&conn)
                         .await
