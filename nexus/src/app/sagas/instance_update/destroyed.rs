@@ -48,9 +48,6 @@ declare_saga_actions! {
 
     DELETE_V2P_MAPPINGS -> "no_result4" {
         + siud_delete_v2p_mappings
-        // N.B. that the undo action is the same as the forward action, because
-        // all this does is kick the V2P manager background task.
-        // - siud_delete_v2p_mappings
     }
 
     DELETE_NAT_ENTRIES -> "no_result5" {
