@@ -439,7 +439,7 @@ impl super::Nexus {
                                         .parse()
                                         .unwrap(),
                                 ),
-                                network: ipv4_net.clone().into(),
+                                network: (*ipv4_net).into(),
                             })
                             .collect(),
                     },
@@ -822,8 +822,7 @@ impl super::Nexus {
                             rack_subnet,
                             allocation.subnet_octet.try_into().unwrap(),
                         )
-                        .net()
-                        .into(),
+                        .net(),
                     },
                 },
             },

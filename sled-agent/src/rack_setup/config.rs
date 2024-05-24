@@ -98,6 +98,7 @@ mod test {
     use omicron_common::address::IpRange;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use oxnet::Ipv6Net;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
@@ -125,7 +126,11 @@ mod test {
                     .unwrap(),
             },
             rack_network_config: RackNetworkConfig {
-                rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+                rack_subnet: Ipv6Net::new(
+                    "fd00:1122:3344:0100::".parse().unwrap(),
+                    RACK_PREFIX,
+                )
+                .unwrap(),
                 infra_ip_first: Ipv4Addr::LOCALHOST,
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),
