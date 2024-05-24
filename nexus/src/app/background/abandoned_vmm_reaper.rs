@@ -12,6 +12,24 @@
 //!   any instance record's `active_propolis_id` and `target_propolis_id`
 //!   fields).
 //! - It has not been deleted yet.
+//!
+//! VMMs are abandoned when the instance they are responsible for migrates.
+//! Should the migration succeed, the previously occupied VMM process is now
+//! abandoned. If a migration is attempted but fails, the *target* VMM is now
+//! abandoned, as the instance remains on the source VMM.
+//!
+//! Such VMMs may be deleted fairly simply: any sled resources reserved for the
+//! VMM process can be deallocated, and the VMM record in the database is then
+//! marked as deleted. Note that reaping abandoned VMMs does not require
+//! deallocating virtual provisioning resources, NAT entries, and other such
+//! resources which are owned by the *instance*, rather than the VMM process;
+//! this task is only responsible for cleaning up VMMs left behind by an
+//! instance that has moved to *another* VMM process. The instance itself
+//! remains alive and continues to own its virtual provisioning resources.
+//!
+//! Cleanup of instance resources when an instance's *active* VMM is destroyed
+//! is handled elsewhere, by `notify_instance_updated` and (eventually) the
+//! `instance-update` saga.
 
 use super::common::BackgroundTask;
 use anyhow::Context;
