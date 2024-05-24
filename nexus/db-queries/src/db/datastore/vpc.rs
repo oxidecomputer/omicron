@@ -2604,7 +2604,7 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_vpc_router_rule_instance_resolve");
         let log = &logctx.log;
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let (authz_project, authz_vpc, db_vpc, authz_router, _) =
@@ -2738,5 +2738,8 @@ mod tests {
                 RouterTarget::Ip(ip) => *ip == nic.ip.ip(),
                 _ => false,
             }));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
