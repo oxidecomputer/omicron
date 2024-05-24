@@ -1724,6 +1724,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -1870,6 +1871,7 @@ async fn test_instance_create_delete_network_interface(
         },
         ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -2111,6 +2113,7 @@ async fn test_instance_update_network_interfaces(
         },
         ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,

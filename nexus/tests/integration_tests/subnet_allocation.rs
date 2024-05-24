@@ -111,6 +111,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         // Use the minimum subnet size
         ipv4_block: Ipv4Net(subnet),
         ipv6_block: None,
+        custom_router: None,
     };
     NexusRequest::objects_post(client, &subnets_url, &Some(&subnet_create))
         .authn_as(AuthnMode::PrivilegedUser)

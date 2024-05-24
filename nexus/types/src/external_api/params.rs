@@ -1219,6 +1219,13 @@ pub struct VpcSubnetCreate {
     /// be assigned if one is not provided. It must not overlap with any
     /// existing subnet in the VPC.
     pub ipv6_block: Option<Ipv6Net>,
+
+    /// An optional router, used to direct packets sent from hosts in this subnet
+    /// to any destination address.
+    ///
+    /// Custom routers apply in addition to the VPC-wide *system* router, and have
+    /// higher priority than
+    pub custom_router: Option<NameOrId>,
 }
 
 /// Updateable properties of a `VpcSubnet`
@@ -1226,6 +1233,9 @@ pub struct VpcSubnetCreate {
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+
+    /// XXX
+    pub custom_router: Option<NameOrId>,
 }
 
 // VPC ROUTERS
@@ -1251,7 +1261,9 @@ pub struct VpcRouterUpdate {
 pub struct RouterRouteCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// A CIDR block (or named subnet) which this route will apply to.
     pub destination: RouteDestination,
 }
 

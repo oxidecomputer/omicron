@@ -203,6 +203,7 @@ pub static DEMO_VPC_SUBNET_CREATE: Lazy<params::VpcSubnetCreate> =
         },
         ipv4_block: Ipv4Net("10.1.2.3/8".parse().unwrap()),
         ipv6_block: None,
+        custom_router: None,
     });
 
 // VPC Router used for testing
@@ -1506,6 +1507,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                             name: None,
                             description: Some("different".to_string())
                         },
+                        custom_router: None,
                     }).unwrap()
                 ),
                 AllowedMethod::Delete,

@@ -107,7 +107,7 @@ impl super::Nexus {
         // See <https://github.com/oxidecomputer/omicron/issues/685> for
         // details.
         let subnet_id = Uuid::new_v4();
-        let out = match params.ipv6_block {
+        let mut out = match params.ipv6_block {
             None => {
                 const NUM_RETRIES: usize = 2;
                 let mut retry = 0;
@@ -213,6 +213,23 @@ impl super::Nexus {
             }
         }?;
 
+        // XX: rollback the creation if this fails?
+        if let Some(custom_router) = &params.custom_router {
+            let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+                .vpc_subnet_id(out.id())
+                .lookup_for(authz::Action::Modify)
+                .await?;
+
+            out = self
+                .vpc_subnet_update_custom_router(
+                    opctx,
+                    &authz_vpc,
+                    &authz_subnet,
+                    Some(custom_router),
+                )
+                .await?;
+        }
+
         self.vpc_needed_notify_sleds();
 
         Ok(out)
@@ -235,8 +252,18 @@ impl super::Nexus {
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
         params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
-        let (.., authz_subnet) =
+        let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
+
+        // Updating the subnet is a separate action.
+        self.vpc_subnet_update_custom_router(
+            opctx,
+            &authz_vpc,
+            &authz_subnet,
+            params.custom_router.as_ref(),
+        )
+        .await?;
+
         let out = self
             .db_datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
@@ -245,6 +272,68 @@ impl super::Nexus {
         self.vpc_needed_notify_sleds();
 
         Ok(out)
+    }
+
+    async fn vpc_subnet_update_custom_router(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        authz_subnet: &authz::VpcSubnet,
+        custom_router: Option<&NameOrId>,
+    ) -> UpdateResult<VpcSubnet> {
+        // Resolve the VPC router, if specified.
+        let router_lookup = match custom_router {
+            Some(key @ NameOrId::Name(_)) => self
+                .vpc_router_lookup(
+                    opctx,
+                    params::RouterSelector {
+                        project: None,
+                        vpc: Some(NameOrId::Id(authz_vpc.id())),
+                        router: key.clone(),
+                    },
+                )
+                .map(Some),
+            Some(key @ NameOrId::Id(_)) => self
+                .vpc_router_lookup(
+                    opctx,
+                    params::RouterSelector {
+                        project: None,
+                        vpc: None,
+                        router: key.clone(),
+                    },
+                )
+                .map(Some),
+            None => Ok(None),
+        }?;
+
+        let router_lookup = if let Some(l) = router_lookup {
+            let (.., rtr_authz_vpc, authz_router) =
+                l.lookup_for(authz::Action::Read).await?;
+
+            if authz_vpc.id() != rtr_authz_vpc.id() {
+                return Err(Error::invalid_request(
+                    "router and subnet must belong to the same VPC",
+                ));
+            }
+
+            Some(authz_router)
+        } else {
+            None
+        };
+
+        if let Some(authz_router) = router_lookup {
+            self.db_datastore
+                .vpc_subnet_set_custom_router(
+                    opctx,
+                    &authz_subnet,
+                    &authz_router,
+                )
+                .await
+        } else {
+            self.db_datastore
+                .vpc_subnet_unset_custom_router(opctx, &authz_subnet)
+                .await
+        }
     }
 
     pub(crate) async fn vpc_delete_subnet(
