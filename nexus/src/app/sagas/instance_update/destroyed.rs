@@ -32,30 +32,43 @@ pub(crate) struct Params {
 
 // instance update VMM destroyed subsaga: actions
 
+// This subsaga is responsible for handling an instance update where the
+// instance's active VMM has entered the `Destroyed` state. This requires
+// deallocating resources assigned to the instance, updating the instance's
+// records in the database, and marking the VMM as deleted.
 declare_saga_actions! {
     instance_update_destroyed;
 
-    DELETE_SLED_RESOURCE -> "no_result1" {
-        + siud_delete_sled_resource
+    // Deallocate physical sled resources reserved for the destroyed VMM, as it
+    // is no longer using them.
+    RELEASE_SLED_RESOURCES -> "no_result1" {
+        + siud_release_sled_resources
     }
 
-    DELETE_VIRTUAL_PROVISIONING -> "no_result2" {
-        + siud_delete_virtual_provisioning
+    // Deallocate virtual provisioning resources reserved by the instance, as it
+    // is no longer running.
+    RELEASE_VIRTUAL_PROVISIONING -> "no_result2" {
+        + siud_release_virtual_provisioning
     }
 
-    DELETE_V2P_MAPPINGS -> "no_result3" {
+    // Unassign the instance's Oximeter producer.
+    UNASSIGN_OXIMETER_PRODUCER -> "no_result3" {
+        + siud_unassign_oximeter_producer
+    }
+
+    DELETE_V2P_MAPPINGS -> "no_result4" {
         + siud_delete_v2p_mappings
     }
 
-    DELETE_NAT_ENTRIES -> "no_result4" {
+    DELETE_NAT_ENTRIES -> "no_result5" {
         + siud_delete_nat_entries
     }
 
-    UPDATE_INSTANCE -> "no_result5" {
+    UPDATE_INSTANCE -> "no_result6" {
         + siud_update_instance
     }
 
-    MARK_VMM_DELETED -> "no_result6" {
+    MARK_VMM_DELETED -> "no_result7" {
         + siud_mark_vmm_deleted
     }
 }
@@ -74,8 +87,9 @@ impl NexusSaga for SagaVmmDestroyed {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(delete_sled_resource_action());
-        builder.append(delete_virtual_provisioning_action());
+        builder.append(release_sled_resources_action());
+        builder.append(release_virtual_provisioning_action());
+        builder.append(unassign_oximeter_producer_action());
         builder.append(delete_v2p_mappings_action());
         builder.append(delete_nat_entries_action());
         builder.append(update_instance_action());
@@ -85,7 +99,7 @@ impl NexusSaga for SagaVmmDestroyed {
     }
 }
 
-async fn siud_delete_sled_resource(
+async fn siud_release_sled_resources(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -97,7 +111,7 @@ async fn siud_delete_sled_resource(
 
     info!(
         osagactx.log(),
-        "instance update (VMM destroyed): deleting sled reservation";
+        "instance update (VMM destroyed): deallocating sled resource reservation";
         "instance_id" => %instance.id(),
         "propolis_id" => %vmm.id,
         "instance_update" => %"VMM destroyed",
@@ -117,7 +131,7 @@ async fn siud_delete_sled_resource(
         .map_err(ActionError::action_failed)
 }
 
-async fn siud_delete_virtual_provisioning(
+async fn siud_release_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -129,7 +143,7 @@ async fn siud_delete_virtual_provisioning(
 
     info!(
         osagactx.log(),
-        "instance update (VMM destroyed): deleting virtual provisioning";
+        "instance update (VMM destroyed): deallocating virtual provisioning resources";
         "instance_id" => %instance.id(),
         "propolis_id" => %vmm.id,
         "instance_update" => %"VMM destroyed",
@@ -154,6 +168,26 @@ async fn siud_delete_virtual_provisioning(
                 _ => Err(ActionError::action_failed(err)),
             }
         })
+}
+
+async fn siud_unassign_oximeter_producer(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let Params { ref instance, ref serialized_authn, .. } =
+        sagactx.saga_params::<Params>()?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    crate::app::oximeter::unassign_producer(
+        osagactx.datastore(),
+        osagactx.log(),
+        &opctx,
+        &instance.id(),
+    )
+    .await
+    .map_err(ActionError::action_failed)
 }
 
 async fn siud_delete_v2p_mappings(
