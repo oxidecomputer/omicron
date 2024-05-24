@@ -63,6 +63,10 @@ a tick, but they must occur in that order.)
 . Run the test suite, which should catch any unexpected SQL
   compatibility issues between releases and help validate that your
   build works.
+  * You will need to run the `test_omdb_success_cases` test from
+    omicron-omdb with `EXPECTORATE=overwrite`; this file contains the
+    expected output of various omdb commands, including a fingerprint of
+    CockroachDB's cluster state.
 . Submit a PR for your changes to garbage-compactor; when merged,
   publish the final build to the `oxide-cockroachdb-build` S3 bucket.
 . Update `tools/cockroachdb_checksums`. For non-illumos checksums, use

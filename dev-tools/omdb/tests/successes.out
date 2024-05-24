@@ -527,6 +527,10 @@ WARNING: Zones exist without physical disks!
 
 
 
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
+
  METADATA:
     created by:::::::::::   nexus-test-utils
     created at:::::::::::   <REDACTED     TIMESTAMP>
@@ -560,6 +564,10 @@ WARNING: Zones exist without physical disks!
     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
 
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -597,6 +605,10 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
+    cluster.preserve_downgrade_option:   "22.1" (unchanged)
 
  METADATA:
     internal DNS version:   1 (unchanged)
