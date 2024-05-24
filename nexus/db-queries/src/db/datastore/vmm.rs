@@ -199,7 +199,12 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             // - not pointed to by any instance's `active_propolis_id` or
             //   `target_propolis_id`.
+            //
             .left_join(
+                // Left join with the `instance` table on the VMM's instance ID, so
+                // that we can check if the instance pointed to by this VMM (if
+                // any exists) has this VMM pointed to by its
+                // `active_propolis_id` or `target_propolis_id` fields.
                 instance_dsl::instance
                     .on(instance_dsl::id.eq(dsl::instance_id)),
             )
@@ -207,12 +212,18 @@ impl DataStore {
                 dsl::id
                     .nullable()
                     .ne(instance_dsl::active_propolis_id)
+                    // In SQL, *all* comparisons with NULL are `false`, even `!=
+                    // NULL`, so we have to explicitly check for nulls here, or
+                    // else VMMs whose instances have no `active_propolis_id`
+                    // will not be considered abandoned (incorrectly).
                     .or(instance_dsl::active_propolis_id.is_null()),
             )
             .filter(
                 dsl::id
                     .nullable()
                     .ne(instance_dsl::target_propolis_id)
+                    // As above, we must add this clause because SQL nulls have
+                    // the most irritating behavior possible.
                     .or(instance_dsl::target_propolis_id.is_null()),
             )
             .select(Vmm::as_select())
