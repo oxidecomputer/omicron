@@ -54,6 +54,7 @@ use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
@@ -232,8 +233,13 @@ impl super::Nexus {
         // Fill in the CockroachDB metadata for the initial blueprint, and set
         // the `cluster.preserve_downgrade_option` setting ahead of blueprint
         // execution.
-        let cockroachdb_settings =
-            self.datastore().cockroachdb_settings(opctx).await?;
+        let cockroachdb_settings = self
+            .datastore()
+            .cockroachdb_settings(opctx)
+            .await
+            .internal_context(
+                "fetching cockroachdb settings for rack initialization",
+            )?;
         self.datastore()
             .cockroachdb_setting_set_string(
                 opctx,
@@ -241,7 +247,11 @@ impl super::Nexus {
                 "cluster.preserve_downgrade_option",
                 CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
             )
-            .await?;
+            .await
+            .internal_context(
+                "setting `cluster.preserve_downgrade_option` \
+                for rack initialization",
+            )?;
         blueprint.cockroachdb_fingerprint =
             cockroachdb_settings.state_fingerprint;
         blueprint.cockroachdb_setting_preserve_downgrade =

@@ -114,13 +114,19 @@ impl DataStore {
             // below in `test_state_fingerprint`).
             .sql(" ELSE NULL END")
             .bind::<sql_types::Text, _>(state_fingerprint)
-            .bind::<sql_types::Text, _>(value)
+            .bind::<sql_types::Text, _>(value.clone())
             .query::<()>()
             .execute_async(&*conn)
             .await
             .map_err(|err| {
                 public_error_from_diesel(err, ErrorHandler::Server)
             })?;
+        info!(
+            opctx.log,
+            "set cockroachdb setting";
+            "setting" => setting,
+            "value" => &value,
+        );
         Ok(())
     }
 }

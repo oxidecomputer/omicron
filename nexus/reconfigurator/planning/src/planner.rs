@@ -535,8 +535,8 @@ impl<'a> Planner<'a> {
                 }
             }
             // The current version is unknown to us; we are likely in the middle
-            // of an upgrade and shouldn't change _any_ settings.
-            Err(_) => return,
+            // of an cluster upgrade.
+            Err(_) => CockroachDbPreserveDowngrade::DoNotModify,
         };
         self.blueprint.cockroachdb_preserve_downgrade(value);
         info!(
@@ -545,6 +545,14 @@ impl<'a> Planner<'a> {
             "setting" => "cluster.preserve_downgrade_option",
             "value" => ?value,
         );
+
+        // Hey! Listen!
+        //
+        // If we need to manage more CockroachDB settings, we should ensure
+        // that no settings will be modified if we don't recognize the current
+        // cluster version -- we're likely in the middle of an upgrade!
+        //
+        // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
     }
 }
 

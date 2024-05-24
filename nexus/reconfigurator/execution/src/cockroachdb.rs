@@ -8,7 +8,6 @@ use anyhow::Context;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use slog::info;
 
 pub(crate) async fn ensure_settings(
     opctx: &OpContext,
@@ -23,16 +22,10 @@ pub(crate) async fn ensure_settings(
                 opctx,
                 blueprint.cockroachdb_fingerprint.clone(),
                 "cluster.preserve_downgrade_option",
-                value.clone(),
+                value,
             )
             .await
             .context("failed to set cluster.preserve_downgrade_option")?;
-        info!(
-            opctx.log,
-            "set cockroachdb setting";
-            "setting" => "cluster.preserve_downgrade_option",
-            "value" => &value,
-        );
     }
     Ok(())
 }
