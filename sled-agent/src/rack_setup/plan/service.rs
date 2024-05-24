@@ -384,11 +384,11 @@ impl Plan {
             &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
             .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().addr().into())
+            .map(|dns_subnet| dns_subnet.dns_address().into())
             .collect::<Vec<IpAddr>>();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
-            let ip = dns_subnet.dns_address().addr();
+            let ip = dns_subnet.dns_address();
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -419,7 +419,7 @@ impl Plan {
                     },
                     http_address,
                     dns_address,
-                    gz_address: dns_subnet.gz_address().addr(),
+                    gz_address: dns_subnet.gz_address(),
                     gz_address_index: i.try_into().expect("Giant indices?"),
                 },
             });
