@@ -59,16 +59,7 @@ impl InstanceUpdater {
         stats.destroyed_active_vmms = destroyed_active_vmms.len();
 
         for InstanceAndActiveVmm { instance, vmm } in destroyed_active_vmms {
-            let saga = SagaRequest::InstanceUpdate {
-                params: sagas::instance_update::Params {
-                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-                    state: InstanceAndVmms {
-                        instance,
-                        active_vmm: vmm,
-                        target_vmm: None,
-                    },
-                },
-            };
+            let saga = SagaRequest::InstanceUpdate { params: todo!() };
             self.saga_req
                 .send(saga)
                 .await

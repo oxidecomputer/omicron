@@ -961,7 +961,7 @@ impl Nexus {
                     &self.log,
                     o!(
                         "saga" => "instance_update",
-                        "instance_id" => params.state.instance.id().to_string(),
+                        "instance_id" => params.authz_instance.id().to_string(),
                     ),
                 );
                 tokio::spawn(async move {

@@ -1340,12 +1340,7 @@ impl super::Nexus {
         if let Some(state) = state {
             let update_result = self
                 .db_datastore
-                .instance_and_vmm_update_runtime(
-                    instance_id,
-                    &state.instance_state.into(),
-                    &state.propolis_id,
-                    &state.vmm_state.into(),
-                )
+                .vmm_update_runtime(&state.propolis_id, &state.vmm_state.into())
                 .await;
 
             slog::debug!(&self.log,
@@ -1354,7 +1349,8 @@ impl super::Nexus {
                          "propolis_id" => %state.propolis_id,
                          "result" => ?update_result);
 
-            update_result
+            // TODO(eliza): probably just change the retval to `bool` later...
+            update_result.map(|vmm_updated| (false, vmm_updated))
         } else {
             Ok((false, false))
         }
@@ -2002,7 +1998,11 @@ pub(crate) async fn notify_instance_updated(
         .await?;
 
     let updated = datastore
-        .vmm_update_runtime(&propolis_id, &new_runtime_state.vmm_state)
+        .vmm_update_runtime(
+            &propolis_id,
+            // TODO(eliza): probably should take this by value...
+            &new_runtime_state.vmm_state.clone().into(),
+        )
         .await?;
 
     // // Update OPTE and Dendrite if the instance's active sled assignment
