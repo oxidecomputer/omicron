@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
@@ -14,6 +17,8 @@ dropshot.workspace = true
 http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 schemars.workspace = true
 slog.workspace = true
 slog-async.workspace = true
