@@ -22,9 +22,9 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
+        AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         IpAllowList = omicron_common::api::external::IpAllowList,
-        AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
     }
 );
 

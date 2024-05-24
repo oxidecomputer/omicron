@@ -760,7 +760,7 @@ fn build_port_settings(
 
     let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.ip()).collect();
+    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
 
     port_settings.links.insert(
         link_id.to_string(),
