@@ -25,24 +25,30 @@ pub(crate) struct Params {
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
 
-    pub state: InstanceSnapshot,
+    pub authz_instance: authz::Instance,
 }
 
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
-const INSTANCE_LOCK_GEN: &str = "saga_instance_lock_gen";
+const STATE: &str = "state";
 
 // instance update saga: actions
 
 declare_saga_actions! {
     instance_update;
 
-    // Read the target Instance from CRDB and join with its active VMM and
-    // migration target VMM records if they exist, and then acquire the
-    // "instance updater" lock with this saga's ID if no other saga is currently
-    // updating the instance.
+    // Acquire the instance updater" lock with this saga's ID if no other saga
+    // is currently updating the instance.
     LOCK_INSTANCE -> "saga_instance_lock_gen" {
         + siu_lock_instance
         - siu_lock_instance_undo
+    }
+
+    // Fetch the instance and VMM's state.
+    // N.B. that this must be performed as a separate action from
+    // `LOCK_INSTANCE`, so that if the lookup fails, we will still unwind the
+    // `LOCK_INSTANCE` action and release the lock.
+    FETCH_STATE -> "state" {
+        + siu_fetch_state
     }
 
     UNLOCK_INSTANCE -> "no_result7" {
@@ -72,51 +78,37 @@ impl NexusSaga for SagaInstanceUpdate {
             ACTION_GENERATE_ID.as_ref(),
         ));
         builder.append(lock_instance_action());
+        builder.append(fetch_state_action());
 
         // determine which subsaga to execute based on the state of the instance
         // and the VMMs associated with it.
-        match params.state {
-            // VMM destroyed subsaga
-            InstanceSnapshot {
-                instance, active_vmm: Some(ref vmm), ..
-            } if vmm.runtime.state.state() == &VmmState::Destroyed => {
-                const DESTROYED_SUBSAGA_PARAMS: &str =
-                    "params_for_vmm_destroyed_subsaga";
-                let subsaga_params = destroyed::Params {
-                    serialized_authn: params.serialized_authn.clone(),
-                    instance: instance.clone(),
-                    vmm: vmm.clone(),
-                };
-                let subsaga_dag = {
-                    let subsaga_builder = DagBuilder::new(SagaName::new(
-                        destroyed::SagaVmmDestroyed::NAME,
-                    ));
-                    destroyed::SagaVmmDestroyed::make_saga_dag(
-                        &subsaga_params,
-                        subsaga_builder,
-                    )?
-                };
-
-                builder.append(Node::constant(
-                    DESTROYED_SUBSAGA_PARAMS,
-                    serde_json::to_value(&subsaga_params).map_err(|e| {
-                        SagaInitError::SerializeError(
-                            DESTROYED_SUBSAGA_PARAMS.to_string(),
-                            e,
-                        )
-                    })?,
-                ));
-
-                builder.append(Node::subsaga(
-                    "vmm_destroyed_subsaga_no_result",
-                    subsaga_dag,
-                    DESTROYED_SUBSAGA_PARAMS,
-                ));
-            }
-            _ => {
-                // TODO(eliza): other subsagas
-            }
+        const DESTROYED_SUBSAGA_PARAMS: &str =
+            "params_for_vmm_destroyed_subsaga";
+        let subsaga_dag = {
+            let subsaga_builder = DagBuilder::new(SagaName::new(
+                destroyed::SagaVmmDestroyed::NAME,
+            ));
+            destroyed::SagaVmmDestroyed::make_saga_dag(
+                &params,
+                subsaga_builder,
+            )?
         };
+
+        builder.append(Node::constant(
+            DESTROYED_SUBSAGA_PARAMS,
+            serde_json::to_value(&params).map_err(|e| {
+                SagaInitError::SerializeError(
+                    DESTROYED_SUBSAGA_PARAMS.to_string(),
+                    e,
+                )
+            })?,
+        ));
+
+        builder.append(Node::subsaga(
+            "vmm_destroyed_subsaga_no_result",
+            subsaga_dag,
+            DESTROYED_SUBSAGA_PARAMS,
+        ));
 
         builder.append(unlock_instance_action());
 
@@ -130,44 +122,113 @@ async fn siu_lock_instance(
     sagactx: NexusActionContext,
 ) -> Result<Generation, ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref state, .. } =
+    let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let datastore = osagactx.datastore();
+    let log = osagactx.log();
+    let instance_id = authz_instance.id();
+    slog::info!(
+        log,
+        "instance update: attempting to lock instance";
+        "instance_id" => %instance_id,
+        "saga_id" => %lock_id,
+    );
 
-    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-        .instance_id(state.instance.id())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    loop {
+        let instance = datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .map_err(ActionError::action_failed)?;
+        // Look at the current lock state of the instance and determine whether
+        // we can lock it.
+        match instance.runtime_state.updater_id {
+            Some(ref id) if id == &lock_id => {
+                slog::info!(
+                    log,
+                    "instance update: instance already locked by this saga";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %lock_id,
+                );
+                return Ok(instance.runtime_state.updater_gen);
+            }
+            Some(ref id) => {
+                slog::info!(
+                    log,
+                    "instance update: instance locked by another saga";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %lock_id,
+                    "locked_by" => %lock_id,
+                );
+                return Err(ActionError::action_failed(serde_json::json!({
+                    "error": "instance locked by another saga",
+                    "saga_id": lock_id,
+                    "locked_by": id,
+                })));
+            }
+            None => {}
+        };
+        let gen = instance.runtime_state.updater_gen;
+        slog::debug!(
+            log,
+            "instance update: trying to acquire updater lock...";
+            "instance_id" => %instance_id,
+            "saga_id" => %lock_id,
+            "updater_gen" => ?gen,
+        );
+        let lock = datastore
+            .instance_updater_try_lock(&opctx, &authz_instance, gen, &lock_id)
+            .await
+            .map_err(ActionError::action_failed)?;
+        match lock {
+            Some(lock_gen) => {
+                slog::info!(
+                    log,
+                    "instance update: acquired updater lock";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %lock_id,
+                    "updater_gen" => ?gen,
+                );
+                return Ok(lock_gen);
+            }
+            None => {
+                slog::debug!(
+                    log,
+                    "instance update: generation has advanced, retrying...";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %lock_id,
+                    "updater_gen" => ?gen,
+                );
+            }
+        }
+    }
+}
 
-    // try to acquire the instance updater lock
-    datastore
-        .instance_updater_try_lock(
-            &opctx,
-            &authz_instance,
-            state.instance.runtime_state.updater_gen,
-            &lock_id,
-        )
+async fn siu_fetch_state(
+    sagactx: NexusActionContext,
+) -> Result<InstanceAndVmms, ActionError> {
+    let osagactx = sagactx.user_data();
+    let Params { ref serialized_authn, ref authz_instance, .. } =
+        sagactx.saga_params::<Params>()?;
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    osagactx
+        .datastore()
+        .instance_fetch_with_vmms(&opctx, authz_instance)
         .await
-        .map_err(ActionError::action_failed)?
-        .ok_or_else(|| {
-            ActionError::action_failed(
-                serde_json::json!({"error": "can't get ye lock"}),
-            )
-        })
+        .map_err(ActionError::action_failed)
 }
 
 async fn siu_unlock_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref state, .. } =
+    let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
-    let gen = sagactx.lookup::<Generation>(INSTANCE_LOCK_GEN)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     osagactx
@@ -177,27 +238,27 @@ async fn siu_unlock_instance(
     Ok(())
 }
 
-// this is different from "lock instance" lol
+// N.B. that this has to be a separate function just because the undo action
+// must return `anyhow::Error` rather than `ActionError`.
 async fn siu_lock_instance_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref state, .. } =
+    let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let datastore = osagactx.datastore();
 
-    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-        .instance_id(state.instance.id())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    slog::info!(
+        osagactx.log(),
+        "instance update: unlocking instance on unwind";
+        "instance_id" => %authz_instance.id(),
+        "saga_id" => %lock_id,
+    );
 
-    let updater_gen = state.instance.runtime_state.updater_gen.next().into();
-    datastore
-        .instance_updater_unlock(&opctx, &authz_instance, &lock_id, updater_gen)
-        .await?;
+    datastore.instance_updater_unlock(&opctx, authz_instance, &lock_id).await?;
+
     Ok(())
 }
