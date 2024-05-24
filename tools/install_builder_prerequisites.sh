@@ -171,7 +171,6 @@ function install_packages {
       'pkg-config'
       'libxmlsec1'
       'yq'
-      'gh'
     )
     confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
   else

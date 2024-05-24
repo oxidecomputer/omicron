@@ -20,6 +20,8 @@ MGD_REPO="../maghemite"
 if [ ! -d "$DENDRITE_REPO" ]; then
     mkdir -p "$DENDRITE_REPO"
     git clone git@github.com:oxidecomputer/dendrite.git $DENDRITE_REPO
+else
+    echo "dendrite repo already exists"
 fi
 
 cd "$DENDRITE_REPO"
@@ -32,6 +34,8 @@ cp target/release/swadm "$DENDRITE_BIN_DIR/swadm"
 if [ ! -d "$MGD_REPO" ]; then
     mkdir -p "$MGD_REPO"
     git clone  git@github.com:oxidecomputer/maghemite.git "$MGD_REPO"
+else
+    echo "maghemite repo already exists"
 fi
 
 cd "$MGD_REPO"
