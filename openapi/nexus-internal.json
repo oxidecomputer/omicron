@@ -3183,53 +3183,6 @@
           }
         ]
       },
-      "InstanceRuntimeState": {
-        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of the target VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "gen": {
-            "description": "Generation number for this state.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "migration_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of that migration.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "propolis_id": {
-            "nullable": true,
-            "description": "The instance's currently active VMM ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "time_updated": {
-            "description": "Timestamp for this information.",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "gen",
-          "time_updated"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -4716,23 +4669,6 @@
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
         "properties": {
-          "instance_state": {
-            "description": "The sled's conception of the state of the instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
-              }
-            ]
-          },
-          "migration_state": {
-            "nullable": true,
-            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
             "allOf": [
@@ -4751,7 +4687,6 @@
           }
         },
         "required": [
-          "instance_state",
           "propolis_id",
           "vmm_state"
         ]

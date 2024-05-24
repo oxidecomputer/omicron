@@ -373,7 +373,6 @@ impl SledAgent {
             .sim_ensure(
                 &instance_id.into_untyped_uuid(),
                 SledInstanceState {
-                    instance_state: instance_runtime,
                     vmm_state: vmm_runtime,
                     propolis_id,
                     migration_state: None,
