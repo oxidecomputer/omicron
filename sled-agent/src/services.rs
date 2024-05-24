@@ -61,7 +61,6 @@ use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::COCKROACH_PORT;
@@ -78,6 +77,7 @@ use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
+use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
