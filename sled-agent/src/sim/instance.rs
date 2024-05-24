@@ -466,7 +466,7 @@ impl Simulatable for SimInstance {
         SimInstance {
             inner: Arc::new(Mutex::new(SimInstanceInner {
                 state: InstanceStates::new(
-                    current.instance_state,
+                    todo!(),
                     current.vmm_state,
                     current.propolis_id,
                 ),
