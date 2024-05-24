@@ -24,6 +24,30 @@ pub enum ProgenitorOperationRetryError<E> {
     ProgenitorError(progenitor_client::Error<E>),
 }
 
+impl<E> ProgenitorOperationRetryError<E> {
+    pub fn is_not_found(&self) -> bool {
+        match &self {
+            ProgenitorOperationRetryError::ProgenitorError(e) => match e {
+                progenitor_client::Error::ErrorResponse(rv) => {
+                    match rv.status() {
+                        http::StatusCode::NOT_FOUND => true,
+
+                        _ => false,
+                    }
+                }
+
+                _ => false,
+            },
+
+            _ => false,
+        }
+    }
+
+    pub fn is_gone(&self) -> bool {
+        matches!(&self, ProgenitorOperationRetryError::Gone)
+    }
+}
+
 /// Retry a progenitor client operation until a known result is returned, or
 /// until something tells us that we should stop trying.
 ///

@@ -37,6 +37,34 @@ enum WaitError {
     Permanent(#[from] Error),
 }
 
+/// Convert an error returned from the ProgenitorOperationRetry loops in this
+/// file into an external Error
+fn into_external_error(
+    e: ProgenitorOperationRetryError<crucible_agent_client::types::Error>,
+) -> Error {
+    match e {
+        ProgenitorOperationRetryError::Gone => Error::Gone,
+
+        ProgenitorOperationRetryError::GoneCheckError(e) => {
+            Error::internal_error(&format!(
+                "insufficient permission for crucible_agent_gone_check: {e}"
+            ))
+        }
+
+        ProgenitorOperationRetryError::ProgenitorError(e) => match e {
+            crucible_agent_client::Error::ErrorResponse(rv) => {
+                if rv.status().is_client_error() {
+                    Error::invalid_request(&rv.message)
+                } else {
+                    Error::internal_error(&rv.message)
+                }
+            }
+
+            _ => Error::internal_error(&format!("unexpected failure: {e}",)),
+        },
+    }
+}
+
 impl super::Nexus {
     fn crucible_agent_client_for_dataset(
         &self,
@@ -112,39 +140,11 @@ impl super::Nexus {
                         "dataset_id" => %dataset_id,
                     );
 
-                    match e {
-                        ProgenitorOperationRetryError::Gone => {
-                            // Return an error if Nexus is unable to create the
-                            // requested region 
-                            Err(BackoffError::Permanent(WaitError::Permanent(Error::Gone)))
-                        }
-
-                        ProgenitorOperationRetryError::GoneCheckError(_) => {
-                            Err(BackoffError::Permanent(WaitError::Permanent(
-                                Error::internal_error("insufficient permission for crucible_agent_gone_check")
-                            )))
-                        }
-
-                        ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                            crucible_agent_client::Error::ErrorResponse(rv) => {
-                                if rv.status().is_client_error() {
-                                    Err(BackoffError::Permanent(WaitError::Permanent(
-                                        Error::invalid_request(&rv.message)
-                                    )))
-                                } else {
-                                    Err(BackoffError::Permanent(WaitError::Permanent(
-                                        Error::internal_error(&rv.message)
-                                    )))
-                                }
-                            }
-
-                            _ => {
-                                Err(BackoffError::Permanent(WaitError::Permanent(
-                                    Error::internal_error("unexpected failure during `region_delete`")
-                                )))
-                            }
-                        }
-                    }
+                    // Return an error if Nexus is unable to create the
+                    // requested region
+                    Err(BackoffError::Permanent(WaitError::Permanent(
+                        into_external_error(e),
+                    )))
                 }
             }?;
 
@@ -221,50 +221,21 @@ impl super::Nexus {
             Ok(v) => Ok(Some(v.into_inner())),
 
             Err(e) => {
-                error!(
-                    log,
-                    "region_get saw {:?}",
-                    e;
-                    "region_id" => %region_id,
-                    "dataset_id" => %dataset_id,
-                );
+                if e.is_not_found() {
+                    // A 404 Not Found is ok for this function, just return None
+                    Ok(None)
+                } else {
+                    error!(
+                        log,
+                        "region_get saw {:?}",
+                        e;
+                        "region_id" => %region_id,
+                        "dataset_id" => %dataset_id,
+                    );
 
-                match e {
-                    ProgenitorOperationRetryError::Gone => {
-                        // Return an error if Nexus is unable to query the
-                        // dataset's agent for the requested region 
-                        Err(Error::Gone)
-                    }
-
-                    ProgenitorOperationRetryError::GoneCheckError(_) => {
-                        Err(Error::internal_error(
-                            "insufficient permission for crucible_agent_gone_check"
-                        ))
-                    }
-
-                    ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                        crucible_agent_client::Error::ErrorResponse(rv) => {
-                            match rv.status() {
-                                http::StatusCode::NOT_FOUND => {
-                                    Ok(None)
-                                }
-
-                                status if status.is_client_error() => {
-                                    Err(Error::invalid_request(&rv.message))
-                                }
-
-                                _ => {
-                                    Err(Error::internal_error(&rv.message))
-                                }
-                            }
-                        }
-
-                        _ => {
-                            Err(Error::internal_error(
-                                "unexpected failure during `region_get`",
-                            ))
-                        }
-                    }
+                    // Return an error if Nexus is unable to query the dataset's
+                    // agent for the requested region
+                    Err(into_external_error(e))
                 }
             }
         }
@@ -302,35 +273,9 @@ impl super::Nexus {
                     "dataset_id" => %dataset_id,
                 );
 
-                match e {
-                    ProgenitorOperationRetryError::Gone => {
-                        // Return an error if Nexus is unable to query the
-                        // dataset's agent for the requested region 's snapshots
-                        Err(Error::Gone)
-                    }
-
-                    ProgenitorOperationRetryError::GoneCheckError(_) => {
-                        Err(Error::internal_error(
-                            "insufficient permission for crucible_agent_gone_check"
-                        ))
-                    }
-
-                    ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                        crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() {
-                                Err(Error::invalid_request(&rv.message))
-                            } else {
-                                Err(Error::internal_error(&rv.message))
-                            }
-                        }
-
-                        _ => {
-                            Err(Error::internal_error(
-                                "unexpected failure during `region_get`",
-                            ))
-                        }
-                    }
-                }
+                // Return an error if Nexus is unable to query the dataset's
+                // agent for the requested region 's snapshots
+                Err(into_external_error(e))
             }
         }
     }
@@ -358,42 +303,20 @@ impl super::Nexus {
             Ok(_) => Ok(()),
 
             Err(e) => {
-                error!(
-                    log,
-                    "region_delete saw {:?}",
-                    e;
-                    "region_id" => %region_id,
-                    "dataset_id" => %dataset.id(),
-                );
+                if e.is_gone() {
+                    // Return Ok if the dataset's agent is gone, no delete call
+                    // is required.
+                    Ok(())
+                } else {
+                    error!(
+                        log,
+                        "region_delete saw {:?}",
+                        e;
+                        "region_id" => %region_id,
+                        "dataset_id" => %dataset.id(),
+                    );
 
-                match e {
-                    ProgenitorOperationRetryError::Gone => {
-                        // Return Ok if the dataset's agent is gone, no delete
-                        // call is required.
-                        Ok(())
-                    }
-
-                    ProgenitorOperationRetryError::GoneCheckError(_) => {
-                        Err(Error::internal_error(
-                            "insufficient permission for crucible_agent_gone_check"
-                        ))
-                    }
-
-                    ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                        crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() {
-                                Err(Error::invalid_request(&rv.message))
-                            } else {
-                                Err(Error::internal_error(&rv.message))
-                            }
-                        }
-
-                        _ => {
-                            Err(Error::internal_error(
-                                "unexpected failure during `region_delete`",
-                            ))
-                        }
-                    }
+                    Err(into_external_error(e))
                 }
             }
         }
@@ -428,43 +351,21 @@ impl super::Nexus {
             Ok(_) => Ok(()),
 
             Err(e) => {
-                error!(
-                    log,
-                    "region_delete_running_snapshot saw {:?}",
-                    e;
-                    "dataset_id" => %dataset_id,
-                    "region_id" => %region_id,
-                    "snapshot_id" => %snapshot_id,
-                );
+                if e.is_gone() {
+                    // Return Ok if the dataset's agent is gone, no delete call
+                    // is required.
+                    Ok(())
+                } else {
+                    error!(
+                        log,
+                        "region_delete_running_snapshot saw {:?}",
+                        e;
+                        "dataset_id" => %dataset_id,
+                        "region_id" => %region_id,
+                        "snapshot_id" => %snapshot_id,
+                    );
 
-                match e {
-                    ProgenitorOperationRetryError::Gone => {
-                        // Return Ok if the dataset's agent is gone, no delete
-                        // call is required.
-                        Ok(())
-                    }
-
-                    ProgenitorOperationRetryError::GoneCheckError(_) => {
-                        Err(Error::internal_error(
-                            "insufficient permission for crucible_agent_gone_check"
-                        ))
-                    }
-
-                    ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                        crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() {
-                                Err(Error::invalid_request(&rv.message))
-                            } else {
-                                Err(Error::internal_error(&rv.message))
-                            }
-                        }
-
-                        _ => {
-                            Err(Error::internal_error(
-                                "unexpected failure during `region_delete_running_snapshot`",
-                            ))
-                        }
-                    }
+                    Err(into_external_error(e))
                 }
             }
         }
@@ -499,43 +400,21 @@ impl super::Nexus {
             Ok(_) => Ok(()),
 
             Err(e) => {
-                error!(
-                    log,
-                    "region_delete_snapshot saw {:?}",
-                    e;
-                    "dataset_id" => %dataset_id,
-                    "region_id" => %region_id,
-                    "snapshot_id" => %snapshot_id,
-                );
+                if e.is_gone() {
+                    // Return Ok if the dataset's agent is gone, no delete call
+                    // is required.
+                    Ok(())
+                } else {
+                    error!(
+                        log,
+                        "region_delete_snapshot saw {:?}",
+                        e;
+                        "dataset_id" => %dataset_id,
+                        "region_id" => %region_id,
+                        "snapshot_id" => %snapshot_id,
+                    );
 
-                match e {
-                    ProgenitorOperationRetryError::Gone => {
-                        // Return Ok if the dataset's agent is gone, no delete
-                        // call is required.
-                        Ok(())
-                    }
-
-                    ProgenitorOperationRetryError::GoneCheckError(_) => {
-                        Err(Error::internal_error(
-                            "insufficient permission for crucible_agent_gone_check"
-                        ))
-                    }
-
-                    ProgenitorOperationRetryError::ProgenitorError(e) => match e {
-                        crucible_agent_client::Error::ErrorResponse(rv) => {
-                            if rv.status().is_client_error() {
-                                Err(Error::invalid_request(&rv.message))
-                            } else {
-                                Err(Error::internal_error(&rv.message))
-                            }
-                        }
-
-                        _ => {
-                            Err(Error::internal_error(
-                                "unexpected failure during `region_delete_snapshot`",
-                            ))
-                        }
-                    }
+                    Err(into_external_error(e))
                 }
             }
         }
