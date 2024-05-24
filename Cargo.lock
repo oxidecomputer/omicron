@@ -4803,7 +4803,6 @@ dependencies = [
  "indexmap 2.2.6",
  "internal-dns",
  "ipnet",
- "ipnetwork",
  "maplit",
  "nexus-config",
  "nexus-inventory",
