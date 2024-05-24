@@ -26,13 +26,12 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use parse_display::Display;
-use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::fmt;
 use strum::IntoEnumIterator;
 
 /// Policy and database inputs to the Reconfigurator planner
@@ -223,8 +222,8 @@ impl CockroachDbSettings {
     Eq,
     PartialOrd,
     Ord,
-    Display,
-    FromStr,
+    parse_display::Display,
+    parse_display::FromStr,
     Deserialize,
     Serialize,
     JsonSchema,
@@ -294,6 +293,22 @@ impl CockroachDbPreserveDowngrade {
             CockroachDbPreserveDowngrade::AllowUpgrade => Some(String::new()),
             CockroachDbPreserveDowngrade::Set(version) => {
                 Some(version.to_string())
+            }
+        }
+    }
+}
+
+impl fmt::Display for CockroachDbPreserveDowngrade {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CockroachDbPreserveDowngrade::DoNotModify => {
+                write!(f, "(do not modify)")
+            }
+            CockroachDbPreserveDowngrade::AllowUpgrade => {
+                write!(f, "\"\" (allow upgrade)")
+            }
+            CockroachDbPreserveDowngrade::Set(version) => {
+                write!(f, "\"{}\"", version)
             }
         }
     }

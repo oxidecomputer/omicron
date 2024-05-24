@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
@@ -74,6 +75,11 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::from_optional_string(
+                    &value.cockroachdb_setting_preserve_downgrade,
+                )
+                .ok(),
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,

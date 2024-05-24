@@ -1747,7 +1747,7 @@
             "type": "string"
           },
           "cockroachdb_setting_preserve_downgrade": {
-            "description": "Whether to set `cluster.preserve_downgrade_option` and what to set it to.",
+            "description": "Whether to set `cluster.preserve_downgrade_option` and what to set it to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/CockroachDbPreserveDowngrade"
@@ -1823,6 +1823,15 @@
           "cockroachdb_fingerprint": {
             "description": "CockroachDB state fingerprint when this blueprint was created",
             "type": "string"
+          },
+          "cockroachdb_setting_preserve_downgrade": {
+            "nullable": true,
+            "description": "Whether to set `cluster.preserve_downgrade_option` and what to set it to (`None` if this value was retrieved from the database and was invalid)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CockroachDbPreserveDowngrade"
+              }
+            ]
           },
           "comment": {
             "description": "human-readable string describing why this blueprint was created (for debugging)",

@@ -163,8 +163,7 @@ pub struct Blueprint {
     // on this.
     pub cockroachdb_fingerprint: String,
 
-    /// Whether to set `cluster.preserve_downgrade_option` and what to set it
-    /// to.
+    /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
     pub cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
     /// when this blueprint was generated (for debugging)
@@ -186,6 +185,9 @@ impl Blueprint {
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
+            cockroachdb_setting_preserve_downgrade: Some(
+                self.cockroachdb_setting_preserve_downgrade,
+            ),
             time_created: self.time_created,
             creator: self.creator.clone(),
             comment: self.comment.clone(),
@@ -359,7 +361,28 @@ pub struct BlueprintDisplay<'a> {
 }
 
 impl<'a> BlueprintDisplay<'a> {
-    pub(super) fn make_metadata_table(&self) -> KvListWithHeading {
+    fn make_cockroachdb_table(&self) -> KvListWithHeading {
+        let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
+            NONE_PARENS.to_string()
+        } else {
+            self.blueprint.cockroachdb_fingerprint.clone()
+        };
+
+        KvListWithHeading::new_unchanged(
+            COCKROACHDB_HEADING,
+            vec![
+                (COCKROACHDB_FINGERPRINT, fingerprint),
+                (
+                    COCKROACHDB_PRESERVE_DOWNGRADE,
+                    self.blueprint
+                        .cockroachdb_setting_preserve_downgrade
+                        .to_string(),
+                ),
+            ],
+        )
+    }
+
+    fn make_metadata_table(&self) -> KvListWithHeading {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
         } else {
@@ -459,6 +482,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
             }
         }
 
+        writeln!(f, "{}", self.make_cockroachdb_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
 
         Ok(())
@@ -1013,6 +1037,10 @@ pub struct BlueprintMetadata {
     pub external_dns_version: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
+    /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
+    /// (`None` if this value was retrieved from the database and was invalid)
+    pub cockroachdb_setting_preserve_downgrade:
+        Option<CockroachDbPreserveDowngrade>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
