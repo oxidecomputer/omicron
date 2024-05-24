@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Region;
@@ -16,6 +17,8 @@ use crate::db::model::RegionReplacementStep;
 use crate::db::model::UpstairsRepairNotification;
 use crate::db::model::UpstairsRepairNotificationType;
 use crate::db::model::VolumeRepair;
+use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::db::TransactionError;
@@ -95,17 +98,32 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<RegionReplacement>, Error> {
-        use db::schema::region_replacement::dsl;
+        opctx.check_complex_operations_allowed()?;
 
-        dsl::region_replacement
+        let mut replacements = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use db::schema::region_replacement::dsl;
+
+            let batch = paginated(
+                dsl::region_replacement,
+                dsl::id,
+                &p.current_pagparams(),
+            )
             .filter(
                 dsl::replacement_state.eq(RegionReplacementState::Requested),
             )
-            .get_results_async::<RegionReplacement>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_results_async::<RegionReplacement>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+            paginator = p.found_batch(&batch, &|r| r.id);
+            replacements.extend(batch);
+        }
+
+        Ok(replacements)
     }
 
     /// Return region replacement requests that are in state `Running` with no
