@@ -228,7 +228,6 @@ impl InstanceStates {
     /// use the `instance` or `vmm` accessors instead.
     pub fn sled_instance_state(&self) -> SledInstanceState {
         SledInstanceState {
-            instance_state: self.instance.clone(),
             vmm_state: self.vmm.clone(),
             propolis_id: self.propolis_id,
         }

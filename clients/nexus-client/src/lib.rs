@@ -145,11 +145,7 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
     fn from(
         s: omicron_common::api::internal::nexus::SledInstanceState,
     ) -> Self {
-        Self {
-            instance_state: s.instance_state.into(),
-            propolis_id: s.propolis_id,
-            vmm_state: s.vmm_state.into(),
-        }
+        Self { propolis_id: s.propolis_id, vmm_state: s.vmm_state.into() }
     }
 }
 

@@ -447,11 +447,7 @@ mod test {
             time_updated: Utc::now(),
         };
 
-        let state = SledInstanceState {
-            instance_state: instance_vmm,
-            vmm_state,
-            propolis_id,
-        };
+        let state = SledInstanceState { vmm_state, propolis_id };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
     }
@@ -500,14 +496,8 @@ mod test {
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
-        assert!(rnext.instance_state.gen > rprev.instance_state.gen);
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
-        assert!(
-            rnext.instance_state.time_updated
-                >= rprev.instance_state.time_updated
-        );
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert!(rnext.instance_state.propolis_id.is_none());
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
         assert!(rx.try_next().is_err());
 
@@ -631,7 +621,6 @@ mod test {
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
-        assert!(rnext.instance_state.gen > rprev.instance_state.gen);
         logctx.cleanup_successful();
     }
 

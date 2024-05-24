@@ -337,11 +337,7 @@ impl SledAgent {
             .instances
             .sim_ensure(
                 &instance_id,
-                SledInstanceState {
-                    instance_state: instance_runtime,
-                    vmm_state: vmm_runtime,
-                    propolis_id,
-                },
+                SledInstanceState { vmm_state: vmm_runtime, propolis_id },
                 None,
             )
             .await?;
