@@ -652,7 +652,7 @@ fn validate_rack_network_config(
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
-        rack_subnet: RACK_SUBNET.net(),
+        rack_subnet: RACK_SUBNET.net().into(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config

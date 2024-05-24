@@ -2543,7 +2543,7 @@ impl ServiceManager {
                                 );
                                 smfh.setprop(
                                     "config/rack-subnet",
-                                    &rack_subnet.net().ip().to_string(),
+                                    &rack_subnet.net().addr().to_string(),
                                 )?;
                             }
 
@@ -2711,7 +2711,7 @@ impl ServiceManager {
                                     // network address, without the mask.
                                     smfh.setprop(
                                         format!("config/techport{i}_prefix"),
-                                        prefix.net().network().to_string(),
+                                        prefix.net().addr(),
                                     )?;
                                 }
                                 smfh.setprop("config/pkt_source", pkt_source)?;
@@ -3995,12 +3995,12 @@ impl ServiceManager {
 
                                 info!(
                                     self.inner.log, "configuring wicketd";
-                                    "rack_subnet" => %rack_subnet.net().ip(),
+                                    "rack_subnet" => %rack_subnet.net().addr(),
                                 );
 
                                 smfh.setprop(
                                     "config/rack-subnet",
-                                    &rack_subnet.net().ip().to_string(),
+                                    &rack_subnet.net().addr().to_string(),
                                 )?;
 
                                 smfh.refresh()?;
@@ -5066,9 +5066,9 @@ mod test {
     fn test_bootstrap_addr_to_techport_prefixes() {
         let ba: Ipv6Addr = "fdb0:1122:3344:5566::".parse().unwrap();
         let prefixes = ServiceManager::bootstrap_addr_to_techport_prefixes(&ba);
-        assert!(prefixes.iter().all(|p| p.net().prefix() == 64));
-        let prefix0 = prefixes[0].net().network();
-        let prefix1 = prefixes[1].net().network();
+        assert!(prefixes.iter().all(|p| p.net().width() == 64));
+        let prefix0 = prefixes[0].net().prefix();
+        let prefix1 = prefixes[1].net().prefix();
         assert_eq!(prefix0.segments()[1..], ba.segments()[1..]);
         assert_eq!(prefix1.segments()[1..], ba.segments()[1..]);
         assert_eq!(prefix0.segments()[0], 0xfdb1);

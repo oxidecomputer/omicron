@@ -7,7 +7,6 @@
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
@@ -27,6 +26,7 @@ use oxide_vpc::api::Ipv6PrefixLen;
 use oxide_vpc::api::Ports;
 use oxide_vpc::api::ProtoFilter;
 use oxide_vpc::api::Protocol;
+use oxnet::IpNet;
 
 trait FromVpcFirewallRule {
     fn action(&self) -> FirewallAction;
@@ -65,26 +65,22 @@ impl FromVpcFirewallRule for VpcFirewallRule {
             Some(ref hosts) if !hosts.is_empty() => hosts
                 .iter()
                 .map(|host| match host {
-                    HostIdentifier::Ip(IpNet::V4(net))
-                        if net.prefix() == 32 =>
-                    {
-                        Address::Ip(IpAddr::Ip4(net.ip().into()))
+                    HostIdentifier::Ip(IpNet::V4(net)) if net.is_host_net() => {
+                        Address::Ip(IpAddr::Ip4(net.addr().into()))
                     }
                     HostIdentifier::Ip(IpNet::V4(net)) => {
                         Address::Subnet(IpCidr::Ip4(Ipv4Cidr::new(
-                            net.ip().into(),
-                            Ipv4PrefixLen::new(net.prefix()).unwrap(),
+                            net.addr().into(),
+                            Ipv4PrefixLen::new(net.width()).unwrap(),
                         )))
                     }
-                    HostIdentifier::Ip(IpNet::V6(net))
-                        if net.prefix() == 128 =>
-                    {
-                        Address::Ip(IpAddr::Ip6(net.ip().into()))
+                    HostIdentifier::Ip(IpNet::V6(net)) if net.is_host_net() => {
+                        Address::Ip(IpAddr::Ip6(net.addr().into()))
                     }
                     HostIdentifier::Ip(IpNet::V6(net)) => {
                         Address::Subnet(IpCidr::Ip6(Ipv6Cidr::new(
-                            net.ip().into(),
-                            Ipv6PrefixLen::new(net.prefix()).unwrap(),
+                            net.addr().into(),
+                            Ipv6PrefixLen::new(net.width()).unwrap(),
                         )))
                     }
                     HostIdentifier::Vpc(vni) => {

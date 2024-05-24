@@ -23,7 +23,7 @@ use mg_admin_client::types::{
 use mg_admin_client::Client as MgdClient;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
-use omicron_common::api::external::{BfdMode, ImportExportPolicy, IpNet};
+use omicron_common::api::external::{BfdMode, ImportExportPolicy};
 use omicron_common::api::internal::shared::{
     BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
     RackNetworkConfigV1, SwitchLocation, UplinkConfig,
@@ -34,6 +34,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_ddm_admin_client::DdmError;
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -515,12 +516,12 @@ impl<'a> EarlyNetworkSetup<'a> {
                                     .iter()
                                     .map(|x| match x {
                                         IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.prefix(),
-                                            value: p.ip(),
+                                            length: p.width(),
+                                            value: p.addr(),
                                         }),
                                         IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.prefix(),
-                                            value: p.ip(),
+                                            length: p.width(),
+                                            value: p.addr(),
                                         }),
                                     })
                                     .collect(),
@@ -537,12 +538,12 @@ impl<'a> EarlyNetworkSetup<'a> {
                                     .iter()
                                     .map(|x| match x {
                                         IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.prefix(),
-                                            value: p.ip(),
+                                            length: p.width(),
+                                            value: p.addr(),
                                         }),
                                         IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.prefix(),
-                                            value: p.ip(),
+                                            length: p.width(),
+                                            value: p.addr(),
                                         }),
                                     })
                                     .collect(),

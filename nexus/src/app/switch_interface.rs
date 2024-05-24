@@ -11,8 +11,9 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::{
-    CreateResult, DataPageParams, DeleteResult, Error, IpNet, ListResultVec,
+    CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
 };
+use oxnet::IpNet;
 use std::sync::Arc;
 use uuid::Uuid;
 

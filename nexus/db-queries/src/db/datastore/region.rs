@@ -13,6 +13,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -22,6 +23,7 @@ use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupResult;
 use slog::Logger;
 use uuid::Uuid;
 
@@ -66,6 +68,22 @@ impl DataStore {
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region_optional(
+        &self,
+        region_id: Uuid,
+    ) -> Result<Option<Region>, Error> {
+        use db::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -173,9 +191,32 @@ impl DataStore {
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
-        let query = crate::db::queries::region_allocation::allocation_query(
+        self.arbitrary_region_allocate_direct(
+            opctx,
             volume_id,
             u64::from(block_size.to_bytes()),
+            blocks_per_extent,
+            extent_count,
+            allocation_strategy,
+            num_regions_required,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn arbitrary_region_allocate_direct(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        let query = crate::db::queries::region_allocation::allocation_query(
+            volume_id,
+            block_size,
             blocks_per_extent,
             extent_count,
             allocation_strategy,
@@ -323,6 +364,40 @@ impl DataStore {
         } else {
             Ok(0)
         }
+    }
+
+    /// Find regions on expunged disks
+    pub async fn find_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

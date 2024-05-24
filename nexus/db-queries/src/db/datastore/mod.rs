@@ -78,6 +78,7 @@ pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
+mod region_replacement;
 mod region_snapshot;
 mod role;
 mod saga;
@@ -120,6 +121,7 @@ pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
 pub use volume::VolumeCheckoutReason;
+pub use volume::VolumeReplacementParams;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -985,8 +987,8 @@ mod test {
                 // This is a little goofy, but it catches a bug that has
                 // happened before. The returned columns share names (like
                 // "id"), so we need to process them in-order.
-                assert!(regions.get(&dataset.id()).is_none());
-                assert!(disk_datasets.get(&region.id()).is_none());
+                assert!(!regions.contains(&dataset.id()));
+                assert!(!disk_datasets.contains(&region.id()));
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =
@@ -1591,8 +1593,8 @@ mod test {
                 name: external::Name::try_from(String::from("name")).unwrap(),
                 description: String::from("description"),
             },
-            external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
-            external::Ipv6Net("fd00::/64".parse().unwrap()),
+            "172.30.0.0/22".parse().unwrap(),
+            "fd00::/64".parse().unwrap(),
         );
         let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =

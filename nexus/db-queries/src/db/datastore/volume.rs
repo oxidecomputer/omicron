@@ -45,6 +45,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
@@ -1150,6 +1151,48 @@ impl DataStore {
             })
     }
 
+    /// Return all the read-write regions in a volume whose target address
+    /// matches the argument dataset's.
+    pub async fn get_dataset_rw_regions_in_volume(
+        &self,
+        opctx: &OpContext,
+        dataset_id: Uuid,
+        volume_id: Uuid,
+    ) -> LookupResult<Vec<SocketAddrV6>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let dataset = {
+            use db::schema::dataset::dsl;
+
+            dsl::dataset
+                .filter(dsl::id.eq(dataset_id))
+                .select(Dataset::as_select())
+                .first_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        let Some(volume) = self.volume_get(volume_id).await? else {
+            return Err(Error::internal_error("volume is gone!?"));
+        };
+
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data())?;
+
+        let mut targets: Vec<SocketAddrV6> = vec![];
+
+        find_matching_rw_regions_in_volume(
+            &vcr,
+            dataset.address().ip(),
+            &mut targets,
+        )
+        .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        Ok(targets)
+    }
+
     // An Upstairs is created as part of a Volume hierarchy if the Volume
     // Construction Request includes a "Region" variant. This may be at any
     // layer of the Volume, and some notifications will come from an Upstairs
@@ -1583,6 +1626,274 @@ impl DataStore {
     }
 }
 
+pub struct VolumeReplacementParams {
+    pub volume_id: Uuid,
+    pub region_id: Uuid,
+    pub region_addr: SocketAddrV6,
+}
+
+impl DataStore {
+    /// Replace a read-write region in a Volume with a new region.
+    pub async fn volume_replace_region(
+        &self,
+        existing: VolumeReplacementParams,
+        replacement: VolumeReplacementParams,
+    ) -> Result<(), Error> {
+        // In a single transaction:
+        //
+        // - set the existing region's volume id to the replacement's volume id
+        // - set the replacement region's volume id to the existing's volume id
+        // - update the existing volume's construction request to replace the
+        // existing region's SocketAddrV6 with the replacement region's
+        //
+        // This function's effects can be undone by calling it with swapped
+        // parameters.
+        //
+        // # Example #
+        //
+        // Imagine `volume_replace_region` is called with the following,
+        // pretending that UUIDs are just eight uppercase letters:
+        //
+        //   let existing = VolumeReplacementParams {
+        //     volume_id: TARGET_VOL,
+        //     region_id: TARGET_REG,
+        //     region_addr: "[fd00:1122:3344:145::10]:40001",
+        //   }
+        //
+        //   let replace = VolumeReplacementParams {
+        //     volume_id: NEW_VOL,
+        //     region_id: NEW_REG,
+        //     region_addr: "[fd00:1122:3344:322::4]:3956",
+        //   }
+        //
+        // In the database, the relevant records (and columns) of the region
+        // table look like this prior to the transaction:
+        //
+        //            id | volume_id
+        //  -------------| ---------
+        //    TARGET_REG | TARGET_VOL
+        //       NEW_REG | NEW_VOL
+        //
+        // TARGET_VOL has a volume construction request where one of the targets
+        // list will contain TARGET_REG's address:
+        //
+        //   {
+        //     "type": "volume",
+        //     "block_size": 512,
+        //     "id": "TARGET_VOL",
+        //     "read_only_parent": {
+        //       ...
+        //     },
+        //     "sub_volumes": [
+        //       {
+        //         ...
+        //         "opts": {
+        //           ...
+        //           "target": [
+        //             "[fd00:1122:3344:103::3]:19004",
+        //             "[fd00:1122:3344:79::12]:27015",
+        //             "[fd00:1122:3344:145::10]:40001"  <-----
+        //           ]
+        //         }
+        //       }
+        //     ]
+        //   }
+        //
+        // Note it is not required for the replacement volume to exist as a
+        // database record for this transaction.
+        //
+        // The first part of the transaction will swap the volume IDs of the
+        // existing and replacement region records:
+        //
+        //           id | volume_id
+        //  ------------| ---------
+        //   TARGET_REG | NEW_VOL
+        //      NEW_REG | TARGET_VOL
+        //
+        // The second part of the transaction will update the volume
+        // construction request of TARGET_VOL by finding and replacing
+        // TARGET_REG's address (in the appropriate targets array) with
+        // NEW_REG's address:
+        //
+        //   {
+        //           ...
+        //           "target": [
+        //             "[fd00:1122:3344:103::3]:19004",
+        //             "[fd00:1122:3344:79::12]:27015",
+        //             "[fd00:1122:3344:322::4]:3956"  <-----
+        //           ]
+        //           ...
+        //   }
+        //
+        // After the transaction, the caller should ensure that TARGET_REG is
+        // referenced (via its socket address) in NEW_VOL. For an example, this
+        // is done as part of the region replacement start saga.
+
+        #[derive(Debug, thiserror::Error)]
+        enum VolumeReplaceRegionError {
+            #[error("Error from Volume region replacement: {0}")]
+            Public(Error),
+
+            #[error("Serde error during Volume region replacement: {0}")]
+            SerdeError(#[from] serde_json::Error),
+
+            #[error("Target Volume deleted")]
+            TargetVolumeDeleted,
+
+            #[error("Region replacement error: {0}")]
+            RegionReplacementError(#[from] anyhow::Error),
+        }
+        let err = OptionalError::new();
+
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("volume_replace_region")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    use db::schema::region::dsl as region_dsl;
+                    use db::schema::volume::dsl as volume_dsl;
+
+                    // Set the existing region's volume id to the replacement's
+                    // volume id
+                    diesel::update(region_dsl::region)
+                        .filter(region_dsl::id.eq(existing.region_id))
+                        .set(region_dsl::volume_id.eq(replacement.volume_id))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeReplaceRegionError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                )
+                            })
+                        })?;
+
+                    // Set the replacement region's volume id to the existing's
+                    // volume id
+                    diesel::update(region_dsl::region)
+                        .filter(region_dsl::id.eq(replacement.region_id))
+                        .set(region_dsl::volume_id.eq(existing.volume_id))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeReplaceRegionError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                )
+                            })
+                        })?;
+
+                    // Update the existing volume's construction request to
+                    // replace the existing region's SocketAddrV6 with the
+                    // replacement region's
+                    let maybe_old_volume = {
+                        volume_dsl::volume
+                            .filter(volume_dsl::id.eq(existing.volume_id))
+                            .select(Volume::as_select())
+                            .first_async::<Volume>(&conn)
+                            .await
+                            .optional()
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(e, |e| {
+                                    VolumeReplaceRegionError::Public(
+                                        public_error_from_diesel(
+                                            e,
+                                            ErrorHandler::Server,
+                                        )
+                                    )
+                                })
+                            })?
+                    };
+
+                    let old_volume = if let Some(old_volume) = maybe_old_volume {
+                        old_volume
+                    } else {
+                        // existing volume was deleted, so return an error, we
+                        // can't perform the region replacement now!
+                        return Err(err.bail(VolumeReplaceRegionError::TargetVolumeDeleted));
+                    };
+
+                    let old_vcr: VolumeConstructionRequest =
+                        match serde_json::from_str(&old_volume.data()) {
+                            Ok(vcr) => vcr,
+                            Err(e) => {
+                                return Err(err.bail(VolumeReplaceRegionError::SerdeError(e)));
+                            },
+                        };
+
+                    // Copy the old volume's VCR, changing out the old region
+                    // for the new.
+                    let new_vcr = match replace_region_in_vcr(
+                        &old_vcr,
+                        existing.region_addr,
+                        replacement.region_addr,
+                    ) {
+                        Ok(new_vcr) => new_vcr,
+                        Err(e) => {
+                            return Err(err.bail(
+                                VolumeReplaceRegionError::RegionReplacementError(e)
+                            ));
+                        }
+                    };
+
+                    let new_volume_data = serde_json::to_string(
+                        &new_vcr,
+                    )
+                    .map_err(|e| {
+                        err.bail(VolumeReplaceRegionError::SerdeError(e))
+                    })?;
+
+                    // Update the existing volume's data
+                    diesel::update(volume_dsl::volume)
+                        .filter(volume_dsl::id.eq(existing.volume_id))
+                        .set(volume_dsl::data.eq(new_volume_data))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeReplaceRegionError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                )
+                            })
+                        })?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        VolumeReplaceRegionError::Public(e) => e,
+
+                        VolumeReplaceRegionError::SerdeError(_) => {
+                            Error::internal_error(&err.to_string())
+                        }
+
+                        VolumeReplaceRegionError::TargetVolumeDeleted => {
+                            Error::internal_error(&err.to_string())
+                        }
+
+                        VolumeReplaceRegionError::RegionReplacementError(_) => {
+                            Error::internal_error(&err.to_string())
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+}
+
 /// Return the targets from a VolumeConstructionRequest.
 ///
 /// The targets of a volume construction request map to resources.
@@ -1681,6 +1992,119 @@ pub fn volume_is_read_only(
     }
 }
 
+/// Replace a Region in a VolumeConstructionRequest
+///
+/// Note that UUIDs are not randomized by this step: Crucible will reject a
+/// `target_replace` call if the replacement VolumeConstructionRequest does not
+/// exactly match the original, except for a single Region difference.
+///
+/// Note that the generation number _is_ bumped in this step, otherwise
+/// `compare_vcr_for_update` will reject the update.
+fn replace_region_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    old_region: SocketAddrV6,
+    new_region: SocketAddrV6,
+) -> anyhow::Result<VolumeConstructionRequest> {
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id,
+            block_size,
+            sub_volumes,
+            read_only_parent,
+        } => Ok(VolumeConstructionRequest::Volume {
+            id: *id,
+            block_size: *block_size,
+            sub_volumes: sub_volumes
+                .iter()
+                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
+                    replace_region_in_vcr(&subvol, old_region, new_region)
+                })
+                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
+
+            // Only replacing R/W regions
+            read_only_parent: read_only_parent.clone(),
+        }),
+
+        VolumeConstructionRequest::Url { id, block_size, url } => {
+            Ok(VolumeConstructionRequest::Url {
+                id: *id,
+                block_size: *block_size,
+                url: url.clone(),
+            })
+        }
+
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            opts,
+            gen,
+        } => {
+            let mut opts = opts.clone();
+
+            for target in &mut opts.target {
+                let parsed_target: SocketAddrV6 = target.parse()?;
+                if parsed_target == old_region {
+                    *target = new_region.to_string();
+                }
+            }
+
+            Ok(VolumeConstructionRequest::Region {
+                block_size: *block_size,
+                blocks_per_extent: *blocks_per_extent,
+                extent_count: *extent_count,
+                opts,
+                gen: *gen + 1,
+            })
+        }
+
+        VolumeConstructionRequest::File { id, block_size, path } => {
+            Ok(VolumeConstructionRequest::File {
+                id: *id,
+                block_size: *block_size,
+                path: path.clone(),
+            })
+        }
+    }
+}
+
+/// Find Regions in a Volume's subvolumes list whose target match the argument
+/// IP, and add them to the supplied Vec.
+fn find_matching_rw_regions_in_volume(
+    vcr: &VolumeConstructionRequest,
+    ip: &std::net::Ipv6Addr,
+    matched_targets: &mut Vec<SocketAddrV6>,
+) -> anyhow::Result<()> {
+    match vcr {
+        VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+            for sub_volume in sub_volumes {
+                find_matching_rw_regions_in_volume(
+                    sub_volume,
+                    ip,
+                    matched_targets,
+                )?;
+            }
+        }
+
+        VolumeConstructionRequest::Url { .. } => {}
+
+        VolumeConstructionRequest::Region { opts, .. } => {
+            if !opts.read_only {
+                for target in &opts.target {
+                    let parsed_target: SocketAddrV6 = target.parse()?;
+                    if parsed_target.ip() == ip {
+                        matched_targets.push(parsed_target);
+                    }
+                }
+            }
+        }
+
+        VolumeConstructionRequest::File { .. } => {}
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1688,6 +2112,7 @@ mod tests {
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
+    use sled_agent_client::types::CrucibleOpts;
 
     // Assert that Nexus will not fail to deserialize an old version of
     // CrucibleResources that was serialized before schema update 6.0.0.
@@ -1790,6 +2215,213 @@ mod tests {
             "f548332c-6026-4eff-8c1c-ba202cd5c834".parse().unwrap()
         );
         assert_eq!(region_snapshot.deleting, false);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_volume_replace_region() {
+        let logctx = dev::test_setup_log("test_volume_replace_region");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+
+        // Insert four Region records (three, plus one additionally allocated)
+
+        let volume_id = Uuid::new_v4();
+        let new_volume_id = Uuid::new_v4();
+
+        let mut region_and_volume_ids = [
+            (Uuid::new_v4(), volume_id),
+            (Uuid::new_v4(), volume_id),
+            (Uuid::new_v4(), volume_id),
+            (Uuid::new_v4(), new_volume_id),
+        ];
+
+        {
+            let conn = db_datastore.pool_connection_for_tests().await.unwrap();
+
+            for i in 0..4 {
+                let (_, volume_id) = region_and_volume_ids[i];
+
+                let region = Region::new(
+                    Uuid::new_v4(), // dataset id
+                    volume_id,
+                    512_i64.try_into().unwrap(),
+                    10,
+                    10,
+                );
+
+                region_and_volume_ids[i].0 = region.id();
+
+                use nexus_db_model::schema::region::dsl;
+                diesel::insert_into(dsl::region)
+                    .values(region.clone())
+                    .execute_async(&*conn)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let _volume = db_datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd00:1122:3344:101::1]:11111"), // target to replace
+                                String::from("[fd00:1122:3344:102::1]:22222"),
+                                String::from("[fd00:1122:3344:103::1]:33333"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: false,
+                        },
+                    }],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        // Replace one
+
+        let target = region_and_volume_ids[0];
+        let replacement = region_and_volume_ids[3];
+
+        db_datastore
+            .volume_replace_region(
+                /* target */
+                db::datastore::VolumeReplacementParams {
+                    volume_id: target.1,
+                    region_id: target.0,
+                    region_addr: "[fd00:1122:3344:101::1]:11111"
+                        .parse()
+                        .unwrap(),
+                },
+                /* replacement */
+                db::datastore::VolumeReplacementParams {
+                    volume_id: replacement.1,
+                    region_id: replacement.0,
+                    region_addr: "[fd55:1122:3344:101::1]:11111"
+                        .parse()
+                        .unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let vcr: VolumeConstructionRequest = serde_json::from_str(
+            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+        )
+        .unwrap();
+
+        // Ensure the shape of the resulting VCR
+        assert_eq!(
+            &vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 2, // generation number bumped
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd55:1122:3344:101::1]:11111"), // replaced
+                            String::from("[fd00:1122:3344:102::1]:22222"),
+                            String::from("[fd00:1122:3344:103::1]:33333"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false,
+                    },
+                }],
+                read_only_parent: None,
+            },
+        );
+
+        // Now undo the replacement. Note volume ID is not swapped.
+        db_datastore
+            .volume_replace_region(
+                /* target */
+                db::datastore::VolumeReplacementParams {
+                    volume_id: target.1,
+                    region_id: replacement.0,
+                    region_addr: "[fd55:1122:3344:101::1]:11111"
+                        .parse()
+                        .unwrap(),
+                },
+                /* replacement */
+                db::datastore::VolumeReplacementParams {
+                    volume_id: replacement.1,
+                    region_id: target.0,
+                    region_addr: "[fd00:1122:3344:101::1]:11111"
+                        .parse()
+                        .unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let vcr: VolumeConstructionRequest = serde_json::from_str(
+            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+        )
+        .unwrap();
+
+        // Ensure the shape of the resulting VCR
+        assert_eq!(
+            &vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 3, // generation number bumped
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd00:1122:3344:101::1]:11111"), // back to what it was
+                            String::from("[fd00:1122:3344:102::1]:22222"),
+                            String::from("[fd00:1122:3344:103::1]:33333"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false,
+                    },
+                }],
+                read_only_parent: None,
+            },
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

@@ -480,11 +480,9 @@ fn sp_info_csv<R: std::io::Read>(
             }
 
             if let Some(sensor) = Sensor::from_string(&record[1], &record[2]) {
-                if sensors.get(&sensor).is_some() {
+                if !sensors.insert(sensor.clone()) {
                     break;
                 }
-
-                sensors.insert(sensor.clone());
 
                 for (ndx, sp) in sps.iter().enumerate() {
                     if let Some(sp) = sp {

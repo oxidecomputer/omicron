@@ -401,7 +401,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "nexus".parse().unwrap(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -444,7 +444,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "external-dns".parse().unwrap(),
                     ip: DNS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
