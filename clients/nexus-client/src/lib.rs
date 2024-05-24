@@ -419,33 +419,27 @@ impl TryFrom<types::ProducerEndpoint>
     }
 }
 
-impl TryFrom<&omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
+impl TryFrom<&oxnet::Ipv4Net> for types::Ipv4Net {
     type Error = String;
 
-    fn try_from(
-        net: &omicron_common::api::external::Ipv4Net,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(net: &oxnet::Ipv4Net) -> Result<Self, Self::Error> {
         types::Ipv4Net::try_from(net.to_string()).map_err(|e| e.to_string())
     }
 }
 
-impl TryFrom<&omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
+impl TryFrom<&oxnet::Ipv6Net> for types::Ipv6Net {
     type Error = String;
 
-    fn try_from(
-        net: &omicron_common::api::external::Ipv6Net,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(net: &oxnet::Ipv6Net) -> Result<Self, Self::Error> {
         types::Ipv6Net::try_from(net.to_string()).map_err(|e| e.to_string())
     }
 }
 
-impl TryFrom<&omicron_common::api::external::IpNet> for types::IpNet {
+impl TryFrom<&oxnet::IpNet> for types::IpNet {
     type Error = String;
 
-    fn try_from(
-        net: &omicron_common::api::external::IpNet,
-    ) -> Result<Self, Self::Error> {
-        use omicron_common::api::external::IpNet;
+    fn try_from(net: &oxnet::IpNet) -> Result<Self, Self::Error> {
+        use oxnet::IpNet;
         match net {
             IpNet::V4(v4) => types::Ipv4Net::try_from(v4).map(types::IpNet::V4),
             IpNet::V6(v6) => types::Ipv6Net::try_from(v6).map(types::IpNet::V6),

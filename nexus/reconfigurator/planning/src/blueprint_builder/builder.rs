@@ -526,7 +526,7 @@ impl<'a> BlueprintBuilder<'a> {
         // these are at known, fixed addresses relative to the AZ subnet
         // (which itself is a known-prefix parent subnet of the sled subnet).
         let dns_servers =
-            get_internal_dns_server_addresses(sled_subnet.net().network());
+            get_internal_dns_server_addresses(sled_subnet.net().prefix());
 
         // The list of boundary NTP servers is not necessarily stored
         // anywhere (unless there happens to be another internal NTP zone
@@ -758,7 +758,7 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
         let allocator =
             self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
-                let sled_subnet_addr = sled_subnet.net().network();
+                let sled_subnet_addr = sled_subnet.net().prefix();
                 let minimum = sled_subnet_addr
                     .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
                 let maximum = sled_subnet_addr

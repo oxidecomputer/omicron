@@ -6,9 +6,10 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, Name},
 };
 use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -53,7 +54,7 @@ pub struct NetworkInterface {
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
+    pub subnet: IpNet,
     pub vni: external::Vni,
     pub primary: bool,
     pub slot: u8,
@@ -527,9 +528,9 @@ impl TryFrom<Vec<IpNet>> for AllowedSourceIps {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for AllowedSourceIps {
+impl TryFrom<&[ipnetwork::IpNetwork]> for AllowedSourceIps {
     type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
         IpAllowList::try_from(list).map(Self::List)
     }
 }
@@ -580,45 +581,43 @@ impl TryFrom<Vec<IpNet>> for IpAllowList {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for IpAllowList {
+impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
         if list.is_empty() {
             return Err("IP allowlist must not be empty");
         }
-        Ok(Self(list.iter().copied().map(Into::into).collect()))
+        Ok(Self(list.into_iter().map(|net| (*net).into()).collect()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::api::{
-        external::{IpNet, Ipv4Net, Ipv6Net},
-        internal::shared::AllowedSourceIps,
-    };
-    use ipnetwork::{Ipv4Network, Ipv6Network};
+    use crate::api::internal::shared::AllowedSourceIps;
+    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn test_deserialize_allowed_source_ips() {
         let parsed: AllowedSourceIps = serde_json::from_str(
-            r#"{"allow":"list","ips":["127.0.0.1","10.0.0.0/24","fd00::1/64"]}"#,
+            r#"{"allow":"list","ips":["127.0.0.1/32","10.0.0.0/24","fd00::1/64"]}"#,
         )
         .unwrap();
         assert_eq!(
             parsed,
             AllowedSourceIps::try_from(vec![
-                IpNet::V4(Ipv4Net::single(Ipv4Addr::LOCALHOST)),
-                IpNet::V4(Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
-                )),
-                IpNet::V6(Ipv6Net(
-                    Ipv6Network::new(
+                Ipv4Net::host_net(Ipv4Addr::LOCALHOST).into(),
+                IpNet::V4(
+                    Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
+                ),
+                IpNet::V6(
+                    Ipv6Net::new(
                         Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
                         64
                     )
                     .unwrap()
-                )),
+                ),
             ])
             .unwrap()
         );

@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
-    InstanceState, IpNet, SemverVersion, Vni,
+    InstanceState, SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
@@ -251,7 +251,7 @@ mod tests {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum HostIdentifier {
-    Ip(IpNet),
+    Ip(oxnet::IpNet),
     Vpc(Vni),
 }
 

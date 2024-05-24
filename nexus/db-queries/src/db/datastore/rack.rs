@@ -1038,6 +1038,7 @@ mod test {
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
+    use oxnet::IpNet;
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -1334,22 +1335,22 @@ mod test {
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let external_dns_id = OmicronZoneUuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp1_pip = NTP_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let ntp1_id = OmicronZoneUuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp2_pip = NTP_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
         let ntp2_id = OmicronZoneUuid::new_v4();
         let ntp3_id = OmicronZoneUuid::new_v4();
@@ -1381,10 +1382,7 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **DNS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1410,10 +1408,7 @@ mod test {
                                     name: "ntp1".parse().unwrap(),
                                     ip: ntp1_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NTP_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1457,10 +1452,9 @@ mod test {
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1486,10 +1480,7 @@ mod test {
                                     name: "ntp2".parse().unwrap(),
                                     ip: ntp2_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NTP_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1677,10 +1668,10 @@ mod test {
         let nexus_id1 = OmicronZoneUuid::new_v4();
         let nexus_id2 = OmicronZoneUuid::new_v4();
         let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
@@ -1711,10 +1702,9 @@ mod test {
                                     name: "nexus1".parse().unwrap(),
                                     ip: nexus_pip1.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1743,10 +1733,9 @@ mod test {
                                     name: "nexus2".parse().unwrap(),
                                     ip: nexus_pip2.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: oxnet::IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1951,7 +1940,7 @@ mod test {
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
@@ -1981,10 +1970,7 @@ mod test {
                                 name: "nexus".parse().unwrap(),
                                 ip: nexus_pip.into(),
                                 mac: macs.next().unwrap(),
-                                subnet: IpNetwork::from(
-                                    **NEXUS_OPTE_IPV4_SUBNET,
-                                )
-                                .into(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
@@ -2052,11 +2038,11 @@ mod test {
         // Request two services which happen to be using the same IP address.
         let external_dns_id = OmicronZoneUuid::new_v4();
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
@@ -2086,10 +2072,7 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **DNS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -2118,10 +2101,9 @@ mod test {
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,

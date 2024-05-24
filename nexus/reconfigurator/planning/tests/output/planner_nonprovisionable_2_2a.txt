@@ -196,12 +196,10 @@ ERRORS:
                 ),
             ),
             subnet: V4(
-                Ipv4Net(
-                    Ipv4Network {
-                        addr: 172.30.2.0,
-                        prefix: 24,
-                    },
-                ),
+                Ipv4Net {
+                    addr: 172.30.2.0,
+                    width: 24,
+                },
             ),
             vni: Vni(
                 100,

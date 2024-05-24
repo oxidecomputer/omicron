@@ -22,6 +22,7 @@ nexus-networking.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+oxnet.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true

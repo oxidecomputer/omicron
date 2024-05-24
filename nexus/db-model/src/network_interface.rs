@@ -73,7 +73,7 @@ pub struct NetworkInterface {
 impl NetworkInterface {
     pub fn into_internal(
         self,
-        subnet: external::IpNet,
+        subnet: oxnet::IpNet,
     ) -> internal::shared::NetworkInterface {
         internal::shared::NetworkInterface {
             id: self.id(),

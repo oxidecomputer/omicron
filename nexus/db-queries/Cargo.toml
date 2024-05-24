@@ -33,6 +33,7 @@ newtype_derive.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
 oso.workspace = true
+oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"

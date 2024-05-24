@@ -118,7 +118,7 @@ impl Resolver {
             .get_dns_subnets()
             .into_iter()
             .map(|dns_subnet| {
-                let ip_addr = IpAddr::V6(dns_subnet.dns_address().ip());
+                let ip_addr = IpAddr::V6(dns_subnet.dns_address().addr());
                 SocketAddr::new(ip_addr, DNS_PORT)
             })
             .collect()

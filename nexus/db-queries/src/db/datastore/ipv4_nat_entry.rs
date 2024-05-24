@@ -406,13 +406,11 @@ mod test {
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
-        let external_address = external::Ipv4Net(
-            ipnetwork::Ipv4Network::try_from("10.0.0.100").unwrap(),
-        );
+        let external_address =
+            oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
 
-        let sled_address = external::Ipv6Net(
-            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
-        );
+        let sled_address =
+            oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         // Add a nat entry.
         let nat1 = Ipv4NatValues {
@@ -565,13 +563,11 @@ mod test {
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
-        let external_address = external::Ipv4Net(
-            ipnetwork::Ipv4Network::try_from("10.0.0.100").unwrap(),
-        );
+        let external_address =
+            oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
 
-        let sled_address = external::Ipv6Net(
-            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
-        );
+        let sled_address =
+            oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         // Add a nat entry.
         let nat1 = Ipv4NatValues {
@@ -711,13 +707,11 @@ mod test {
         // 1. an entry should be deleted during the next sync
         // 2. an entry that should be kept during the next sync
 
-        let external_address = external::Ipv4Net(
-            ipnetwork::Ipv4Network::try_from("10.0.0.100").unwrap(),
-        );
+        let external_address =
+            oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
 
-        let sled_address = external::Ipv6Net(
-            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
-        );
+        let sled_address =
+            oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         // Add a nat entry.
         let nat1 = Ipv4NatValues {
@@ -833,13 +827,12 @@ mod test {
 
         let addresses = (0..=255).map(|i| {
             let addr = Ipv4Addr::new(10, 0, 0, i);
-            let net = ipnetwork::Ipv4Network::new(addr, 32).unwrap();
-            external::Ipv4Net(net)
+            let net = oxnet::Ipv4Net::new(addr, 32).unwrap();
+            net
         });
 
-        let sled_address = external::Ipv6Net(
-            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
-        );
+        let sled_address =
+            oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
 
         let nat_entries = addresses.map(|external_address| {
             // build a bunch of nat entries
@@ -908,7 +901,7 @@ mod test {
                         .expect("did not find a deleted nat entry with a matching version number");
 
                     assert_eq!(
-                        deleted_nat.external_address.ip(),
+                        deleted_nat.external_address.addr(),
                         change.external_address
                     );
                     assert_eq!(
@@ -917,7 +910,7 @@ mod test {
                     );
                     assert_eq!(deleted_nat.last_port, change.last_port.into());
                     assert_eq!(
-                        deleted_nat.sled_address.ip(),
+                        deleted_nat.sled_address.addr(),
                         change.sled_address
                     );
                     assert_eq!(*deleted_nat.mac, change.mac);
@@ -933,13 +926,13 @@ mod test {
                     assert!(added_nat.version_removed.is_none());
 
                     assert_eq!(
-                        added_nat.external_address.ip(),
+                        added_nat.external_address.addr(),
                         change.external_address
                     );
                     assert_eq!(added_nat.first_port, change.first_port.into());
                     assert_eq!(added_nat.last_port, change.last_port.into());
                     assert_eq!(
-                        added_nat.sled_address.ip(),
+                        added_nat.sled_address.addr(),
                         change.sled_address
                     );
                     assert_eq!(*added_nat.mac, change.mac);

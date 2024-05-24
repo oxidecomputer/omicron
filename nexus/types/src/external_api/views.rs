@@ -13,9 +13,10 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
-    IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name, ObjectIdentity,
-    RoleName, SimpleIdentity,
+    IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
+    SimpleIdentity,
 };
+use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

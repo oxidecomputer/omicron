@@ -22,6 +22,7 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
+use oxnet::IpNet;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::thread_rng;
@@ -39,7 +40,6 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -1229,398 +1229,33 @@ impl DiskState {
     }
 }
 
-/// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
-
-impl Ipv4Net {
-    /// Constructs a new `Ipv4Net` representing a single IP.
-    pub fn single(ip: Ipv4Addr) -> Self {
-        Ipv4Net(
-            ipnetwork::Ipv4Network::new(ip, 32).expect("32 is within range"),
-        )
-    }
-
-    /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
-    /// address space.
-    pub fn is_private(&self) -> bool {
-        self.0.network().is_private()
-    }
-}
-
-impl std::ops::Deref for Ipv4Net {
-    type Target = ipnetwork::Ipv4Network;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Ipv4Net {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl JsonSchema for Ipv4Net {
-    fn schema_name() -> String {
-        "Ipv4Net".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("An IPv4 subnet".to_string()),
-                description: Some(
-                    "An IPv4 subnet, including prefix and subnet mask"
-                        .to_string(),
-                ),
-                examples: vec!["192.168.1.0/24".into()],
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(
-                    concat!(
-                        r#"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.){3}"#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"/([0-9]|1[0-9]|2[0-9]|3[0-2])$"#,
-                    )
-                    .to_string(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-/// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
-
-impl Ipv6Net {
+pub trait Ipv6NetExt {
     /// The length for all VPC IPv6 prefixes
-    pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+    const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
 
-    /// The prefix length for all VPC Sunets
-    pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
-
-    /// Constructs a new `Ipv6Net` representing a single IPv6 address.
-    pub fn single(ip: Ipv6Addr) -> Self {
-        Ipv6Net(
-            ipnetwork::Ipv6Network::new(ip, 128).expect("128 is within range"),
-        )
-    }
-
-    /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
-    /// range defined in RFC 4193, e.g., `fd00:/8`
-    pub fn is_unique_local(&self) -> bool {
-        // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
-        self.0.network().octets()[0] == 0xfd
-    }
+    /// The prefix length for all VPC Subnets
+    const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
 
     /// Return `true` if this subnetwork is a valid VPC prefix.
     ///
     /// This checks that the subnet is a unique local address, and has the VPC
     /// prefix length required.
-    pub fn is_vpc_prefix(&self) -> bool {
-        self.is_unique_local()
-            && self.0.prefix() == Self::VPC_IPV6_PREFIX_LENGTH
-    }
+    fn is_vpc_prefix(&self) -> bool;
 
     /// Return `true` if this subnetwork is a valid VPC Subnet, given the VPC's
     /// prefix.
-    pub fn is_vpc_subnet(&self, vpc_prefix: &Ipv6Net) -> bool {
+    fn is_vpc_subnet(&self, vpc_prefix: &Self) -> bool;
+}
+
+impl Ipv6NetExt for oxnet::Ipv6Net {
+    fn is_vpc_prefix(&self) -> bool {
+        self.is_unique_local() && self.width() == Self::VPC_IPV6_PREFIX_LENGTH
+    }
+
+    fn is_vpc_subnet(&self, vpc_prefix: &Self) -> bool {
         self.is_unique_local()
-            && self.is_subnet_of(vpc_prefix.0)
-            && self.prefix() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
-    }
-}
-
-impl std::ops::Deref for Ipv6Net {
-    type Target = ipnetwork::Ipv6Network;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Ipv6Net {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<ipnetwork::Ipv6Network> for Ipv6Net {
-    fn from(n: ipnetwork::Ipv6Network) -> Ipv6Net {
-        Self(n)
-    }
-}
-
-const IPV6_NET_REGEX: &str = concat!(
-    r#"^("#,
-    r#"([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,7}:|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"#,
-    r#"[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"#,
-    r#":((:[0-9a-fA-F]{1,4}){1,7}|:)|"#,
-    r#"fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|"#,
-    r#"::(ffff(:0{1,4}){0,1}:){0,1}"#,
-    r#"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"#,
-    r#"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|"#,
-    r#"([0-9a-fA-F]{1,4}:){1,4}:"#,
-    r#"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"#,
-    r#"(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"#,
-    r#")\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
-);
-
-#[cfg(test)]
-#[test]
-fn test_ipv6_regex() {
-    let re = regress::Regex::new(IPV6_NET_REGEX).unwrap();
-    for case in [
-        "1:2:3:4:5:6:7:8",
-        "1:a:2:b:3:c:4:d",
-        "1::",
-        "::1",
-        "::",
-        "1::3:4:5:6:7:8",
-        "1:2::4:5:6:7:8",
-        "1:2:3::5:6:7:8",
-        "1:2:3:4::6:7:8",
-        "1:2:3:4:5::7:8",
-        "1:2:3:4:5:6::8",
-        "1:2:3:4:5:6:7::",
-        "2001::",
-        "fd00::",
-        "::100:1",
-        "fd12:3456::",
-    ] {
-        for prefix in 0..=128 {
-            let net = format!("{case}/{prefix}");
-            assert!(
-                re.find(&net).is_some(),
-                "Expected to match IPv6 case: {}",
-                prefix,
-            );
-        }
-    }
-}
-
-impl JsonSchema for Ipv6Net {
-    fn schema_name() -> String {
-        "Ipv6Net".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("An IPv6 subnet".to_string()),
-                description: Some(
-                    "An IPv6 subnet, including prefix and subnet mask"
-                        .to_string(),
-                ),
-                examples: vec!["fd12:3456::/64".into()],
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(IPV6_NET_REGEX.to_string()),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-/// An `IpNet` represents an IP network, either IPv4 or IPv6.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum IpNet {
-    V4(Ipv4Net),
-    V6(Ipv6Net),
-}
-
-impl IpNet {
-    /// Constructs a new `IpNet` representing a single IP.
-    pub fn single(ip: IpAddr) -> Self {
-        match ip {
-            IpAddr::V4(ip) => IpNet::V4(Ipv4Net::single(ip)),
-            IpAddr::V6(ip) => IpNet::V6(Ipv6Net::single(ip)),
-        }
-    }
-
-    /// Return the underlying address.
-    pub fn ip(&self) -> IpAddr {
-        match self {
-            IpNet::V4(inner) => inner.ip().into(),
-            IpNet::V6(inner) => inner.ip().into(),
-        }
-    }
-
-    /// Return the underlying prefix length.
-    pub fn prefix(&self) -> u8 {
-        match self {
-            IpNet::V4(inner) => inner.prefix(),
-            IpNet::V6(inner) => inner.prefix(),
-        }
-    }
-
-    /// Return the first address in this subnet
-    pub fn first_address(&self) -> IpAddr {
-        match self {
-            IpNet::V4(inner) => IpAddr::from(inner.iter().next().unwrap()),
-            IpNet::V6(inner) => IpAddr::from(inner.iter().next().unwrap()),
-        }
-    }
-
-    /// Return the last address in this subnet.
-    ///
-    /// For a subnet of size 1, e.g., a /32, this is the same as the first
-    /// address.
-    // NOTE: This is a workaround for the fact that the `ipnetwork` crate's
-    // iterator provides only the `Iterator::next()` method. That means that
-    // finding the last address is linear in the size of the subnet, which is
-    // completely untenable and totally avoidable with some addition. In the
-    // long term, we should either put up a patch to the `ipnetwork` crate or
-    // move the `ipnet` crate, which does provide an efficient iterator
-    // implementation.
-    pub fn last_address(&self) -> IpAddr {
-        match self {
-            IpNet::V4(inner) => {
-                let base: u32 = inner.network().into();
-                let size = inner.size() - 1;
-                std::net::IpAddr::V4(std::net::Ipv4Addr::from(base + size))
-            }
-            IpNet::V6(inner) => {
-                let base: u128 = inner.network().into();
-                let size = inner.size() - 1;
-                std::net::IpAddr::V6(std::net::Ipv6Addr::from(base + size))
-            }
-        }
-    }
-
-    /// Return true if the provided address is contained in self.
-    ///
-    /// This returns false if the address and the network are of different IP
-    /// families.
-    pub fn contains(&self, addr: IpAddr) -> bool {
-        match (self, addr) {
-            (IpNet::V4(net), IpAddr::V4(ip)) => net.contains(ip),
-            (IpNet::V6(net), IpAddr::V6(ip)) => net.contains(ip),
-            (_, _) => false,
-        }
-    }
-}
-
-impl From<ipnetwork::IpNetwork> for IpNet {
-    fn from(n: ipnetwork::IpNetwork) -> Self {
-        match n {
-            ipnetwork::IpNetwork::V4(v4) => IpNet::V4(Ipv4Net(v4)),
-            ipnetwork::IpNetwork::V6(v6) => IpNet::V6(Ipv6Net(v6)),
-        }
-    }
-}
-
-// NOTE: We deliberately do *NOT* implement `From<Ip{v4,v6,}Addr> for IpNet`.
-// This is because there are many ways to convert an address into a network.
-// See https://github.com/oxidecomputer/omicron/issues/5687.
-
-impl From<Ipv4Net> for IpNet {
-    fn from(n: Ipv4Net) -> IpNet {
-        IpNet::V4(n)
-    }
-}
-
-impl From<Ipv6Net> for IpNet {
-    fn from(n: Ipv6Net) -> IpNet {
-        IpNet::V6(n)
-    }
-}
-
-impl std::fmt::Display for IpNet {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IpNet::V4(inner) => write!(f, "{}", inner),
-            IpNet::V6(inner) => write!(f, "{}", inner),
-        }
-    }
-}
-
-impl FromStr for IpNet {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let net =
-            s.parse::<ipnetwork::IpNetwork>().map_err(|e| e.to_string())?;
-        match net {
-            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
-            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
-        }
-    }
-}
-
-impl From<IpNet> for ipnetwork::IpNetwork {
-    fn from(net: IpNet) -> ipnetwork::IpNetwork {
-        match net {
-            IpNet::V4(net) => ipnetwork::IpNetwork::from(net.0),
-            IpNet::V6(net) => ipnetwork::IpNetwork::from(net.0),
-        }
-    }
-}
-
-impl Serialize for IpNet {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            IpNet::V4(v4) => v4.serialize(serializer),
-            IpNet::V6(v6) => v6.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for IpNet {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let net = ipnetwork::IpNetwork::deserialize(deserializer)?;
-        match net {
-            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
-            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
-        }
-    }
-}
-
-impl JsonSchema for IpNet {
-    fn schema_name() -> String {
-        "IpNet".to_string()
-    }
-
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
-                one_of: Some(vec![
-                    label_schema("v4", gen.subschema_for::<Ipv4Net>()),
-                    label_schema("v6", gen.subschema_for::<Ipv6Net>()),
-                ]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
+            && self.is_subnet_of(vpc_prefix)
+            && self.width() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
     }
 }
 
@@ -1907,7 +1542,7 @@ pub enum VpcFirewallRuleTarget {
     /// The rule applies to a specific IP address
     Ip(IpAddr),
     /// The rule applies to a specific IP subnet
-    IpNet(IpNet),
+    IpNet(oxnet::IpNet),
     // Tags not yet implemented
     // Tag(Name),
 }
@@ -1938,7 +1573,7 @@ pub enum VpcFirewallRuleHostFilter {
     /// The rule applies to traffic from/to a specific IP address
     Ip(IpAddr),
     /// The rule applies to traffic from/to a specific IP subnet
-    IpNet(IpNet),
+    IpNet(oxnet::IpNet),
     // TODO: Internet gateways not yet implemented
     // #[display("inetgw:{0}")]
     // InternetGateway(Name),
@@ -2446,7 +2081,7 @@ pub struct LoopbackAddress {
     pub switch_location: String,
 
     /// The loopback IP address and prefix length.
-    pub address: IpNet,
+    pub address: oxnet::IpNet,
 }
 
 /// A switch port represents a physical external port on a rack switch.
@@ -2688,7 +2323,7 @@ pub struct LldpConfig {
     pub system_description: String,
 
     /// THE LLDP management IP TLV.
-    pub management_ip: IpNet,
+    pub management_ip: oxnet::IpNet,
 }
 
 /// Describes the kind of an switch interface.
@@ -2755,10 +2390,10 @@ pub struct SwitchPortRouteConfig {
     pub interface_name: String,
 
     /// The route's destination network.
-    pub dst: IpNet,
+    pub dst: oxnet::IpNet,
 
     /// The route's gateway address.
-    pub gw: IpNet,
+    pub gw: oxnet::IpNet,
 
     /// The VLAN identifier for the route. Use this if the gateway is reachable
     /// over an 802.1Q tagged L2 segment.
@@ -2887,7 +2522,7 @@ pub struct BgpAnnouncement {
     pub address_lot_block_id: Uuid,
 
     /// The IP network being announced.
-    pub network: IpNet,
+    pub network: oxnet::IpNet,
 }
 
 /// An IP address configuration for a port settings object.
@@ -2900,7 +2535,7 @@ pub struct SwitchPortAddressConfig {
     pub address_lot_block_id: Uuid,
 
     /// The IP address and prefix.
-    pub address: IpNet,
+    pub address: oxnet::IpNet,
 
     /// The interface name this address belongs to.
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
@@ -3027,7 +2662,7 @@ impl AggregateBgpMessageHistory {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpImportedRouteIpv4 {
     /// The destination network prefix.
-    pub prefix: Ipv4Net,
+    pub prefix: oxnet::Ipv4Net,
 
     /// The nexthop the prefix is reachable through.
     pub nexthop: Ipv4Addr,
@@ -3180,7 +2815,7 @@ pub enum ImportExportPolicy {
     /// Do not perform any filtering.
     #[default]
     NoFiltering,
-    Allow(Vec<IpNet>),
+    Allow(Vec<oxnet::IpNet>),
 }
 
 #[cfg(test)]
@@ -3188,7 +2823,6 @@ mod test {
     use serde::Deserialize;
     use serde::Serialize;
 
-    use super::IpNet;
     use super::RouteDestination;
     use super::RouteTarget;
     use super::SemverVersion;
@@ -3644,31 +3278,29 @@ mod test {
 
     #[test]
     fn test_ipv6_net_operations() {
-        use super::Ipv6Net;
-        assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
-        assert!(!Ipv6Net("fe00::/8".parse().unwrap()).is_unique_local());
+        use super::Ipv6NetExt;
+        use oxnet::Ipv6Net;
 
-        assert!(Ipv6Net("fd00::/48".parse().unwrap()).is_vpc_prefix());
-        assert!(!Ipv6Net("fe00::/48".parse().unwrap()).is_vpc_prefix());
-        assert!(!Ipv6Net("fd00::/40".parse().unwrap()).is_vpc_prefix());
+        assert!("fd00::/8".parse::<Ipv6Net>().unwrap().is_unique_local());
+        assert!(!"fe00::/8".parse::<Ipv6Net>().unwrap().is_unique_local());
 
-        let vpc_prefix = Ipv6Net("fd00::/48".parse().unwrap());
-        assert!(
-            Ipv6Net("fd00::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
-        );
-        assert!(
-            !Ipv6Net("fd10::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
-        );
-        assert!(
-            !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
-        );
-    }
+        assert!("fd00::/48".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+        assert!(!"fe00::/48".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+        assert!(!"fd00::/40".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
 
-    #[test]
-    fn test_ipv4_net_operations() {
-        use super::{IpNet, Ipv4Net};
-        let x: IpNet = "0.0.0.0/0".parse().unwrap();
-        assert_eq!(x, IpNet::V4(Ipv4Net("0.0.0.0/0".parse().unwrap())))
+        let vpc_prefix = "fd00::/48".parse::<Ipv6Net>().unwrap();
+        assert!("fd00::/64"
+            .parse::<Ipv6Net>()
+            .unwrap()
+            .is_vpc_subnet(&vpc_prefix));
+        assert!(!"fd10::/64"
+            .parse::<Ipv6Net>()
+            .unwrap()
+            .is_vpc_subnet(&vpc_prefix));
+        assert!(!"fd00::/63"
+            .parse::<Ipv6Net>()
+            .unwrap()
+            .is_vpc_subnet(&vpc_prefix));
     }
 
     #[test]
@@ -3797,92 +3429,6 @@ mod test {
 
         // Bad prefix
         assert!("hash:super_random".parse::<Digest>().is_err());
-    }
-
-    #[test]
-    fn test_ipnet_serde() {
-        //TODO: none of this actually exercises
-        // schemars::schema::StringValidation bits and the schemars
-        // documentation is not forthcoming on how this might be accomplished.
-        let net_str = "fd00:2::/32";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-
-        let net_str = "fd00:47::1/64";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-
-        let net_str = "192.168.1.1/16";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-
-        let net_str = "0.0.0.0/0";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-    }
-
-    #[test]
-    fn test_ipnet_first_last_address() {
-        use std::net::IpAddr;
-        use std::net::Ipv4Addr;
-        use std::net::Ipv6Addr;
-        let net: IpNet = "fd00::/128".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-        );
-
-        let net: IpNet = "fd00::/64".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff
-            )),
-        );
-
-        let net: IpNet = "10.0.0.0/16".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 255, 255)),
-        );
-
-        let net: IpNet = "10.0.0.0/32".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-        );
     }
 
     #[test]

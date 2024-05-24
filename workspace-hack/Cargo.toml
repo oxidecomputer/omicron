@@ -89,7 +89,7 @@ regex-automata = { version = "0.4.6", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
-schemars = { version = "0.8.19", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.20", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.202", features = ["alloc", "derive", "rc"] }
@@ -194,7 +194,7 @@ regex-automata = { version = "0.4.6", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
-schemars = { version = "0.8.19", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.20", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.202", features = ["alloc", "derive", "rc"] }

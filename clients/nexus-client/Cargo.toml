@@ -14,6 +14,7 @@ ipnetwork.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+oxnet.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

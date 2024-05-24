@@ -406,7 +406,7 @@ async fn start_sled_agent(
     ddmd_client.advertise_prefix(request.body.subnet);
 
     let az_prefix =
-        Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().network());
+        Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().addr());
     let addr = request.body.subnet.net().iter().nth(1).unwrap();
     let dns_servers = Resolver::servers_from_subnet(az_prefix);
     ddmd_client.enable_stats(

@@ -1168,8 +1168,8 @@ impl DataStore {
         let mut result = BTreeMap::new();
         for subnet in subnets {
             let entry = result.entry(subnet.name).or_insert_with(Vec::new);
-            entry.push(IpNetwork::V4(subnet.ipv4_block.0 .0));
-            entry.push(IpNetwork::V6(subnet.ipv6_block.0 .0));
+            entry.push(IpNetwork::V4(subnet.ipv4_block.0.into()));
+            entry.push(IpNetwork::V6(subnet.ipv6_block.0.into()));
         }
         Ok(result)
     }

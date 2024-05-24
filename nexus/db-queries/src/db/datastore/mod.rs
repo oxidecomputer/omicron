@@ -1592,8 +1592,8 @@ mod test {
                 name: external::Name::try_from(String::from("name")).unwrap(),
                 description: String::from("description"),
             },
-            external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
-            external::Ipv6Net("fd00::/64".parse().unwrap()),
+            "172.30.0.0/22".parse().unwrap(),
+            "fd00::/64".parse().unwrap(),
         );
         let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
