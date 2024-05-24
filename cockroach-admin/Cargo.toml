@@ -26,5 +26,10 @@ toml.workspace = true
 
 omicron-workspace-hack.workspace = true
 
+[dev-dependencies]
+nexus-test-utils.workspace = true
+omicron-test-utils.workspace = true
+url.workspace = true
+
 [lints]
 workspace = true

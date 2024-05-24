@@ -5238,7 +5238,9 @@ dependencies = [
  "dropshot",
  "http 0.2.12",
  "illumos-utils",
+ "nexus-test-utils",
  "omicron-common",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -5249,6 +5251,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.13",
+ "url",
 ]
 
 [[package]]

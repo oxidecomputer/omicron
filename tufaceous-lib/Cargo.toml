@@ -36,7 +36,7 @@ tar.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tough.workspace = true
-url = "2.5.0"
+url.workspace = true
 zip.workspace = true
 omicron-workspace-hack.workspace = true
 

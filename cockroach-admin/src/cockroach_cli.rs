@@ -201,9 +201,11 @@ impl NodeStatus {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
-
     use super::*;
+    use chrono::NaiveDate;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+    use url::Url;
 
     #[test]
     fn test_node_status_parse_single_line_from_csv() {
@@ -370,5 +372,65 @@ mod tests {
         for (status, expected) in statuses.iter().zip(&expected) {
             assert_eq!(status, expected);
         }
+    }
+
+    // Ensure that if `cockroach node status` changes in a future CRDB version
+    // bump, we have a test that will fail to force us to check whether our
+    // current parsing is still valid.
+    #[tokio::test]
+    async fn test_node_status_compatibility() {
+        let logctx = dev::test_setup_log(
+            "test_project_create_vpc_raw_returns_none_on_vni_exhaustion",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let db_url = db.listen_url().to_string();
+
+        let expected_headers = "id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live";
+
+        // Manually run cockroach node status to grab just the CSV header line
+        // (which the `csv` crate normally eats on our behalf) and check it's
+        // exactly what we expect.
+        let mut command = Command::new("cockroach");
+        command
+            .arg("node")
+            .arg("status")
+            .arg("--url")
+            .arg(&db_url)
+            .arg("--format")
+            .arg("csv");
+        let output =
+            command.output().await.expect("ran `cockroach node status`");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut lines = stdout.lines();
+        let headers = lines.next().expect("header line");
+        assert_eq!(
+            headers, expected_headers,
+            "`cockroach node status --format csv` headers may have changed?"
+        );
+
+        // We should also be able to run our wrapper against this cockroach.
+        let url: Url = db_url.parse().expect("valid url");
+        let cockroach_address: SocketAddrV6 = format!(
+            "{}:{}",
+            url.host().expect("url has host"),
+            url.port().expect("url has port")
+        )
+        .parse()
+        .expect("valid SocketAddrV6");
+        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let status = cli.node_status().await.expect("got node status");
+
+        // We can't check all the fields exactly, but some we know based on the
+        // fact that our test database is a single node.
+        assert_eq!(status.len(), 1);
+        assert_eq!(status[0].node_id, "1");
+        assert_eq!(status[0].address, SocketAddr::V6(cockroach_address));
+        assert_eq!(status[0].sql_address, SocketAddr::V6(cockroach_address));
+        assert_eq!(status[0].is_available, true);
+        assert_eq!(status[0].is_live, true);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
