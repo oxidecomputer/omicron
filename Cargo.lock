@@ -692,7 +692,6 @@ dependencies = [
 name = "bootstrap-agent-client"
 version = "0.1.0"
 dependencies = [
- "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",

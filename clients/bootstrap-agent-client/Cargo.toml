@@ -10,7 +10,6 @@ workspace = true
 [dependencies]
 omicron-common.workspace = true
 progenitor.workspace = true
-ipnetwork.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 schemars.workspace = true
