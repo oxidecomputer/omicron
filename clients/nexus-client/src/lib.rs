@@ -122,22 +122,6 @@ impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
-    for types::InstanceRuntimeState
-{
-    fn from(
-        s: omicron_common::api::internal::nexus::InstanceRuntimeState,
-    ) -> Self {
-        Self {
-            dst_propolis_id: s.dst_propolis_id,
-            gen: s.gen,
-            migration_id: s.migration_id,
-            propolis_id: s.propolis_id,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
