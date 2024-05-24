@@ -4491,7 +4491,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "ipnetwork",
  "nexus-types",
  "omicron-common",
  "omicron-passwords",
@@ -8717,7 +8716,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "ipnetwork",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -10992,7 +10990,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gateway-client",
- "ipnetwork",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
@@ -11065,7 +11062,6 @@ dependencies = [
  "installinator-artifactd",
  "installinator-common",
  "internal-dns",
- "ipnetwork",
  "itertools 0.12.1",
  "maplit",
  "omicron-certificates",
@@ -11112,7 +11108,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "installinator-common",
- "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
