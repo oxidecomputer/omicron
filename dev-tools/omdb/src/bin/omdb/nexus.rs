@@ -996,6 +996,59 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 eprintln!("    unexpected return value from task: {:?}", val)
             }
         };
+    } else if name == "abandoned_vmm_reaper" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// total number of abandoned VMMs found
+            found: usize,
+
+            /// number of abandoned VMM records that were deleted
+            vmms_deleted: usize,
+
+            /// number of abandoned VMM records that were already deleted when
+            /// we tried to delete them.
+            vmms_already_deleted: usize,
+
+            /// sled resource reservations that were released
+            sled_reservations_deleted: usize,
+
+            /// number of errors that occurred during the activation
+            error_count: usize,
+
+            /// the last error that occurred during execution.
+            error: Option<String>,
+        }
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(TaskSuccess {
+                found,
+                vmms_deleted,
+                vmms_already_deleted,
+                sled_reservations_deleted,
+                error_count,
+                error,
+            }) => {
+                if let Some(error) = error {
+                    println!("    task did not complete successfully!");
+                    println!("      total errors: {error_count}");
+                    println!("      most recent error: {error}");
+                }
+
+                println!("    total abandoned VMMs found: {found}");
+                println!("      VMM records deleted: {vmms_deleted}");
+                println!(
+                    "      VMM records already deleted by another Nexus: {}",
+                    vmms_already_deleted,
+                );
+                println!(
+                    "    sled resource reservations deleted: {}",
+                    sled_reservations_deleted,
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

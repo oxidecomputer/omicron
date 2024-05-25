@@ -4,6 +4,7 @@
 
 //! Background tasks
 
+mod abandoned_vmm_reaper;
 mod bfd;
 mod blueprint_execution;
 mod blueprint_load;

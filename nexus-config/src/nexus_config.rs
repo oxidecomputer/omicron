@@ -381,6 +381,8 @@ pub struct BackgroundTaskConfig {
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
     pub v2p_mapping_propagation: V2PMappingPropagationConfig,
+    /// configuration for abandoned VMM reaper task
+    pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
 }
 
 #[serde_as]
@@ -544,6 +546,14 @@ pub struct ServiceFirewallPropagationConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct V2PMappingPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AbandonedVmmReaperConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -788,6 +798,7 @@ mod test {
             instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
+            abandoned_vmm_reaper.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -926,6 +937,9 @@ mod test {
                         v2p_mapping_propagation: V2PMappingPropagationConfig {
                             period_secs: Duration::from_secs(30)
                         },
+                        abandoned_vmm_reaper: AbandonedVmmReaperConfig {
+                            period_secs: Duration::from_secs(60),
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -995,6 +1009,7 @@ mod test {
             instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
+            abandoned_vmm_reaper.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,
