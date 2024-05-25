@@ -7,14 +7,17 @@
 //! TODO this is currently a placeholder for a future PR
 
 use super::common::BackgroundTask;
-use crate::app::authn;
-use crate::app::sagas::{self, SagaRequest};
+use crate::app::sagas::instance_update;
+use crate::app::sagas::SagaRequest;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::{InstanceAndActiveVmm, InstanceAndVmms};
+use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::{authn, authz};
+use nexus_types::identity::Resource;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -58,8 +61,18 @@ impl InstanceUpdater {
 
         stats.destroyed_active_vmms = destroyed_active_vmms.len();
 
-        for InstanceAndActiveVmm { instance, vmm } in destroyed_active_vmms {
-            let saga = SagaRequest::InstanceUpdate { params: todo!() };
+        for InstanceAndActiveVmm { instance, .. } in destroyed_active_vmms {
+            let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
+            let (.., authz_instance) = LookupPath::new(&opctx, &self.datastore)
+                .instance_id(instance.id())
+                .lookup_for(authz::Action::Modify)
+                .await?;
+            let saga = SagaRequest::InstanceUpdate {
+                params: instance_update::Params {
+                    serialized_authn,
+                    authz_instance,
+                },
+            };
             self.saga_req
                 .send(saga)
                 .await

@@ -13,8 +13,8 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
-use super::instance_watcher;
 use super::instance_updater;
+use super::instance_watcher;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
@@ -383,10 +383,9 @@ impl BackgroundTasks {
         let task_instance_watcher = {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore.clone(),
-                resolver.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
-                v2p_watcher.0,
+                saga_request.clone(),
             );
             driver.register(
                 "instance_watcher".to_string(),

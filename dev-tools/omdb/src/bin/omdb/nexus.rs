@@ -904,6 +904,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// number of stale instance metrics that were deleted
             pruned_instances: usize,
 
+            /// update sagas queued due to instance updates.
+            update_sagas_queued: usize,
+
             /// instance states from completed checks.
             ///
             /// this is a mapping of stringified instance states to the number
@@ -945,6 +948,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(TaskSuccess {
                 total_instances,
+                update_sagas_queued,
                 pruned_instances,
                 instance_states,
                 failed_checks,
@@ -962,7 +966,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 for (state, count) in &instance_states {
                     println!("       -> {count} instances {state}")
                 }
-
+                println!("       update sagas queued: {update_sagas_queued}");
                 println!("       failed checks: {total_failures}");
                 for (failure, count) in &failed_checks {
                     println!("       -> {count} {failure}")

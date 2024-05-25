@@ -5,6 +5,7 @@
 //! Background task for pulling instance state from sled-agents.
 
 use super::common::BackgroundTask;
+use crate::app::sagas;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use nexus_db_model::Instance;
@@ -27,15 +28,15 @@ use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 /// Background task that periodically checks instance states.
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
-    resolver: internal_dns::resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
     id: WatcherIdentity,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    saga_req: Sender<sagas::SagaRequest>,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -46,16 +47,15 @@ const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
 impl InstanceWatcher {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
-        resolver: internal_dns::resolver::Resolver,
         producer_registry: &ProducerRegistry,
         id: WatcherIdentity,
-        v2p_notification_tx: tokio::sync::watch::Sender<()>,
+        saga_req: Sender<sagas::SagaRequest>,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, resolver, metrics, id, v2p_notification_tx }
+        Self { datastore, metrics, id, saga_req }
     }
 
     fn check_instance(
@@ -65,7 +65,6 @@ impl InstanceWatcher {
         target: VirtualMachine,
     ) -> impl Future<Output = Check> + Send + 'static {
         let datastore = self.datastore.clone();
-        let resolver = self.resolver.clone();
 
         let opctx = opctx.child(
             std::iter::once((
@@ -75,13 +74,17 @@ impl InstanceWatcher {
             .collect(),
         );
         let client = client.clone();
-        let v2p_notification_tx = self.v2p_notification_tx.clone();
+        let saga_req = self.saga_req.clone();
 
         async move {
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client.instance_get_state(&target.instance_id).await;
-            let mut check =
-                Check { target, outcome: Default::default(), result: Ok(()) };
+            let mut check = Check {
+                target,
+                outcome: Default::default(),
+                result: Ok(()),
+                update_saga_queued: false,
+            };
             let state = match rsp {
                 Ok(rsp) => rsp.into_inner(),
                 Err(ClientError::ErrorResponse(rsp)) => {
@@ -148,46 +151,30 @@ impl InstanceWatcher {
                 "updating instance state";
                 "state" => ?new_runtime_state.vmm_state.state,
             );
-            check.result = crate::app::instance::notify_instance_updated(
-                &datastore,
-                &resolver,
-                &opctx,
-                &opctx,
-                &opctx.log,
-                &target.instance_id,
-                &new_runtime_state,
-                v2p_notification_tx,
-            )
-            .await
-            .map_err(|e| {
-                slog::warn!(
-                    opctx.log,
-                    "error updating instance";
-                    "error" => ?e,
-                    "state" => ?new_runtime_state.vmm_state.state,
-                );
-                Incomplete::UpdateFailed
-            })
-            .and_then(|updated| {
-                updated.ok_or_else(|| {
+            check.result =
+                crate::app::instance::notify_instance_updated_background(
+                    &datastore,
+                    &opctx,
+                    &saga_req,
+                    target.instance_id,
+                    new_runtime_state,
+                )
+                .await
+                .map_err(|e| {
                     slog::warn!(
                         opctx.log,
-                        "error updating instance: not found in database";
-                        "state" => ?new_runtime_state.vmm_state.state,
+                        "error updating instance";
+                        "error" => ?e,
                     );
-                    Incomplete::InstanceNotFound
+                    Incomplete::UpdateFailed
                 })
-            })
-            .map(|updated| {
-                slog::debug!(
-                    opctx.log,
-                    "update successful";
-                    "instance_updated" => updated.instance_updated,
-                    "vmm_updated" => updated.vmm_updated,
-                    "state" => ?new_runtime_state.vmm_state.state,
-                );
-            });
-
+                .map(|updated| {
+                    slog::debug!(
+                        opctx.log, "update successful";
+                        "vmm_updated" => ?updated,
+                    );
+                    check.update_saga_queued = updated;
+                });
             check
         }
     }
@@ -274,6 +261,8 @@ struct Check {
     /// Depending on when the error occurred, the `outcome` field may also
     /// be populated.
     result: Result<(), Incomplete>,
+
+    update_saga_queued: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -433,6 +422,7 @@ impl BackgroundTask for InstanceWatcher {
 
             // Now, wait for the check results to come back.
             let mut total: usize = 0;
+            let mut update_sagas_queued: usize = 0;
             let mut instance_states: BTreeMap<String, usize> =
                 BTreeMap::new();
             let mut check_failures: BTreeMap<String, usize> =
@@ -461,7 +451,11 @@ impl BackgroundTask for InstanceWatcher {
                 if let Err(ref reason) = check.result {
                     *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
                 }
+                if check.update_saga_queued {
+                    update_sagas_queued += 1;
+                }
                 self.metrics.lock().unwrap().record_check(check);
+
             }
 
             // All requests completed! Prune any old instance metrics for
@@ -475,6 +469,7 @@ impl BackgroundTask for InstanceWatcher {
                 "total_completed" => instance_states.len() + check_failures.len(),
                 "total_failed" => check_failures.len(),
                 "total_incomplete" => check_errors.len(),
+                "update_sagas_queued" => update_sagas_queued,
                 "pruned_instances" => pruned,
             );
             serde_json::json!({
@@ -482,6 +477,7 @@ impl BackgroundTask for InstanceWatcher {
                 "instance_states": instance_states,
                 "failed_checks": check_failures,
                 "incomplete_checks": check_errors,
+                "update_sagas_queued": update_sagas_queued,
                 "pruned_instances": pruned,
             })
         }
