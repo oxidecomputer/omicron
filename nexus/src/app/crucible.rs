@@ -891,7 +891,7 @@ impl super::Nexus {
     }
 
     /// Given a list of datasets and region snapshots, send DELETE calls to the
-    /// datasets corresponding Crucible Agent for each snapshot.
+    /// dataset's corresponding Crucible Agent for each snapshot.
     pub async fn delete_crucible_snapshots(
         &self,
         log: &Logger,
