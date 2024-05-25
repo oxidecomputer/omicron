@@ -85,7 +85,7 @@ impl super::Nexus {
     ) -> Result<bool, Error> {
         let on_in_service_physical_disk = self
             .datastore()
-            .dataset_on_in_service_physical_disk(dataset_id)
+            .dataset_physical_disk_in_service(dataset_id)
             .await?;
 
         Ok(!on_in_service_physical_disk)

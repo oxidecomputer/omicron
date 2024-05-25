@@ -183,7 +183,7 @@ impl DataStore {
         Ok(all_datasets)
     }
 
-    pub async fn dataset_on_in_service_physical_disk(
+    pub async fn dataset_physical_disk_in_service(
         &self,
         dataset_id: Uuid,
     ) -> LookupResult<bool> {
