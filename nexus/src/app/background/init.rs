@@ -617,10 +617,9 @@ impl BackgroundTasksInitializer {
         {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore.clone(),
-                resolver.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
-                task_v2p_manager.clone(),
+                saga_request.clone(),
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",

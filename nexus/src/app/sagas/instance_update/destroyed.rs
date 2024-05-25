@@ -187,7 +187,7 @@ async fn siud_release_virtual_provisioning(
 async fn siud_unassign_oximeter_producer(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let Some((_, vmm)) = get_destroyed_vmm(&sagactx)? else {
+    let Some((_, _)) = get_destroyed_vmm(&sagactx)? else {
         // if the update we are handling is not an active VMM destroyed update,
         // bail --- there's nothing to do here.
         return Ok(());
