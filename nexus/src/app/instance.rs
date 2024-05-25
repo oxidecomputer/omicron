@@ -1517,23 +1517,40 @@ impl super::Nexus {
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
     pub(crate) async fn notify_instance_updated(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         instance_id: &InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
-        notify_instance_updated(
-            &self.datastore(),
-            self.resolver(),
-            &self.opctx_alloc,
-            opctx,
-            &self.log,
-            instance_id,
-            new_runtime_state,
-            &self.background_tasks.task_v2p_manager,
-        )
-        .await?;
-        self.vpc_needed_notify_sleds();
+        let propolis_id = new_runtime_state.propolis_id;
+        info!(opctx.log, "received new VMM runtime state from sled agent";
+            "instance_id" => %instance_id,
+            "propolis_id" => %propolis_id,
+            "vmm_state" => ?new_runtime_state.vmm_state);
+
+        let updated = self
+            .db_datastore
+            .vmm_update_runtime(
+                &propolis_id,
+                // TODO(eliza): probably should take this by value...
+                &new_runtime_state.vmm_state.clone().into(),
+            )
+            .await?;
+        if updated {
+            let (.., authz_instance) =
+                LookupPath::new(&opctx, &self.db_datastore)
+                    .instance_id(*instance_id)
+                    .lookup_for(authz::Action::Modify)
+                    .await?;
+            let saga_params = sagas::instance_update::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                authz_instance,
+            };
+            self.execute_saga::<sagas::instance_update::SagaInstanceUpdate>(
+                saga_params,
+            )
+            .await?;
+        }
         Ok(())
     }
 
@@ -1972,33 +1989,20 @@ impl super::Nexus {
     }
 }
 
-/// Invoked by a sled agent to publish an updated runtime state for an
-/// Instance.
-#[allow(clippy::too_many_arguments)] // :(
-pub(crate) async fn notify_instance_updated(
+/// [`Nexus::notify_instance_updated`] (~~Taylor~~ background task's version)
+pub(crate) async fn notify_instance_updated_background(
     datastore: &DataStore,
-    resolver: &internal_dns::resolver::Resolver,
-    opctx_alloc: &OpContext,
     opctx: &OpContext,
-    log: &slog::Logger,
-    instance_id: &InstanceUuid,
-    new_runtime_state: &nexus::SledInstanceState,
-    v2p_manager: &crate::app::background::Activator,
-) -> Result<Option<InstanceUpdateResult>, Error> {
+    saga_request: &tokio::sync::mpsc::Sender<sagas::SagaRequest>,
+    instance_id: InstanceUuid,
+    new_runtime_state: nexus::SledInstanceState,
+) -> Result<bool, Error> {
     let propolis_id = new_runtime_state.propolis_id;
-
-    info!(log, "received new VMM runtime state from sled agent";
-            "instance_id" => %instance_id,
-            "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state,
-            "migration_state" => ?new_runtime_state.migration_state);
-
-    // Grab the current state of the instance in the DB to reason about
-    // whether this update is stale or not.
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .fetch()
-        .await?;
+    info!(opctx.log, "received new VMM runtime state from sled agent";
+        "instance_id" => %instance_id,
+        "propolis_id" => %propolis_id,
+        "vmm_state" => ?new_runtime_state.vmm_state,
+        "migration_state" => ?new_runtime_state.migration_state);
 
     let updated = datastore
         .vmm_update_runtime(
@@ -2008,31 +2012,24 @@ pub(crate) async fn notify_instance_updated(
         )
         .await?;
 
-    // // Update OPTE and Dendrite if the instance's active sled assignment
-    // // changed or a migration was retired. If these actions fail, sled agent
-    // // is expected to retry this update.
-    // //
-    // // This configuration must be updated before updating any state in CRDB
-    // // so that, if the instance was migrating or has shut down, it will not
-    // // appear to be able to migrate or start again until the appropriate
-    // // networking state has been written. Without this interlock, another
-    // // thread or another Nexus can race with this routine to write
-    // // conflicting configuration.
-    // //
-    // // In the future, this should be replaced by a call to trigger a
-    // // networking state update RPW.
-    // super::instance_network::ensure_updated_instance_network_config(
-    //     datastore,
-    //     log,
-    //     resolver,
-    //     opctx,
-    //     opctx_alloc,
-    //     &authz_instance,
-    //     db_instance.runtime(),
-    //     &new_runtime_state.instance_state,
-    //     v2p_notification_tx.clone(),
-    // )
-    // .await?;
+    if updated {
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        let params = sagas::instance_update::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_instance,
+        };
+        saga_request
+            .send(sagas::SagaRequest::InstanceUpdate { params })
+            .await
+            .map_err(|_| {
+                Error::internal_error(
+                    "background saga executor is gone! this is not supposed to happen"
+                )
+            })?;
+    }
 
     // // If the supplied instance state indicates that the instance no longer
     // // has an active VMM, attempt to delete the virtual provisioning record,
@@ -2181,7 +2178,7 @@ pub(crate) async fn notify_instance_updated(
     //     }
 
     // }
-    Ok(Some(InstanceUpdated { vmm_updated: updated, instance_updated: false }))
+    Ok(updated)
 }
 
 /// Determines the disposition of a request to start an instance given its state
