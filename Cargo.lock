@@ -5514,6 +5514,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "humantime",
+ "indicatif",
  "internal-dns",
  "ipnetwork",
  "multimap",
