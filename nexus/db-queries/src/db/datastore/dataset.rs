@@ -185,10 +185,8 @@ impl DataStore {
 
     pub async fn dataset_on_in_service_physical_disk(
         &self,
-        // opctx: &OpContext,
         dataset_id: Uuid,
     ) -> LookupResult<bool> {
-        //let conn = self.pool_connection_authorized(opctx).await?;
         let conn = self.pool_connection_unauthorized().await?;
 
         let dataset = {
