@@ -1013,6 +1013,7 @@ mod test {
     };
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,
@@ -1056,9 +1057,12 @@ mod test {
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
                     sled_state: BTreeMap::new(),
+                    cockroachdb_setting_preserve_downgrade:
+                        CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
+                    cockroachdb_fingerprint: String::new(),
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
@@ -1525,9 +1529,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1779,9 +1786,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1988,9 +1998,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2123,9 +2136,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),

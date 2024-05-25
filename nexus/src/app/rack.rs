@@ -24,6 +24,7 @@ use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
@@ -53,6 +54,7 @@ use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
@@ -227,6 +229,33 @@ impl super::Nexus {
         // match this update.
         let mut blueprint = request.blueprint;
         blueprint.external_dns_version = blueprint.external_dns_version.next();
+
+        // Fill in the CockroachDB metadata for the initial blueprint, and set
+        // the `cluster.preserve_downgrade_option` setting ahead of blueprint
+        // execution.
+        let cockroachdb_settings = self
+            .datastore()
+            .cockroachdb_settings(opctx)
+            .await
+            .internal_context(
+                "fetching cockroachdb settings for rack initialization",
+            )?;
+        self.datastore()
+            .cockroachdb_setting_set_string(
+                opctx,
+                cockroachdb_settings.state_fingerprint.clone(),
+                "cluster.preserve_downgrade_option",
+                CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            )
+            .await
+            .internal_context(
+                "setting `cluster.preserve_downgrade_option` \
+                for rack initialization",
+            )?;
+        blueprint.cockroachdb_fingerprint =
+            cockroachdb_settings.state_fingerprint;
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into();
 
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.

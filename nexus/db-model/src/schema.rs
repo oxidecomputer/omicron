@@ -1504,6 +1504,9 @@ table! {
 
         internal_dns_version -> Int8,
         external_dns_version -> Int8,
+        cockroachdb_fingerprint -> Text,
+
+        cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
     }
 }
 

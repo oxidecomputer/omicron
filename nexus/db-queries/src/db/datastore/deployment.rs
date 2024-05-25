@@ -47,6 +47,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::external_api::views::SledState;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -283,6 +284,8 @@ impl DataStore {
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
+            cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade,
             time_created,
             creator,
             comment,
@@ -306,11 +309,23 @@ impl DataStore {
                 blueprint.parent_blueprint_id,
                 *blueprint.internal_dns_version,
                 *blueprint.external_dns_version,
+                blueprint.cockroachdb_fingerprint,
+                blueprint.cockroachdb_setting_preserve_downgrade,
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
             )
         };
+        let cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::from_optional_string(
+                &cockroachdb_setting_preserve_downgrade,
+            )
+            .map_err(|_| {
+                Error::internal_error(&format!(
+                    "unrecognized cluster version {:?}",
+                    cockroachdb_setting_preserve_downgrade
+                ))
+            })?;
 
         // Load the sled states for this blueprint.
         let sled_state: BTreeMap<SledUuid, SledState> = {
@@ -611,6 +626,8 @@ impl DataStore {
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
+            cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade,
             time_created,
             creator,
             comment,

@@ -477,6 +477,9 @@ mod test {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -596,9 +599,12 @@ mod test {
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             sled_state,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1147,11 +1153,14 @@ mod test {
             .expect("fetching initial external DNS");
 
         // Fetch the initial blueprint installed during rack initialization.
-        let (_blueprint_target, blueprint) = datastore
+        let (_blueprint_target, mut blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
             .expect("failed to read current target blueprint");
         eprintln!("blueprint: {}", blueprint.display());
+        // Override the CockroachDB settings so that we don't try to set them.
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::DoNotModify;
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
@@ -1222,9 +1231,12 @@ mod test {
                 .into(),
                 // These are not used because we're not actually going through
                 // the planner.
+                cockroachdb_settings: &CockroachDbSettings::empty(),
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
+                target_cockroachdb_cluster_version:
+                    CockroachDbClusterVersion::POLICY,
                 log,
             }
             .build()

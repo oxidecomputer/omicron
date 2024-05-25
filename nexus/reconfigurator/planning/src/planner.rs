@@ -13,6 +13,9 @@ use crate::blueprint_builder::Error;
 use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
@@ -25,6 +28,7 @@ use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
+use std::str::FromStr;
 
 use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
@@ -90,6 +94,7 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_add()?;
         self.do_plan_decommission()?;
+        self.do_plan_cockroachdb_settings();
 
         Ok(())
     }
@@ -455,6 +460,100 @@ impl<'a> Planner<'a> {
 
         Ok(())
     }
+
+    fn do_plan_cockroachdb_settings(&mut self) {
+        // Figure out what we should set the CockroachDB "preserve downgrade
+        // option" setting to based on the planning input.
+        //
+        // CockroachDB version numbers look like SemVer but are not. Major
+        // version numbers consist of the first *two* components, which
+        // represent the year and the Nth release that year. So the major
+        // version in "22.2.7" is "22.2".
+        //
+        // A given major version of CockroachDB is backward compatible with the
+        // storage format of the previous major version of CockroachDB. This is
+        // shown by the `version` setting, which displays the current storage
+        // format version. When `version` is '22.2', versions v22.2.x or v23.1.x
+        // can be used to run a node. This allows for rolling upgrades of nodes
+        // within the cluster and also preserves the ability to rollback until
+        // the new software version can be validated.
+        //
+        // By default, when all nodes of a cluster are upgraded to a new major
+        // version, the upgrade is "auto-finalized"; `version` is changed to the
+        // new major version, and rolling back to a previous major version of
+        // CockroachDB is no longer possible.
+        //
+        // The `cluster.preserve_downgrade_option` setting can be used to
+        // control this. This setting can only be set to the current value
+        // of the `version` setting, and when it is set, CockroachDB will not
+        // perform auto-finalization. To perform finalization and finish the
+        // upgrade, a client must reset the "preserve downgrade option" setting.
+        // Finalization occurs in the background, and the "preserve downgrade
+        // option" setting should not be changed again until finalization
+        // completes.
+        //
+        // We determine the appropriate value for `preserve_downgrade_option`
+        // based on:
+        //
+        // 1. the _target_ cluster version from the `Policy` (what we want to
+        //    be running)
+        // 2. the `version` setting reported by CockroachDB (what we're
+        //    currently running)
+        //
+        // by saying:
+        //
+        // - If we don't recognize the `version` CockroachDB reports, we will
+        //   do nothing.
+        // - If our target version is _equal to_ what CockroachDB reports,
+        //   we will ensure `preserve_downgrade_option` is set to the current
+        //   `version`. This prevents auto-finalization when we deploy the next
+        //   major version of CockroachDB as part of an update.
+        // - If our target version is _older than_ what CockroachDB reports, we
+        //   will also ensure `preserve_downgrade_option` is set to the current
+        //   `version`. (This will happen on newly-initialized clusters when
+        //   we deploy a version of CockroachDB that is newer than our current
+        //   policy.)
+        // - If our target version is _newer than_ what CockroachDB reports, we
+        //   will ensure `preserve_downgrade_option` is set to the default value
+        //   (the empty string). This will trigger finalization.
+
+        let policy = self.input.target_cockroachdb_cluster_version();
+        let CockroachDbSettings { version, .. } =
+            self.input.cockroachdb_settings();
+        let value = match CockroachDbClusterVersion::from_str(version) {
+            // The current version is known to us.
+            Ok(version) => {
+                if policy > version {
+                    // Ensure `cluster.preserve_downgrade_option` is reset so we
+                    // can upgrade.
+                    CockroachDbPreserveDowngrade::AllowUpgrade
+                } else {
+                    // The cluster version is equal to or newer than the
+                    // version we want by policy. In either case, ensure
+                    // `cluster.preserve_downgrade_option` is set.
+                    CockroachDbPreserveDowngrade::Set(version)
+                }
+            }
+            // The current version is unknown to us; we are likely in the middle
+            // of an cluster upgrade.
+            Err(_) => CockroachDbPreserveDowngrade::DoNotModify,
+        };
+        self.blueprint.cockroachdb_preserve_downgrade(value);
+        info!(
+            &self.log,
+            "will ensure cockroachdb setting";
+            "setting" => "cluster.preserve_downgrade_option",
+            "value" => ?value,
+        );
+
+        // Hey! Listen!
+        //
+        // If we need to manage more CockroachDB settings, we should ensure
+        // that no settings will be modified if we don't recognize the current
+        // cluster version -- we're likely in the middle of an upgrade!
+        //
+        // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
+    }
 }
 
 /// Returns `Some(reason)` if the sled needs its zones to be expunged,
@@ -508,6 +607,9 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
@@ -1362,6 +1464,128 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_ensure_preserve_downgrade_option() {
+        static TEST_NAME: &str = "planner_ensure_preserve_downgrade_option";
+        let logctx = test_setup_log(TEST_NAME);
+
+        let (collection, input, bp1) = example(&logctx.log, TEST_NAME, 0);
+        let mut builder = input.into_builder();
+        assert!(bp1.cockroachdb_fingerprint.is_empty());
+        assert_eq!(
+            bp1.cockroachdb_setting_preserve_downgrade,
+            CockroachDbPreserveDowngrade::DoNotModify
+        );
+
+        // If `preserve_downgrade_option` is unset and the current cluster
+        // version matches `POLICY`, we ensure it is set.
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp2".to_owned(),
+            version: CockroachDbClusterVersion::POLICY.to_string(),
+            preserve_downgrade: String::new(),
+        });
+        let bp2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "initial settings",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp2.cockroachdb_fingerprint, "bp2");
+        assert_eq!(
+            bp2.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::POLICY.into()
+        );
+
+        // If `preserve_downgrade_option` is unset and the current cluster
+        // version is known to us and _newer_ than `POLICY`, we still ensure
+        // it is set. (During a "tock" release, `POLICY == NEWLY_INITIALIZED`
+        // and this won't be materially different than the above test, but it
+        // shouldn't need to change when moving to a "tick" release.)
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp3".to_owned(),
+            version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            preserve_downgrade: String::new(),
+        });
+        let bp3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "initial settings",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp3.cockroachdb_fingerprint, "bp3");
+        assert_eq!(
+            bp3.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into()
+        );
+
+        // When we run the planner again after setting the setting, the inputs
+        // will change; we should still be ensuring the setting.
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp4".to_owned(),
+            version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            preserve_downgrade: CockroachDbClusterVersion::NEWLY_INITIALIZED
+                .to_string(),
+        });
+        let bp4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "after ensure",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp4.cockroachdb_fingerprint, "bp4");
+        assert_eq!(
+            bp4.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into()
+        );
+
+        // When `version` isn't recognized, do nothing regardless of the value
+        // of `preserve_downgrade`.
+        for preserve_downgrade in [
+            String::new(),
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            "definitely not a real cluster version".to_owned(),
+        ] {
+            builder.set_cockroachdb_settings(CockroachDbSettings {
+                state_fingerprint: "bp5".to_owned(),
+                version: "definitely not a real cluster version".to_owned(),
+                preserve_downgrade: preserve_downgrade.clone(),
+            });
+            let bp5 = Planner::new_based_on(
+                logctx.log.clone(),
+                &bp1,
+                &builder.clone().build(),
+                "unknown version",
+                &collection,
+            )
+            .expect("failed to create planner")
+            .with_rng_seed((TEST_NAME, format!("bp5-{}", preserve_downgrade)))
+            .plan()
+            .expect("failed to plan");
+            assert_eq!(bp5.cockroachdb_fingerprint, "bp5");
+            assert_eq!(
+                bp5.cockroachdb_setting_preserve_downgrade,
+                CockroachDbPreserveDowngrade::DoNotModify
+            );
+        }
 
         logctx.cleanup_successful();
     }

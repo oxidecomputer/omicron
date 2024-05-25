@@ -109,7 +109,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         Blueprint, BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
-        BlueprintTarget,
+        BlueprintTarget, CockroachDbPreserveDowngrade,
     };
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
@@ -137,9 +137,12 @@ mod test {
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks,
                 sled_state: BTreeMap::new(),
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
+                cockroachdb_fingerprint: String::new(),
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
