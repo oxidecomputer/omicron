@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema, PartialEq ],
+    derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -29,33 +29,31 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     patch = {
-        BfdPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        BgpConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        BgpPeerConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        PortConfigV1 = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        RouteConfig = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        IpNet = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        VirtualNetworkInterfaceHost = { derives = [PartialEq, Eq, Hash, Serialize, Deserialize] },
-        OmicronPhysicalDiskConfig = { derives = [Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord] },
+        BfdPeerConfig = { derives = [Eq, Hash] },
+        BgpConfig = { derives = [Eq, Hash] },
+        BgpPeerConfig = { derives = [Eq, Hash] },
+        OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        PortConfigV1 = { derives = [Eq, Hash] },
+        RouteConfig = { derives = [Eq, Hash] },
+        VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
-    //TODO trade the manual transformations later in this file for the
-    //     replace directives below?
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
         ByteCount = omicron_common::api::external::ByteCount,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         Generation = omicron_common::api::external::Generation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        SwitchLocation = omicron_common::api::external::SwitchLocation,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
-        Vni = omicron_common::api::external::Vni,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
+        Vni = omicron_common::api::external::Vni,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
@@ -413,111 +411,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<oxnet::Ipv4Net> for types::Ipv4Net {
-    fn from(n: oxnet::Ipv4Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<oxnet::Ipv6Net> for types::Ipv6Net {
-    fn from(n: oxnet::Ipv6Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<oxnet::IpNet> for types::IpNet {
-    fn from(s: oxnet::IpNet) -> Self {
-        match s {
-            oxnet::IpNet::V4(v4) => Self::V4(v4.into()),
-            oxnet::IpNet::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<types::Ipv4Net> for oxnet::Ipv4Net {
-    fn from(n: types::Ipv4Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<oxnet::Ipv4Net> for types::Ipv4Network {
-    fn from(n: oxnet::Ipv4Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
-    fn from(n: ipnetwork::Ipv6Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<types::Ipv6Net> for ipnetwork::Ipv6Network {
-    fn from(n: types::Ipv6Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<ipnetwork::IpNetwork> for types::IpNet {
-    fn from(n: ipnetwork::IpNetwork) -> Self {
-        use ipnetwork::IpNetwork;
-        match n {
-            IpNetwork::V4(v4) => Self::V4(v4.into()),
-            IpNetwork::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
-impl From<types::IpNet> for ipnetwork::IpNetwork {
-    fn from(n: types::IpNet) -> Self {
-        match n {
-            types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
-            types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
-        }
-    }
-}
-
-impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
-    fn from(n: types::Ipv4Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<std::net::Ipv4Addr> for types::Ipv4Net {
-    fn from(n: std::net::Ipv4Addr) -> Self {
-        Self::try_from(format!("{n}/32"))
-            .unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<std::net::Ipv6Addr> for types::Ipv6Net {
-    fn from(n: std::net::Ipv6Addr) -> Self {
-        Self::try_from(format!("{n}/128"))
-            .unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<std::net::IpAddr> for types::IpNet {
-    fn from(s: std::net::IpAddr) -> Self {
-        match s {
-            IpAddr::V4(v4) => Self::V4(v4.into()),
-            IpAddr::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
 impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     fn from(s: omicron_common::api::external::L4PortRange) -> Self {
         Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
@@ -578,7 +471,7 @@ impl From<omicron_common::api::internal::nexus::HostIdentifier>
     fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
         use omicron_common::api::internal::nexus::HostIdentifier::*;
         match s {
-            Ip(net) => Self::Ip(net.into()),
+            Ip(net) => Self::Ip(net),
             Vpc(vni) => Self::Vpc(vni),
         }
     }

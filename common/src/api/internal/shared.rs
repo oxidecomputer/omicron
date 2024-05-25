@@ -8,8 +8,7 @@ use crate::{
     address::NUM_SOURCE_NAT_PORTS,
     api::external::{self, BfdMode, ImportExportPolicy, Name},
 };
-use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
-use oxnet::IpNet;
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -160,7 +159,7 @@ pub type RackNetworkConfig = RackNetworkConfigV1;
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfigV1 {
-    pub rack_subnet: Ipv6Network,
+    pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,
@@ -180,7 +179,7 @@ pub struct BgpConfig {
     /// The autonomous system number for the BGP configuration.
     pub asn: u32,
     /// The set of prefixes for the BGP router to originate.
-    pub originate: Vec<Ipv4Network>,
+    pub originate: Vec<Ipv4Net>,
 
     /// Shaper to apply to outgoing messages.
     #[serde(default)]
@@ -292,7 +291,7 @@ pub struct BfdPeerConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RouteConfig {
     /// The destination of the route.
-    pub destination: IpNetwork,
+    pub destination: IpNet,
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
     /// The VLAN id associated with this route.
@@ -305,7 +304,7 @@ pub struct PortConfigV1 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
     /// This port's addresses.
-    pub addresses: Vec<IpNetwork>,
+    pub addresses: Vec<IpNet>,
     /// Switch the port belongs to.
     pub switch: SwitchLocation,
     /// Nmae of the port this config applies to.
@@ -356,7 +355,7 @@ pub struct UplinkConfig {
     pub uplink_port_fec: PortFec,
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool)
-    pub uplink_cidr: Ipv4Network,
+    pub uplink_cidr: Ipv4Net,
     /// VLAN id to use for uplink
     pub uplink_vid: Option<u16>,
 }
@@ -374,7 +373,7 @@ pub struct HostPortConfig {
 
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool)
-    pub addrs: Vec<IpNetwork>,
+    pub addrs: Vec<IpNet>,
 }
 
 impl From<PortConfigV1> for HostPortConfig {

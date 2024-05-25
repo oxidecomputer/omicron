@@ -36,6 +36,7 @@ use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -527,7 +528,7 @@ pub async fn run_standalone_server(
             HashMap::new(),
         ),
         rack_network_config: NexusTypes::RackNetworkConfigV1 {
-            rack_subnet: Ipv6Addr::LOCALHOST.into(),
+            rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,
             ports: Vec::new(),

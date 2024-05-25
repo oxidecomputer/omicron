@@ -204,7 +204,7 @@
           "description": "The set of prefixes for the BGP router to originate.",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/Ipv4Network"
+            "$ref": "#/definitions/Ipv4Net"
           }
         },
         "shaper": {
@@ -500,27 +500,6 @@
         "version": "0.1.0"
       }
     },
-    "IpNetwork": {
-      "oneOf": [
-        {
-          "title": "v4",
-          "allOf": [
-            {
-              "$ref": "#/definitions/Ipv4Network"
-            }
-          ]
-        },
-        {
-          "title": "v6",
-          "allOf": [
-            {
-              "$ref": "#/definitions/Ipv6Network"
-            }
-          ]
-        }
-      ],
-      "x-rust-type": "ipnetwork::IpNetwork"
-    },
     "IpRange": {
       "oneOf": [
         {
@@ -555,11 +534,6 @@
         "version": "0.1.0"
       }
     },
-    "Ipv4Network": {
-      "type": "string",
-      "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$",
-      "x-rust-type": "ipnetwork::Ipv4Network"
-    },
     "Ipv4Range": {
       "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
       "type": "object",
@@ -591,11 +565,6 @@
         "path": "oxnet::Ipv6Net",
         "version": "0.1.0"
       }
-    },
-    "Ipv6Network": {
-      "type": "string",
-      "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$",
-      "x-rust-type": "ipnetwork::Ipv6Network"
     },
     "Ipv6Range": {
       "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -656,7 +625,7 @@
           "description": "This port's addresses.",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/IpNetwork"
+            "$ref": "#/definitions/IpNet"
           }
         },
         "autoneg": {
@@ -879,7 +848,7 @@
           }
         },
         "rack_subnet": {
-          "$ref": "#/definitions/Ipv6Network"
+          "$ref": "#/definitions/Ipv6Net"
         }
       }
     },
@@ -914,7 +883,7 @@
           "description": "The destination of the route.",
           "allOf": [
             {
-              "$ref": "#/definitions/IpNetwork"
+              "$ref": "#/definitions/IpNet"
             }
           ]
         },

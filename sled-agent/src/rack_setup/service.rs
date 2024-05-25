@@ -752,7 +752,7 @@ impl ServiceInner {
                                 vlan_id: r.vlan_id,
                             })
                             .collect(),
-                        addresses: config.addresses.clone(),
+                        addresses: config.addresses.iter().cloned().map(Into::into).collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
@@ -788,7 +788,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config.originate.clone(),
+                        originate: config.originate.iter().cloned().map(Into::into).collect(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                     })

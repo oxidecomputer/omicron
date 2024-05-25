@@ -6,7 +6,6 @@
 
 pub use gateway_client::types::SpIdentifier as GatewaySpIdentifier;
 pub use gateway_client::types::SpType as GatewaySpType;
-use ipnetwork::IpNetwork;
 use omicron_common::address;
 use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::Name;
@@ -182,7 +181,7 @@ impl UserSpecifiedRackNetworkConfig {
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
-    pub addresses: Vec<IpNetwork>,
+    pub addresses: Vec<IpNet>,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: PortFec,
     pub autoneg: bool,
