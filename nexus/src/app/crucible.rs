@@ -444,7 +444,15 @@ impl super::Nexus {
 
             // Return Ok if the dataset's agent is gone, no delete call
             // is required.
-            Err(Error::Gone) => return Ok(()),
+            Err(Error::Gone) => {
+                warn!(
+                    log,
+                    "dataset is gone";
+                    "dataset_id" => %dataset.id(),
+                );
+
+                return Ok(());
+            }
 
             Err(e) => return Err(e),
         }
@@ -460,26 +468,34 @@ impl super::Nexus {
         backoff::retry_notify(
             backoff::retry_policy_internal_service_aggressive(),
             || async {
-                let region = match self.maybe_get_crucible_region(
-                    log,
-                    dataset,
-                    region_id,
-                ).await {
-                    Ok(None) => {
-                        Err(BackoffError::Permanent(WaitError::Permanent(
-                            Error::internal_error(
-                                "dataset {dataset_id} region {region_id} is missing now!",
-                            )
-                        )))
-                    }
+                let region = match self
+                    .maybe_get_crucible_region(log, dataset, region_id)
+                    .await
+                {
+                    Ok(None) => Err(BackoffError::Permanent(
+                        WaitError::Permanent(Error::internal_error(&format!(
+                            "dataset {} region {region_id} is missing now!",
+                            dataset.id(),
+                        ))),
+                    )),
 
                     Ok(Some(v)) => Ok(v),
 
                     // Return Ok if the dataset's agent is gone, no
                     // delete call is required.
-                    Err(Error::Gone) => return Ok(()),
+                    Err(Error::Gone) => {
+                        warn!(
+                            log,
+                            "dataset is gone";
+                            "dataset_id" => %dataset.id(),
+                        );
 
-                    Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
+                        return Ok(());
+                    }
+
+                    Err(e) => {
+                        Err(BackoffError::Permanent(WaitError::Permanent(e)))
+                    }
                 }?;
 
                 match region.state {
@@ -557,7 +573,15 @@ impl super::Nexus {
 
                     // Return Ok if the dataset's agent is gone, no
                     // delete call is required.
-                    Err(Error::Gone) => return Ok(()),
+                    Err(Error::Gone) => {
+                        warn!(
+                            log,
+                            "dataset is gone";
+                            "dataset_id" => %dataset.id(),
+                        );
+
+                        return Ok(());
+                    }
 
                     Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
                 }?;
@@ -694,7 +718,15 @@ impl super::Nexus {
 
                     // Return Ok if the dataset's agent is gone, no
                     // delete call is required.
-                    Err(Error::Gone) => return Ok(()),
+                    Err(Error::Gone) => {
+                        warn!(
+                            log,
+                            "dataset is gone";
+                            "dataset_id" => %dataset.id(),
+                        );
+
+                        return Ok(());
+                    }
 
                     Err(e) => {
                         Err(BackoffError::Permanent(WaitError::Permanent(e)))
