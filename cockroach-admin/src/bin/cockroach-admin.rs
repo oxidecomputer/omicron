@@ -31,7 +31,7 @@ enum Args {
         #[clap(long, action)]
         cockroach_address: SocketAddrV6,
 
-        /// Address on which this server should bin
+        /// Address on which this server should run
         #[clap(long, action)]
         http_address: SocketAddrV6,
 

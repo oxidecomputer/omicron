@@ -57,7 +57,7 @@ pub async fn start_server(
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
-            .to_logger("gateway")
+            .to_logger("cockroach-admin")
             .map_err(StartError::InitializeLogger)?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));

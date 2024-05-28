@@ -31,7 +31,7 @@ pub enum CockroachCliError {
     #[error(transparent)]
     ExecutionError(#[from] ExecutionError),
     #[error(
-        "failed to parse `cockroack {subcommand}` output \
+        "failed to parse `cockroach {subcommand}` output \
          (stdout: {stdout}, stderr: {stderr})"
     )]
     ParseOutput {
@@ -379,9 +379,7 @@ mod tests {
     // current parsing is still valid.
     #[tokio::test]
     async fn test_node_status_compatibility() {
-        let logctx = dev::test_setup_log(
-            "test_project_create_vpc_raw_returns_none_on_vni_exhaustion",
-        );
+        let logctx = dev::test_setup_log("test_node_status_compatibility");
         let mut db = test_setup_database(&logctx.log).await;
         let db_url = db.listen_url().to_string();
 
