@@ -1343,8 +1343,11 @@ impl super::Nexus {
                          "propolis_id" => %state.propolis_id,
                          "result" => ?update_result);
 
-            // TODO(eliza): probably just change the retval to `bool` later...
-            update_result.map(|vmm_updated| (false, vmm_updated))
+            Ok(InstanceUpdateResult {
+                instance_updated: false,
+                vmm_updated: update_result?,
+                migration_updated: None,
+            })
         } else {
             // There was no instance state to write back, so --- perhaps
             // obviously --- nothing happened.

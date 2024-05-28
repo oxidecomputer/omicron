@@ -385,7 +385,7 @@ impl InstanceRunner {
                     match request {
                         Some(Update { state, tx }) => {
                             let observed = ObservedPropolisState::new(
-                                self.state.instance(),
+                                &self.state,
                                 &state,
                             );
                             let reaction = self.observe_state(&observed).await;
@@ -433,10 +433,7 @@ impl InstanceRunner {
                         },
                         Some(PutMigrationIds{ old_runtime, migration_ids, tx }) => {
                             tx.send(
-                                self.put_migration_ids(
-                                    &old_runtime,
-                                    &migration_ids
-                                ).await.map_err(|e| e.into())
+                                self.put_migration_ids(&migration_ids).await.map_err(|e| e.into())
                             )
                             .map_err(|_| Error::FailedSendClientClosed)
                         },
@@ -649,7 +646,6 @@ impl InstanceRunner {
             self.log,
             "updated state after observing Propolis state change";
             "propolis_id" => %self.state.propolis_id(),
-            "new_instance_state" => ?self.state.instance(),
             "new_vmm_state" => ?self.state.vmm()
         );
 
@@ -711,10 +707,13 @@ impl InstanceRunner {
 
         let migrate = match migrate {
             Some(params) => {
-                let migration_id =
-                    self.state.instance().migration_id.ok_or_else(|| {
+                let migration_id = self
+                    .state
+                    .migration()
+                    .ok_or_else(|| {
                         Error::Migration(anyhow!("Missing Migration UUID"))
-                    })?;
+                    })?
+                    .migration_id;
                 Some(propolis_client::types::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
@@ -1098,11 +1097,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
-            state: InstanceStates::new(
-                instance_runtime,
-                vmm_runtime,
-                propolis_id,
-            ),
+            state: InstanceStates::new(vmm_runtime, propolis_id),
             running_state: None,
             nexus_client,
             storage,
@@ -1378,28 +1373,12 @@ impl InstanceRunner {
 
     async fn put_migration_ids(
         &mut self,
-        old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<SledInstanceState, Error> {
-        // Check that the instance's current generation matches the one the
-        // caller expects to transition from. This helps Nexus ensure that if
-        // multiple migration sagas launch at Propolis generation N, then only
-        // one of them will successfully set the instance's migration IDs.
-        if self.state.instance().gen != old_runtime.gen {
-            // Allow this transition for idempotency if the instance is
-            // already in the requested goal state.
-            if self.state.migration_ids_already_set(old_runtime, migration_ids)
-            {
-                return Ok(self.state.sled_instance_state());
-            }
-
-            return Err(Error::Transition(
-                omicron_common::api::external::Error::conflict(format!(
-                    "wrong instance state generation: expected {}, got {}",
-                    self.state.instance().gen,
-                    old_runtime.gen
-                )),
-            ));
+        // Allow this transition for idempotency if the instance is
+        // already in the requested goal state.
+        if self.state.migration_ids_already_set(migration_ids) {
+            return Ok(self.state.sled_instance_state());
         }
 
         self.state.set_migration_ids(migration_ids, Utc::now());

@@ -12,12 +12,13 @@ use crate::app::sagas::ActionError;
 use nexus_db_model::Generation;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
+use nexus_db_model::InstanceState;
 use nexus_db_model::Vmm;
-use nexus_db_queries::db::datastore::InstanceAndVmms;
+use nexus_db_model::VmmState;
+use nexus_db_queries::db::datastore::InstanceSnapshot;
 use nexus_db_queries::db::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState;
 use slog::info;
 
 // instance update VMM destroyed subsaga: actions
@@ -92,9 +93,9 @@ impl NexusSaga for SagaVmmDestroyed {
 fn get_destroyed_vmm(
     sagactx: &NexusActionContext,
 ) -> Result<Option<(Instance, Vmm)>, ActionError> {
-    let state = sagactx.lookup::<InstanceAndVmms>(STATE)?;
+    let state = sagactx.lookup::<InstanceSnapshot>(STATE)?;
     match state.active_vmm {
-        Some(vmm) if vmm.runtime.state.state() == &InstanceState::Destroyed => {
+        Some(vmm) if vmm.runtime.state.state() == &VmmState::Destroyed => {
             Ok(Some((state.instance, vmm)))
         }
         _ => Ok(None),
@@ -273,7 +274,7 @@ async fn siud_update_instance(
     let osagactx = sagactx.user_data();
     let new_runtime = InstanceRuntimeState {
         propolis_id: None,
-        nexus_state: external::InstanceState::Stopped.into(),
+        nexus_state: InstanceState::NoVmm.into(),
         gen: Generation(instance.runtime_state.gen.0.next()),
         ..instance.runtime_state
     };
