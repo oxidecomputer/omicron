@@ -9,12 +9,12 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+gateway-client.workspace = true
+maplit.workspace = true
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
 oxnet.workspace = true
-gateway-client.workspace = true
-ipnetwork.workspace = true
-maplit.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -22,7 +22,6 @@ sha2.workspace = true
 sled-hardware-types.workspace = true
 thiserror.workspace = true
 update-engine.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 toml.workspace = true

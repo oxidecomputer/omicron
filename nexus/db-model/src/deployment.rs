@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
@@ -41,6 +42,8 @@ pub struct Blueprint {
     pub parent_blueprint_id: Option<Uuid>,
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
+    pub cockroachdb_fingerprint: String,
+    pub cockroachdb_setting_preserve_downgrade: Option<String>,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -53,6 +56,10 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             parent_blueprint_id: bp.parent_blueprint_id,
             internal_dns_version: Generation(bp.internal_dns_version),
             external_dns_version: Generation(bp.external_dns_version),
+            cockroachdb_fingerprint: bp.cockroachdb_fingerprint.clone(),
+            cockroachdb_setting_preserve_downgrade: bp
+                .cockroachdb_setting_preserve_downgrade
+                .to_optional_string(),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -67,6 +74,12 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             parent_blueprint_id: value.parent_blueprint_id,
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
+            cockroachdb_fingerprint: value.cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::from_optional_string(
+                    &value.cockroachdb_setting_preserve_downgrade,
+                )
+                .ok(),
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,

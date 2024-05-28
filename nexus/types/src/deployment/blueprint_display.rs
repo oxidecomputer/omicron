@@ -18,6 +18,10 @@ pub mod constants {
     pub(super) const SUB_LAST: &str = "└─";
 
     pub const ARROW: &str = "->";
+    pub const COCKROACHDB_HEADING: &str = "COCKROACHDB SETTINGS";
+    pub const COCKROACHDB_FINGERPRINT: &str = "state fingerprint";
+    pub const COCKROACHDB_PRESERVE_DOWNGRADE: &str =
+        "cluster.preserve_downgrade_option";
     pub const METADATA_HEADING: &str = "METADATA";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
@@ -29,6 +33,7 @@ pub mod constants {
     pub const NONE_PARENS: &str = "(none)";
     pub const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
+    pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
 }
 use constants::*;
 

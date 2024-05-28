@@ -27,7 +27,6 @@ use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
-use ipnetwork::Ipv6Network;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -40,6 +39,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
@@ -154,7 +154,7 @@ impl SledAgent {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
                 rack_network_config: Some(RackNetworkConfig {
-                    rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56)
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: Ipv4Addr::UNSPECIFIED,
                     infra_ip_last: Ipv4Addr::UNSPECIFIED,

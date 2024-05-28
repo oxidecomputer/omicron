@@ -30,6 +30,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
@@ -790,6 +791,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .try_into()
                     .expect("bad internal DNS generation"),
                 external_dns_version: Generation::new(),
+                cockroachdb_fingerprint: String::new(),
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 time_created: Utc::now(),
                 creator: "nexus-test-utils".to_string(),
                 comment: "initial test blueprint".to_string(),

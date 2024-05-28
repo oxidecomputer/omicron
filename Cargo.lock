@@ -692,9 +692,9 @@ dependencies = [
 name = "bootstrap-agent-client"
 version = "0.1.0"
 dependencies = [
- "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxnet",
  "progenitor",
  "regress",
  "reqwest",
@@ -4490,7 +4490,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "ipnetwork",
  "nexus-types",
  "omicron-common",
  "omicron-passwords",
@@ -4803,7 +4802,6 @@ dependencies = [
  "indexmap 2.2.6",
  "internal-dns",
  "ipnet",
- "ipnetwork",
  "maplit",
  "nexus-config",
  "nexus-inventory",
@@ -8746,7 +8744,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "ipnetwork",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -11021,7 +11018,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gateway-client",
- "ipnetwork",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
@@ -11094,7 +11090,6 @@ dependencies = [
  "installinator-artifactd",
  "installinator-common",
  "internal-dns",
- "ipnetwork",
  "itertools 0.12.1",
  "maplit",
  "omicron-certificates",
@@ -11106,6 +11101,7 @@ dependencies = [
  "once_cell",
  "openapi-lint",
  "openapiv3",
+ "oxnet",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -11140,7 +11136,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "installinator-common",
- "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",

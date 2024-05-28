@@ -3238,7 +3238,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- identifies the latest internal DNS version when blueprint planning began
     internal_dns_version INT8 NOT NULL,
     -- identifies the latest external DNS version when blueprint planning began
-    external_dns_version INT8 NOT NULL
+    external_dns_version INT8 NOT NULL,
+    -- identifies the CockroachDB state fingerprint when blueprint planning began
+    cockroachdb_fingerprint TEXT NOT NULL,
+
+    -- CockroachDB settings managed by blueprints.
+    --
+    -- We use NULL in these columns to reflect that blueprint execution should
+    -- not modify the option; we're able to do this because CockroachDB settings
+    -- require the value to be the correct type and not NULL. There is no value
+    -- that represents "please reset this setting to the default value"; that is
+    -- represented by the presence of the default value in that field.
+    --
+    -- `cluster.preserve_downgrade_option`
+    cockroachdb_setting_preserve_downgrade TEXT
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3998,7 +4011,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '65.0.0', NULL)
+    (TRUE, NOW(), NOW(), '66.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

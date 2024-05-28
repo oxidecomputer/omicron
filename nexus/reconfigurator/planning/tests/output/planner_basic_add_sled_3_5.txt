@@ -148,6 +148,10 @@ to:   blueprint f432fcd5-1284-4058-8b4a-9286a3de6163
 +   crucible       f86e19d2-9145-41cf-be89-6aaa34a73873   in service    fd00:1122:3344:104::24
 
 
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)

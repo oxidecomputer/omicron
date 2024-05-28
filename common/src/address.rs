@@ -249,24 +249,16 @@ impl DnsSubnet {
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
-    pub fn dns_address(&self) -> Ipv6Net {
-        Ipv6Net::new(
-            self.subnet.net().nth(DNS_ADDRESS_INDEX as u128).unwrap(),
-            SLED_PREFIX,
-        )
-        .unwrap()
+    pub fn dns_address(&self) -> Ipv6Addr {
+        self.subnet.net().nth(DNS_ADDRESS_INDEX as u128).unwrap()
     }
 
     /// Returns the address which the Global Zone should create
     /// to be able to contact the DNS server.
     ///
     /// This is the second address within the subnet.
-    pub fn gz_address(&self) -> Ipv6Net {
-        Ipv6Net::new(
-            self.subnet.net().nth(GZ_ADDRESS_INDEX as u128).unwrap(),
-            SLED_PREFIX,
-        )
-        .unwrap()
+    pub fn gz_address(&self) -> Ipv6Addr {
+        self.subnet.net().nth(GZ_ADDRESS_INDEX as u128).unwrap()
     }
 }
 
@@ -305,7 +297,7 @@ pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
         &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
     dns_subnets
         .iter()
-        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().addr()))
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address()))
         .collect()
 }
 
@@ -687,11 +679,11 @@ mod test {
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(
-            "fd00:1122:3344:0001::1/64".parse::<Ipv6Net>().unwrap(),
+            "fd00:1122:3344:0001::1".parse::<Ipv6Addr>().unwrap(),
             dns_subnets[0].dns_address(),
         );
         assert_eq!(
-            "fd00:1122:3344:0001::2/64".parse::<Ipv6Net>().unwrap(),
+            "fd00:1122:3344:0001::2".parse::<Ipv6Addr>().unwrap(),
             dns_subnets[0].gz_address(),
         );
     }

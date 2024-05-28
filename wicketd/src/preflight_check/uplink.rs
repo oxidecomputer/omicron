@@ -16,12 +16,12 @@ use dpd_client::ClientState as DpdClientState;
 use either::Either;
 use illumos_utils::zone::SVCCFG;
 use illumos_utils::PFEXEC;
-use ipnetwork::IpNetwork;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::OMICRON_DPD_TAG;
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -760,7 +760,7 @@ fn build_port_settings(
 
     let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.ip()).collect();
+    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
 
     port_settings.links.insert(
         link_id.to_string(),
@@ -777,7 +777,7 @@ fn build_port_settings(
     );
 
     for r in &uplink.routes {
-        if let (IpNetwork::V4(_dst), IpAddr::V4(_nexthop)) =
+        if let (IpNet::V4(_dst), IpAddr::V4(_nexthop)) =
             (r.destination, r.nexthop)
         {
             // TODO: do we need to create config for mgd?
@@ -895,7 +895,7 @@ pub(crate) enum UplinkPreflightTerminalError {
     #[error(
         "failed to remove host OS route {destination} -> {nexthop}: {err}"
     )]
-    RemoveHostRoute { err: String, destination: IpNetwork, nexthop: IpAddr },
+    RemoveHostRoute { err: String, destination: IpNet, nexthop: IpAddr },
     #[error("failed to remove uplink SMF property {property:?}: {err}")]
     RemoveSmfProperty { property: String, err: String },
     #[error("failed to refresh uplink service config: {0}")]

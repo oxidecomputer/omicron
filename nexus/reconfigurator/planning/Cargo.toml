@@ -14,7 +14,6 @@ gateway-client.workspace = true
 indexmap.workspace = true
 internal-dns.workspace = true
 ipnet.workspace = true
-ipnetwork.workspace = true
 nexus-config.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true

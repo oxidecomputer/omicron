@@ -14,7 +14,6 @@ use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
-use ipnetwork::Ipv6Network;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
     CheckerSource, ImportExportPolicy as MgImportExportPolicy, Prefix, Prefix4,
@@ -34,7 +33,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_ddm_admin_client::DdmError;
-use oxnet::IpNet;
+use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -579,7 +578,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     originate: config
                         .originate
                         .iter()
-                        .map(|x| Prefix4 { length: x.prefix(), value: x.ip() })
+                        .map(|x| Prefix4 { length: x.width(), value: x.addr() })
                         .collect(),
                 })
                 .await
@@ -601,9 +600,9 @@ impl<'a> EarlyNetworkSetup<'a> {
                     IpAddr::V4(v4) => v4,
                     IpAddr::V6(_) => continue,
                 };
-                let prefix = match r.destination.ip() {
+                let prefix = match r.destination.addr() {
                     IpAddr::V4(v4) => {
-                        Prefix4 { value: v4, length: r.destination.prefix() }
+                        Prefix4 { value: v4, length: r.destination.width() }
                     }
                     IpAddr::V6(_) => continue,
                 };
@@ -658,7 +657,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             // TODO We're discarding the `uplink_cidr.prefix()` here and only using
             // the IP address; at some point we probably need to give the full CIDR
             // to dendrite?
-            addrs.push(a.ip());
+            addrs.push(a.addr());
         }
 
         let link_settings = LinkSettings {
@@ -886,7 +885,7 @@ impl RackNetworkConfigV0 {
         v0: RackNetworkConfigV0,
     ) -> RackNetworkConfigV1 {
         RackNetworkConfigV1 {
-            rack_subnet: Ipv6Network::new(rack_subnet, 56).unwrap(),
+            rack_subnet: Ipv6Net::new(rack_subnet, 56).unwrap(),
             infra_ip_first: v0.infra_ip_first,
             infra_ip_last: v0.infra_ip_last,
             ports: v0
@@ -973,7 +972,7 @@ mod tests {
             body: EarlyNetworkConfigBody {
                 ntp_servers: v0.ntp_servers.clone(),
                 rack_network_config: Some(RackNetworkConfigV1 {
-                    rack_subnet: Ipv6Network::new(v0.rack_subnet, 56).unwrap(),
+                    rack_subnet: Ipv6Net::new(v0.rack_subnet, 56).unwrap(),
                     infra_ip_first: v0_rack_network_config.infra_ip_first,
                     infra_ip_last: v0_rack_network_config.infra_ip_last,
                     ports: vec![PortConfigV1 {
