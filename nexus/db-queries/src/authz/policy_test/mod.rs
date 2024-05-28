@@ -62,7 +62,8 @@ use uuid::Uuid;
 async fn test_iam_roles_behavior() {
     let logctx = dev::test_setup_log("test_iam_roles");
     let mut db = test_setup_database(&logctx.log).await;
-    let (opctx, datastore) = db::datastore::datastore_test(&logctx, &db).await;
+    let (opctx, datastore) =
+        db::datastore::test_utils::datastore_test(&logctx, &db).await;
 
     // Before we can create the resources, users, and role assignments that we
     // need, we must grant the "test-privileged" user privileges to fetch and
@@ -328,7 +329,8 @@ async fn test_conferred_roles() {
     // To start, this test looks a lot like the test above.
     let logctx = dev::test_setup_log("test_conferred_roles");
     let mut db = test_setup_database(&logctx.log).await;
-    let (opctx, datastore) = db::datastore::datastore_test(&logctx, &db).await;
+    let (opctx, datastore) =
+        db::datastore::test_utils::datastore_test(&logctx, &db).await;
 
     // Before we can create the resources, users, and role assignments that we
     // need, we must grant the "test-privileged" user privileges to fetch and

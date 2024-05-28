@@ -6,12 +6,18 @@
 
 use super::DataStore;
 use crate::db;
+use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
+use crate::db::model::DownstairsClientStopRequestNotification;
+use crate::db::model::DownstairsClientStoppedNotification;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
+use crate::db::model::UpstairsRepairNotification;
+use crate::db::model::UpstairsRepairNotificationType;
+use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
 use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
 use crate::transaction_retry::OptionalError;
@@ -25,6 +31,13 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
+use omicron_common::api::internal::nexus::DownstairsClientStopped;
+use omicron_common::api::internal::nexus::RepairProgress;
+use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -809,6 +822,242 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
+
+    // An Upstairs is created as part of a Volume hierarchy if the Volume
+    // Construction Request includes a "Region" variant. This may be at any
+    // layer of the Volume, and some notifications will come from an Upstairs
+    // instead of the top level of the Volume. The following functions have an
+    // Upstairs ID instead of a Volume ID for this reason.
+
+    /// Record when an Upstairs notifies us about a repair. If that record
+    /// (uniquely identified by the four IDs passed in plus the notification
+    /// type) exists already, do nothing.
+    pub async fn upstairs_repair_notification(
+        &self,
+        opctx: &OpContext,
+        record: UpstairsRepairNotification,
+    ) -> Result<(), Error> {
+        use db::schema::upstairs_repair_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("upstairs_repair_notification")
+            .transaction(&conn, |conn| {
+                let record = record.clone();
+                let err = err.clone();
+
+                async move {
+                    // Return 409 if a repair ID does not match types
+                    let mismatched_record_type_count: usize =
+                        dsl::upstairs_repair_notification
+                            .filter(dsl::repair_id.eq(record.repair_id))
+                            .filter(dsl::repair_type.ne(record.repair_type))
+                            .execute_async(&conn)
+                            .await?;
+
+                    if mismatched_record_type_count > 0 {
+                        return Err(err.bail(Error::conflict(&format!(
+                            "existing repair type for id {} does not match {:?}!",
+                            record.repair_id,
+                            record.repair_type,
+                        ))));
+                    }
+
+                    match &record.notification_type {
+                        UpstairsRepairNotificationType::Started => {
+                            // Proceed - the insertion can succeed or fail below
+                            // based on the table's primary key
+                        }
+
+                        UpstairsRepairNotificationType::Succeeded
+                        | UpstairsRepairNotificationType::Failed => {
+                            // However, Nexus must accept only one "finished"
+                            // status - an Upstairs cannot change this and must
+                            // instead perform another repair with a new repair
+                            // ID.
+                            let maybe_existing_finish_record: Option<
+                                UpstairsRepairNotification,
+                            > = dsl::upstairs_repair_notification
+                                .filter(dsl::repair_id.eq(record.repair_id))
+                                .filter(dsl::upstairs_id.eq(record.upstairs_id))
+                                .filter(dsl::session_id.eq(record.session_id))
+                                .filter(dsl::region_id.eq(record.region_id))
+                                .filter(dsl::notification_type.eq_any(vec![
+                                    UpstairsRepairNotificationType::Succeeded,
+                                    UpstairsRepairNotificationType::Failed,
+                                ]))
+                                .get_result_async(&conn)
+                                .await
+                                .optional()?;
+
+                            if let Some(existing_finish_record) =
+                                maybe_existing_finish_record
+                            {
+                                if existing_finish_record.notification_type
+                                    != record.notification_type
+                                {
+                                    return Err(err.bail(Error::conflict(
+                                        "existing finish record does not match",
+                                    )));
+                                } else {
+                                    // inserting the same record, bypass
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+
+                    diesel::insert_into(dsl::upstairs_repair_notification)
+                        .values(record)
+                        .on_conflict((
+                            dsl::repair_id,
+                            dsl::upstairs_id,
+                            dsl::session_id,
+                            dsl::region_id,
+                            dsl::notification_type,
+                        ))
+                        .do_nothing()
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Record Upstairs repair progress
+    pub async fn upstairs_repair_progress(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_id: TypedUuid<UpstairsRepairKind>,
+        repair_progress: RepairProgress,
+    ) -> Result<(), Error> {
+        use db::schema::upstairs_repair_notification::dsl as notification_dsl;
+        use db::schema::upstairs_repair_progress::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("upstairs_repair_progress")
+            .transaction(&conn, |conn| {
+                let repair_progress = repair_progress.clone();
+                let err = err.clone();
+
+                async move {
+                    // Check that there is a repair id for the upstairs id
+                    let matching_repair: Option<UpstairsRepairNotification> =
+                        notification_dsl::upstairs_repair_notification
+                            .filter(notification_dsl::repair_id.eq(nexus_db_model::to_db_typed_uuid(repair_id)))
+                            .filter(notification_dsl::upstairs_id.eq(nexus_db_model::to_db_typed_uuid(upstairs_id)))
+                            .filter(notification_dsl::notification_type.eq(UpstairsRepairNotificationType::Started))
+                            .get_result_async(&conn)
+                            .await
+                            .optional()?;
+
+                    if matching_repair.is_none() {
+                        return Err(err.bail(Error::non_resourcetype_not_found(&format!(
+                            "upstairs {upstairs_id} repair {repair_id} not found"
+                        ))));
+                    }
+
+                    diesel::insert_into(dsl::upstairs_repair_progress)
+                        .values(UpstairsRepairProgress {
+                            repair_id: repair_id.into(),
+                            time: repair_progress.time,
+                            current_item: repair_progress.current_item,
+                            total_items: repair_progress.total_items,
+                        })
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Record when a Downstairs client is requested to stop, and why
+    pub async fn downstairs_client_stop_request_notification(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stop_request: DownstairsClientStopRequest,
+    ) -> Result<(), Error> {
+        use db::schema::downstairs_client_stop_request_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::insert_into(dsl::downstairs_client_stop_request_notification)
+            .values(DownstairsClientStopRequestNotification {
+                time: downstairs_client_stop_request.time,
+                upstairs_id: upstairs_id.into(),
+                downstairs_id: downstairs_id.into(),
+                reason: downstairs_client_stop_request.reason.into(),
+            })
+            .on_conflict((
+                dsl::time,
+                dsl::upstairs_id,
+                dsl::downstairs_id,
+                dsl::reason,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Record when a Downstairs client is stopped, and why
+    pub async fn downstairs_client_stopped_notification(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stopped: DownstairsClientStopped,
+    ) -> Result<(), Error> {
+        use db::schema::downstairs_client_stopped_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::insert_into(dsl::downstairs_client_stopped_notification)
+            .values(DownstairsClientStoppedNotification {
+                time: downstairs_client_stopped.time,
+                upstairs_id: upstairs_id.into(),
+                downstairs_id: downstairs_id.into(),
+                reason: downstairs_client_stopped.reason.into(),
+            })
+            .on_conflict((
+                dsl::time,
+                dsl::upstairs_id,
+                dsl::downstairs_id,
+                dsl::reason,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -1064,7 +1313,7 @@ pub fn read_only_resources_associated_with_volume(
 mod tests {
     use super::*;
 
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
 

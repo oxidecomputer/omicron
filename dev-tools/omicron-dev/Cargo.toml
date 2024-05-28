@@ -16,6 +16,7 @@ futures.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 libc.workspace = true
+nexus-config.workspace = true
 nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 nexus-test-interface.workspace = true
 omicron-common.workspace = true

@@ -379,7 +379,7 @@ fn ipv4_nat_next_version() -> diesel::expression::SqlLiteral<BigInt> {
 mod test {
     use std::{net::Ipv4Addr, str::FromStr};
 
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use chrono::Utc;
     use nexus_db_model::{Ipv4NatEntry, Ipv4NatValues, MacAddr, Vni};
     use nexus_test_utils::db::test_setup_database;

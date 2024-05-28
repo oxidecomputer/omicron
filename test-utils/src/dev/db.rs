@@ -8,7 +8,7 @@ use crate::dev::poll;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
-use omicron_common::postgres_config::PostgresConfigWithUrl;
+use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -650,8 +650,13 @@ impl Drop for CockroachInstance {
                 // Do NOT clean up the temporary directory in this case.
                 let path = temp_dir.into_path();
                 eprintln!(
-                    "WARN: temporary directory leaked: {}",
-                    path.display()
+                    "WARN: temporary directory leaked: {path:?}\n\
+                     \tIf you would like to access the database for debugging, run the following:\n\n\
+                     \t# Run the database\n\
+                     \tcargo run --bin omicron-dev db-run --no-populate --store-dir {data_path:?}\n\
+                     \t# Access the database. Note the port may change if you run multiple databases.\n\
+                     \tcockroach sql --host=localhost:32221 --insecure",
+                     data_path = path.join("data"),
                 );
             }
         }

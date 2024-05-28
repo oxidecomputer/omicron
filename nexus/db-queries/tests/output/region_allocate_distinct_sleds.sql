@@ -35,7 +35,21 @@ WITH
         INNER JOIN (zpool INNER JOIN sled ON zpool.sled_id = sled.id) ON
             zpool.id = old_zpool_usage.pool_id
       WHERE
-        (old_zpool_usage.size_used + $2) <= total_size AND sled.provision_state = 'provisionable'
+        (old_zpool_usage.size_used + $2)
+        <= (
+            SELECT
+              total_size
+            FROM
+              omicron.public.inv_zpool
+            WHERE
+              inv_zpool.id = old_zpool_usage.pool_id
+            ORDER BY
+              inv_zpool.time_collected DESC
+            LIMIT
+              1
+          )
+        AND sled.sled_policy = 'in_service'
+        AND sled.sled_state = 'active'
       ORDER BY
         zpool.sled_id, md5(CAST(zpool.id AS BYTES) || $3)
     ),

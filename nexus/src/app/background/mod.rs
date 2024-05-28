@@ -15,11 +15,11 @@ mod external_endpoints;
 mod init;
 mod inventory_collection;
 mod nat_cleanup;
+mod networking;
 mod phantom_disks;
 mod region_replacement;
 mod status;
 mod sync_service_zone_nat;
+mod sync_switch_configuration;
 
-pub use common::Driver;
-pub use common::TaskHandle;
 pub use init::BackgroundTasks;

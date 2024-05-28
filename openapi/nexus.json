@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "0.0.6"
+    "version": "20240327.0"
   },
   "paths": {
     "/device/auth": {
@@ -97,6 +97,206 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/experimental/v1/probes": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "List instrumentation probes",
+        "operationId": "probe_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Create instrumentation probe",
+        "operationId": "probe_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/probes/{probe}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "View instrumentation probe",
+        "operationId": "probe_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "probe",
+            "description": "Name or ID of the probe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Delete instrumentation probe",
+        "operationId": "probe_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "probe",
+            "description": "Name or ID of the probe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -809,7 +1009,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "List all floating IPs",
+        "summary": "List floating IPs",
         "operationId": "floating_ip_list",
         "parameters": [
           {
@@ -945,6 +1145,60 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Update floating IP",
+        "operationId": "floating_ip_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FloatingIpUpdate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -2427,7 +2681,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP pools",
+        "summary": "List IP pools",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
@@ -4221,13 +4475,13 @@
         }
       }
     },
-    "/v1/system/hardware/sleds/{sled_id}/provision-state": {
+    "/v1/system/hardware/sleds/{sled_id}/provision-policy": {
       "put": {
         "tags": [
           "system/hardware"
         ],
-        "summary": "Set sled provision state",
-        "operationId": "sled_set_provision_state",
+        "summary": "Set sled provision policy",
+        "operationId": "sled_set_provision_policy",
         "parameters": [
           {
             "in": "path",
@@ -4244,7 +4498,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SledProvisionStateParams"
+                "$ref": "#/components/schemas/SledProvisionPolicyParams"
               }
             }
           },
@@ -4256,7 +4510,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledProvisionStateResponse"
+                  "$ref": "#/components/schemas/SledProvisionPolicyResponse"
                 }
               }
             }
@@ -5178,6 +5432,7 @@
           "system/networking"
         ],
         "summary": "Add range to IP pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -5469,6 +5724,44 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/utilization": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch IP pool utilization",
+        "operationId": "ip_pool_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
@@ -5555,6 +5848,7 @@
           "system/networking"
         ],
         "summary": "Add IP range to Oxide service pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -6224,6 +6518,46 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-message-history": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP router message history",
+        "operationId": "networking_bgp_message_history",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateBgpMessageHistory"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8638,6 +8972,22 @@
           "items"
         ]
       },
+      "AggregateBgpMessageHistory": {
+        "description": "BGP message history for rack switches.",
+        "type": "object",
+        "properties": {
+          "switch_histories": {
+            "description": "BGP history organized by switch.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchBgpHistory"
+            }
+          }
+        },
+        "required": [
+          "switch_histories"
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -8660,6 +9010,7 @@
         ]
       },
       "BfdMode": {
+        "description": "BFD connection mode.",
         "type": "string",
         "enum": [
           "single_hop",
@@ -9081,6 +9432,7 @@
           "switch"
         ]
       },
+      "BgpMessageHistory": {},
       "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
@@ -11864,14 +12216,14 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "address": {
+          "description": {
+            "type": "string"
+          },
+          "ip": {
             "nullable": true,
             "description": "An IP address to reserve for use as a floating IP. This field is optional: when not set, an address will be automatically chosen from `pool`. If set, then the IP must be available in the resolved `pool`.",
             "type": "string",
             "format": "ip"
-          },
-          "description": {
-            "type": "string"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -11918,6 +12270,24 @@
         "required": [
           "items"
         ]
+      },
+      "FloatingIpUpdate": {
+        "description": "Updateable identity-related parameters",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "Group": {
         "description": "View of a Group",
@@ -13138,6 +13508,14 @@
           }
         ]
       },
+      "IpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -13372,6 +13750,31 @@
           }
         }
       },
+      "IpPoolUtilization": {
+        "type": "object",
+        "properties": {
+          "ipv4": {
+            "description": "Number of allocated and total available IPv4 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Utilization"
+              }
+            ]
+          },
+          "ipv6": {
+            "description": "Number of allocated and total available IPv6 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Utilization"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ipv4",
+          "ipv6"
+        ]
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -13417,6 +13820,27 @@
           "last"
         ]
       },
+      "Ipv4Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv4 addresses allocated from this pool",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "capacity": {
+            "description": "The total number of IPv4 addresses in the pool, i.e., the sum of the lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit integer because there are only 2^32 IPv4 addresses.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
+        ]
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -13440,6 +13864,25 @@
         "required": [
           "first",
           "last"
+        ]
+      },
+      "Ipv6Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv6 addresses allocated from this pool. A 128-bit integer string to match the capacity field.",
+            "type": "string",
+            "format": "uint128"
+          },
+          "capacity": {
+            "description": "The total number of IPv6 addresses in the pool, i.e., the sum of the lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
+            "type": "string",
+            "format": "uint128"
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
         ]
       },
       "L4PortRange": {
@@ -13842,6 +14285,119 @@
           }
         ]
       },
+      "NetworkInterface": {
+        "description": "Information required to construct a virtual network interface",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NetworkInterfaceKind"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "subnet": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "kind",
+          "mac",
+          "name",
+          "primary",
+          "slot",
+          "subnet",
+          "vni"
+        ]
+      },
+      "NetworkInterfaceKind": {
+        "description": "The type of network interface",
+        "oneOf": [
+          {
+            "description": "A vNIC attached to a guest instance",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with an internal service",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -13945,6 +14501,161 @@
         "type": "string",
         "enum": [
           "ok"
+        ]
+      },
+      "Probe": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "sled",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ProbeCreate": {
+        "description": "Create time parameters for probes.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip_pool": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "sled"
+        ]
+      },
+      "ProbeExternalIp": {
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeExternalIp"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/NetworkInterface"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface",
+          "name",
+          "sled"
+        ]
+      },
+      "ProbeInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Project": {
@@ -14839,11 +15550,11 @@
             "type": "string",
             "format": "uuid"
           },
-          "provision_state": {
-            "description": "The provision state of the sled.",
+          "policy": {
+            "description": "The operator-defined policy of a sled.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledPolicy"
               }
             ]
           },
@@ -14851,6 +15562,14 @@
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
             "format": "uuid"
+          },
+          "state": {
+            "description": "The current state Nexus believes the sled to be in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledState"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -14880,8 +15599,9 @@
         "required": [
           "baseboard",
           "id",
-          "provision_state",
+          "policy",
           "rack_id",
+          "state",
           "time_created",
           "time_modified",
           "usable_hardware_threads",
@@ -14971,8 +15691,52 @@
           "items"
         ]
       },
-      "SledProvisionState": {
-        "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+      "SledPolicy": {
+        "description": "The operator-defined policy of a sled.",
+        "oneOf": [
+          {
+            "description": "The operator has indicated that the sled is in-service.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              },
+              "provision_policy": {
+                "description": "Determines whether new resources can be provisioned onto the sled.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SledProvisionPolicy"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "provision_policy"
+            ]
+          },
+          {
+            "description": "The operator has indicated that the sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)\n\nAn expunged sled is always non-provisionable.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "SledProvisionPolicy": {
+        "description": "The operator-defined provision policy of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
         "oneOf": [
           {
             "description": "New resources will be provisioned on this sled.",
@@ -14982,7 +15746,7 @@
             ]
           },
           {
-            "description": "New resources will not be provisioned on this sled. However, existing resources will continue to be on this sled unless manually migrated off.",
+            "description": "New resources will not be provisioned on this sled. However, if the sled is currently in service, existing resources will continue to be on this sled unless manually migrated off.",
             "type": "string",
             "enum": [
               "non_provisionable"
@@ -14990,15 +15754,15 @@
           }
         ]
       },
-      "SledProvisionStateParams": {
-        "description": "Parameters for `sled_set_provision_state`.",
+      "SledProvisionPolicyParams": {
+        "description": "Parameters for `sled_set_provision_policy`.",
         "type": "object",
         "properties": {
           "state": {
             "description": "The provision state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           }
@@ -15007,15 +15771,15 @@
           "state"
         ]
       },
-      "SledProvisionStateResponse": {
-        "description": "Response to `sled_set_provision_state`.",
+      "SledProvisionPolicyResponse": {
+        "description": "Response to `sled_set_provision_policy`.",
         "type": "object",
         "properties": {
           "new_state": {
             "description": "The new provision state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           },
@@ -15023,7 +15787,7 @@
             "description": "The old provision state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           }
@@ -15052,6 +15816,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SledState": {
+        "description": "The current state of the sled, as determined by Nexus.",
+        "oneOf": [
+          {
+            "description": "The sled is currently active, and has resources allocated on it.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is decommissioned, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)",
+            "type": "string",
+            "enum": [
+              "decommissioned"
+            ]
+          }
         ]
       },
       "Snapshot": {
@@ -15294,6 +16077,31 @@
           "rack_id",
           "time_created",
           "time_modified"
+        ]
+      },
+      "SwitchBgpHistory": {
+        "description": "BGP message history for a particular switch.",
+        "type": "object",
+        "properties": {
+          "history": {
+            "description": "Message history indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpMessageHistory"
+            }
+          },
+          "switch": {
+            "description": "Switch this message history is associated with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "history",
+          "switch"
         ]
       },
       "SwitchInterfaceConfig": {
@@ -16359,6 +17167,12 @@
           "storage"
         ]
       },
+      "Vni": {
+        "description": "A Geneve Virtual Network Identifier",
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
       "Vpc": {
         "description": "View of a VPC",
         "type": "object",
@@ -17306,6 +18120,13 @@
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-networking"
+      }
+    },
+    {
+      "name": "system/probes",
+      "description": "Probes for testing network connectivity",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/probes"
       }
     },
     {

@@ -11,6 +11,7 @@ use clap::Args;
 use clap::Parser;
 use dropshot::test_util::LogContext;
 use futures::stream::StreamExt;
+use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -473,7 +474,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
 
     // Read configuration.
     let config_str = include_str!("../../../../nexus/examples/config.toml");
-    let mut config: omicron_common::nexus_config::Config =
+    let mut config: NexusConfig =
         toml::from_str(config_str).context("parsing example config")?;
     config.pkg.log = dropshot::ConfigLogging::File {
         // See LogContext::new(),
@@ -542,10 +543,12 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.silo_name,
         cptestctx.external_dns_zone_name,
     );
-    println!(
-        "omicron-dev: management gateway:    http://{}",
-        cptestctx.gateway.client.bind_address,
-    );
+    for (location, gateway) in &cptestctx.gateway {
+        println!(
+            "omicron-dev: management gateway:    http://{} ({})",
+            gateway.client.bind_address, location,
+        );
+    }
     println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
     println!(
         "omicron-dev: privileged user name:  {}",

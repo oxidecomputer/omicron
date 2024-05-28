@@ -7,6 +7,7 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::paginated;
@@ -28,6 +29,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::Column;
 use diesel::ExpressionMethods;
+use diesel::Insertable;
+use diesel::IntoSql;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
@@ -40,7 +43,9 @@ use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::OmicronZonesConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -49,17 +54,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::num::NonZeroU32;
 use uuid::Uuid;
-
-/// "limit" used in SQL queries that paginate through all sleds, omicron
-/// zones, etc.
-///
-/// While we always load an entire blueprint in one operation, we use a
-/// [`Paginator`] to guard against single queries returning an unchecked number
-/// of rows.
-// unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
 impl DataStore {
     /// List blueprints
@@ -89,6 +84,17 @@ impl DataStore {
         opctx: &OpContext,
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::blueprint_insert_on_connection(&conn, opctx, blueprint).await
+    }
+
+    /// Variant of [Self::blueprint_insert] which may be called from a
+    /// transaction context.
+    pub(crate) async fn blueprint_insert_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+        blueprint: &Blueprint,
+    ) -> Result<(), Error> {
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
@@ -101,51 +107,66 @@ impl DataStore {
         // so that we can produce the `Error` type that we want here.
         let row_blueprint = DbBlueprint::from(blueprint);
         let blueprint_id = row_blueprint.id;
+
+        // `Blueprint` stores the policy for each zone next to the zone itself.
+        // This would ideally be represented as a simple column in
+        // bp_omicron_zone.
+        //
+        // But historically, `Blueprint` used to store the set of zones in
+        // service in a BTreeSet. Since most zones are expected to be in
+        // service, we store the set of zones NOT in service (which we expect
+        // to be much smaller, often empty). Build that inverted set here.
+        //
+        // This will soon be replaced with an extra column in the
+        // `bp_omicron_zone` table, coupled with other data migrations.
+        let omicron_zones_not_in_service = blueprint
+            .all_blueprint_zones(BlueprintZoneFilter::All)
+            .filter_map(|(_, zone)| {
+                // This is going to go away soon when we change the database
+                // representation to store the zone disposition enum next to
+                // each zone. For now, do an exhaustive match so that this
+                // fails if we add a new variant.
+                match zone.disposition {
+                    BlueprintZoneDisposition::InService => None,
+                    BlueprintZoneDisposition::Quiesced => {
+                        Some(BpOmicronZoneNotInService {
+                            blueprint_id,
+                            bp_omicron_zone_id: zone.config.id,
+                        })
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
         let sled_omicron_zones = blueprint
-            .omicron_zones
+            .blueprint_zones
             .iter()
             .map(|(sled_id, zones_config)| {
                 BpSledOmicronZones::new(blueprint_id, *sled_id, zones_config)
             })
             .collect::<Vec<_>>();
         let omicron_zones = blueprint
-            .omicron_zones
+            .blueprint_zones
             .iter()
             .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.iter().map(|zone| {
+                zones_config.zones.iter().map(move |zone| {
                     BpOmicronZone::new(blueprint_id, *sled_id, zone)
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
         let omicron_zone_nics = blueprint
-            .omicron_zones
+            .blueprint_zones
             .values()
             .flat_map(|zones_config| {
                 zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
-                        .with_context(|| format!("zone {:?}", zone.id))
+                        .with_context(|| format!("zone {:?}", zone.config.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                         .transpose()
                 })
             })
             .collect::<Result<Vec<BpOmicronZoneNic>, _>>()?;
-
-        // `Blueprint` stores a set of zones in service, but in the database we
-        // store the set of zones NOT in service (which we expect to be much
-        // smaller, often empty). Build that inverted set here.
-        let omicron_zones_not_in_service = {
-            let mut zones_not_in_service = Vec::new();
-            for zone in &omicron_zones {
-                if !blueprint.zones_in_service.contains(&zone.id) {
-                    zones_not_in_service.push(BpOmicronZoneNotInService {
-                        blueprint_id,
-                        bp_omicron_zone_id: zone.id,
-                    });
-                }
-            }
-            zones_not_in_service
-        };
 
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
@@ -161,8 +182,7 @@ impl DataStore {
         // batch rather than making a bunch of round-trips to the database.
         // We'd do that if we had an interface for doing that with bound
         // parameters, etc.  See oxidecomputer/omicron#973.
-        let pool = self.pool_connection_authorized(opctx).await?;
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             // Insert the row for the blueprint.
             {
                 use db::schema::blueprint::dsl;
@@ -233,7 +253,14 @@ impl DataStore {
 
         // Read the metadata from the primary blueprint row, and ensure that it
         // exists.
-        let (parent_blueprint_id, time_created, creator, comment) = {
+        let (
+            parent_blueprint_id,
+            internal_dns_version,
+            external_dns_version,
+            time_created,
+            creator,
+            comment,
+        ) = {
             use db::schema::blueprint::dsl;
 
             let Some(blueprint) = dsl::blueprint
@@ -251,6 +278,8 @@ impl DataStore {
 
             (
                 blueprint.parent_blueprint_id,
+                *blueprint.internal_dns_version,
+                *blueprint.external_dns_version,
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
@@ -261,10 +290,10 @@ impl DataStore {
         // the `OmicronZonesConfig` generation number for each sled that is a
         // part of this blueprint. Construct the BTreeMap we ultimately need,
         // but all the `zones` vecs will be empty until our next query below.
-        let mut omicron_zones: BTreeMap<Uuid, OmicronZonesConfig> = {
+        let mut blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig> = {
             use db::schema::bp_sled_omicron_zones::dsl;
 
-            let mut omicron_zones = BTreeMap::new();
+            let mut blueprint_zones = BTreeMap::new();
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
                 let batch = paginated(
@@ -283,9 +312,9 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|s| s.sled_id);
 
                 for s in batch {
-                    let old = omicron_zones.insert(
+                    let old = blueprint_zones.insert(
                         s.sled_id,
-                        OmicronZonesConfig {
+                        BlueprintZonesConfig {
                             generation: *s.generation,
                             zones: Vec::new(),
                         },
@@ -298,7 +327,7 @@ impl DataStore {
                 }
             }
 
-            omicron_zones
+            blueprint_zones
         };
 
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
@@ -379,11 +408,6 @@ impl DataStore {
             omicron_zones_not_in_service
         };
 
-        // Create the in-memory list of zones _in_ service, which we'll
-        // calculate below as we load zones. (Any zone that isn't present in
-        // `omicron_zones_not_in_service` is considered in service.)
-        let mut zones_in_service = BTreeSet::new();
-
         // Load all the zones for each sled.
         {
             use db::schema::bp_omicron_zone::dsl;
@@ -426,8 +450,9 @@ impl DataStore {
                             })
                         })
                         .transpose()?;
-                    let sled_zones =
-                        omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
+                    let sled_zones = blueprint_zones
+                        .get_mut(&z.sled_id)
+                        .ok_or_else(|| {
                             // This error means that we found a row in
                             // bp_omicron_zone with no associated record in
                             // bp_sled_omicron_zones.  This should be
@@ -439,8 +464,14 @@ impl DataStore {
                             ))
                         })?;
                     let zone_id = z.id;
+                    let disposition =
+                        if omicron_zones_not_in_service.remove(&zone_id) {
+                            BlueprintZoneDisposition::Quiesced
+                        } else {
+                            BlueprintZoneDisposition::InService
+                        };
                     let zone = z
-                        .into_omicron_zone_config(nic_row)
+                        .into_blueprint_zone_config(nic_row, disposition)
                         .with_context(|| {
                             format!("zone {:?}: parse from database", zone_id)
                         })
@@ -451,14 +482,6 @@ impl DataStore {
                             ))
                         })?;
                     sled_zones.zones.push(zone);
-
-                    // If we can remove `zone_id` from
-                    // `omicron_zones_not_in_service`, then the zone is not in
-                    // service. Otherwise, add it to the list of in-service
-                    // zones.
-                    if !omicron_zones_not_in_service.remove(&zone_id) {
-                        zones_in_service.insert(zone_id);
-                    }
                 }
             }
         }
@@ -476,9 +499,10 @@ impl DataStore {
 
         Ok(Blueprint {
             id: blueprint_id,
-            omicron_zones,
-            zones_in_service,
+            blueprint_zones,
             parent_blueprint_id,
+            internal_dns_version,
+            external_dns_version,
             time_created,
             creator,
             comment,
@@ -616,9 +640,23 @@ impl DataStore {
     /// Set the current target blueprint
     ///
     /// In order to become the target blueprint, `target`'s parent blueprint
-    /// must be the current target
+    /// must be the current target. To instead change the current target's
+    /// properties (particularly whether it's enabled), use
+    /// [`DataStore::blueprint_target_set_current_enabled`].
     pub async fn blueprint_target_set_current(
         &self,
+        opctx: &OpContext,
+        target: BlueprintTarget,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::blueprint_target_set_current_on_connection(&conn, opctx, target)
+            .await
+    }
+
+    /// Variant of [Self::blueprint_target_set_current] which may be called from
+    /// a transaction context.
+    pub(crate) async fn blueprint_target_set_current_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         target: BlueprintTarget,
     ) -> Result<(), Error> {
@@ -632,14 +670,102 @@ impl DataStore {
             time_made_target: target.time_made_target,
         };
 
-        let conn = self.pool_connection_authorized(opctx).await?;
-
         query
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .map_err(|e| Error::from(query.decode_error(e)))?;
 
         Ok(())
+    }
+
+    /// Set the current target blueprint's `enabled` field
+    ///
+    /// In order to change the enabled field, `target` must already be the
+    /// current target blueprint. To instead set a new blueprint target, use
+    /// [`DataStore::blueprint_target_set_current`].
+    // Although this function is like `blueprint_target_set_current()` in that
+    // both store the given `BlueprintTarget` into the table, the functions are
+    // distinct because the preconditions and error cases are different. We
+    // could reconsider this and make `blueprint_target_set_current` accept
+    // blueprints where either their own or their parent is the current
+    // blueprint, although this would require some rework in the nontrivial
+    // `InsertTargetQuery` CTE.
+    pub async fn blueprint_target_set_current_enabled(
+        &self,
+        opctx: &OpContext,
+        target: BlueprintTarget,
+    ) -> Result<(), Error> {
+        use db::schema::bp_target::dsl;
+
+        opctx
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        // Diesel requires us to use an alias in order to refer to the
+        // `bp_target` table twice in the same query.
+        let bp_target2 = diesel::alias!(db::schema::bp_target as bp_target1);
+
+        // The following diesel produces this query:
+        //
+        // ```sql
+        // INSERT INTO bp_target
+        //   (SELECT
+        //        version + 1,
+        //        blueprint_id,
+        //        <target.enabled>,
+        //        <target.time_made_target>
+        //    FROM bp_target
+        //    WHERE
+        //        -- This part of the subquery restricts us to only the
+        //        -- current target (i.e., the bp_target with maximal version)
+        //        version IN (SELECT version FROM bp_target
+        //                    ORDER BY version DESC LIMIT 1)
+        //
+        //        -- ... and that current target must exactly equal the target
+        //        -- blueprint on which we're trying to set `enabled`
+        //        AND blueprint_id = <target.blueprint_id>
+        //   );
+        // ```
+        //
+        // This will either insert one new row (if the filters were satisified)
+        // or no new rows (if the filters were not satisfied).
+        let query = dsl::bp_target
+            .select((
+                dsl::version + 1,
+                dsl::blueprint_id,
+                target.enabled.into_sql::<sql_types::Bool>(),
+                target.time_made_target.into_sql::<sql_types::Timestamptz>(),
+            ))
+            .filter(
+                dsl::version.eq_any(
+                    bp_target2
+                        .select(bp_target2.field(dsl::version))
+                        .order_by(bp_target2.field(dsl::version).desc())
+                        .limit(1),
+                ),
+            )
+            .filter(dsl::blueprint_id.eq(target.target_id))
+            .insert_into(dsl::bp_target);
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let num_inserted = query
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        match num_inserted {
+            0 => Err(Error::invalid_request(format!(
+                "Blueprint {} is not the current target blueprint",
+                target.target_id
+            ))),
+            1 => Ok(()),
+            // This is impossible, not only due to the `.limit(1)` in the
+            // subquery above, but also because we're inserting `version + 1`
+            // which would fail with pkey conflicts if we matched more than one
+            // existing row in the subquery.
+            _ => unreachable!("query inserted more than one row"),
+        }
     }
 
     /// Get the current target blueprint, if one exists
@@ -1046,16 +1172,18 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::datastore_test;
-    use nexus_deployment::blueprint_builder::BlueprintBuilder;
-    use nexus_deployment::blueprint_builder::Ensure;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_inventory::now_db_precision;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use rand::thread_rng;
     use rand::Rng;
@@ -1117,7 +1245,8 @@ mod tests {
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
         SledResources {
-            provision_state: SledProvisionState::Provisionable,
+            policy: SledPolicy::provisionable(),
+            state: SledState::Active,
             zpools,
             subnet: Ipv6Subnet::new(ip),
         }
@@ -1174,6 +1303,8 @@ mod tests {
         let policy = policy_from_collection(&collection);
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1198,7 +1329,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_blueprint() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_empty_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1207,6 +1338,8 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
+            Generation::new(),
             &EMPTY_POLICY,
             "test",
         )
@@ -1236,10 +1369,8 @@ mod tests {
             [blueprint1.id]
         );
 
-        // There ought to be no sleds or zones in service, and no parent
-        // blueprint.
-        assert_eq!(blueprint1.omicron_zones.len(), 0);
-        assert_eq!(blueprint1.zones_in_service.len(), 0);
+        // There ought to be no sleds or zones, and no parent blueprint.
+        assert_eq!(blueprint1.blueprint_zones.len(), 0);
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Trying to insert the same blueprint again should fail.
@@ -1260,7 +1391,7 @@ mod tests {
     #[tokio::test]
     async fn test_representative_blueprint() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_representative_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1284,9 +1415,9 @@ mod tests {
         );
 
         // Check the number of blueprint elements against our collection.
-        assert_eq!(blueprint1.omicron_zones.len(), policy.sleds.len());
+        assert_eq!(blueprint1.blueprint_zones.len(), policy.sleds.len());
         assert_eq!(
-            blueprint1.omicron_zones.len(),
+            blueprint1.blueprint_zones.len(),
             collection.omicron_zones.len()
         );
         assert_eq!(
@@ -1294,10 +1425,7 @@ mod tests {
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
-        assert_eq!(
-            blueprint1.zones_in_service.len(),
-            blueprint1.all_omicron_zones().count()
-        );
+        assert_all_zones_in_service(&blueprint1);
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Set blueprint1 as the current target, and ensure that we cannot
@@ -1332,10 +1460,19 @@ mod tests {
         policy.sleds.insert(new_sled_id, fake_sled_resources(None));
         let new_sled_zpools = &policy.sleds.get(&new_sled_id).unwrap().zpools;
 
-        // Create a builder for a child blueprint.
-        let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test")
-                .expect("failed to create builder");
+        // Create a builder for a child blueprint.  While we're at it, use a
+        // different DNS version to test that that works.
+        let new_internal_dns_version = blueprint1.internal_dns_version.next();
+        let new_external_dns_version = new_internal_dns_version.next();
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            new_internal_dns_version,
+            new_external_dns_version,
+            &policy,
+            "test",
+        )
+        .expect("failed to create builder");
 
         // Add zones to our new sled.
         assert_eq!(
@@ -1357,8 +1494,8 @@ mod tests {
 
         // Check that we added the new sled and its zones.
         assert_eq!(
-            blueprint1.omicron_zones.len() + 1,
-            blueprint2.omicron_zones.len()
+            blueprint1.blueprint_zones.len() + 1,
+            blueprint2.blueprint_zones.len()
         );
         assert_eq!(
             blueprint1.all_omicron_zones().count() + num_new_sled_zones,
@@ -1366,10 +1503,7 @@ mod tests {
         );
 
         // All zones should be in service.
-        assert_eq!(
-            blueprint2.zones_in_service.len(),
-            blueprint2.all_omicron_zones().count()
-        );
+        assert_all_zones_in_service(&blueprint2);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
         // Check that we can write it to the DB and read it back.
@@ -1381,8 +1515,10 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff(&blueprint_read));
+        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read).display());
         assert_eq!(blueprint2, blueprint_read);
+        assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
+        assert_eq!(blueprint2.external_dns_version, new_external_dns_version);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
             expected_ids.sort();
@@ -1436,7 +1572,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_target() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_set_target");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1474,18 +1610,32 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
+            Generation::new(),
             &EMPTY_POLICY,
             "test1",
         )
         .unwrap();
-        let blueprint2 =
-            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test2")
-                .expect("failed to create builder")
-                .build();
-        let blueprint3 =
-            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test3")
-                .expect("failed to create builder")
-                .build();
+        let blueprint2 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            Generation::new(),
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test2",
+        )
+        .expect("failed to create builder")
+        .build();
+        let blueprint3 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            Generation::new(),
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test3",
+        )
+        .expect("failed to create builder")
+        .build();
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -1574,10 +1724,16 @@ mod tests {
 
         // Create a child of blueprint3, and ensure when we set it as the target
         // with enabled=false, that status is serialized.
-        let blueprint4 =
-            BlueprintBuilder::new_based_on(&blueprint3, &EMPTY_POLICY, "test3")
-                .expect("failed to create builder")
-                .build();
+        let blueprint4 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint3,
+            Generation::new(),
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test3",
+        )
+        .expect("failed to create builder")
+        .build();
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -1597,5 +1753,136 @@ mod tests {
         // Clean up.
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_set_target_enabled() {
+        // Setup
+        let logctx = dev::test_setup_log("test_set_target_enabled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create an initial blueprint and a child.
+        let collection =
+            nexus_inventory::CollectionBuilder::new("test").build();
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            Generation::new(),
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test1",
+        )
+        .unwrap();
+        let blueprint2 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            Generation::new(),
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test2",
+        )
+        .expect("failed to create builder")
+        .build();
+        assert_eq!(blueprint1.parent_blueprint_id, None);
+        assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
+
+        // Insert both into the blueprint table.
+        datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
+        datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
+
+        let mut bp1_target = BlueprintTarget {
+            target_id: blueprint1.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        let mut bp2_target = BlueprintTarget {
+            target_id: blueprint2.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+
+        // Set bp1_target as the current target.
+        datastore
+            .blueprint_target_set_current(&opctx, bp1_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some(bp1_target),
+        );
+
+        // We should be able to toggle its enabled status an arbitrary number of
+        // times.
+        for _ in 0..10 {
+            bp1_target.enabled = !bp1_target.enabled;
+            datastore
+                .blueprint_target_set_current_enabled(&opctx, bp1_target)
+                .await
+                .unwrap();
+            assert_eq!(
+                datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+                Some(bp1_target),
+            );
+        }
+
+        // We cannot use `blueprint_target_set_current_enabled` to make
+        // bp2_target the target...
+        let err = datastore
+            .blueprint_target_set_current_enabled(&opctx, bp2_target)
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("is not the current target blueprint"));
+
+        // ...but we can make it the target via `blueprint_target_set_current`.
+        datastore
+            .blueprint_target_set_current(&opctx, bp2_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some(bp2_target),
+        );
+
+        // We can no longer toggle the enabled bit of bp1_target.
+        let err = datastore
+            .blueprint_target_set_current_enabled(&opctx, bp1_target)
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("is not the current target blueprint"));
+
+        // We can toggle bp2_target.enabled an arbitrary number of times.
+        for _ in 0..10 {
+            bp2_target.enabled = !bp2_target.enabled;
+            datastore
+                .blueprint_target_set_current_enabled(&opctx, bp2_target)
+                .await
+                .unwrap();
+            assert_eq!(
+                datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+                Some(bp2_target),
+            );
+        }
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    fn assert_all_zones_in_service(blueprint: &Blueprint) {
+        let not_in_service = blueprint
+            .all_blueprint_zones(BlueprintZoneFilter::All)
+            .filter(|(_, z)| {
+                z.disposition != BlueprintZoneDisposition::InService
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            not_in_service.is_empty(),
+            "expected all zones to be in service, \
+             found these zones not in service: {not_in_service:?}"
+        );
     }
 }

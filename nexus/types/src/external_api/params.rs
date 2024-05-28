@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, ByteCount, Hostname, IdentityMetadataCreateParams,
+    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
     SemverVersion,
@@ -80,6 +80,7 @@ path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
+path_param!(ProbePath, probe, "probe");
 
 id_path_param!(GroupPath, group_id, "group");
 
@@ -91,26 +92,27 @@ id_path_param!(SwitchPath, switch_id, "switch");
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,
 }
 
-/// Parameters for `sled_set_provision_state`.
+/// Parameters for `sled_set_provision_policy`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SledProvisionStateParams {
+pub struct SledProvisionPolicyParams {
     /// The provision state.
-    pub state: super::views::SledProvisionState,
+    pub state: super::views::SledProvisionPolicy,
 }
 
-/// Response to `sled_set_provision_state`.
+/// Response to `sled_set_provision_policy`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SledProvisionStateResponse {
+pub struct SledProvisionPolicyResponse {
     /// The old provision state.
-    pub old_state: super::views::SledProvisionState,
+    pub old_state: super::views::SledProvisionPolicy,
 
     /// The new provision state.
-    pub new_state: super::views::SledProvisionState,
+    pub new_state: super::views::SledProvisionPolicy,
 }
 
 pub struct SwitchSelector {
@@ -167,7 +169,7 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone)]
 pub struct FloatingIpSelector {
     /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
     pub project: Option<NameOrId>,
@@ -883,11 +885,17 @@ pub struct FloatingIpCreate {
     /// An IP address to reserve for use as a floating IP. This field is
     /// optional: when not set, an address will be automatically chosen from
     /// `pool`. If set, then the IP must be available in the resolved `pool`.
-    pub address: Option<IpAddr>,
+    pub ip: Option<IpAddr>,
 
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /// The type of resource that a floating IP is attached to
@@ -1317,6 +1325,16 @@ impl JsonSchema for BlockSize {
 pub enum PhysicalDiskKind {
     M2,
     U2,
+}
+
+impl From<sled_agent_client::types::DiskVariant> for PhysicalDiskKind {
+    fn from(variant: sled_agent_client::types::DiskVariant) -> Self {
+        use sled_agent_client::types::DiskVariant;
+        match variant {
+            DiskVariant::U2 => Self::U2,
+            DiskVariant::M2 => Self::M2,
+        }
+    }
 }
 
 /// Different sources for a disk
@@ -1796,24 +1814,6 @@ pub struct BgpStatusSelector {
     pub name_or_id: NameOrId,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
-}
-
 /// Information about a bidirectional forwarding detection (BFD) session.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BfdSessionEnable {
@@ -2035,4 +2035,22 @@ pub struct UpdatesPutRepositoryParams {
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
     pub system_version: SemverVersion,
+}
+
+// Probes
+
+/// Create time parameters for probes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ProbeCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub sled: Uuid,
+    pub ip_pool: Option<NameOrId>,
+}
+
+/// List probes with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ProbeListSelector {
+    /// A name or id to use when selecting a probe.
+    pub name_or_id: Option<NameOrId>,
 }

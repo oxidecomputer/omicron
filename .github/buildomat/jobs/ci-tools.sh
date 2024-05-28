@@ -8,6 +8,7 @@
 #:	"=/work/end-to-end-tests/*.gz",
 #:	"=/work/caboose-util.gz",
 #:	"=/work/tufaceous.gz",
+#:	"=/work/commtest",
 #: ]
 
 set -o errexit
@@ -32,6 +33,10 @@ export CARGO_INCREMENTAL=0
 
 ptime -m cargo build --locked -p end-to-end-tests --tests --bin bootstrap \
 	--message-format json-render-diagnostics >/tmp/output.end-to-end.json
+
+mkdir -p /work
+ptime -m cargo build --locked -p end-to-end-tests --tests --bin commtest
+cp target/debug/commtest /work/commtest
 
 mkdir -p /work/end-to-end-tests
 for p in target/debug/bootstrap $(/opt/ooce/bin/jq -r 'select(.profile.test) | .executable' /tmp/output.end-to-end.json); do

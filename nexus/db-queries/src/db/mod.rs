@@ -34,6 +34,11 @@ pub mod subquery;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
+/// Batch statement to disable full table scans.
+// This is `pub` so tests that don't go through our connection pool can disable
+// full table scans the same way pooled connections do.
+pub use pool_connection::DISALLOW_FULL_TABLE_SCAN_SQL;
+
 #[cfg(test)]
 mod test_utils;
 

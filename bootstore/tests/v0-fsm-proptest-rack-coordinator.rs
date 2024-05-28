@@ -20,7 +20,7 @@ use bootstore::schemes::v0::{
     Request, RequestType, Response, ResponseType, Share,
 };
 use proptest::prelude::*;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 

@@ -34,9 +34,6 @@ _exit_trap() {
 	local status=$?
 	[[ $status -eq 0 ]] && exit 0
 
-    # XXX paranoia
-    pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
-
 	set +o errexit
 	set -o xtrace
 	banner evidence
@@ -102,19 +99,6 @@ z_swadm () {
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-# XXX remove. This is just to test against a development branch of OPTE in CI.
-set +x
-OPTE_COMMIT="73d4669ea213d0b7aca35c4babb6fd09ed51d29e"
-curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
-pfexec rem_drv xde || true
-pfexec mv xde /kernel/drv/amd64/xde
-pfexec add_drv xde || true
-curl -sSfOL https://buildomat.eng.oxide.computer/wg/0/artefact/01HM09S4M15WNXB2B2MX8R1GBT/yLalJU5vT4S4IEpwSeY4hPuspxw3JcINokZmlfNU14npHkzG/01HM09SJ2RQSFGW7MVKC9JKZ8D/01HM0A58D888AJ7YP6N1Q6T6ZD/opteadm
-chmod +x opteadm
-cp opteadm /tmp/opteadm
-pfexec mv opteadm /opt/oxide/opte/bin/opteadm
-set -x
-
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
 # is probably not yet fixed in xde branch?  Once the xde branch merges from
@@ -161,7 +145,7 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
-mv out/omicron-nexus-single-sled.tar.gz out/omicron-nexus.tar.gz
+mv out/nexus-single-sled.tar.gz out/nexus.tar.gz
 mkdir tests
 for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
@@ -244,12 +228,10 @@ first = \"$SERVICE_IP_POOL_START\"
 		/^last/c\\
 last = \"$SERVICE_IP_POOL_END\"
 	}
-	/^\\[rack_network_config/,/^$/ {
-		/^infra_ip_first/c\\
+	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
-		/^infra_ip_last/c\\
+	/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
-	}
 	/^\\[\\[rack_network_config.ports/,/^\$/ {
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
@@ -347,6 +329,18 @@ while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
 	retry=$((retry + 1))
 done
 echo "Waited for chrony: ${retry}s"
+
+# Wait for at least one nexus zone to become available
+retry=0
+until zoneadm list | grep nexus; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to start at least one nexus zone after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for nexus: ${retry}s"
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END

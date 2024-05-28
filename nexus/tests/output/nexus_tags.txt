@@ -17,6 +17,7 @@ floating_ip_create                       POST     /v1/floating-ips
 floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
 floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
 floating_ip_list                         GET      /v1/floating-ips
+floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
 floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "hidden"
@@ -25,6 +26,10 @@ device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
 logout                                   POST     /v1/logout
+probe_create                             POST     /experimental/v1/probes
+probe_delete                             DELETE   /experimental/v1/probes/{probe}
+probe_list                               GET      /experimental/v1/probes
+probe_view                               GET      /experimental/v1/probes/{probe}
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
@@ -133,7 +138,7 @@ sled_instance_list                       GET      /v1/system/hardware/sleds/{sle
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
-sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
+sled_set_provision_policy                PUT      /v1/system/hardware/sleds/{sled_id}/provision-policy
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
@@ -159,6 +164,7 @@ ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/sil
 ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
+ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
@@ -174,6 +180,7 @@ networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}

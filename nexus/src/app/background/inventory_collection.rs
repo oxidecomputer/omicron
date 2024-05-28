@@ -194,6 +194,7 @@ mod test {
     use crate::app::background::common::BackgroundTask;
     use crate::app::background::inventory_collection::DbSledAgentEnumerator;
     use crate::app::background::inventory_collection::InventoryCollector;
+    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
@@ -313,9 +314,9 @@ mod test {
             page_size: NonZeroU32::new(3).unwrap(),
         };
 
-        // There will be one sled agent set up as part of the test context.
+        // There will be two sled agents set up as part of the test context.
         let found_urls = db_enum.list_sled_agents().await.unwrap();
-        assert_eq!(found_urls.len(), 1);
+        assert_eq!(found_urls.len(), 2);
 
         // Insert some sleds.
         let rack_id = Uuid::new_v4();
@@ -337,6 +338,7 @@ mod test {
                     reservoir_size: ByteCount::from_gibibytes_u32(8).into(),
                 },
                 rack_id,
+                Generation::new(),
             );
             sleds.push(datastore.sled_upsert(sled).await.unwrap());
         }

@@ -109,9 +109,11 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let pool = match &params.pool {
+        let params::FloatingIpCreate { identity, pool, ip } = params;
+
+        let pool = match pool {
             Some(pool) => Some(
-                self.ip_pool_lookup(opctx, pool)?
+                self.ip_pool_lookup(opctx, &pool)?
                     .lookup_for(authz::Action::Read)
                     .await?
                     .0,
@@ -121,7 +123,23 @@ impl super::Nexus {
 
         Ok(self
             .db_datastore
-            .allocate_floating_ip(opctx, authz_project.id(), params, pool)
+            .allocate_floating_ip(opctx, authz_project.id(), identity, ip, pool)
+            .await?
+            .try_into()
+            .unwrap())
+    }
+
+    pub(crate) async fn floating_ip_update(
+        &self,
+        opctx: &OpContext,
+        ip_lookup: lookup::FloatingIp<'_>,
+        params: params::FloatingIpUpdate,
+    ) -> UpdateResult<FloatingIp> {
+        let (.., authz_fip) =
+            ip_lookup.lookup_for(authz::Action::Modify).await?;
+        Ok(self
+            .db_datastore
+            .floating_ip_update(opctx, &authz_fip, params.clone().into())
             .await?
             .try_into()
             .unwrap())
@@ -144,21 +162,32 @@ impl super::Nexus {
         fip_selector: params::FloatingIpSelector,
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
+        let fip_lookup = self.floating_ip_lookup(opctx, fip_selector)?;
+        let (.., authz_project, authz_fip) =
+            fip_lookup.lookup_for(authz::Action::Modify).await?;
+
         match target.kind {
             params::FloatingIpParentKind::Instance => {
+                // Handle the cases where the FIP and instance are specified by
+                // name and ID (or ID and name) respectively. We remove the project
+                // from the instance lookup if using the instance's ID, and insert
+                // the floating IP's project ID otherwise.
                 let instance_selector = params::InstanceSelector {
-                    project: fip_selector.project,
+                    project: match &target.parent {
+                        NameOrId::Id(_) => None,
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                    },
                     instance: target.parent,
                 };
+
                 let instance =
                     self.instance_lookup(opctx, instance_selector)?;
-                let attach_params = &params::ExternalIpCreate::Floating {
-                    floating_ip: fip_selector.floating_ip,
-                };
-                self.instance_attach_external_ip(
+
+                self.instance_attach_floating_ip(
                     opctx,
                     &instance,
-                    attach_params,
+                    authz_fip,
+                    authz_project,
                 )
                 .await
                 .and_then(FloatingIp::try_from)

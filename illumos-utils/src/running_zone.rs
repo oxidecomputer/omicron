@@ -404,7 +404,7 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.inner.zonepath.join(Self::ROOT_FS_PATH)
+        self.inner.root()
     }
 
     pub fn control_interface(&self) -> AddrObject {
@@ -888,7 +888,7 @@ impl RunningZone {
 
     /// Return references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
-        self.inner.opte_ports.iter().map(|(port, _)| port)
+        self.inner.opte_ports()
     }
 
     /// Remove the OPTE ports on this zone from the port manager.
@@ -912,8 +912,14 @@ impl RunningZone {
         Ok(())
     }
 
+    /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
         &self.inner.links
+    }
+
+    /// Return a mutable reference to the links for this zone.
+    pub fn links_mut(&mut self) -> &mut Vec<Link> {
+        &mut self.inner.links
     }
 
     /// Return the running processes associated with all the SMF services this
@@ -1094,6 +1100,9 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
+    pub const ROOT_FS_PATH: &'static str = "root";
+
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
@@ -1130,11 +1139,21 @@ impl InstalledZone {
         path.push("root/var/svc/profile/site.xml");
         path
     }
+
+    /// Returns references to the OPTE ports for this zone.
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Returns the filesystem path to the zone's root in the GZ.
+    pub fn root(&self) -> Utf8PathBuf {
+        self.zonepath.join(Self::ROOT_FS_PATH)
+    }
 }
 
 #[derive(Clone)]
 pub struct FakeZoneBuilderConfig {
-    temp_dir: Arc<Utf8TempDir>,
+    temp_dir: Arc<Utf8PathBuf>,
 }
 
 #[derive(Clone, Default)]
@@ -1152,10 +1171,14 @@ pub struct ZoneBuilderFactory {
 
 impl ZoneBuilderFactory {
     /// For use in unit tests that don't require actual zone creation to occur.
-    pub fn fake() -> Self {
+    pub fn fake(temp_dir: Option<&String>) -> Self {
+        let temp_dir = match temp_dir {
+            Some(dir) => Utf8PathBuf::from(dir),
+            None => Utf8TempDir::new().unwrap().into_path(),
+        };
         Self {
             fake_cfg: Some(FakeZoneBuilderConfig {
-                temp_dir: Arc::new(Utf8TempDir::new().unwrap()),
+                temp_dir: Arc::new(temp_dir),
             }),
         }
     }
@@ -1170,29 +1193,55 @@ impl ZoneBuilderFactory {
 /// Created by [ZoneBuilderFactory].
 #[derive(Default)]
 pub struct ZoneBuilder<'a> {
+    /// Logger to which status messages are written during zone installation.
     log: Option<Logger>,
+    /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
+    /// Filesystem path at which the installed zone will reside.
     zone_root_path: Option<&'a Utf8Path>,
+    /// The directories that will be searched for the image tarball for the
+    /// provided zone type ([`Self::with_zone_type`]).
     zone_image_paths: Option<&'a [Utf8PathBuf]>,
+    /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
-    unique_name: Option<Uuid>, // actually optional
+    /// Unique ID of the instance of the zone being created. (optional)
+    // *actually* optional (in contrast to other fields that are `Option` for
+    // builder purposes - that is, skipping this field in the builder will
+    // still result in an `Ok(InstalledZone)` from `.install()`, rather than
+    // an `Err(InstallZoneError::IncompleteBuilder)`.
+    unique_name: Option<Uuid>,
+    /// ZFS datasets to be accessed from within the zone.
     datasets: Option<&'a [zone::Dataset]>,
+    /// Filesystems to mount within the zone.
     filesystems: Option<&'a [zone::Fs]>,
+    /// Additional network device names to add to the zone.
     data_links: Option<&'a [String]>,
+    /// Device nodes to pass through to the zone.
     devices: Option<&'a [zone::Device]>,
+    /// OPTE devices for the guest network interfaces.
     opte_ports: Option<Vec<(Port, PortTicket)>>,
-    bootstrap_vnic: Option<Link>, // actually optional
+    /// NIC to use for creating a bootstrap address on the switch zone.
+    // actually optional (as above)
+    bootstrap_vnic: Option<Link>,
+    /// Physical NICs possibly provisioned to the zone.
     links: Option<Vec<Link>>,
+    /// The maximum set of privileges any process in this zone can obtain.
     limit_priv: Option<Vec<String>>,
+    /// For unit tests only: if `Some`, then no actual zones will be installed
+    /// by this builder, and minimal facsimiles of them will be placed in
+    /// temporary directories according to the contents of the provided
+    /// `FakeZoneBuilderConfig`.
     fake_cfg: Option<FakeZoneBuilderConfig>,
 }
 
 impl<'a> ZoneBuilder<'a> {
+    /// Logger to which status messages are written during zone installation.
     pub fn with_log(mut self, log: Logger) -> Self {
         self.log = Some(log);
         self
     }
 
+    /// Allocates the NIC used for control plane communication.
     pub fn with_underlay_vnic_allocator(
         mut self,
         vnic_allocator: &'a VnicAllocator<Etherstub>,
@@ -1201,11 +1250,14 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
+    /// Filesystem path at which the installed zone will reside.
     pub fn with_zone_root_path(mut self, root_path: &'a Utf8Path) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
 
+    /// The directories that will be searched for the image tarball for the
+    /// provided zone type ([`Self::with_zone_type`]).
     pub fn with_zone_image_paths(
         mut self,
         image_paths: &'a [Utf8PathBuf],
@@ -1214,56 +1266,68 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
+    /// The name of the type of zone being created (e.g. "propolis-server")
     pub fn with_zone_type(mut self, zone_type: &'a str) -> Self {
         self.zone_type = Some(zone_type);
         self
     }
 
+    /// Unique ID of the instance of the zone being created. (optional)
     pub fn with_unique_name(mut self, uuid: Uuid) -> Self {
         self.unique_name = Some(uuid);
         self
     }
 
+    /// ZFS datasets to be accessed from within the zone.
     pub fn with_datasets(mut self, datasets: &'a [zone::Dataset]) -> Self {
         self.datasets = Some(datasets);
         self
     }
 
+    /// Filesystems to mount within the zone.
     pub fn with_filesystems(mut self, filesystems: &'a [zone::Fs]) -> Self {
         self.filesystems = Some(filesystems);
         self
     }
 
+    /// Additional network device names to add to the zone.
     pub fn with_data_links(mut self, links: &'a [String]) -> Self {
         self.data_links = Some(links);
         self
     }
 
+    /// Device nodes to pass through to the zone.
     pub fn with_devices(mut self, devices: &'a [zone::Device]) -> Self {
         self.devices = Some(devices);
         self
     }
 
+    /// OPTE devices for the guest network interfaces.
     pub fn with_opte_ports(mut self, ports: Vec<(Port, PortTicket)>) -> Self {
         self.opte_ports = Some(ports);
         self
     }
 
+    /// NIC to use for creating a bootstrap address on the switch zone.
+    /// (optional)
     pub fn with_bootstrap_vnic(mut self, vnic: Link) -> Self {
         self.bootstrap_vnic = Some(vnic);
         self
     }
 
+    /// Physical NICs possibly provisioned to the zone.
     pub fn with_links(mut self, links: Vec<Link>) -> Self {
         self.links = Some(links);
         self
     }
 
+    /// The maximum set of privileges any process in this zone can obtain.
     pub fn with_limit_priv(mut self, limit_priv: Vec<String>) -> Self {
         self.limit_priv = Some(limit_priv);
         self
     }
 
+    // (used in unit tests)
     fn fake_install(self) -> Result<InstalledZone, InstallZoneError> {
         let zone = self
             .zone_type
@@ -1275,7 +1339,7 @@ impl<'a> ZoneBuilder<'a> {
             .new_control(None)
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
-        let temp_dir = fake_cfg.temp_dir.path().to_path_buf();
+        let temp_dir = fake_cfg.temp_dir;
         (|| {
             let full_zone_name = InstalledZone::get_zone_name(
                 self.zone_type?,
@@ -1301,6 +1365,9 @@ impl<'a> ZoneBuilder<'a> {
         .ok_or(InstallZoneError::IncompleteBuilder)
     }
 
+    /// Create the zone with the provided parameters.
+    /// Returns `Err(InstallZoneError::IncompleteBuilder)` if a necessary
+    /// parameter was not provided.
     pub async fn install(self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
             return self.fake_install();

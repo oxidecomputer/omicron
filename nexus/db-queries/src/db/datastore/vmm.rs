@@ -23,6 +23,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -134,7 +135,7 @@ impl DataStore {
         Ok(updated)
     }
 
-    /// Forcibly overwrites the Propolis IP in the supplied VMM's record with
+    /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
     /// the supplied Propolis IP.
     ///
     /// This is used in tests to overwrite the IP for a VMM that is backed by a
@@ -142,15 +143,20 @@ impl DataStore {
     /// allocated by the instance start procedure. (Unfortunately, this can't be
     /// marked #[cfg(test)] because the integration tests require this
     /// functionality.)
-    pub async fn vmm_overwrite_ip_for_test(
+    pub async fn vmm_overwrite_addr_for_test(
         &self,
         opctx: &OpContext,
         vmm_id: &Uuid,
-        new_ip: ipnetwork::IpNetwork,
+        new_addr: SocketAddr,
     ) -> UpdateResult<Vmm> {
+        let new_ip = ipnetwork::IpNetwork::from(new_addr.ip());
+        let new_port = new_addr.port();
         let vmm = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(*vmm_id))
-            .set(dsl::propolis_ip.eq(new_ip))
+            .set((
+                dsl::propolis_ip.eq(new_ip),
+                dsl::propolis_port.eq(new_port as i32),
+            ))
             .returning(Vmm::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await

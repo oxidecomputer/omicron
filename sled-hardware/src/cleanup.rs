@@ -18,6 +18,7 @@ use illumos_utils::ExecutionError;
 use illumos_utils::{execute, PFEXEC};
 use slog::warn;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::process::Command;
 
 pub fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
@@ -45,7 +46,17 @@ fn delete_addresses_matching_prefixes(
     let addrobjs = output
         .stdout
         .lines()
-        .flatten()
+        .filter_map(|line| match line {
+            Ok(line) => Some(line),
+            Err(err) => {
+                warn!(
+                    log,
+                    "ipadm show-addr returned line that wasn't valid UTF-8";
+                    InlineErrorChain::new(&err),
+                );
+                None
+            }
+        })
         .collect::<std::collections::HashSet<_>>();
 
     for addrobj in addrobjs {

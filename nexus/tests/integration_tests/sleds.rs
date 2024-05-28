@@ -48,9 +48,9 @@ async fn sled_instance_list(
 async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    // Verify that there is one sled to begin with.
+    // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
+    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 2);
 
     // Now start a few more sled agents.
     let nsleds = 3;
@@ -76,7 +76,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
 
     // List sleds again.
     let sleds_found = sleds_list(&client, &sleds_url).await;
-    assert_eq!(sleds_found.len(), nsleds + 1);
+    assert_eq!(sleds_found.len(), nsleds + 2);
 
     let sledids_found =
         sleds_found.iter().map(|sv| sv.identity.id).collect::<Vec<Uuid>>();
@@ -97,9 +97,9 @@ async fn test_physical_disk_create_list_delete(
     let external_client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
 
-    // Verify that there is one sled to begin with.
+    // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
+    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
 
     // The test framework may set up some disks initially.
     let disks_url =
@@ -140,9 +140,9 @@ async fn test_physical_disk_create_list_delete(
 async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
 
-    // Verify that there is one sled to begin with.
+    // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
+    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
 
     // Verify that there are no instances.
     let instances_url =

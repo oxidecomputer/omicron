@@ -14,8 +14,8 @@ use const_format::concatcp;
 use diesel::pg::Pg;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use nexus_config::RegionAllocationStrategy;
 use omicron_common::api::external;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 
 type AllColumnsOfRegion = AllColumnsOf<schema::region::table>;
 type AllColumnsOfDataset = AllColumnsOf<schema::dataset::table>;
@@ -116,49 +116,50 @@ pub fn allocation_query(
     SELECT
       dataset.pool_id,
       sum(dataset.size_used) AS size_used
-    FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),");
+    FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),")
+    .sql("
+  candidate_zpools AS (");
 
     // Identifies zpools with enough space for region allocation.
     //
-    // NOTE: This changes the format of the underlying SQL query, as it uses
+    // NOTE: 'distinct_sleds' changes the format of the underlying SQL query, as it uses
     // distinct bind parameters depending on the conditional branch.
-    if distinct_sleds {
-        builder.sql("
-  candidate_zpools AS (
-    SELECT DISTINCT ON (zpool.sled_id)
-      old_zpool_usage.pool_id
+    let builder = if distinct_sleds {
+        builder.sql("SELECT DISTINCT ON (zpool.sled_id) ")
+    } else {
+        builder.sql("SELECT ")
+    };
+    let builder = builder.sql("
+        old_zpool_usage.pool_id
     FROM (
         old_zpool_usage
           INNER JOIN
         (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)
     )
     WHERE (
-      ((old_zpool_usage.size_used + ").param().sql(" ) <= total_size)
+      ((old_zpool_usage.size_used + ").param().sql(" ) <=
+         (SELECT total_size FROM omicron.public.inv_zpool WHERE
+          inv_zpool.id = old_zpool_usage.pool_id
+          ORDER BY inv_zpool.time_collected DESC LIMIT 1)
+      )
       AND
-      (sled.provision_state = 'provisionable')
-    )
-    ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ").param().sql("))),")
-        .bind::<sql_types::BigInt, _>(size_delta as i64)
-        .bind::<sql_types::Bytea, _>(seed.clone())
+      (sled.sled_policy = 'in_service')
+      AND
+      (sled.sled_state = 'active')
+    )"
+    ).bind::<sql_types::BigInt, _>(size_delta as i64);
+
+    let builder = if distinct_sleds {
+        builder
+            .sql("ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ")
+            .param()
+            .sql("))")
+            .bind::<sql_types::Bytea, _>(seed.clone())
     } else {
-        builder.sql("
-  candidate_zpools AS (
-    SELECT
-      old_zpool_usage.pool_id
-    FROM (
-      old_zpool_usage
-      INNER JOIN
-      (zpool INNER JOIN sled ON (zpool.sled_id = sled.id))
-      ON (zpool.id = old_zpool_usage.pool_id)
-    )
-    WHERE (
-      ((old_zpool_usage.size_used + ").param().sql(" ) <= total_size)
-      AND
-      (sled.provision_state = 'provisionable')
-    )
-  ),")
-        .bind::<sql_types::BigInt, _>(size_delta as i64)
+        builder
     }
+    .sql("),");
+
     // Find datasets which could be used for provisioning regions.
     //
     // We only consider datasets which are already allocated as "Crucible".
@@ -167,7 +168,7 @@ pub fn allocation_query(
     // usage as Crucible storage.
     //
     // We select only one dataset from each zpool.
-    .sql("
+    builder.sql("
   candidate_datasets AS (
     SELECT DISTINCT ON (dataset.pool_id)
       dataset.id,
@@ -242,11 +243,12 @@ pub fn allocation_query(
     //
     // Selecting two datasets on the same zpool will not initially be
     // possible, as at the time of writing each zpool only has one dataset.
-    // Additionally, we intend to modify the allocation strategy to select
-    // from 3 distinct sleds, removing the possibility entirely. But, if we
-    // introduce a change that adds another crucible dataset to zpools
-    // before we improve the allocation strategy, this check will make sure
-    // we don't violate drive redundancy, and generate an error instead.
+    // Additionally, provide a configuration option ("distinct_sleds") to modify
+    // the allocation strategy to select from 3 distinct sleds, removing the
+    // possibility entirely. But, if we introduce a change that adds another
+    // crucible dataset to zpools before we improve the allocation strategy,
+    // this check will make sure we don't violate drive redundancy, and generate
+    // an error instead.
     .sql("
   do_insert AS (
     SELECT (((

@@ -26,8 +26,6 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod ledger;
-pub mod nexus_config;
-pub mod postgres_config;
 pub mod update;
 pub mod vlan;
 
@@ -79,3 +77,84 @@ impl slog::KV for FileKv {
 }
 
 pub const OMICRON_DPD_TAG: &str = "omicron";
+
+use futures::Future;
+use slog::warn;
+
+/// Retry a progenitor client operation until a known result is returned.
+///
+/// Saga execution relies on the outcome of an external call being known: since
+/// they are idempotent, reissue the external call until a known result comes
+/// back. Retry if a communication error is seen, or if another retryable error
+/// is seen.
+///
+/// Note that retrying is only valid if the call itself is idempotent.
+pub async fn retry_until_known_result<F, T, E, Fut>(
+    log: &slog::Logger,
+    mut f: F,
+) -> Result<T, progenitor_client::Error<E>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    E: std::fmt::Debug,
+{
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service(),
+        move || {
+            let fut = f();
+            async move {
+                match fut.await {
+                    Err(progenitor_client::Error::CommunicationError(e)) => {
+                        warn!(
+                            log,
+                            "saw transient communication error {}, retrying...",
+                            e,
+                        );
+
+                        Err(backoff::BackoffError::transient(
+                            progenitor_client::Error::CommunicationError(e),
+                        ))
+                    }
+
+                    Err(progenitor_client::Error::ErrorResponse(
+                        response_value,
+                    )) => {
+                        match response_value.status() {
+                            // Retry on 503 or 429
+                            http::StatusCode::SERVICE_UNAVAILABLE
+                            | http::StatusCode::TOO_MANY_REQUESTS => {
+                                Err(backoff::BackoffError::transient(
+                                    progenitor_client::Error::ErrorResponse(
+                                        response_value,
+                                    ),
+                                ))
+                            }
+
+                            // Anything else is a permanent error
+                            _ => Err(backoff::BackoffError::Permanent(
+                                progenitor_client::Error::ErrorResponse(
+                                    response_value,
+                                ),
+                            )),
+                        }
+                    }
+
+                    Err(e) => {
+                        warn!(log, "saw permanent error {}, aborting", e,);
+
+                        Err(backoff::BackoffError::Permanent(e))
+                    }
+
+                    Ok(v) => Ok(v),
+                }
+            }
+        },
+        |error: progenitor_client::Error<_>, delay| {
+            warn!(
+                log,
+                "failed external call ({:?}), will retry in {:?}", error, delay,
+            );
+        },
+    )
+    .await
+}

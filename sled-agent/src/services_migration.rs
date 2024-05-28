@@ -24,8 +24,8 @@
 //! past this change.
 
 use crate::params::{
-    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, ZoneType,
-    OMICRON_ZONES_CONFIG_INITIAL_GENERATION,
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, OmicronZonesConfig,
+    ZoneType,
 };
 use crate::services::{OmicronZoneConfigLocal, OmicronZonesConfigLocal};
 use anyhow::{anyhow, ensure, Context};
@@ -103,8 +103,7 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
         //   some buffer.)
         //
         // In summary, 2 seems fine.
-        let omicron_generation =
-            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_GENERATION).next();
+        let omicron_generation = OmicronZonesConfig::INITIAL_GENERATION.next();
 
         // The ledger generation doesn't really matter.  In case it's useful, we
         // pick the generation from the ledger that we loaded.

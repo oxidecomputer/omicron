@@ -1,0 +1,15 @@
+[package]
+name = "sled-hardware-types"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+illumos-utils.workspace = true
+omicron-common.workspace = true
+schemars.workspace = true
+serde.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+macaddr.workspace = true

@@ -36,36 +36,6 @@
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo-rot-all.zip.sha256.txt"
 #:
-#: [[publish]]
-#: series = "rot-prod-rel"
-#: name = "repo.zip.parta"
-#: from_output = "/work/repo-rot-prod-rel.zip.parta"
-#:
-#: [[publish]]
-#: series = "rot-prod-rel"
-#: name = "repo.zip.partb"
-#: from_output = "/work/repo-rot-prod-rel.zip.partb"
-#:
-#: [[publish]]
-#: series = "rot-prod-rel"
-#: name = "repo.zip.sha256.txt"
-#: from_output = "/work/repo-rot-prod-rel.zip.sha256.txt"
-#:
-#: [[publish]]
-#: series = "rot-staging-dev"
-#: name = "repo.zip.parta"
-#: from_output = "/work/repo-rot-staging-dev.zip.parta"
-#:
-#: [[publish]]
-#: series = "rot-staging-dev"
-#: name = "repo.zip.partb"
-#: from_output = "/work/repo-rot-staging-dev.zip.partb"
-#:
-#: [[publish]]
-#: series = "rot-staging-dev"
-#: name = "repo.zip.sha256.txt"
-#: from_output = "/work/repo-rot-staging-dev.zip.sha256.txt"
-#:
 
 set -o errexit
 set -o pipefail
@@ -93,7 +63,7 @@ target/release/omicron-package -t default target create -i standard -m gimlet -s
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
 rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic
-rm out/omicron-nexus-single-sled.tar.gz # only used for deploy tests
+rm out/nexus-single-sled.tar.gz # only used for deploy tests
 for zone in out/*.tar.gz; do
     target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
 done
@@ -156,7 +126,7 @@ for tag in "${TAGS[@]}"; do
 done
 popd
 
-# Fetch ROT images from dvt-dock.
+# Fetch signed ROT images from dvt-dock.
 source "$TOP/tools/dvt_dock_version"
 git init /work/dvt-dock
 (
@@ -179,28 +149,15 @@ caboose_util_rot() {
     echo "$output_a"
 }
 
-SERIES_LIST=()
+# Add the SP images.
+for board_rev in "${ALL_BOARDS[@]}"; do
+    board=${board_rev%-?}
+    tufaceous_board=${board//sidecar/switch}
+    sp_image="/work/hubris/${board_rev}.zip"
+    sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
+    sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
 
-# Create an initial `manifest-rot-all.toml` containing the SP images for all
-# boards. While we still need to build multiple TUF repos,
-# `add_hubris_artifacts` below will append RoT images to this manifest (in
-# addition to the single-RoT manifest it creates).
-prep_rot_all_series() {
-    series="rot-all"
-
-    SERIES_LIST+=("$series")
-
-    manifest=/work/manifest-$series.toml
-    cp /work/manifest.toml "$manifest"
-
-    for board_rev in "${ALL_BOARDS[@]}"; do
-        board=${board_rev%-?}
-        tufaceous_board=${board//sidecar/switch}
-        sp_image="/work/hubris/${board_rev}.zip"
-        sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
-        sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
-
-        cat >>"$manifest" <<EOF
+    cat >>/work/manifest.toml <<EOF
 [[artifact.${tufaceous_board}_sp]]
 name = "$sp_caboose_board"
 version = "$sp_caboose_version"
@@ -208,21 +165,12 @@ version = "$sp_caboose_version"
 kind = "file"
 path = "$sp_image"
 EOF
-    done
-}
-prep_rot_all_series
+done
 
+# Add the ROT images.
 add_hubris_artifacts() {
-    series="$1"
-    rot_dir="$2"
-    rot_version="$3"
-    shift 3
-
-    SERIES_LIST+=("$series")
-
-    manifest=/work/manifest-$series.toml
-    manifest_rot_all=/work/manifest-rot-all.toml
-    cp /work/manifest.toml "$manifest"
+    rot_dir="$1"
+    rot_version="$2"
 
     for board in gimlet psc sidecar; do
         tufaceous_board=${board//sidecar/switch}
@@ -231,21 +179,7 @@ add_hubris_artifacts() {
         rot_caboose_version=$(caboose_util_rot read-version "$rot_image_a" "$rot_image_b")
         rot_caboose_board=$(caboose_util_rot read-board "$rot_image_a" "$rot_image_b")
 
-        cat >>"$manifest" <<EOF
-[[artifact.${tufaceous_board}_rot]]
-name = "$rot_caboose_board"
-version = "$rot_caboose_version"
-[artifact.${tufaceous_board}_rot.source]
-kind = "composite-rot"
-[artifact.${tufaceous_board}_rot.source.archive_a]
-kind = "file"
-path = "$rot_image_a"
-[artifact.${tufaceous_board}_rot.source.archive_b]
-kind = "file"
-path = "$rot_image_b"
-EOF
-
-        cat >>"$manifest_rot_all" <<EOF
+        cat >>/work/manifest.toml <<EOF
 [[artifact.${tufaceous_board}_rot]]
 name = "$rot_caboose_board-${rot_dir//\//-}"
 version = "$rot_caboose_version"
@@ -259,38 +193,20 @@ kind = "file"
 path = "$rot_image_b"
 EOF
     done
-
-    for board_rev in "$@"; do
-        board=${board_rev%-?}
-        tufaceous_board=${board//sidecar/switch}
-        sp_image="/work/hubris/${board_rev}.zip"
-        sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
-        sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
-
-        cat >>"$manifest" <<EOF
-[[artifact.${tufaceous_board}_sp]]
-name = "$sp_caboose_board"
-version = "$sp_caboose_version"
-[artifact.${tufaceous_board}_sp.source]
-kind = "file"
-path = "$sp_image"
-EOF
-    done
 }
-# usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.5  "${ALL_BOARDS[@]}"
-add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.5     "${ALL_BOARDS[@]}"
+# usage:              ROT_DIR      ROT_VERSION
+add_hubris_artifacts  staging/dev  cert-staging-dev-v1.0.7
+add_hubris_artifacts  prod/rel     cert-prod-rel-v1.0.7
 
-for series in "${SERIES_LIST[@]}"; do
-    /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip
-    digest -a sha256 /work/repo-"$series".zip > /work/repo-"$series".zip.sha256.txt
+# Build the TUF ZIP.
+/work/tufaceous assemble --no-generate-key /work/manifest.toml /work/repo-rot-all.zip
+digest -a sha256 /work/repo-rot-all.zip > /work/repo-rot-all.zip.sha256.txt
 
-    #
-    # XXX: There are some issues downloading Buildomat artifacts > 1 GiB, see
-    # oxidecomputer/buildomat#36.
-    #
-    split -a 1 -b 1024m /work/repo-"$series".zip /work/repo-"$series".zip.part
-    rm /work/repo-"$series".zip
-    # Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
-    touch /work/repo-"$series".zip.partb
-done
+#
+# XXX: There are some issues downloading Buildomat artifacts > 1 GiB, see
+# oxidecomputer/buildomat#36.
+#
+split -a 1 -b 1024m /work/repo-rot-all.zip /work/repo-rot-all.zip.part
+rm /work/repo-rot-all.zip
+# Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
+touch /work/repo-rot-all.zip.partb

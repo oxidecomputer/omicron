@@ -1,0 +1,14 @@
+sled-list
+inventory-list
+blueprint-list
+
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-add dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-list
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-add 90c1102a-b9f5-4d88-92a2-60d54a2d98cc
+sled-add 04ef3330-c682-4a08-8def-fcc4bef31bcd
+sled-list
+
+inventory-generate
+inventory-list

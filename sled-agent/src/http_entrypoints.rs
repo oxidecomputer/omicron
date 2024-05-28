@@ -413,6 +413,7 @@ async fn instance_register(
             body_args.instance_runtime,
             body_args.vmm_runtime,
             body_args.propolis_addr,
+            body_args.metadata,
         )
         .await?,
     ))
@@ -971,7 +972,7 @@ async fn inventory(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = request_context.context();
-    Ok(HttpResponseOk(sa.inventory()?))
+    Ok(HttpResponseOk(sa.inventory().await?))
 }
 
 /// Get the internal state of the local bootstore node

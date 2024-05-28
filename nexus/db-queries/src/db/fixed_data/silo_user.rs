@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_PRIVILEGED: Lazy<db::model::SiloUser> = Lazy::new(|| {
     db::model::SiloUser::new(
-        *db::fixed_data::silo::SILO_ID,
+        *db::fixed_data::silo::DEFAULT_SILO_ID,
         // "4007" looks a bit like "root".
         "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
         "privileged".into(),
@@ -39,7 +39,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<db::model::RoleAssignment>> =
                 db::model::IdentityType::SiloUser,
                 USER_TEST_PRIVILEGED.id(),
                 role_builtin::SILO_ADMIN.resource_type,
-                *db::fixed_data::silo::SILO_ID,
+                *db::fixed_data::silo::DEFAULT_SILO_ID,
                 role_builtin::SILO_ADMIN.role_name,
             ),
         ]
@@ -52,7 +52,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<db::model::RoleAssignment>> =
 pub static USER_TEST_UNPRIVILEGED: Lazy<db::model::SiloUser> =
     Lazy::new(|| {
         db::model::SiloUser::new(
-            *db::fixed_data::silo::SILO_ID,
+            *db::fixed_data::silo::DEFAULT_SILO_ID,
             // 60001 is the decimal uid for "nobody" on Helios.
             "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
             "unprivileged".into(),

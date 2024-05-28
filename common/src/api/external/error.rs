@@ -9,8 +9,10 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
+use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::SlogInlineError;
 use std::fmt::Display;
 use uuid::Uuid;
 
@@ -25,7 +27,15 @@ use uuid::Uuid;
 /// General best practices for error design apply here.  Where possible, we want
 /// to reuse existing variants rather than inventing new ones to distinguish
 /// cases that no programmatic consumer needs to distinguish.
-#[derive(Clone, Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    thiserror::Error,
+    PartialEq,
+    Serialize,
+    SlogInlineError,
+)]
 pub enum Error {
     /// An object needed as part of this operation was not found.
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
@@ -70,6 +80,11 @@ pub enum Error {
 
     #[error("Conflict: {}", .message.display_internal())]
     Conflict { message: MessagePair },
+
+    /// A generic 404 response. If there is an applicable ResourceType, use
+    /// ObjectNotFound instead.
+    #[error("Not found: {}", .message.display_internal())]
+    NotFound { message: MessagePair },
 }
 
 /// Represents an error message which has an external component, along with
@@ -152,6 +167,11 @@ pub enum LookupType {
 }
 
 impl LookupType {
+    /// Constructs a `ById` lookup type from a typed or untyped UUID.
+    pub fn by_id<T: GenericUuid>(id: T) -> Self {
+        LookupType::ById(id.into_untyped_uuid())
+    }
+
     /// Returns an ObjectNotFound error appropriate for the case where this
     /// lookup failed
     pub fn into_not_found(self, type_name: ResourceType) -> Error {
@@ -193,6 +213,7 @@ impl Error {
             | Error::InsufficientCapacity { .. }
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
+            | Error::NotFound { .. }
             | Error::Conflict { .. } => false,
         }
     }
@@ -294,6 +315,15 @@ impl Error {
         Error::Conflict { message: MessagePair::new(message.into()) }
     }
 
+    /// Generates an [`Error::NotFound`] with a specific message.
+    ///
+    /// This is used in cases where a generic 404 is required. For cases where
+    /// there is a ResourceType, use a function that produces
+    /// [`Error::ObjectNotFound`] instead.
+    pub fn non_resourcetype_not_found(message: impl Into<String>) -> Error {
+        Error::NotFound { message: MessagePair::new(message.into()) }
+    }
+
     /// Given an [`Error`] with an internal message, return the same error with
     /// `context` prepended to it to provide more context
     ///
@@ -346,6 +376,9 @@ impl Error {
                 }
             }
             Error::Conflict { message } => Error::Conflict {
+                message: message.with_internal_context(context),
+            },
+            Error::NotFound { message } => Error::NotFound {
                 message: message.with_internal_context(context),
             },
         }
@@ -469,6 +502,17 @@ impl From<Error> for HttpError {
                     internal_message,
                 }
             }
+
+            Error::NotFound { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::NOT_FOUND,
+                    error_code: Some(String::from("Not Found")),
+                    external_message,
+                    internal_message,
+                }
+            }
         }
     }
 }
@@ -496,7 +540,8 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
             )
             | progenitor::progenitor_client::Error::UnexpectedResponse(_)
             | progenitor::progenitor_client::Error::InvalidUpgrade(_)
-            | progenitor::progenitor_client::Error::ResponseBodyError(_) => {
+            | progenitor::progenitor_client::Error::ResponseBodyError(_)
+            | progenitor::progenitor_client::Error::PreHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

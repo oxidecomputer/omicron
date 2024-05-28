@@ -15,8 +15,10 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 libc.workspace = true
+nexus-config.workspace = true
 omicron-common.workspace = true
 pem.workspace = true
+regex.workspace = true
 ring.workspace = true
 rustls.workspace = true
 slog.workspace = true
@@ -28,13 +30,23 @@ tokio = { workspace = true, features = ["full"] }
 tokio-postgres.workspace = true
 usdt.workspace = true
 rcgen.workspace = true
-regex.workspace = true
 reqwest.workspace = true
 walkdir.workspace = true
 omicron-workspace-hack.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+gethostname.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+libfalcon.workspace = true
+
+[[bin]]
+name = "falcon_runner"
+
+[[bin]]
+name = "falcon_runner_cli"

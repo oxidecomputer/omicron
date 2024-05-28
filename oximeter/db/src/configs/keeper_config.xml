@@ -9,7 +9,7 @@
     </logger>
 
     <!-- To allow all use :: -->
-    <listen_host from_env="CH_LISTEN_ADDR"/> 
+    <listen_host from_env="CH_LISTEN_ADDR"/>
     <path replace="true" from_env="CH_DATASTORE"/>
 
     <keeper_server>

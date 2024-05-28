@@ -6,6 +6,7 @@
 
 use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -22,6 +23,7 @@ use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -45,6 +47,7 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Filter a "silo_list" query based on silos' discoverability
+#[derive(Debug, Clone, Copy)]
 pub enum Discoverability {
     /// Show all Silos
     All,
@@ -282,7 +285,8 @@ impl DataStore {
                         .await?;
                 }
 
-                self.dns_update(nexus_opctx, &conn, dns_update).await?;
+                self.dns_update_incremental(nexus_opctx, &conn, dns_update)
+                    .await?;
 
                 self.silo_quotas_create(
                     &conn,
@@ -348,6 +352,34 @@ impl DataStore {
             .load_async::<Silo>(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all Silos, making as many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn silo_list_all_batched(
+        &self,
+        opctx: &OpContext,
+        discoverability: Discoverability,
+    ) -> ListResultVec<Silo> {
+        opctx.check_complex_operations_allowed()?;
+        let mut all_silos = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .silos_list(
+                    opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    discoverability,
+                )
+                .await?;
+            paginator =
+                p.found_batch(&batch, &|s: &nexus_db_model::Silo| s.id());
+            all_silos.extend(batch);
+        }
+        Ok(all_silos)
     }
 
     pub async fn silo_delete(
@@ -420,7 +452,7 @@ impl DataStore {
             )
             .await?;
 
-            self.dns_update(dns_opctx, &conn, dns_update).await?;
+            self.dns_update_incremental(dns_opctx, &conn, dns_update).await?;
 
             info!(opctx.log, "deleted silo {}", id);
 

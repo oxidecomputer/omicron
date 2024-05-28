@@ -9,6 +9,10 @@ use crate::api::external::{
     InstanceState, IpNet, SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
+use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsRepairKind;
+use omicron_uuid_kinds::UpstairsSessionKind;
 use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -250,4 +254,83 @@ mod tests {
 pub enum HostIdentifier {
     Ip(IpNet),
     Vpc(Vni),
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstairsRepairType {
+    Live,
+    Reconciliation,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct DownstairsUnderRepair {
+    pub region_uuid: TypedUuid<DownstairsRegionKind>,
+    pub target_addr: std::net::SocketAddrV6,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct RepairStartInfo {
+    pub time: DateTime<Utc>,
+    pub session_id: TypedUuid<UpstairsSessionKind>,
+    pub repair_id: TypedUuid<UpstairsRepairKind>,
+    pub repair_type: UpstairsRepairType,
+    pub repairs: Vec<DownstairsUnderRepair>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct RepairFinishInfo {
+    pub time: DateTime<Utc>,
+    pub session_id: TypedUuid<UpstairsSessionKind>,
+    pub repair_id: TypedUuid<UpstairsRepairKind>,
+    pub repair_type: UpstairsRepairType,
+    pub repairs: Vec<DownstairsUnderRepair>,
+    pub aborted: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct RepairProgress {
+    pub time: DateTime<Utc>,
+    pub current_item: i64,
+    pub total_items: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum DownstairsClientStopRequestReason {
+    Replacing,
+    Disabled,
+    FailedReconcile,
+    IOError,
+    BadNegotiationOrder,
+    Incompatible,
+    FailedLiveRepair,
+    TooManyOutstandingJobs,
+    Deactivated,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct DownstairsClientStopRequest {
+    pub time: DateTime<Utc>,
+    pub reason: DownstairsClientStopRequestReason,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum DownstairsClientStoppedReason {
+    ConnectionTimeout,
+    ConnectionFailed,
+    Timeout,
+    WriteFailed,
+    ReadFailed,
+    RequestedStop,
+    Finished,
+    QueueClosed,
+    ReceiveTaskCancelled,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct DownstairsClientStopped {
+    pub time: DateTime<Utc>,
+    pub reason: DownstairsClientStoppedReason,
 }

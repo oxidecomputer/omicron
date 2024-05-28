@@ -39,11 +39,13 @@ use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvOmicronZoneNic;
+use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledOmicronZones;
+use nexus_db_model::InvZpool;
 use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SledRole;
 use nexus_db_model::SledRoleEnum;
@@ -125,6 +127,29 @@ impl DataStore {
                 ))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+        // Pull disks out of all sled agents
+        let disks: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent.disks.iter().map(|disk| {
+                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
+                })
+            })
+            .collect();
+
+        // Pull zpools out of all sled agents
+        let zpools: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent
+                    .zpools
+                    .iter()
+                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
+            })
+            .collect();
+
         // Partition the sled agents into those with an associated baseboard id
         // and those without one.  We handle these pretty differently.
         let (sled_agents_baseboards, sled_agents_no_baseboards): (
@@ -639,6 +664,44 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the physical disks we found.
+            {
+                use db::schema::inv_physical_disk::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut disks = disks.into_iter();
+                loop {
+                    let some_disks =
+                        disks.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_disks.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_physical_disk)
+                        .values(some_disks)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the zpools we found.
+            {
+                use db::schema::inv_zpool::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut zpools = zpools.into_iter();
+                loop {
+                    let some_zpools =
+                        zpools.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_zpools.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zpool)
+                        .values(some_zpools)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the sled agents that we found.  In practice, we'd
             // expect these to all have baseboards (if using Oxide hardware) or
             // none have baseboards (if not).
@@ -1029,9 +1092,11 @@ impl DataStore {
             ncabooses,
             nrot_pages,
             nsled_agents,
+            nphysical_disks,
             nsled_agent_zones,
             nzones,
             nnics,
+            nzpools,
             nerrors,
         ) = conn
             .transaction_async(|conn| async move {
@@ -1100,6 +1165,17 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows for physical disks found.
+                let nphysical_disks = {
+                    use db::schema::inv_physical_disk::dsl;
+                    diesel::delete(
+                        dsl::inv_physical_disk
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows associated with Omicron zones
                 let nsled_agent_zones = {
                     use db::schema::inv_sled_omicron_zones::dsl;
@@ -1131,6 +1207,16 @@ impl DataStore {
                     .await?
                 };
 
+                let nzpools = {
+                    use db::schema::inv_zpool::dsl;
+                    diesel::delete(
+                        dsl::inv_zpool
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows for errors encountered.
                 let nerrors = {
                     use db::schema::inv_collection_error::dsl;
@@ -1149,9 +1235,11 @@ impl DataStore {
                     ncabooses,
                     nrot_pages,
                     nsled_agents,
+                    nphysical_disks,
                     nsled_agent_zones,
                     nzones,
                     nnics,
+                    nzpools,
                     nerrors,
                 ))
             })
@@ -1171,9 +1259,11 @@ impl DataStore {
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
+            "nphysical_disks" => nphysical_disks,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
+            "nzpools" => nzpools,
             "nerrors" => nerrors,
         );
 
@@ -1391,6 +1481,68 @@ impl DataStore {
             rows
         };
 
+        // Mapping of "Sled ID" -> "All disks reported by that sled"
+        let physical_disks: BTreeMap<
+            Uuid,
+            Vec<nexus_types::inventory::PhysicalDisk>,
+        > = {
+            use db::schema::inv_physical_disk::dsl;
+
+            let mut disks = BTreeMap::<
+                Uuid,
+                Vec<nexus_types::inventory::PhysicalDisk>,
+            >::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_physical_disk,
+                    (dsl::sled_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvPhysicalDisk::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.slot));
+                for disk in batch {
+                    disks.entry(disk.sled_id).or_default().push(disk.into());
+                }
+            }
+            disks
+        };
+
+        // Mapping of "Sled ID" -> "All zpools reported by that sled"
+        let zpools: BTreeMap<Uuid, Vec<nexus_types::inventory::Zpool>> = {
+            use db::schema::inv_zpool::dsl;
+
+            let mut zpools =
+                BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zpool,
+                    (dsl::sled_id, dsl::id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvZpool::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                for zpool in batch {
+                    zpools.entry(zpool.sled_id).or_default().push(zpool.into());
+                }
+            }
+            zpools
+        };
+
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
         let baseboard_id_ids: BTreeSet<_> = sps
@@ -1494,6 +1646,14 @@ impl DataStore {
                         ),
                         usable_physical_ram: s.usable_physical_ram.into(),
                         reservoir_size: s.reservoir_size.into(),
+                        disks: physical_disks
+                            .get(&sled_id)
+                            .map(|disks| disks.to_vec())
+                            .unwrap_or_default(),
+                        zpools: zpools
+                            .get(&sled_id)
+                            .map(|zpools| zpools.to_vec())
+                            .unwrap_or_default(),
                     };
                     Ok((sled_id, sled_agent))
                 })
@@ -1914,8 +2074,8 @@ impl DataStoreInventoryTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::datastore_test;
     use crate::db::datastore::inventory::DataStoreInventoryTest;
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::DataStoreConnection;
     use crate::db::schema;
     use anyhow::Context;
@@ -1933,6 +2093,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
 
     struct CollectionCounts {
@@ -2379,6 +2540,12 @@ mod test {
                     .unwrap();
             assert_eq!(0, count);
             let count = schema::inv_sled_agent::dsl::inv_sled_agent
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_physical_disk::dsl::inv_physical_disk
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
                 .await

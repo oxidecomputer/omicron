@@ -1,0 +1,58 @@
+> sled-list
+ID NZPOOLS SUBNET 
+
+> inventory-list
+ID NERRORS TIME_DONE 
+
+> blueprint-list
+ID 
+
+> 
+
+> sled-show REDACTED_UUID_REDACTED_UUID_REDACTED
+error: no sled with id REDACTED_UUID_REDACTED_UUID_REDACTED
+
+> sled-add REDACTED_UUID_REDACTED_UUID_REDACTED
+added sled
+
+> sled-list
+ID                                   NZPOOLS SUBNET                  
+REDACTED_UUID_REDACTED_UUID_REDACTED 10      fd00:1122:3344:101::/64 
+
+> sled-show REDACTED_UUID_REDACTED_UUID_REDACTED
+sled REDACTED_UUID_REDACTED_UUID_REDACTED
+subnet fd00:1122:3344:101::/64
+zpools (10):
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+    ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED")
+
+
+> sled-add REDACTED_UUID_REDACTED_UUID_REDACTED
+added sled
+
+> sled-add REDACTED_UUID_REDACTED_UUID_REDACTED
+added sled
+
+> sled-list
+ID                                   NZPOOLS SUBNET                  
+REDACTED_UUID_REDACTED_UUID_REDACTED 10      fd00:1122:3344:103::/64 
+REDACTED_UUID_REDACTED_UUID_REDACTED 10      fd00:1122:3344:102::/64 
+REDACTED_UUID_REDACTED_UUID_REDACTED 10      fd00:1122:3344:101::/64 
+
+> 
+
+> inventory-generate
+generated inventory collection REDACTED_UUID_REDACTED_UUID_REDACTED from configured sleds
+
+> inventory-list
+ID                                   NERRORS TIME_DONE                
+REDACTED_UUID_REDACTED_UUID_REDACTED 0       <REDACTED     TIMESTAMP> 
+

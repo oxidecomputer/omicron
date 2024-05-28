@@ -4,7 +4,7 @@
 
 //! General-purpose types for instrumenting code to producer oximeter metrics.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 #[cfg(feature = "http-instruments")]
 pub mod http;

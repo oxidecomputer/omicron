@@ -4,17 +4,15 @@
 
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
-    instance_ip_move_state, instance_ip_remove_opte, ModifyStateForExternalIp,
+    instance_ip_move_state, instance_ip_remove_opte, ExternalIpAttach,
+    ModifyStateForExternalIp,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
-use crate::app::{authn, authz, db};
-use crate::external_api::params;
+use crate::app::{authn, authz};
 use nexus_db_model::{IpAttachState, Ipv4NatEntry};
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{Error, NameOrId};
-use ref_cast::RefCast;
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -72,7 +70,7 @@ declare_saga_actions! {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
-    pub create_params: params::ExternalIpCreate,
+    pub create_params: ExternalIpAttach,
     pub authz_instance: authz::Instance,
     pub project_id: Uuid,
     /// Authentication context to use to fetch the instance's current state from
@@ -93,7 +91,7 @@ async fn siia_begin_attach_ip(
 
     match &params.create_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool } => {
+        ExternalIpAttach::Ephemeral { pool } => {
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
@@ -125,33 +123,19 @@ async fn siia_begin_attach_ip(
                 })
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpCreate::Floating { floating_ip } => {
-            let (.., authz_fip) = match floating_ip {
-                NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
-                    .project_id(params.project_id)
-                    .floating_ip_name(db::model::Name::ref_cast(name)),
-                NameOrId::Id(id) => {
-                    LookupPath::new(&opctx, datastore).floating_ip_id(*id)
-                }
-            }
-            .lookup_for(authz::Action::Modify)
+        ExternalIpAttach::Floating { floating_ip } => datastore
+            .floating_ip_begin_attach(
+                &opctx,
+                &floating_ip,
+                params.authz_instance.id(),
+                false,
+            )
             .await
-            .map_err(ActionError::action_failed)?;
-
-            datastore
-                .floating_ip_begin_attach(
-                    &opctx,
-                    &authz_fip,
-                    params.authz_instance.id(),
-                    false,
-                )
-                .await
-                .map_err(ActionError::action_failed)
-                .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
-                    external_ip: Some(external_ip),
-                    do_saga,
-                })
-        }
+            .map_err(ActionError::action_failed)
+            .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
+                external_ip: Some(external_ip),
+                do_saga,
+            }),
     }
 }
 
@@ -349,7 +333,7 @@ impl NexusSaga for SagaInstanceIpAttach {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::app::{saga::create_saga_dag, sagas::test_helpers};
+    use crate::app::{db, saga::create_saga_dag, sagas::test_helpers};
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -357,12 +341,13 @@ pub(crate) mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_floating_ip, create_instance,
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::{Name, SimpleIdentity};
+    use omicron_common::api::external::SimpleIdentity;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -391,17 +376,22 @@ pub(crate) mod test {
         datastore: &db::DataStore,
         use_floating: bool,
     ) -> Params {
+        let project_name = db::model::Name(PROJECT_NAME.parse().unwrap());
         let create_params = if use_floating {
-            params::ExternalIpCreate::Floating {
-                floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
-            }
+            let (.., floating_ip) = LookupPath::new(opctx, datastore)
+                .project_name(&project_name)
+                .floating_ip_name(&db::model::Name(FIP_NAME.parse().unwrap()))
+                .lookup_for(authz::Action::Modify)
+                .await
+                .unwrap();
+            ExternalIpAttach::Floating { floating_ip }
         } else {
-            params::ExternalIpCreate::Ephemeral { pool: None }
+            ExternalIpAttach::Ephemeral { pool: None }
         };
 
         let (.., authz_project, authz_instance) =
             LookupPath::new(opctx, datastore)
-                .project_name(&db::model::Name(PROJECT_NAME.parse().unwrap()))
+                .project_name(&project_name)
                 .instance_name(&db::model::Name(INSTANCE_NAME.parse().unwrap()))
                 .lookup_for(authz::Action::Modify)
                 .await

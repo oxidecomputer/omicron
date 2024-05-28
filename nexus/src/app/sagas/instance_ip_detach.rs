@@ -357,6 +357,8 @@ pub(crate) mod test {
             .project_name(&proj_name)
             .instance_name(&inst_name);
 
+        let (.., authz_proj, authz_instance, _) = lookup.fetch().await.unwrap();
+
         for use_float in [false, true] {
             let params = instance_ip_attach::test::new_test_params(
                 opctx, datastore, use_float,
@@ -365,8 +367,9 @@ pub(crate) mod test {
             nexus
                 .instance_attach_external_ip(
                     opctx,
-                    &lookup,
-                    &params.create_params,
+                    authz_instance.clone(),
+                    authz_proj.id(),
+                    params.create_params,
                 )
                 .await
                 .unwrap();

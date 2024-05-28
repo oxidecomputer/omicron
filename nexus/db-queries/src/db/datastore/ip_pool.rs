@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`IpPool`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -25,6 +26,7 @@ use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::TransactionError;
@@ -48,6 +50,16 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use uuid::Uuid;
+
+pub struct IpsAllocated {
+    pub ipv4: i64,
+    pub ipv6: i64,
+}
+
+pub struct IpsCapacity {
+    pub ipv4: u32,
+    pub ipv6: u128,
+}
 
 impl DataStore {
     /// List IP Pools
@@ -320,6 +332,86 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_pool),
                 )
             })
+    }
+
+    pub async fn ip_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<IpsAllocated, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+
+        use db::schema::external_ip;
+        use diesel::dsl::sql;
+        use diesel::sql_types::BigInt;
+
+        let (ipv4, ipv6) = external_ip::table
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
+            .filter(external_ip::time_deleted.is_null())
+            // need to do distinct IP because SNAT IPs are shared between
+            // multiple instances, and each gets its own row in the table
+            .select((
+                sql::<BigInt>(
+                    "count(distinct ip) FILTER (WHERE family(ip) = 4)",
+                ),
+                sql::<BigInt>(
+                    "count(distinct ip) FILTER (WHERE family(ip) = 6)",
+                ),
+            ))
+            .first_async::<(i64, i64)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(IpsAllocated { ipv4, ipv6 })
+    }
+
+    pub async fn ip_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<IpsCapacity, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+
+        use db::schema::ip_pool_range;
+
+        let ranges = ip_pool_range::table
+            .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
+            .filter(ip_pool_range::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            // This is a rare unpaginated DB query, which means we are
+            // vulnerable to a resource exhaustion attack in which someone
+            // creates a very large number of ranges in order to make this
+            // query slow. In order to mitigate that, we limit the query to the
+            // (current) max allowed page size, effectively making this query
+            // exactly as vulnerable as if it were paginated. If there are more
+            // than 10,000 ranges in a pool, we will undercount, but I have a
+            // hard time seeing that as a practical problem.
+            .limit(10000)
+            .get_results_async::<IpPoolRange>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })?;
+
+        let mut ipv4: u32 = 0;
+        let mut ipv6: u128 = 0;
+
+        for range in &ranges {
+            let r = IpRange::from(range);
+            match r {
+                IpRange::V4(r) => ipv4 += r.len(),
+                IpRange::V6(r) => ipv6 += r.len(),
+            }
+        }
+        Ok(IpsCapacity { ipv4, ipv6 })
     }
 
     pub async fn ip_pool_silo_list(
@@ -669,6 +761,33 @@ impl DataStore {
             })
     }
 
+    /// List all IP pool ranges for a given pool, making as many queries as
+    /// needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn ip_pool_list_ranges_batched(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> ListResultVec<IpPoolRange> {
+        opctx.check_complex_operations_allowed()?;
+        let mut ip_ranges = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
+                .await?;
+            // The use of `last_address` here assumes `paginator` is sorting
+            // in Ascending order (which it does - see the implementation of
+            // `current_pagparams()`).
+            paginator = p.found_batch(&batch, &|r| r.last_address);
+            ip_ranges.extend(batch);
+        }
+        Ok(ip_ranges)
+    }
+
     pub async fn ip_pool_add_range(
         &self,
         opctx: &OpContext,
@@ -816,11 +935,15 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::datastore::datastore_test;
-    use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::model::{
+        IpPool, IpPoolResource, IpPoolResourceType, Project,
+    };
     use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
+    use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
@@ -1042,6 +1165,157 @@ mod test {
         let is_internal =
             datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
         assert_eq!(is_internal, Ok(false));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ip_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ip_utilization");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let project = Project::new(
+            authz_silo.id(),
+            params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-project".parse().unwrap(),
+                    description: "".to_string(),
+                },
+            },
+        );
+        let (.., project) =
+            datastore.project_create(&opctx, project).await.unwrap();
+
+        // create an IP pool for the silo, add a range to it, and link it to the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "my-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // capacity of zero because there are no ranges
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 0);
+        assert_eq!(max_ips.ipv6, 0);
+
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 1),
+                std::net::Ipv4Addr::new(10, 0, 0, 5),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &range)
+            .await
+            .expect("Could not add range");
+
+        // now it has a capacity of 5 because we added the range
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 0);
+
+        let link = IpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Could not link pool to silo");
+
+        let ip_count = datastore
+            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(ip_count.ipv4, 0);
+        assert_eq!(ip_count.ipv6, 0);
+
+        let identity = IdentityMetadataCreateParams {
+            name: "my-ip".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip = datastore
+            .allocate_floating_ip(&opctx, project.id(), identity, None, None)
+            .await
+            .expect("Could not allocate floating IP");
+        assert_eq!(ip.ip.to_string(), "10.0.0.1/32");
+
+        let ip_count = datastore
+            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(ip_count.ipv4, 1);
+        assert_eq!(ip_count.ipv6, 0);
+
+        // allocating one has nothing to do with total capacity
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 0);
+
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 20),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .await
+            .expect("Could not add range");
+
+        // now test with additional v6 range
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 11 + 65536);
+
+        // add a giant range for fun
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
+                std::net::Ipv6Addr::new(
+                    0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+                ),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .await
+            .expect("Could not add range");
+
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 1208925819614629174706166);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

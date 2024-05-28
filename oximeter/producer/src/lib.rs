@@ -38,8 +38,8 @@ pub enum Error {
     #[error("Error running producer HTTP server: {0}")]
     Server(String),
 
-    #[error("Error registering as metric producer: {0}")]
-    RegistrationError(String),
+    #[error("Error registering as metric producer: {msg}")]
+    RegistrationError { retryable: bool, msg: String },
 
     #[error("Producer registry and config UUIDs do not match")]
     UuidMismatch,
@@ -251,11 +251,19 @@ pub async fn register(
 ) -> Result<(), Error> {
     let client =
         nexus_client::Client::new(&format!("http://{}", address), log.clone());
-    client
-        .cpapi_producers_post(&server_info.into())
-        .await
-        .map(|_| ())
-        .map_err(|msg| Error::RegistrationError(msg.to_string()))
+    client.cpapi_producers_post(&server_info.into()).await.map(|_| ()).map_err(
+        |err| {
+            let retryable = match &err {
+                nexus_client::Error::CommunicationError(..) => true,
+                nexus_client::Error::ErrorResponse(resp) => {
+                    resp.status().is_server_error()
+                }
+                _ => false,
+            };
+            let msg = err.to_string();
+            Error::RegistrationError { retryable, msg }
+        },
+    )
 }
 
 /// Handle a request to pull available metric data from a [`ProducerRegistry`].

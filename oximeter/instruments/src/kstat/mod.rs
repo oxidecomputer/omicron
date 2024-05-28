@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Types for publishing kernel statistics via oximeter.
 //!
@@ -87,6 +87,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(any(feature = "datalink", test))]
 pub mod link;
 mod sampler;
 
@@ -206,9 +207,9 @@ pub fn hrtime_to_utc(hrtime: i64) -> Result<DateTime<Utc>, Error> {
     }
 }
 
-// Helper trait for converting a `NamedData` item into a specific contained data
-// type, if possible.
-pub(crate) trait ConvertNamedData {
+/// Helper trait for converting a `NamedData` item into a specific contained data
+/// type, if possible.
+pub trait ConvertNamedData {
     fn as_i32(&self) -> Result<i32, Error>;
     fn as_u32(&self) -> Result<u32, Error>;
     fn as_i64(&self) -> Result<i64, Error>;

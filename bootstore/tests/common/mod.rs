@@ -12,7 +12,7 @@ use bootstore::schemes::v0::{
     ApiError, Envelope, Fsm, FsmConfig, Msg, MsgError, RackUuid, Request,
     RequestType, Response, ResponseType,
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 

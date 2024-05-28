@@ -44,14 +44,13 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_HTTP_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
-/// The port propolis-server listens on inside the propolis zone.
-pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
+pub const LLDP_PORT: u16 = 12230;
 pub const MGD_PORT: u16 = 4676;
 pub const DDMD_PORT: u16 = 8000;
 pub const MGS_PORT: u16 = 12225;
@@ -422,6 +421,14 @@ impl IpRange {
             IpRange::V6(ip6) => IpRangeIter::V6(ip6.iter()),
         }
     }
+
+    // Has to be u128 to accommodate IPv6
+    pub fn len(&self) -> u128 {
+        match self {
+            IpRange::V4(ip4) => u128::from(ip4.len()),
+            IpRange::V6(ip6) => ip6.len(),
+        }
+    }
 }
 
 impl From<IpAddr> for IpRange {
@@ -509,6 +516,12 @@ impl Ipv4Range {
     pub fn iter(&self) -> Ipv4RangeIter {
         Ipv4RangeIter { next: Some(self.first.into()), last: self.last.into() }
     }
+
+    pub fn len(&self) -> u32 {
+        let start_num = u32::from(self.first);
+        let end_num = u32::from(self.last);
+        end_num - start_num + 1
+    }
 }
 
 impl From<Ipv4Addr> for Ipv4Range {
@@ -564,6 +577,12 @@ impl Ipv6Range {
 
     pub fn iter(&self) -> Ipv6RangeIter {
         Ipv6RangeIter { next: Some(self.first.into()), last: self.last.into() }
+    }
+
+    pub fn len(&self) -> u128 {
+        let start_num = u128::from(self.first);
+        let end_num = u128::from(self.last);
+        end_num - start_num + 1
     }
 }
 
@@ -780,6 +799,19 @@ mod test {
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
             ]
         );
+    }
+
+    #[test]
+    fn test_ip_range_length() {
+        let lo = Ipv4Addr::new(10, 0, 0, 1);
+        let hi = Ipv4Addr::new(10, 0, 0, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        assert_eq!(range.len(), 3);
+
+        let lo = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+        let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        assert_eq!(range.len(), 2u128.pow(16) + 3);
     }
 
     #[test]

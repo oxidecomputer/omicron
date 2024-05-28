@@ -127,6 +127,7 @@ mod test {
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),
                 bgp: Vec::new(),
+                bfd: Vec::new(),
             },
         };
 

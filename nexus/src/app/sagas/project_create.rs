@@ -245,7 +245,6 @@ mod test {
                         .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
                         // ignore built-in services project
                         .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
-
                         .select(VirtualProvisioningCollection::as_select())
                         .get_results_async::<VirtualProvisioningCollection>(&conn)
                         .await

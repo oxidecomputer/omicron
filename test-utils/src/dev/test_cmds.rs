@@ -120,3 +120,73 @@ pub fn temp_file_path(label: &str) -> PathBuf {
 pub fn error_for_enoent() -> String {
     io::Error::from_raw_os_error(libc::ENOENT).to_string()
 }
+
+/// Redacts text from a string (usually stdout/stderr) that may change from
+/// invocation to invocation (e.g., assigned TCP port numbers, timestamps)
+///
+/// This allows use to use expectorate to verify the shape of the CLI output.
+pub fn redact_variable(input: &str, extra_redactions: &[&str]) -> String {
+    // Replace TCP port numbers.  We include the localhost characters to avoid
+    // catching any random sequence of numbers.
+    let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
+        .unwrap()
+        .replace_all(input, "[::1]:REDACTED_PORT")
+        .to_string();
+    let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
+        .unwrap()
+        .replace_all(&s, "[::ffff:127.0.0.1]:REDACTED_PORT")
+        .to_string();
+    let s = regex::Regex::new(r"127\.0\.0\.1:\d{4,5}")
+        .unwrap()
+        .replace_all(&s, "127.0.0.1:REDACTED_PORT")
+        .to_string();
+
+    // Replace uuids.
+    let s = regex::Regex::new(
+        "[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-\
+        [a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}",
+    )
+    .unwrap()
+    .replace_all(&s, "REDACTED_UUID_REDACTED_UUID_REDACTED")
+    .to_string();
+
+    // Replace timestamps.
+    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+        .unwrap()
+        .replace_all(&s, "<REDACTED_TIMESTAMP>")
+        .to_string();
+
+    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
+        .unwrap()
+        .replace_all(&s, "<REDACTED     TIMESTAMP>")
+        .to_string();
+
+    // Replace formatted durations.  These are pretty specific to the background
+    // task output.
+    let s = regex::Regex::new(r"\d+s ago")
+        .unwrap()
+        .replace_all(&s, "<REDACTED DURATION>s ago")
+        .to_string();
+
+    let s = regex::Regex::new(r"\d+ms")
+        .unwrap()
+        .replace_all(&s, "<REDACTED DURATION>ms")
+        .to_string();
+
+    let mut s = regex::Regex::new(
+        r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
+    )
+    .unwrap()
+    .replace_all(
+        &s,
+        "note: database schema version matches expected \
+        (<redacted database version>)",
+    )
+    .to_string();
+
+    for r in extra_redactions {
+        s = s.replace(r, "<REDACTED>");
+    }
+
+    s
+}

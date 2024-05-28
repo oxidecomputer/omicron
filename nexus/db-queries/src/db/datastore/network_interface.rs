@@ -29,16 +29,17 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use nexus_db_model::ServiceNetworkInterface;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use sled_agent_client::types as sled_client_types;
 use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
@@ -58,8 +59,10 @@ struct NicInfo {
     slot: i16,
 }
 
-impl From<NicInfo> for sled_client_types::NetworkInterface {
-    fn from(nic: NicInfo) -> sled_client_types::NetworkInterface {
+impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
+    fn from(
+        nic: NicInfo,
+    ) -> omicron_common::api::internal::shared::NetworkInterface {
         let ip_subnet = if nic.ip.is_ipv4() {
             external::IpNet::V4(nic.ipv4_block.0)
         } else {
@@ -67,19 +70,22 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
-                sled_client_types::NetworkInterfaceKind::Instance(nic.parent_id)
+                omicron_common::api::internal::shared::NetworkInterfaceKind::Instance{ id: nic.parent_id }
             }
             NetworkInterfaceKind::Service => {
-                sled_client_types::NetworkInterfaceKind::Service(nic.parent_id)
+                omicron_common::api::internal::shared::NetworkInterfaceKind::Service{ id: nic.parent_id }
+            }
+            NetworkInterfaceKind::Probe => {
+                omicron_common::api::internal::shared::NetworkInterfaceKind::Probe{ id: nic.parent_id }
             }
         };
-        sled_client_types::NetworkInterface {
+        omicron_common::api::internal::shared::NetworkInterface {
             id: nic.id,
             kind,
             name: nic.name.into(),
             ip: nic.ip.ip(),
             mac: nic.mac.0,
-            subnet: sled_client_types::IpNet::from(ip_subnet),
+            subnet: ip_subnet,
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
@@ -107,6 +113,14 @@ impl DataStore {
         self.instance_create_network_interface_raw(&opctx, interface).await
     }
 
+    pub async fn probe_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
+        self.create_network_interface_raw(&opctx, interface).await
+    }
+
     pub(crate) async fn instance_create_network_interface_raw(
         &self,
         opctx: &OpContext,
@@ -126,15 +140,69 @@ impl DataStore {
             .map(NetworkInterface::as_instance)
     }
 
-    #[cfg(test)]
+    /// List network interfaces associated with a given service.
+    pub async fn service_list_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        service_id: Uuid,
+    ) -> ListResultVec<ServiceNetworkInterface> {
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_service_ip_pool, _) =
+            self.ip_pools_service_lookup(opctx).await?;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz_service_ip_pool)
+            .await?;
+
+        use db::schema::service_network_interface::dsl;
+        dsl::service_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::service_id.eq(service_id))
+            .select(ServiceNetworkInterface::as_select())
+            .get_results_async::<ServiceNetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Create a network interface attached to the provided service zone.
+    pub async fn service_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
+        // In `instance_create_network_interface`, the authz checks are for
+        // creating children of the VpcSubnet and the instance. We don't have an
+        // instance. We do have a VpcSubet, but for services these are all
+        // fixed data subnets.
+        //
+        // As a proxy auth check that isn't really guarding the right resource
+        // but should logically be equivalent, we can insert a authz check for
+        // creating children of the service IP pool. For any service zone with
+        // external networking, we create an external IP (in the service IP
+        // pool) and a network interface (in the relevant VpcSubnet). Putting
+        // this check here ensures that the caller can't proceed if they also
+        // couldn't proceed with creating the corresponding external IP.
+        let (authz_service_ip_pool, _) = self
+            .ip_pools_service_lookup(opctx)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_service_ip_pool)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        self.service_create_network_interface_raw(opctx, interface).await
+    }
+
     pub(crate) async fn service_create_network_interface_raw(
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<
-        db::model::ServiceNetworkInterface,
-        network_interface::InsertError,
-    > {
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
         if interface.kind != NetworkInterfaceKind::Service {
             return Err(network_interface::InsertError::External(
                 Error::invalid_request(
@@ -216,6 +284,33 @@ impl DataStore {
         Ok(())
     }
 
+    /// Delete all network interfaces attached to the given probe.
+    pub async fn probe_delete_all_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::network_interface::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::network_interface)
+            .filter(dsl::parent_id.eq(probe_id))
+            .filter(dsl::kind.eq(NetworkInterfaceKind::Probe))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Probe,
+                        LookupType::ById(probe_id),
+                    ),
+                )
+            })?;
+        Ok(())
+    }
+
     /// Delete an `InstanceNetworkInterface` attached to a provided instance.
     ///
     /// Note that the primary interface for an instance cannot be deleted if
@@ -258,7 +353,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         partial_query: BoxedQuery<db::schema::network_interface::table>,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         use db::schema::network_interface;
         use db::schema::vpc;
         use db::schema::vpc_subnet;
@@ -294,7 +390,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(rows
             .into_iter()
-            .map(sled_client_types::NetworkInterface::from)
+            .map(omicron_common::api::internal::shared::NetworkInterface::from)
             .collect())
     }
 
@@ -304,7 +400,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
         use db::schema::network_interface;
@@ -320,13 +417,31 @@ impl DataStore {
         .await
     }
 
+    pub async fn derive_probe_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::parent_id.eq(probe_id))
+                .filter(network_interface::kind.eq(NetworkInterfaceKind::Probe))
+                .into_boxed(),
+        )
+        .await
+    }
+
     /// Return information about all VNICs connected to a VPC required
     /// for the sled agent to instantiate firewall rules via OPTE.
     pub async fn derive_vpc_network_interface_info(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::network_interface;
@@ -345,7 +460,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
         use db::schema::network_interface;
@@ -386,6 +502,25 @@ impl DataStore {
         )
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Get network interface associated with a given probe.
+    pub async fn probe_get_network_interface(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> LookupResult<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        dsl::network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::parent_id.eq(probe_id))
+            .select(NetworkInterface::as_select())
+            .first_async::<NetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Update a network interface associated with a given instance.
