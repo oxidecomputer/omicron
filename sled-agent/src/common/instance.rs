@@ -249,6 +249,17 @@ impl InstanceStates {
 
         self.apply_propolis_observation(&fake_observed);
     }
+
+    /// Sets or clears this instance's migration IDs and advances its Propolis
+    /// generation number.
+    pub(crate) fn set_migration_ids(
+        &mut self,
+        ids: &Option<InstanceMigrationSourceParams>,
+        _now: DateTime<Utc>,
+    ) {
+        self.migration_id = ids.as_ref().map(|ids| ids.migration_id);
+        // TODO(eliza): do we  still care about time_updated here?
+    }
 }
 
 #[cfg(test)]
