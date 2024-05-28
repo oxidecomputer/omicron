@@ -179,7 +179,7 @@ async fn siu_lock_instance(
             "updater_gen" => ?gen,
         );
         let lock = datastore
-            .instance_updater_try_lock(&opctx, &authz_instance, gen, &lock_id)
+            .instance_updater_lock(&opctx, &authz_instance, gen, &lock_id)
             .await
             .map_err(ActionError::action_failed)?;
         match lock {
@@ -208,7 +208,7 @@ async fn siu_lock_instance(
 
 async fn siu_fetch_state(
     sagactx: NexusActionContext,
-) -> Result<InstanceAndVmms, ActionError> {
+) -> Result<InstanceSnapshot, ActionError> {
     let osagactx = sagactx.user_data();
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
@@ -217,7 +217,7 @@ async fn siu_fetch_state(
 
     osagactx
         .datastore()
-        .instance_fetch_with_vmms(&opctx, authz_instance)
+        .instance_fetch_all(&opctx, authz_instance)
         .await
         .map_err(ActionError::action_failed)
 }

@@ -139,7 +139,7 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
         Self {
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
-            migration_state: s.migration_state.map(Into::into),
+            // migration_state: s.migration_state.map(Into::into),
         }
     }
 }
@@ -183,7 +183,6 @@ impl From<omicron_common::api::internal::nexus::MigrationState>
             Input::Completed => Self::Completed,
             Input::Failed => Self::Failed,
         }
-        Self { propolis_id: s.propolis_id, vmm_state: s.vmm_state.into() }
     }
 }
 
