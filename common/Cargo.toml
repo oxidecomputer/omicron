@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 # NOTE:
 #
 # This crate is depended on by several other workspaces! Be careful of adding
@@ -25,6 +28,7 @@ ipnetwork.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
+oxnet.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
@@ -55,6 +59,7 @@ libc.workspace = true
 regress.workspace = true
 serde_urlencoded.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+toml.workspace = true
 
 [features]
 testing = ["proptest", "test-strategy"]

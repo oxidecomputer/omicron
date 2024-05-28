@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::SocketAddr;
+use std::time::Duration;
+
 use super::SqlU16;
 use crate::impl_enum_type;
 use crate::schema::metric_producer;
@@ -44,9 +47,20 @@ impl From<ProducerKind> for internal::nexus::ProducerKind {
     }
 }
 
+impl From<ProducerEndpoint> for internal::nexus::ProducerEndpoint {
+    fn from(ep: ProducerEndpoint) -> Self {
+        internal::nexus::ProducerEndpoint {
+            id: ep.id(),
+            kind: ep.kind.into(),
+            address: SocketAddr::new(ep.ip.ip(), *ep.port),
+            interval: Duration::from_secs_f64(ep.interval),
+        }
+    }
+}
+
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = metric_producer)]
 pub struct ProducerEndpoint {
     #[diesel(embed)]
@@ -56,7 +70,6 @@ pub struct ProducerEndpoint {
     pub ip: ipnetwork::IpNetwork,
     pub port: SqlU16,
     pub interval: f64,
-    pub base_route: String,
     pub oximeter_id: Uuid,
 }
 
@@ -72,14 +85,8 @@ impl ProducerEndpoint {
             kind: endpoint.kind.into(),
             ip: endpoint.address.ip().into(),
             port: endpoint.address.port().into(),
-            base_route: endpoint.base_route.clone(),
             interval: endpoint.interval.as_secs_f64(),
             oximeter_id,
         }
-    }
-
-    /// Return the route that can be used to request metric data.
-    pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, self.id())
     }
 }

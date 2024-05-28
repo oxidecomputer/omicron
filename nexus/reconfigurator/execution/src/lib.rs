@@ -10,32 +10,50 @@ use anyhow::{anyhow, Context};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use overridables::Overridables;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
-pub use dns::silo_dns_name;
-
+mod cockroachdb;
 mod datasets;
 mod dns;
+mod external_networking;
+mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
-mod resource_allocation;
+mod sled_state;
 
-struct Sled {
-    id: Uuid,
+pub use dns::blueprint_external_dns_config;
+pub use dns::blueprint_internal_dns_config;
+pub use dns::blueprint_nexus_external_ips;
+pub use dns::silo_dns_name;
+
+pub struct Sled {
+    id: SledUuid,
     sled_agent_address: SocketAddrV6,
     is_scrimlet: bool,
 }
 
 impl Sled {
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn new(
+        id: SledUuid,
+        sled_agent_address: SocketAddrV6,
+        is_scrimlet: bool,
+    ) -> Sled {
+        Sled { id, sled_agent_address, is_scrimlet }
+    }
+
+    pub(crate) fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
         Ipv6Subnet::<SLED_PREFIX>::new(*self.sled_agent_address.ip())
     }
 }
@@ -43,7 +61,7 @@ impl Sled {
 impl From<nexus_db_model::Sled> for Sled {
     fn from(value: nexus_db_model::Sled) -> Self {
         Sled {
-            id: value.id(),
+            id: SledUuid::from_untyped_uuid(value.id()),
             sled_agent_address: value.address(),
             is_scrimlet: value.is_scrimlet(),
         }
@@ -95,22 +113,50 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    resource_allocation::ensure_zone_resources_allocated(
+    // Deallocate external networking resources for non-externally-reachable
+    // zones first. This will allow external networking resource allocation to
+    // succeed if we are swapping an external IP between two zones (e.g., moving
+    // a specific external IP from an old external DNS zone to a new one).
+    external_networking::ensure_zone_external_networking_deallocated(
         &opctx,
         datastore,
-        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
+        blueprint
+            .all_omicron_zones_not_in(
+                BlueprintZoneFilter::ShouldBeExternallyReachable,
+            )
+            .map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
 
-    let sleds_by_id: BTreeMap<Uuid, _> = datastore
-        .sled_list_all_batched(&opctx)
+    external_networking::ensure_zone_external_networking_allocated(
+        &opctx,
+        datastore,
+        blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
+            .map(|(_sled_id, zone)| zone),
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
+    let sleds_by_id: BTreeMap<SledUuid, _> = datastore
+        .sled_list_all_batched(&opctx, SledFilter::InService)
         .await
         .context("listing all sleds")
         .map_err(|e| vec![e])?
         .into_iter()
-        .map(|db_sled| (db_sled.id(), Sled::from(db_sled)))
+        .map(|db_sled| {
+            (SledUuid::from_untyped_uuid(db_sled.id()), Sled::from(db_sled))
+        })
         .collect();
+
+    omicron_physical_disks::deploy_disks(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_disks,
+    )
+    .await?;
+
     omicron_zones::deploy_zones(
         &opctx,
         &sleds_by_id,
@@ -140,7 +186,9 @@ where
     datasets::ensure_crucible_dataset_records_exist(
         &opctx,
         datastore,
-        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
+        blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
@@ -151,10 +199,28 @@ where
         String::from(nexus_label),
         blueprint,
         &sleds_by_id,
-        &overrides,
+        overrides,
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
+
+    sled_state::decommission_sleds(
+        &opctx,
+        datastore,
+        blueprint
+            .sled_state
+            .iter()
+            .filter(|&(_, &state)| state == SledState::Decommissioned)
+            .map(|(&sled_id, _)| sled_id),
+    )
+    .await?;
+
+    // This is likely to error if any cluster upgrades are in progress (which
+    // can take some time), so it should remain at the end so that other parts
+    // of the blueprint can progress normally.
+    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
+        .await
+        .map_err(|err| vec![err])?;
 
     Ok(())
 }

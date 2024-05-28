@@ -4,6 +4,7 @@
 
 //! ZFS dataset related functionality
 
+use crate::config::MountConfig;
 use crate::keyfile::KeyFile;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
@@ -33,7 +34,7 @@ pub const M2_BACKING_DATASET: &'static str = "backing";
 cfg_if! {
     if #[cfg(any(test, feature = "testing"))] {
         // Tuned for zone_bundle tests
-        pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 10);
+        pub const DEBUG_DATASET_QUOTA: usize = 1 << 20;
     } else {
         // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
         // tuned as needed.
@@ -279,10 +280,12 @@ pub enum DatasetError {
 /// `None` is for the M.2s touched by the Installinator.
 pub(crate) async fn ensure_zpool_has_datasets(
     log: &Logger,
+    mount_config: &MountConfig,
     zpool_name: &ZpoolName,
     disk_identity: &DiskIdentity,
     key_requester: Option<&StorageKeyRequester>,
 ) -> Result<(), DatasetError> {
+    info!(log, "Ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     let (root, datasets) = match zpool_name.kind().into() {
         DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
         DiskVariant::U2 => (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter()),
@@ -297,8 +300,10 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let Some(key_requester) = key_requester else {
             return Err(DatasetError::MissingStorageKeyRequester);
         };
-        let mountpoint = zpool_name.dataset_mountpoint(dataset);
-        let keypath: Keypath = disk_identity.into();
+        let mountpoint =
+            zpool_name.dataset_mountpoint(&mount_config.root, dataset);
+        let keypath: Keypath =
+            illumos_utils::zfs::Keypath::new(disk_identity, &mount_config.root);
 
         let epoch = if let Ok(epoch_str) =
             Zfs::get_oxide_value(dataset, "epoch")
@@ -324,15 +329,15 @@ pub(crate) async fn ensure_zpool_has_datasets(
             // other reason, but the dataset actually existed, we will
             // try to create the dataset below and that will fail. So
             // there is no harm in just loading the latest secret here.
-            info!(log, "Loading latest secret"; "disk_id"=>#?disk_identity);
+            info!(log, "Loading latest secret"; "disk_id"=>?disk_identity);
             let epoch = key_requester.load_latest_secret().await?;
-            info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+            info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
             epoch
         };
 
-        info!(log, "Retrieving key"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+        info!(log, "Retrieving key"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
         let key = key_requester.get_key(epoch, disk_identity.clone()).await?;
-        info!(log, "Got key"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+        info!(log, "Got key"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
 
         let mut keyfile =
             KeyFile::create(keypath.clone(), key.expose_secret(), log)
@@ -366,7 +371,8 @@ pub(crate) async fn ensure_zpool_has_datasets(
     };
 
     for dataset in datasets.into_iter() {
-        let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
+        let mountpoint =
+            zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
         let name = &format!("{}/{}", zpool_name, dataset.name);
 
         // Use a value that's alive for the duration of this sled agent
@@ -788,11 +794,11 @@ async fn finalize_encryption_migration(
 #[cfg(test)]
 mod test {
     use super::*;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::ZpoolUuid;
 
     #[test]
     fn serialize_dataset_name() {
-        let pool = ZpoolName::new_internal(Uuid::new_v4());
+        let pool = ZpoolName::new_internal(ZpoolUuid::new_v4());
         let kind = DatasetKind::Crucible;
         let name = DatasetName::new(pool, kind);
         serde_json::to_string(&name).unwrap();

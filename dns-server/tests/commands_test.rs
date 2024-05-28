@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use camino::Utf8PathBuf;
+use camino_tempfile::Utf8TempDir;
 use dns_server::storage::Store;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
@@ -17,10 +17,9 @@ const CMD_DNSADM: &str = env!("CARGO_BIN_EXE_dnsadm");
 async fn test_dnsadm() {
     // Start a DNS server with some sample data.
     let logctx = test_setup_log("test_dnsadm");
-    let tmpdir = tempdir::TempDir::new("test_dnsadm")
+    let tmpdir = Utf8TempDir::with_prefix("test_dnsadm")
         .expect("failed to create tmp directory for test");
-    let storage_path = Utf8PathBuf::from_path_buf(tmpdir.path().to_path_buf())
-        .expect("failed to create Utf8PathBuf for test temporary directory");
+    let storage_path = tmpdir.path().to_path_buf();
 
     let store = Store::new(
         logctx.log.clone(),

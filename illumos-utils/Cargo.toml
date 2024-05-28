@@ -5,6 +5,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -19,8 +22,10 @@ ipnetwork.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 oxide-vpc.workspace = true
 oxlog.workspace = true
+oxnet.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
@@ -28,6 +33,7 @@ smf.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+whoami.workspace = true
 zone.workspace = true
 
 # only enabled via the `testing` feature
@@ -46,6 +52,3 @@ toml.workspace = true
 [features]
 # Enable to generate MockZones
 testing = ["mockall"]
-# Useful for tests that want real functionality and ability to run without
-# pfexec
-tmp_keypath = []

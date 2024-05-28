@@ -2014,8 +2014,9 @@ impl ComponentUpdateListState {
                         progress_event.kind.progress_counter()
                     {
                         if let Some(total) = counter.total {
-                            let percentage =
-                                (counter.current as u128 * 100) / total as u128;
+                            let percentage = (u128::from(counter.current)
+                                * 100)
+                                / u128::from(total);
                             item_spans.push(Span::styled(
                                 format!("[{:>2}%] ", percentage),
                                 style::selected(),

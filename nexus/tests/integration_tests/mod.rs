@@ -4,6 +4,7 @@
 //! the way it is.
 
 mod address_lots;
+mod allow_list;
 mod authn_http;
 mod authz;
 mod basic;
@@ -50,7 +51,6 @@ mod vpc_firewall;
 mod vpc_routers;
 mod vpc_subnets;
 mod vpcs;
-mod zpools;
 
 // This module is used only for shared data, not test cases.
 mod endpoints;

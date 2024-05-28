@@ -10,7 +10,9 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_config::RegionAllocationStrategy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -40,6 +42,7 @@ use omicron_nexus::TestInterfaces as _;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -187,7 +190,7 @@ async fn test_disk_create_attach_detach_delete(
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_project_and_pool(client).await;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -361,7 +364,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     let disk_names = ["a", "b", "c", "d"];
     let mut disks = Vec::new();
@@ -387,7 +390,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
         get_disk_attach_url(&instance.identity.id.into());
 
     async fn get_disk_slot(ctx: &ControlPlaneTestContext, disk_id: Uuid) -> u8 {
-        let apictx = &ctx.server.apictx();
+        let apictx = &ctx.server.server_context();
         let nexus = &apictx.nexus;
         let datastore = nexus.datastore();
         let opctx =
@@ -465,7 +468,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
     let disks_url = get_disks_url();
@@ -797,7 +800,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     // divisible by block size.
     assert!(
         disk_size.to_bytes()
-            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 * 1024 * 1024 * 1024
+            < u64::from(DiskTest::DEFAULT_ZPOOL_SIZE_GIB) * 1024 * 1024 * 1024
     );
 
     let disks_url = get_disks_url();
@@ -967,9 +970,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
@@ -1039,7 +1042,7 @@ async fn test_disk_virtual_provisioning_collection(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let _test = DiskTest::new(&cptestctx).await;
@@ -1247,7 +1250,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
 ) {
     // Confirm that there's no panic deleting a project if a disk deletion fails
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let disk_test = DiskTest::new(&cptestctx).await;
@@ -1387,7 +1390,7 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
     // faulted
 
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let _disk_test = DiskTest::new(&cptestctx).await;
@@ -1508,7 +1511,7 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     // Create three 10 GiB zpools, each with one dataset.
@@ -1682,9 +1685,9 @@ async fn test_multiple_disks_multiple_zpools(
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
-    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
@@ -1757,10 +1760,6 @@ const ALL_METRICS: [&'static str; 6] =
 
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let oximeter = &cptestctx.oximeter;
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
@@ -1831,10 +1830,6 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
 #[nexus_test]
 async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -1977,7 +1972,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
     // Call project_delete_disk_no_auth twice, ensuring that the disk is either
     // there before deleting and not afterwards.
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -2012,6 +2007,454 @@ async fn test_project_delete_disk_no_auth_idempotent(
         )
         .await
         .unwrap();
+}
+
+// Test allocating a single region
+#[nexus_test]
+async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let disk_test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Allocate a single 1 GB region
+    let volume_id = Uuid::new_v4();
+
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+            ByteCount::from_gibibytes_u32(1),
+            &RegionAllocationStrategy::Random { seed: None },
+            1,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(datasets_and_regions.len(), 1);
+
+    // Double check!
+    let allocated_regions =
+        datastore.get_allocated_regions(volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 1);
+
+    // Triple check!
+    let allocated_region =
+        datastore.get_region(datasets_and_regions[0].1.id()).await.unwrap();
+    assert_eq!(allocated_region.block_size().to_bytes(), 512);
+    assert_eq!(allocated_region.blocks_per_extent(), 131072); // based on EXTENT_SIZE const
+    assert_eq!(allocated_region.extent_count(), 16);
+
+    // Quadruple check! Only one Crucible agent should have received a region
+    // request
+    let mut number_of_matching_regions = 0;
+
+    for zpool in &disk_test.zpools {
+        for dataset in &zpool.datasets {
+            let total_size = datastore
+                .regions_total_occupied_size(dataset.id)
+                .await
+                .unwrap();
+
+            if total_size == 1073741824 {
+                number_of_matching_regions += 1;
+            } else if total_size == 0 {
+                // ok, unallocated
+            } else {
+                panic!("unexpected regions total size of {total_size}");
+            }
+        }
+    }
+
+    assert_eq!(number_of_matching_regions, 1);
+}
+
+// Ensure that `disk_region_allocate` is idempotent.
+#[nexus_test]
+async fn test_region_allocation_strategy_random_is_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create four 10 GiB zpools, each with one dataset.
+    let mut disk_test = DiskTest::new(&cptestctx).await;
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert disk has three allocated regions
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+
+    // Call `disk_region_allocate` again
+    let region: &nexus_db_model::Region = &allocated_regions[0].1;
+
+    let region_total_size: ByteCount = ByteCount::try_from(
+        region.block_size().to_bytes()
+            * region.blocks_per_extent()
+            * region.extent_count(),
+    )
+    .unwrap();
+
+    assert_eq!(region_total_size, ByteCount::from_gibibytes_u32(1));
+
+    let datasets_and_regions = datastore
+        .disk_region_allocate(
+            &opctx,
+            db_disk.volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(
+                    region.block_size().to_bytes() as u32,
+                )
+                .unwrap(),
+            },
+            region_total_size,
+            &RegionAllocationStrategy::Random { seed: None },
+        )
+        .await
+        .unwrap();
+
+    // There should be the same amount
+    assert_eq!(allocated_regions.len(), datasets_and_regions.len());
+}
+
+// Ensure that adjusting redundancy level with `arbitrary_region_allocate` works
+#[nexus_test]
+async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create four 10 GiB zpools, each with one dataset.
+    let mut disk_test = DiskTest::new(&cptestctx).await;
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Call region allocation in isolation
+    let volume_id = Uuid::new_v4();
+
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+            ByteCount::from_gibibytes_u32(1),
+            &RegionAllocationStrategy::Random { seed: None },
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await
+        .unwrap();
+
+    // There should be the same amount as we requested
+    assert_eq!(REGION_REDUNDANCY_THRESHOLD, datasets_and_regions.len());
+
+    // Bump up the number of required regions
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+            ByteCount::from_gibibytes_u32(1),
+            &RegionAllocationStrategy::Random { seed: None },
+            REGION_REDUNDANCY_THRESHOLD + 1,
+        )
+        .await
+        .unwrap();
+
+    // There should be the same amount as we requested
+    assert_eq!(REGION_REDUNDANCY_THRESHOLD + 1, datasets_and_regions.len());
+}
+
+// Test allocating a single region to replace a disk's region
+#[nexus_test]
+async fn test_single_region_allocate_for_replace(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let mut disk_test = DiskTest::new(&cptestctx).await;
+
+    // One more zpool and dataset is required to meet `region_allocate`'s
+    // redundancy requirement.
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert disk has three allocated regions
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+
+    // Allocate one more single 1 GB region to replace one of the disk's regions
+    let region_to_replace: &nexus_db_model::Region = &allocated_regions[0].1;
+
+    let one_more = allocated_regions.len() + 1;
+    assert_eq!(one_more, REGION_REDUNDANCY_THRESHOLD + 1);
+
+    let region_total_size: ByteCount = ByteCount::try_from(
+        region_to_replace.block_size().to_bytes()
+            * region_to_replace.blocks_per_extent()
+            * region_to_replace.extent_count(),
+    )
+    .unwrap();
+
+    assert_eq!(region_total_size, ByteCount::from_gibibytes_u32(1));
+
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            db_disk.volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(
+                    region_to_replace.block_size().to_bytes() as u32,
+                )
+                .unwrap(),
+            },
+            region_total_size,
+            &RegionAllocationStrategy::Random { seed: None },
+            one_more,
+        )
+        .await
+        .unwrap();
+
+    eprintln!("{:?}", datasets_and_regions);
+
+    assert_eq!(datasets_and_regions.len(), one_more);
+
+    // There should be `one_more` regions for this disk's volume id.
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), one_more);
+
+    // Each region should be on a different pool
+    let pools_used: HashSet<Uuid> = datasets_and_regions
+        .iter()
+        .map(|(dataset, _)| dataset.pool_id)
+        .collect();
+
+    assert_eq!(pools_used.len(), REGION_REDUNDANCY_THRESHOLD + 1);
+}
+
+// Confirm allocating a single region to replace a disk's region fails if
+// there's not enough unique zpools
+#[nexus_test]
+async fn test_single_region_allocate_for_replace_not_enough_zpools(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let _disk_test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert disk has three allocated regions
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+
+    // Allocate one more single 1 GB region to replace one of the disk's regions
+    let region_to_replace: &nexus_db_model::Region = &allocated_regions[0].1;
+
+    let one_more = allocated_regions.len() + 1;
+    assert_eq!(one_more, REGION_REDUNDANCY_THRESHOLD + 1);
+
+    let region_total_size: ByteCount = ByteCount::try_from(
+        region_to_replace.block_size().to_bytes()
+            * region_to_replace.blocks_per_extent()
+            * region_to_replace.extent_count(),
+    )
+    .unwrap();
+
+    assert_eq!(region_total_size, ByteCount::from_gibibytes_u32(1));
+
+    // Trying to allocate one more should fail
+    let result = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            db_disk.volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(
+                    region_to_replace.block_size().to_bytes() as u32,
+                )
+                .unwrap(),
+            },
+            region_total_size,
+            &RegionAllocationStrategy::Random { seed: None },
+            one_more,
+        )
+        .await;
+
+    assert!(result.is_err());
+
+    // Confirm calling `arbitrary_region_allocate` still idempotently works
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            db_disk.volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(
+                    region_to_replace.block_size().to_bytes() as u32,
+                )
+                .unwrap(),
+            },
+            region_total_size,
+            &RegionAllocationStrategy::Random { seed: None },
+            allocated_regions.len(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(datasets_and_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+}
+
+// Confirm that a region set can start at N, a region can be deleted, and the
+// allocation CTE can bring the redundancy back to N.
+#[nexus_test]
+async fn test_region_allocation_after_delete(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let _disk_test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert disk has three allocated regions
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+
+    // Delete one of the regions
+    let region_to_delete: &nexus_db_model::Region = &allocated_regions[0].1;
+    datastore
+        .regions_hard_delete(&opctx.log, vec![region_to_delete.id()])
+        .await
+        .unwrap();
+
+    // Assert disk's volume has one less allocated region
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD - 1);
+
+    let region_total_size: ByteCount = ByteCount::try_from(
+        region_to_delete.block_size().to_bytes()
+            * region_to_delete.blocks_per_extent()
+            * region_to_delete.extent_count(),
+    )
+    .unwrap();
+
+    // Rerun disk region allocation
+    datastore
+        .disk_region_allocate(
+            &opctx,
+            db_disk.volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(
+                    region_to_delete.block_size().to_bytes() as u32,
+                )
+                .unwrap(),
+            },
+            region_total_size,
+            &RegionAllocationStrategy::Random { seed: None },
+        )
+        .await
+        .unwrap();
+
+    // Assert redundancy was restored
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

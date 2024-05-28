@@ -142,6 +142,12 @@
             "description": "The collector's UUID.",
             "type": "string",
             "format": "uuid"
+          },
+          "last_refresh": {
+            "nullable": true,
+            "description": "Last time we refreshed our producer list with Nexus.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -194,10 +200,6 @@
             "description": "The IP address and port at which `oximeter` can collect metrics from the producer.",
             "type": "string"
           },
-          "base_route": {
-            "description": "The API base route from which `oximeter` can collect metrics.\n\nThe full route is `{base_route}/{id}`.",
-            "type": "string"
-          },
           "id": {
             "description": "A unique ID for this producer.",
             "type": "string",
@@ -222,7 +224,6 @@
         },
         "required": [
           "address",
-          "base_route",
           "id",
           "interval",
           "kind"

@@ -17,6 +17,7 @@ use num::traits::Zero;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -77,6 +78,8 @@ macro_rules! impl_field_type_from {
 }
 
 impl_field_type_from! { String, FieldType::String }
+impl_field_type_from! { &'static str, FieldType::String }
+impl_field_type_from! { Cow<'static, str>, FieldType::String }
 impl_field_type_from! { i8, FieldType::I8 }
 impl_field_type_from! { u8, FieldType::U8 }
 impl_field_type_from! { i16, FieldType::I16 }
@@ -103,7 +106,7 @@ impl_field_type_from! { bool, FieldType::Bool }
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
-    String(String),
+    String(Cow<'static, str>),
     I8(i8),
     U8(u8),
     I16(i16),
@@ -147,7 +150,9 @@ impl FieldValue {
             typ: field_type.to_string(),
         };
         match field_type {
-            FieldType::String => Ok(FieldValue::String(s.to_string())),
+            FieldType::String => {
+                Ok(FieldValue::String(Cow::Owned(s.to_string())))
+            }
             FieldType::I8 => {
                 Ok(FieldValue::I8(s.parse().map_err(|_| make_err())?))
             }
@@ -222,14 +227,20 @@ impl_field_value_from! { i32, FieldValue::I32 }
 impl_field_value_from! { u32, FieldValue::U32 }
 impl_field_value_from! { i64, FieldValue::I64 }
 impl_field_value_from! { u64, FieldValue::U64 }
-impl_field_value_from! { String, FieldValue::String }
+impl_field_value_from! { Cow<'static, str>, FieldValue::String }
 impl_field_value_from! { IpAddr, FieldValue::IpAddr }
 impl_field_value_from! { Uuid, FieldValue::Uuid }
 impl_field_value_from! { bool, FieldValue::Bool }
 
 impl From<&str> for FieldValue {
     fn from(value: &str) -> Self {
-        FieldValue::String(String::from(value))
+        FieldValue::String(Cow::Owned(String::from(value)))
+    }
+}
+
+impl From<String> for FieldValue {
+    fn from(value: String) -> Self {
+        FieldValue::String(Cow::Owned(value))
     }
 }
 
@@ -311,7 +322,7 @@ pub enum DatumType {
 
 impl DatumType {
     /// Return `true` if this datum type is cumulative, and `false` otherwise.
-    pub fn is_cumulative(&self) -> bool {
+    pub const fn is_cumulative(&self) -> bool {
         matches!(
             self,
             DatumType::CumulativeI64
@@ -331,9 +342,26 @@ impl DatumType {
         )
     }
 
+    /// Return `true` if this datum type is a scalar, and `false` otherwise.
+    pub const fn is_scalar(&self) -> bool {
+        !self.is_histogram()
+    }
+
     /// Return `true` if this datum type is a histogram, and `false` otherwise.
     pub const fn is_histogram(&self) -> bool {
-        matches!(self, DatumType::HistogramF64 | DatumType::HistogramI64)
+        matches!(
+            self,
+            DatumType::HistogramI8
+                | DatumType::HistogramU8
+                | DatumType::HistogramI16
+                | DatumType::HistogramU16
+                | DatumType::HistogramI32
+                | DatumType::HistogramU32
+                | DatumType::HistogramI64
+                | DatumType::HistogramU64
+                | DatumType::HistogramF32
+                | DatumType::HistogramF64
+        )
     }
 }
 
@@ -449,6 +477,11 @@ impl Datum {
             Datum::HistogramF64(ref inner) => Some(inner.start_time()),
             Datum::Missing(ref inner) => inner.start_time(),
         }
+    }
+
+    /// Return true if this datum is missing.
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Datum::Missing(_))
     }
 }
 
@@ -580,7 +613,7 @@ impl Measurement {
 
     /// Return true if this measurement represents a missing datum.
     pub fn is_missing(&self) -> bool {
-        matches!(self.datum, Datum::Missing(_))
+        self.datum.is_missing()
     }
 
     /// Return the datum for this measurement

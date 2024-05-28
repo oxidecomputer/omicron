@@ -12,9 +12,11 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, Error, IdentityMetadata, InstanceState, Ipv4Net,
-    Ipv6Net, Name, ObjectIdentity, RoleName, SimpleIdentity,
+    AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
+    IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
+    SimpleIdentity,
 };
+use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -449,6 +451,8 @@ pub struct FloatingIp {
     pub identity: IdentityMetadata,
     /// The IP address held by this resource.
     pub ip: IpAddr,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
     /// The project this resource exists within.
     pub project_id: Uuid,
     /// The ID of the instance that this Floating IP is attached to,
@@ -592,31 +596,6 @@ impl SledPolicy {
         Self::InService { provision_policy: SledProvisionPolicy::Provisionable }
     }
 
-    /// Returns the list of all in-service policies.
-    pub fn all_in_service() -> &'static [Self] {
-        &[
-            Self::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            },
-            Self::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            },
-        ]
-    }
-
-    /// Returns true if the sled can have services provisioned on it.
-    pub fn is_provisionable(&self) -> bool {
-        match self {
-            Self::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            } => true,
-            Self::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            }
-            | Self::Expunged => false,
-        }
-    }
-
     /// Returns the provision policy, if the sled is in service.
     pub fn provision_policy(&self) -> Option<SledProvisionPolicy> {
         match self {
@@ -625,9 +604,13 @@ impl SledPolicy {
         }
     }
 
-    /// Returns true if the sled can be decommissioned in this state.
+    /// Returns true if the sled can be decommissioned with this policy
+    ///
+    /// This is a method here, rather than being a variant on `SledFilter`,
+    /// because the "decommissionable" condition only has meaning for policies,
+    /// not states.
     pub fn is_decommissionable(&self) -> bool {
-        // This should be kept in sync with decommissionable_states below.
+        // This should be kept in sync with `all_decommissionable` below.
         match self {
             Self::InService { .. } => false,
             Self::Expunged => true,
@@ -636,6 +619,10 @@ impl SledPolicy {
 
     /// Returns all the possible policies a sled can have for it to be
     /// decommissioned.
+    ///
+    /// This is a method here, rather than being a variant on `SledFilter`,
+    /// because the "decommissionable" condition only has meaning for policies,
+    /// not states.
     pub fn all_decommissionable() -> &'static [Self] {
         &[Self::Expunged]
     }
@@ -649,7 +636,7 @@ impl fmt::Display for SledPolicy {
             } => write!(f, "in service"),
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
-            } => write!(f, "in service (not provisionable)"),
+            } => write!(f, "not provisionable"),
             SledPolicy::Expunged => write!(f, "expunged"),
         }
     }
@@ -678,21 +665,6 @@ pub enum SledState {
     /// it will never return to service. (The actual hardware may be reused,
     /// but it will be treated as a brand-new sled.)
     Decommissioned,
-}
-
-impl SledState {
-    /// Returns true if the sled state makes it eligible for services that
-    /// aren't required to be on every sled.
-    ///
-    /// For example, NTP must exist on every sled, but Nexus does not have to.
-    pub fn is_eligible_for_discretionary_services(&self) -> bool {
-        // (Explicit match, so that this fails to compile if a new state is
-        // added.)
-        match self {
-            SledState::Active => true,
-            SledState::Decommissioned => false,
-        }
-    }
 }
 
 impl fmt::Display for SledState {
@@ -742,6 +714,11 @@ pub struct PhysicalDisk {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
 
+    /// The operator-defined policy for a physical disk.
+    pub policy: PhysicalDiskPolicy,
+    /// The current state Nexus believes the disk to be in.
+    pub state: PhysicalDiskState,
+
     /// The sled to which this disk is attached, if any.
     pub sled_id: Option<Uuid>,
 
@@ -750,6 +727,97 @@ pub struct PhysicalDisk {
     pub model: String,
 
     pub form_factor: PhysicalDiskKind,
+}
+
+/// The operator-defined policy of a physical disk.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum PhysicalDiskPolicy {
+    /// The operator has indicated that the disk is in-service.
+    InService,
+
+    /// The operator has indicated that the disk has been permanently removed
+    /// from service.
+    ///
+    /// This is a terminal state: once a particular disk ID is expunged, it
+    /// will never return to service. (The actual hardware may be reused, but
+    /// it will be treated as a brand-new disk.)
+    ///
+    /// An expunged disk is always non-provisionable.
+    Expunged,
+    // NOTE: if you add a new value here, be sure to add it to
+    // the `IntoEnumIterator` impl below!
+}
+
+// Can't automatically derive strum::EnumIter because that doesn't provide a
+// way to iterate over nested enums.
+impl IntoEnumIterator for PhysicalDiskPolicy {
+    type Iterator = std::array::IntoIter<Self, 2>;
+
+    fn iter() -> Self::Iterator {
+        [Self::InService, Self::Expunged].into_iter()
+    }
+}
+
+impl PhysicalDiskPolicy {
+    /// Creates a new `PhysicalDiskPolicy` that is in-service.
+    pub fn in_service() -> Self {
+        Self::InService
+    }
+
+    /// Returns true if the disk can be decommissioned in this state.
+    pub fn is_decommissionable(&self) -> bool {
+        // This should be kept in sync with decommissionable_states below.
+        match self {
+            Self::InService => false,
+            Self::Expunged => true,
+        }
+    }
+}
+
+impl fmt::Display for PhysicalDiskPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicalDiskPolicy::InService => write!(f, "in service"),
+            PhysicalDiskPolicy::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+/// The current state of the disk, as determined by Nexus.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskState {
+    /// The disk is currently active, and has resources allocated on it.
+    Active,
+
+    /// The disk has been permanently removed from service.
+    ///
+    /// This is a terminal state: once a particular disk ID is decommissioned,
+    /// it will never return to service. (The actual hardware may be reused,
+    /// but it will be treated as a brand-new disk.)
+    Decommissioned,
+}
+
+impl fmt::Display for PhysicalDiskState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicalDiskState::Active => write!(f, "active"),
+            PhysicalDiskState::Decommissioned => write!(f, "decommissioned"),
+        }
+    }
 }
 
 // SILO USERS
@@ -883,4 +951,17 @@ pub struct Ping {
     /// Whether the external API is reachable. Will always be Ok if the endpoint
     /// returns anything at all.
     pub status: PingStatus,
+}
+
+// ALLOWED SOURCE IPS
+
+/// Allowlist of IPs or subnets that can make requests to user-facing services.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AllowList {
+    /// Time the list was created.
+    pub time_created: DateTime<Utc>,
+    /// Time the list was last modified.
+    pub time_modified: DateTime<Utc>,
+    /// The allowlist of IPs or subnets.
+    pub allowed_ips: ExternalAllowedSourceIps,
 }

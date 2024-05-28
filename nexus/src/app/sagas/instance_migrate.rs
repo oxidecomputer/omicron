@@ -4,7 +4,8 @@
 
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::instance::{
-    InstanceStateChangeError, InstanceStateChangeRequest,
+    InstanceRegisterReason, InstanceStateChangeError,
+    InstanceStateChangeRequest,
 };
 use crate::app::sagas::{
     declare_saga_actions, instance_common::allocate_vmm_ipv6,
@@ -152,7 +153,7 @@ async fn sim_reserve_sled_resources(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         propolis_id,
-        params.instance.ncpus.0 .0 as u32,
+        u32::from(params.instance.ncpus.0 .0),
         params.instance.memory,
         constraints,
     )
@@ -356,6 +357,10 @@ async fn sim_ensure_destination_propolis(
             &db_instance,
             &vmm.id,
             &vmm,
+            InstanceRegisterReason::Migrate {
+                vmm_id: params.src_vmm.id,
+                target_vmm_id: vmm.id,
+            },
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -609,7 +614,7 @@ mod tests {
     ) {
         let other_sleds = add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -653,7 +658,7 @@ mod tests {
         let log = &cptestctx.logctx.log;
         let other_sleds = add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);

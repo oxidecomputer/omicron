@@ -2,8 +2,7 @@
 #:
 #: name = "a4x2-deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.27"
-#: rust_toolchain = "stable"
+#: target = "lab-2.0-opte-0.29"
 #: output_rules = [
 #:	"/out/falcon/*.log",
 #:	"/out/falcon/*.err",
@@ -13,7 +12,7 @@
 #:  "%/out/dhcp-server.log",
 #: ]
 #: skip_clone = true
-#: enable = true
+#: enable = false
 #:
 #: [dependencies.a4x2]
 #: job = "a4x2-prepare"

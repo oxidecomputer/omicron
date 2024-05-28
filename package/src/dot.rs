@@ -196,7 +196,7 @@ pub fn do_dot(
                 // Similarly, regardless of the type of local package, create
                 // a node showing any local paths that get included in the
                 // package.
-                if paths.len() > 0 {
+                if !paths.is_empty() {
                     let paths = paths
                         .iter()
                         .map(|mapping| {

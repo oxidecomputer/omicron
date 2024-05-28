@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OmicronPhysicalDisksConfig",
+  "type": "object",
+  "required": [
+    "disks",
+    "generation"
+  ],
+  "properties": {
+    "disks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/OmicronPhysicalDiskConfig"
+      }
+    },
+    "generation": {
+      "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Generation"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "DiskIdentity": {
+      "description": "Uniquely identifies a disk.",
+      "type": "object",
+      "required": [
+        "model",
+        "serial",
+        "vendor"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        }
+      }
+    },
+    "Generation": {
+      "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "OmicronPhysicalDiskConfig": {
+      "type": "object",
+      "required": [
+        "id",
+        "identity",
+        "pool_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/definitions/DiskIdentity"
+        },
+        "pool_id": {
+          "$ref": "#/definitions/TypedUuidForZpoolKind"
+        }
+      }
+    },
+    "TypedUuidForZpoolKind": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

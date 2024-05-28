@@ -18,27 +18,29 @@ sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 # in-sync, rather than querying its NTP zone.
 skip_timesync = false
 
-# For testing purposes, A file-backed zpool can be manually created with the
-# following:
+# For testing purposes, a file-backed virtual disk can be manually created with
+# the following:
 #
-# # truncate -s 10GB testpool.vdev
-# # zpool create oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b "$PWD/testpool.vdev"
+# # truncate -s 10GB <name>.vdev
 #
-# Note that you'll need to create one such zpool for each below, with a
-# different vdev for each.  The `create_virtual_hardware.sh` script does this
-# for you.
-zpools = [
-  "oxi_a462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxi_b462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_14b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_24b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_cd70d7f6-2354-4bf2-8012-55bf9eaf7930",
-  "oxp_ceb4461c-cf56-4719-ad3c-14430bfdfb60",
-  "oxp_31bd71cd-4736-4a12-a387-9b74b050396f",
-  "oxp_616b26df-e62a-4c68-b506-f4a923d8aaf7",
+# Note that you'll need to create one such file for each disk below.
+# `cargo xtask virtual-hardware create` does this for you.
+#
+# These paths have the prefix of either "u2" or "m2", followed by an underscore,
+# followed by a string that is embedded into their fake serial values.
+vdevs = [
+  "m2_0.vdev",
+  "m2_1.vdev",
+
+  "u2_0.vdev",
+  "u2_1.vdev",
+  "u2_2.vdev",
+  "u2_3.vdev",
+  "u2_4.vdev",
+  "u2_5.vdev",
+  "u2_6.vdev",
+  "u2_7.vdev",
+  "u2_8.vdev",
 ]
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which

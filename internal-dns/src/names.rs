@@ -4,7 +4,7 @@
 
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
-use uuid::Uuid;
+use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 
 /// Name for the control plane DNS zone
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
@@ -28,8 +28,8 @@ pub enum ServiceName {
     Dendrite,
     Tfport,
     CruciblePantry,
-    SledAgent(Uuid),
-    Crucible(Uuid),
+    SledAgent(SledUuid),
+    Crucible(OmicronZoneUuid),
     BoundaryNtp,
     InternalNtp,
     Maghemite, //TODO change to Dpd - maghemite has several services.

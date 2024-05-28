@@ -101,16 +101,6 @@ trait Attributes: DynClone {
     fn y_axis_label(&self) -> String;
     fn axis_value(&self, val: f64) -> String;
     fn legend_value(&self, val: f64) -> String;
-
-    fn increase(&mut self, _ndx: usize) -> Option<u8> {
-        None
-    }
-
-    fn decrease(&mut self, _ndx: usize) -> Option<u8> {
-        None
-    }
-
-    fn clear(&mut self) {}
 }
 
 dyn_clone::clone_trait_object!(Attributes);
@@ -357,7 +347,7 @@ impl Graph {
 
             for (_ndx, s) in &mut self.series.iter_mut().enumerate() {
                 if let Some(datum) = s.raw[offs] {
-                    let point = (i as f64, datum as f64);
+                    let point = (i as f64, f64::from(datum));
 
                     if self.interpolate != 0 {
                         if let Some(last) = s.data.last() {
@@ -374,7 +364,7 @@ impl Graph {
                         }
                     }
 
-                    s.data.push((i as f64, datum as f64));
+                    s.data.push((i as f64, f64::from(datum)));
                 }
             }
         }

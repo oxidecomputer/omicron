@@ -599,9 +599,11 @@ fn read_frame_size(buf: [u8; FRAME_HEADER_SIZE]) -> usize {
 
 #[derive(Debug, From)]
 enum HandshakeError {
-    Serialization(ciborium::ser::Error<std::io::Error>),
-    Deserialization(ciborium::de::Error<std::io::Error>),
-    Io(tokio::io::Error),
+    // Rust 1.77 warns on tuple variants not being used, but in reality these are
+    // used for their Debug impl.
+    Serialization(#[allow(dead_code)] ciborium::ser::Error<std::io::Error>),
+    Deserialization(#[allow(dead_code)] ciborium::de::Error<std::io::Error>),
+    Io(#[allow(dead_code)] tokio::io::Error),
     UnsupportedScheme,
     UnsupportedVersion,
     Timeout,

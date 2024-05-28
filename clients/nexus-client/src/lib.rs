@@ -21,21 +21,24 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
         // It's kind of unfortunate to pull in such a complex and unstable type
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         Generation = omicron_common::api::external::Generation,
-        Ipv4Network = ipnetwork::Ipv4Network,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        NewPasswordHash = omicron_passwords::NewPasswordHash,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        NewPasswordHash = omicron_passwords::NewPasswordHash,
+        TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
+        TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
@@ -229,7 +232,6 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     ) -> Self {
         Self {
             address: s.address.to_string(),
-            base_route: s.base_route.clone(),
             id: s.id,
             kind: s.kind.into(),
             interval: s.interval.into(),
@@ -255,7 +257,9 @@ impl From<std::time::Duration> for types::Duration {
 
 impl From<types::Duration> for std::time::Duration {
     fn from(s: types::Duration) -> Self {
-        std::time::Duration::from_nanos(s.secs * 1000000000 + s.nanos as u64)
+        std::time::Duration::from_nanos(
+            s.secs * 1000000000 + u64::from(s.nanos),
+        )
     }
 }
 
@@ -287,7 +291,8 @@ impl From<&omicron_common::api::internal::shared::SourceNatConfig>
     fn from(
         r: &omicron_common::api::internal::shared::SourceNatConfig,
     ) -> Self {
-        Self { ip: r.ip, first_port: r.first_port, last_port: r.last_port }
+        let (first_port, last_port) = r.port_range_raw();
+        Self { ip: r.ip, first_port, last_port }
     }
 }
 
@@ -379,6 +384,51 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
                 }).collect();
                 types::ExternalPortDiscovery::Static(new)
             },
+        }
+    }
+}
+
+impl From<types::ProducerKind>
+    for omicron_common::api::internal::nexus::ProducerKind
+{
+    fn from(kind: types::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus::ProducerKind;
+        match kind {
+            types::ProducerKind::SledAgent => ProducerKind::SledAgent,
+            types::ProducerKind::Instance => ProducerKind::Instance,
+            types::ProducerKind::Service => ProducerKind::Service,
+        }
+    }
+}
+
+impl TryFrom<types::ProducerEndpoint>
+    for omicron_common::api::internal::nexus::ProducerEndpoint
+{
+    type Error = String;
+
+    fn try_from(ep: types::ProducerEndpoint) -> Result<Self, String> {
+        let Ok(address) = ep.address.parse() else {
+            return Err(format!("Invalid IP address: {}", ep.address));
+        };
+        Ok(Self {
+            id: ep.id,
+            kind: ep.kind.into(),
+            address,
+            interval: ep.interval.into(),
+        })
+    }
+}
+
+impl From<&omicron_common::api::external::AllowedSourceIps>
+    for types::AllowedSourceIps
+{
+    fn from(ips: &omicron_common::api::external::AllowedSourceIps) -> Self {
+        use omicron_common::api::external::AllowedSourceIps;
+        match ips {
+            AllowedSourceIps::Any => types::AllowedSourceIps::Any,
+            AllowedSourceIps::List(list) => {
+                types::AllowedSourceIps::List(list.iter().cloned().collect())
+            }
         }
     }
 }

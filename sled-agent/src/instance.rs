@@ -405,7 +405,7 @@ impl InstanceRunner {
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(CurrentState{ tx }) => {
-                            tx.send(self.current_state().await)
+                            tx.send(self.current_state())
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(PutState{ state, tx }) => {
@@ -1176,7 +1176,7 @@ impl InstanceRunner {
         }
     }
 
-    async fn current_state(&self) -> SledInstanceState {
+    fn current_state(&self) -> SledInstanceState {
         self.state.sled_instance_state()
     }
 
@@ -1340,7 +1340,7 @@ impl InstanceRunner {
         let mut rng = rand::rngs::StdRng::from_entropy();
         let root = self
             .storage
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_u2_mountpoints(ZONE_DATASET)
             .choose(&mut rng)
@@ -1520,17 +1520,15 @@ impl InstanceRunner {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
-    use crate::nexus::NexusClient;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use crate::zone_bundle::CleanupContext;
     use camino_tempfile::Utf8TempDir;
-    use dns_server::dns_server::ServerHandle as DnsServerHandle;
-    use dropshot::test_util::LogContext;
-    use dropshot::{HandlerTaskMode, HttpServer};
+    use dns_server::TransientServer;
+    use dropshot::HttpServer;
     use illumos_utils::dladm::MockDladm;
     use illumos_utils::dladm::__mock_MockDladm::__create_vnic::Context as MockDladmCreateVnicContext;
     use illumos_utils::dladm::__mock_MockDladm::__delete_vnic::Context as MockDladmDeleteVnicContext;
@@ -1539,15 +1537,13 @@ mod tests {
     use illumos_utils::zone::MockZones;
     use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
-    use illumos_utils::zpool::ZpoolName;
     use internal_dns::resolver::Resolver;
-    use internal_dns::ServiceName;
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceProperties;
-    use sled_storage::disk::{RawDisk, SyntheticDisk};
-    use sled_storage::manager::FakeStorageManager;
+    use omicron_common::FileKv;
+    use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use tokio::sync::watch::Receiver;
@@ -1584,26 +1580,42 @@ mod tests {
     }
 
     struct FakeNexusParts {
-        nexus_client: NexusClient,
-        nexus_server: HttpServer<ServerContext>,
+        nexus_client: NexusClientWithResolver,
+        _nexus_server: HttpServer<ServerContext>,
         state_rx: Receiver<ReceivedInstanceState>,
+        _dns_server: TransientServer,
     }
 
     impl FakeNexusParts {
-        fn new(logctx: &LogContext) -> Self {
+        async fn new(log: &Logger) -> Self {
             let (state_tx, state_rx) =
                 tokio::sync::watch::channel(ReceivedInstanceState::None);
 
-            let nexus_server = crate::fakes::nexus::start_test_server(
-                logctx.log.new(o!("component" => "FakeNexusServer")),
+            let _nexus_server = crate::fakes::nexus::start_test_server(
+                log.new(o!("component" => "FakeNexusServer")),
                 Box::new(NexusServer { observed_runtime_state: state_tx }),
             );
-            let nexus_client = NexusClient::new(
-                &format!("http://{}", nexus_server.local_addr()),
-                logctx.log.new(o!("component" => "NexusClient")),
+
+            let _dns_server =
+                crate::fakes::nexus::start_dns_server(&log, &_nexus_server)
+                    .await;
+
+            let resolver = Arc::new(
+                Resolver::new_from_addrs(
+                    log.clone(),
+                    &[_dns_server.dns_server.local_address()],
+                )
+                .unwrap(),
             );
 
-            Self { nexus_client, nexus_server, state_rx }
+            let nexus_client =
+                NexusClientWithResolver::new_from_resolver_with_port(
+                    &log,
+                    resolver,
+                    _nexus_server.local_addr().port(),
+                );
+
+            Self { nexus_client, _nexus_server, state_rx, _dns_server }
         }
     }
 
@@ -1637,65 +1649,6 @@ mod tests {
         let zone_id_ctx = MockZones::id_context();
         zone_id_ctx.expect().times(..).returning(|_| Ok(Some(1)));
         (boot_ctx, wait_ctx, zone_id_ctx)
-    }
-
-    async fn dns_server(
-        logctx: &LogContext,
-        nexus_server: &HttpServer<ServerContext>,
-    ) -> (DnsServerHandle, Arc<Resolver>, Utf8TempDir) {
-        let storage_path =
-            Utf8TempDir::new().expect("Failed to create temporary directory");
-        let config_store = dns_server::storage::Config {
-            keep_old_generations: 3,
-            storage_path: storage_path.path().to_owned(),
-        };
-
-        let (dns_server, dns_dropshot) = dns_server::start_servers(
-            logctx.log.new(o!("component" => "DnsServer")),
-            dns_server::storage::Store::new(
-                logctx.log.new(o!("component" => "DnsStore")),
-                &config_store,
-            )
-            .unwrap(),
-            &dns_server::dns_server::Config {
-                bind_address: "[::1]:0".parse().unwrap(),
-            },
-            &dropshot::ConfigDropshot {
-                bind_address: "[::1]:0".parse().unwrap(),
-                request_body_max_bytes: 8 * 1024,
-                default_handler_task_mode: HandlerTaskMode::Detached,
-            },
-        )
-        .await
-        .expect("starting DNS server");
-
-        let dns_dropshot_client = dns_service_client::Client::new(
-            &format!("http://{}", dns_dropshot.local_addr()),
-            logctx.log.new(o!("component" => "DnsDropshotClient")),
-        );
-        let mut dns_config = internal_dns::DnsConfigBuilder::new();
-        let IpAddr::V6(nexus_ip_addr) = nexus_server.local_addr().ip() else {
-            panic!("IPv6 address required for nexus_server")
-        };
-        let zone = dns_config.host_zone(Uuid::new_v4(), nexus_ip_addr).unwrap();
-        dns_config
-            .service_backend_zone(
-                ServiceName::Nexus,
-                &zone,
-                nexus_server.local_addr().port(),
-            )
-            .unwrap();
-        let dns_config = dns_config.build();
-        dns_dropshot_client.dns_config_put(&dns_config).await.unwrap();
-
-        let resolver = Arc::new(
-            Resolver::new_from_addrs(
-                logctx.log.new(o!("component" => "Resolver")),
-                &[dns_server.local_address()],
-            )
-            .unwrap(),
-        );
-        (dns_server, resolver, storage_path)
     }
 
     // note the "mock" here is different from the vnic/zone contexts above.
@@ -1736,19 +1689,22 @@ mod tests {
         (srv, client)
     }
 
-    // make a FakeStorageManager with a "U2" upserted
-    async fn fake_storage_manager_with_u2() -> StorageHandle {
-        let (storage_manager, storage_handle) = FakeStorageManager::new();
-        tokio::spawn(storage_manager.run());
-        let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
-        let external_disk: RawDisk =
-            SyntheticDisk::new(external_zpool_name, 0).into();
-        storage_handle.upsert_disk(external_disk).await;
-        storage_handle
+    async fn setup_storage_manager(log: &Logger) -> StorageManagerTestHarness {
+        let mut harness = StorageManagerTestHarness::new(log).await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        harness.handle().key_manager_ready().await;
+        let config = harness.make_config(1, &raw_disks);
+        let _ = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        harness
     }
 
     async fn instance_struct(
-        logctx: &LogContext,
+        log: &Logger,
         propolis_addr: SocketAddr,
         nexus_client_with_resolver: NexusClientWithResolver,
         storage_handle: StorageHandle,
@@ -1763,7 +1719,7 @@ mod tests {
             fake_instance_initial_state(propolis_id, propolis_addr);
 
         let services = fake_instance_manager_services(
-            logctx,
+            log,
             storage_handle,
             nexus_client_with_resolver,
             temp_dir,
@@ -1775,7 +1731,7 @@ mod tests {
         };
 
         Instance::new(
-            logctx.log.new(o!("component" => "Instance")),
+            log.new(o!("component" => "Instance")),
             id,
             propolis_id,
             ticket,
@@ -1797,11 +1753,12 @@ mod tests {
                 hostname: Hostname::from_str("bert").unwrap(),
             },
             nics: vec![],
-            source_nat: SourceNatConfig {
-                ip: IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                first_port: 0,
-                last_port: 0,
-            },
+            source_nat: SourceNatConfig::new(
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                0,
+                16383,
+            )
+            .unwrap(),
             ephemeral_ip: None,
             floating_ips: vec![],
             firewall_rules: vec![],
@@ -1833,7 +1790,7 @@ mod tests {
     }
 
     fn fake_instance_manager_services(
-        logctx: &LogContext,
+        log: &Logger,
         storage_handle: StorageHandle,
         nexus_client_with_resolver: NexusClientWithResolver,
         temp_dir: &String,
@@ -1841,13 +1798,13 @@ mod tests {
         let vnic_allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
+            log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
 
         let cleanup_context = CleanupContext::default();
         let zone_bundler = ZoneBundler::new(
-            logctx.log.new(o!("component" => "ZoneBundler")),
+            log.new(o!("component" => "ZoneBundler")),
             storage_handle.clone(),
             cleanup_context,
         );
@@ -1867,27 +1824,24 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_events_normal",
         );
+        let log = logctx.log.new(o!(FileKv));
 
-        let (propolis_server, _propolis_client) =
-            propolis_mock_server(&logctx.log);
+        let (propolis_server, _propolis_client) = propolis_mock_server(&log);
         let propolis_addr = propolis_server.local_addr();
 
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
         let _mock_zone_contexts = mock_zone_contexts();
 
-        let FakeNexusParts { nexus_client, nexus_server, mut state_rx } =
-            FakeNexusParts::new(&logctx);
+        let FakeNexusParts {
+            nexus_client,
+            mut state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
 
-        let (_dns_server, resolver, _dns_config_dir) =
-            timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
-                .await
-                .expect("timed out making DNS server and Resolver");
-
-        let nexus_client_with_resolver =
-            NexusClientWithResolver::new_with_client(nexus_client, resolver);
-
-        let storage_handle = fake_storage_manager_with_u2().await;
+        let mut storage_harness = setup_storage_manager(&log).await;
+        let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
@@ -1895,9 +1849,9 @@ mod tests {
         let inst = timeout(
             TIMEOUT_DURATION,
             instance_struct(
-                &logctx,
+                &log,
                 propolis_addr,
-                nexus_client_with_resolver,
+                nexus_client,
                 storage_handle,
                 &temp_dir,
             ),
@@ -1935,6 +1889,7 @@ mod tests {
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
+        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -1944,23 +1899,21 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_starting_propolis",
         );
+        let log = logctx.log.new(o!(FileKv));
 
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
         let _mock_zone_contexts = mock_zone_contexts();
 
-        let FakeNexusParts { nexus_client, nexus_server, state_rx } =
-            FakeNexusParts::new(&logctx);
+        let FakeNexusParts {
+            nexus_client,
+            state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
 
-        let (_dns_server, resolver, _dns_config_dir) =
-            timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
-                .await
-                .expect("timed out making DNS server and Resolver");
-
-        let nexus_client_with_resolver =
-            NexusClientWithResolver::new_with_client(nexus_client, resolver);
-
-        let storage_handle = fake_storage_manager_with_u2().await;
+        let mut storage_harness = setup_storage_manager(&logctx.log).await;
+        let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
@@ -1968,10 +1921,10 @@ mod tests {
         let inst = timeout(
             TIMEOUT_DURATION,
             instance_struct(
-                &logctx,
+                &log,
                 // we want to test propolis not ever coming up
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
-                nexus_client_with_resolver,
+                nexus_client,
                 storage_handle,
                 &temp_dir,
             ),
@@ -2007,6 +1960,7 @@ mod tests {
             panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
         }
 
+        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2015,6 +1969,7 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_creating_zone",
         );
+        let log = logctx.log.new(o!(FileKv));
 
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
@@ -2032,18 +1987,15 @@ mod tests {
         let zone_id_ctx = MockZones::id_context();
         zone_id_ctx.expect().times(..).returning(|_| Ok(Some(1)));
 
-        let FakeNexusParts { nexus_client, nexus_server, state_rx } =
-            FakeNexusParts::new(&logctx);
+        let FakeNexusParts {
+            nexus_client,
+            state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
 
-        let (_dns_server, resolver, _dns_config_dir) =
-            timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
-                .await
-                .expect("timed out making DNS server and Resolver");
-
-        let nexus_client_with_resolver =
-            NexusClientWithResolver::new_with_client(nexus_client, resolver);
-
-        let storage_handle = fake_storage_manager_with_u2().await;
+        let mut storage_harness = setup_storage_manager(&logctx.log).await;
+        let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
@@ -2051,10 +2003,10 @@ mod tests {
         let inst = timeout(
             TIMEOUT_DURATION,
             instance_struct(
-                &logctx,
+                &log,
                 // isn't running because the "zone" never "boots"
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
-                nexus_client_with_resolver,
+                nexus_client,
                 storage_handle,
                 &temp_dir,
             ),
@@ -2090,6 +2042,7 @@ mod tests {
             panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
         }
 
+        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2098,23 +2051,21 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_manager_creation",
         );
+        let log = logctx.log.new(o!(FileKv));
 
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
         let _mock_zone_contexts = mock_zone_contexts();
 
-        let storage_handle = fake_storage_manager_with_u2().await;
+        let mut storage_harness = setup_storage_manager(&logctx.log).await;
+        let storage_handle = storage_harness.handle().clone();
 
-        let FakeNexusParts { nexus_client, nexus_server, mut state_rx } =
-            FakeNexusParts::new(&logctx);
-
-        let (_dns_server, resolver, _dns_config_dir) =
-            timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
-                .await
-                .expect("timed out making DNS server and Resolver");
-
-        let nexus_client_with_resolver =
-            NexusClientWithResolver::new_with_client(nexus_client, resolver);
+        let FakeNexusParts {
+            nexus_client,
+            mut state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
 
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
@@ -2127,9 +2078,9 @@ mod tests {
             zone_bundler,
             zone_builder_factory,
         } = fake_instance_manager_services(
-            &logctx,
+            &log,
             storage_handle,
-            nexus_client_with_resolver,
+            nexus_client,
             &temp_dir,
         );
 
@@ -2196,6 +2147,7 @@ mod tests {
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
+        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }

@@ -94,7 +94,7 @@ where
                         }),
                         Err(source) => Err(authn::Error {
                             reason: Reason::LoadSiloAuthnPolicy { source },
-                            schemes_tried: schemes_tried,
+                            schemes_tried,
                         }),
                     };
                 }

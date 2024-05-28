@@ -4,7 +4,7 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
 use chrono::DateTime;
@@ -32,14 +32,17 @@ use thiserror::Error;
 
 mod client;
 pub mod model;
+#[cfg(feature = "oxql")]
+pub mod oxql;
 pub mod query;
+#[cfg(any(feature = "sql", test))]
 pub mod sql;
 
+#[cfg(feature = "oxql")]
+pub use client::oxql::OxqlResult;
+pub use client::query_summary::QuerySummary;
 pub use client::Client;
 pub use client::DbWrite;
-pub use client::QueryMetadata;
-pub use client::QueryResult;
-pub use client::Table;
 pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
@@ -58,7 +61,7 @@ pub enum Error {
     BadMetadata { key: String, msg: String },
 
     /// An error interacting with the telemetry database
-    #[error("Error interacting with telemetry database")]
+    #[error("Error interacting with telemetry database: {0}")]
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema
@@ -134,8 +137,20 @@ pub enum Error {
     #[error("Schema update versions must be sequential without gaps")]
     NonSequentialSchemaVersions,
 
+    #[cfg(any(feature = "sql", test))]
     #[error("SQL error")]
     Sql(#[from] sql::Error),
+
+    #[cfg(any(feature = "oxql", test))]
+    #[error(transparent)]
+    Oxql(oxql::Error),
+}
+
+#[cfg(any(feature = "oxql", test))]
+impl From<crate::oxql::Error> for Error {
+    fn from(e: crate::oxql::Error) -> Self {
+        Error::Oxql(e)
+    }
 }
 
 impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
@@ -281,6 +296,7 @@ mod tests {
     use super::*;
     use crate::model::DbFieldList;
     use crate::model::DbTimeseriesSchema;
+    use std::borrow::Cow;
     use uuid::Uuid;
 
     // Validates that the timeseries_key stability for a sample is stable.
@@ -317,7 +333,7 @@ mod tests {
         use strum::EnumCount;
 
         let values = [
-            ("string", FieldValue::String(String::default())),
+            ("string", FieldValue::String(Cow::Owned(String::default()))),
             ("i8", FieldValue::I8(-0x0A)),
             ("u8", FieldValue::U8(0x0A)),
             ("i16", FieldValue::I16(-0x0ABC)),

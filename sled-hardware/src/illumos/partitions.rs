@@ -12,9 +12,9 @@ use crate::{DiskPaths, DiskVariant, Partition, PooledDiskError};
 use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::Logger;
-use uuid::Uuid;
 
 #[cfg(test)]
 use illumos_utils::zpool::MockZpool as Zpool;
@@ -148,9 +148,10 @@ pub fn ensure_partition_layout(
     paths: &DiskPaths,
     variant: DiskVariant,
     identity: &DiskIdentity,
+    zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     internal_ensure_partition_layout::<libefi_illumos::Gpt>(
-        log, paths, variant, identity,
+        log, paths, variant, identity, zpool_id,
     )
 }
 
@@ -161,23 +162,26 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     paths: &DiskPaths,
     variant: DiskVariant,
     identity: &DiskIdentity,
+    zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     // Open the "Whole Disk" as a raw device to be parsed by the
     // libefi-illumos library. This lets us peek at the GPT before
     // making too many assumptions about it.
     let raw = true;
     let path = paths.whole_disk(raw);
+    let devfs_path_str = paths.devfs_path.as_str().to_string();
+    let log = log.new(slog::o!("path" => devfs_path_str));
 
     let gpt = match GPT::read(&path) {
         Ok(gpt) => {
             // This should be the common steady-state case
-            info!(log, "Disk at {} already has a GPT", paths.devfs_path);
+            info!(log, "Disk already has a GPT");
             gpt
         }
         Err(libefi_illumos::Error::LabelNotFound) => {
             // Fresh U.2 disks are an example of devices where "we don't expect
             // a GPT to exist".
-            info!(log, "Disk at {} does not have a GPT", paths.devfs_path);
+            info!(log, "Disk does not have a GPT");
 
             // For ZFS-implementation-specific reasons, Zpool create can only
             // act on devices under the "/dev" hierarchy, rather than the device
@@ -193,12 +197,19 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                 DiskVariant::U2 => {
                     // First we need to check that this disk is of the proper
                     // size and correct logical block address formatting.
-                    ensure_size_and_formatting(log, identity)?;
+                    ensure_size_and_formatting(&log, identity)?;
 
-                    // If we were successful we can create a zpool on this disk.
-                    info!(log, "Formatting zpool on disk {}", paths.devfs_path);
+                    info!(
+                        log,
+                        "Formatting zpool on disk";
+                        "uuid" => ?zpool_id,
+                    );
+                    let Some(zpool_id) = zpool_id else {
+                        return Err(PooledDiskError::MissingZpoolUuid);
+                    };
+
                     // If a zpool does not already exist, create one.
-                    let zpool_name = ZpoolName::new_external(Uuid::new_v4());
+                    let zpool_name = ZpoolName::new_external(zpool_id);
                     Zpool::create(&zpool_name, dev_path)?;
                     return Ok(vec![Partition::ZfsPool]);
                 }
@@ -385,6 +396,7 @@ mod test {
             &DiskPaths { devfs_path, dev_path: None },
             DiskVariant::U2,
             &mock_disk_identity(),
+            None,
         );
         match result {
             Err(PooledDiskError::CannotFormatMissingDevPath { .. }) => {}
@@ -419,6 +431,7 @@ mod test {
             },
             DiskVariant::U2,
             &mock_disk_identity(),
+            Some(ZpoolUuid::new_v4()),
         )
         .expect("Should have succeeded partitioning disk");
 
@@ -444,6 +457,7 @@ mod test {
             },
             DiskVariant::M2,
             &mock_disk_identity(),
+            None,
         )
         .is_err());
 
@@ -482,6 +496,7 @@ mod test {
             },
             DiskVariant::U2,
             &mock_disk_identity(),
+            None,
         )
         .expect("Should be able to parse disk");
 
@@ -525,6 +540,7 @@ mod test {
             },
             DiskVariant::M2,
             &mock_disk_identity(),
+            None,
         )
         .expect("Should be able to parse disk");
 
@@ -565,6 +581,7 @@ mod test {
                 },
                 DiskVariant::M2,
                 &mock_disk_identity(),
+                None,
             )
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
@@ -591,6 +608,7 @@ mod test {
                 },
                 DiskVariant::U2,
                 &mock_disk_identity(),
+                None,
             )
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }

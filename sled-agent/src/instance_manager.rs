@@ -310,6 +310,19 @@ impl InstanceManager {
     pub fn reservoir_size(&self) -> ByteCount {
         self.inner.vmm_reservoir_manager.reservoir_size()
     }
+
+    pub async fn get_instance_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::GetState { instance_id, tx })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
 }
 
 // Most requests that can be sent to the "InstanceManagerRunner" task.
@@ -364,6 +377,10 @@ enum InstanceManagerRequest {
         instance_id: Uuid,
         ip: InstanceExternalIpBody,
         tx: oneshot::Sender<Result<(), Error>>,
+    },
+    GetState {
+        instance_id: Uuid,
+        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
 }
 
@@ -466,6 +483,14 @@ impl InstanceManagerRunner {
                         },
                         Some(InstanceDeleteExternalIp { instance_id, ip, tx }) => {
                             self.delete_external_ip(tx, instance_id, &ip).await
+                        },
+                        Some(GetState { instance_id, tx }) => {
+                            // TODO(eliza): it could potentially be nice to
+                            // refactor this to use `tokio::sync::watch`, rather
+                            // than having to force `GetState` requests to
+                            // serialize with the requests that actually update
+                            // the state...
+                            self.get_instance_state(tx, instance_id).await
                         },
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
@@ -732,6 +757,22 @@ impl InstanceManagerRunner {
         instance.delete_external_ip(tx, ip).await?;
         Ok(())
     }
+
+    async fn get_instance_state(
+        &self,
+        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+        instance_id: Uuid,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_instance(instance_id) else {
+            return tx
+                .send(Err(Error::NoSuchInstance(instance_id)))
+                .map_err(|_| Error::FailedSendClientClosed);
+        };
+
+        let state = instance.current_state().await?;
+        tx.send(Ok(state)).map_err(|_| Error::FailedSendClientClosed)?;
+        Ok(())
+    }
 }
 
 /// Represents membership of an instance in the [`InstanceManager`].
@@ -750,7 +791,7 @@ impl InstanceTicket {
         InstanceTicket { id, terminate_tx: Some(terminate_tx) }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     pub(crate) fn new_without_manager_for_test(id: Uuid) -> Self {
         Self { id, terminate_tx: None }
     }

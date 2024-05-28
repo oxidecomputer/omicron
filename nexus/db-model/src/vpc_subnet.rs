@@ -50,8 +50,8 @@ impl VpcSubnet {
         subnet_id: Uuid,
         vpc_id: Uuid,
         identity: external::IdentityMetadataCreateParams,
-        ipv4_block: external::Ipv4Net,
-        ipv6_block: external::Ipv6Net,
+        ipv4_block: oxnet::Ipv4Net,
+        ipv6_block: oxnet::Ipv6Net,
     ) -> Self {
         let identity = VpcSubnetIdentity::new(subnet_id, identity);
         Self {

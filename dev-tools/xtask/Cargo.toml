@@ -4,12 +4,16 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
-cargo_toml = "0.19"
-cargo_metadata = "0.18"
+cargo_toml = "0.20"
+cargo_metadata.workspace = true
 clap.workspace = true
+macaddr.workspace = true
 serde.workspace = true
 toml.workspace = true
 fs-err.workspace = true
