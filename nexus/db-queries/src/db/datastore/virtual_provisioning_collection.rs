@@ -325,3 +325,291 @@ impl DataStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::fixed_data;
+    use crate::db::lookup::LookupPath;
+    use nexus_db_model::Project;
+    use nexus_db_model::SiloQuotasUpdate;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_test_utils::dev;
+    use uuid::Uuid;
+
+    async fn verify_collection_usage(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        id: Uuid,
+        expected_cpus: i64,
+        expected_memory: i64,
+        expected_storage: i64,
+    ) {
+        let collection = datastore
+            .virtual_provisioning_collection_get(opctx, id)
+            .await
+            .expect("Could not lookup collection");
+
+        assert_eq!(collection.cpus_provisioned, expected_cpus);
+        assert_eq!(
+            collection.ram_provisioned.0.to_bytes(),
+            expected_memory as u64
+        );
+        assert_eq!(
+            collection.virtual_disk_bytes_provisioned.0.to_bytes(),
+            expected_storage as u64
+        );
+    }
+
+    #[tokio::test]
+    async fn test_instance_create_and_delete() {
+        let logctx = dev::test_setup_log("test_instance_create_and_delete");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Use the default fleet and silo, but create a new project.
+
+        let fleet_id = *fixed_data::FLEET_ID;
+        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+
+        let ids = [fleet_id, silo_id, project_id];
+
+        let (_authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myproject".parse().unwrap(),
+                            description: "It's a project".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the silo has a quota that can fit our requested instance.
+        //
+        // This also acts as a guard against a change in the default silo quota
+        // -- we overwrite it for the test unconditionally.
+
+        let quotas_update = SiloQuotasUpdate {
+            cpus: Some(24),
+            memory: Some(1 << 40),
+            storage: Some(1 << 50),
+            time_modified: chrono::Utc::now(),
+        };
+        let authz_silo = LookupPath::new(&opctx, &datastore)
+            .silo_id(silo_id)
+            .lookup_for(crate::authz::Action::Modify)
+            .await
+            .unwrap()
+            .0;
+        datastore
+            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .await
+            .unwrap();
+
+        // Actually provision the instance
+
+        let instance_id = Uuid::new_v4();
+        let cpus = 12;
+        let ram = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        datastore
+            .virtual_provisioning_collection_insert_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Delete the instance
+
+        let max_instance_gen = 0;
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+                max_instance_gen,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_create_and_delete_twice() {
+        let logctx =
+            dev::test_setup_log("test_instance_create_and_delete_twice");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Use the default fleet and silo, but create a new project.
+
+        let fleet_id = *fixed_data::FLEET_ID;
+        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+
+        let ids = [fleet_id, silo_id, project_id];
+
+        let (_authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myproject".parse().unwrap(),
+                            description: "It's a project".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the silo has a quota that can fit our requested instance.
+        //
+        // This also acts as a guard against a change in the default silo quota
+        // -- we overwrite it for the test unconditionally.
+
+        let quotas_update = SiloQuotasUpdate {
+            cpus: Some(24),
+            memory: Some(1 << 40),
+            storage: Some(1 << 50),
+            time_modified: chrono::Utc::now(),
+        };
+        let authz_silo = LookupPath::new(&opctx, &datastore)
+            .silo_id(silo_id)
+            .lookup_for(crate::authz::Action::Modify)
+            .await
+            .unwrap()
+            .0;
+        datastore
+            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .await
+            .unwrap();
+
+        // Actually provision the instance
+
+        let instance_id = Uuid::new_v4();
+        let cpus = 12;
+        let ram = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        datastore
+            .virtual_provisioning_collection_insert_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Attempt to provision that same instance once more.
+        //
+        // The "virtual_provisioning_collection_insert" call should succeed for
+        // idempotency reasons, but we should not be double-dipping on the
+        // instance object's provisioning accounting.
+
+        datastore
+            .virtual_provisioning_collection_insert_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        // Verify that the usage is the same as before the call
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Delete the instance
+        let max_instance_gen = 0;
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+                max_instance_gen,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        // Attempt to delete the same instance once more.
+        //
+        // Just like "double-adding", double deletion should be an idempotent
+        // operation.
+
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+                max_instance_gen,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+}
