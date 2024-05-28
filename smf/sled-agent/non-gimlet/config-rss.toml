@@ -33,8 +33,7 @@ external_dns_zone_name = "oxide.test"
 # the DNS domain delegated to the rack by the customer. Each of these addresses
 # must be contained in one of the "internal services" IP Pool ranges listed
 # below.
-# external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
-external_dns_ips = [ "10.1.222.1", "10.1.222.2" ]
+external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
 
 # Initial TLS certificates for the external API
 #
@@ -70,10 +69,8 @@ external_certificates = []
 #
 # For more on this and what to put here, see docs/how-to-run.adoc.
 [[internal_services_ip_pool_ranges]]
-# first = "192.168.1.20"
-# last = "192.168.1.29"
-first = "10.1.222.1"
-last = "10.1.222.10"
+first = "192.168.1.20"
+last = "192.168.1.29"
 
 # TODO - this configuration is subject to change going forward. Ultimately these
 # parameters should be provided to the control plane via wicket, but we need to
@@ -94,10 +91,8 @@ rack_subnet = "fd00:1122:3344:0100::/56"
 # A range of IP addresses used by Boundary Services on the external network.  In
 # a real system, these would be addresses of the uplink ports on the Sidecar.
 # With softnpu, only one address is used.
-# infra_ip_first = "192.168.1.30"
-# infra_ip_last = "192.168.1.30"
-infra_ip_first = "10.1.222.10"
-infra_ip_last = "10.1.222.10"
+infra_ip_first = "192.168.1.30"
+infra_ip_last = "192.168.1.30"
 
 # Configurations for BGP routers to run on the scrimlets.
 bgp = []
@@ -105,11 +100,9 @@ bgp = []
 # You can configure multiple uplinks by repeating the following stanza
 [[rack_network_config.ports]]
 # Routes associated with this port.
-# routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
-routes = [{nexthop = "10.0.0.1", destination = "0.0.0.0/0"}]
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
 # Addresses associated with this port.
-# addresses = ["192.168.1.30/24"]
-addresses = ["10.1.222.10/8"]
+addresses = ["192.168.1.30/24"]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
 port = "qsfp0"
 # The speed of this port.

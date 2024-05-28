@@ -1142,6 +1142,8 @@ impl DataStore {
 
         // Unlink all subnets from this router.
         // XXX: We might this want to error out before the delete fires.
+        // XXX: This will temporarily leave some hanging subnet attachments. We need to be sure
+        //      these are safely handled (no unwrap, or remove via join here.)
         use db::schema::vpc_subnet::dsl as vpc;
         diesel::update(vpc::vpc_subnet)
             .filter(vpc::time_deleted.is_null())

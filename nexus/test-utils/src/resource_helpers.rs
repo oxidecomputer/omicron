@@ -26,6 +26,7 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
+use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -35,6 +36,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::NameOrId;
 use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
@@ -557,6 +560,32 @@ pub async fn create_vpc_with_error(
     .unwrap()
     .parsed_body()
     .unwrap()
+}
+
+pub async fn create_vpc_subnet(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    subnet_name: &str,
+    ipv4_block: Ipv4Net,
+    ipv6_block: Option<Ipv6Net>,
+    custom_router: Option<&str>,
+) -> VpcSubnet {
+    object_create(
+        &client,
+        &format!("/v1/vpc-subnets?project={project_name}&vpc={vpc_name}"),
+        &params::VpcSubnetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: subnet_name.parse().unwrap(),
+                description: "vpc description".to_string(),
+            },
+            ipv4_block,
+            ipv6_block,
+            custom_router: custom_router
+                .map(|n| NameOrId::Name(n.parse().unwrap())),
+        },
+    )
+    .await
 }
 
 pub async fn create_router(

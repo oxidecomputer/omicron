@@ -42,8 +42,8 @@ pub struct VpcRouter {
     #[diesel(embed)]
     identity: VpcRouterIdentity,
 
-    pub vpc_id: Uuid,
     pub kind: VpcRouterKind,
+    pub vpc_id: Uuid,
     pub rcgen: Generation,
     pub resolved_version: i64,
 }
