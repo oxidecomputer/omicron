@@ -16,11 +16,11 @@ use crate::db::model::Region;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_config::RegionAllocationStrategy;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use uuid::Uuid;
 
@@ -128,17 +128,16 @@ impl DataStore {
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
+        let query = crate::db::queries::region_allocation::allocation_query(
+            volume_id,
+            block_size.to_bytes() as u64,
+            blocks_per_extent,
+            extent_count,
+            allocation_strategy,
+        );
+        let conn = self.pool_connection_authorized(&opctx).await?;
         let dataset_and_regions: Vec<(Dataset, Region)> =
-            crate::db::queries::region_allocation::allocation_query(
-                volume_id,
-                block_size.to_bytes() as u64,
-                blocks_per_extent,
-                extent_count,
-                allocation_strategy,
-            )
-            .get_results_async(&*self.pool_connection_authorized(&opctx).await?)
-            .await
-            .map_err(|e| {
+            query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;
 

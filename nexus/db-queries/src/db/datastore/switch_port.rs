@@ -1192,7 +1192,8 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::{datastore_test, UpdatePrecondition};
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::UpdatePrecondition;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,

@@ -107,4 +107,29 @@ impl Ipadm {
         };
         Ok(())
     }
+
+    // Create gateway on the IP interface if it doesn't already exist
+    pub fn create_opte_gateway(
+        opte_iface: &String,
+    ) -> Result<(), ExecutionError> {
+        let addrobj = format!("{}/public", opte_iface);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[IPADM, "show-addr", &addrobj]);
+        match execute(cmd) {
+            Err(_) => {
+                let mut cmd = std::process::Command::new(PFEXEC);
+                let cmd = cmd.args(&[
+                    IPADM,
+                    "create-addr",
+                    "-t",
+                    "-T",
+                    "dhcp",
+                    &addrobj,
+                ]);
+                execute(cmd)?;
+            }
+            Ok(_) => (),
+        };
+        Ok(())
+    }
 }

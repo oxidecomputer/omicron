@@ -6,7 +6,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
@@ -173,7 +173,7 @@ async fn test_metrics(
 
     // silo metrics start out zero
     assert_system_metrics(&cptestctx, None, 0, 0, 0).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), 0, 0, 0).await;
+    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), 0, 0, 0).await;
     assert_silo_metrics(&cptestctx, None, 0, 0, 0).await;
 
     let project1_id = create_project(&client, "p-1").await.identity.id;
@@ -189,7 +189,7 @@ async fn test_metrics(
         "/v1/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&project={}", 
         cptestctx.start_time,
         Utc::now(),
-        *SILO_ID,
+        *DEFAULT_SILO_ID,
     );
     assert_404(&cptestctx, &bad_silo_metrics_url).await;
     let bad_system_metrics_url = format!(
@@ -205,14 +205,15 @@ async fn test_metrics(
     assert_silo_metrics(&cptestctx, Some(project1_id), 0, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, 0, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, 0, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), 0, 4, GIB).await;
+    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), 0, 4, GIB).await;
 
     // create disk in project 1
     create_disk(&client, "p-1", "d-1").await;
     assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, GIB, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, GIB, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), GIB, 4, GIB).await;
+    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), GIB, 4, GIB)
+        .await;
 
     // project 2 metrics still empty
     assert_silo_metrics(&cptestctx, Some(project2_id), 0, 0, 0).await;
@@ -225,8 +226,14 @@ async fn test_metrics(
     // both instances show up in silo and fleet metrics
     assert_silo_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
     assert_system_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
-    assert_system_metrics(&cptestctx, Some(*SILO_ID), 2 * GIB, 8, 2 * GIB)
-        .await;
+    assert_system_metrics(
+        &cptestctx,
+        Some(*DEFAULT_SILO_ID),
+        2 * GIB,
+        8,
+        2 * GIB,
+    )
+    .await;
 
     // project 1 unaffected by project 2's resources
     assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;

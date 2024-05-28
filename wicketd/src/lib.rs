@@ -32,7 +32,7 @@ use nexus_proxy::NexusTcpProxy;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::FileKv;
 use preflight_check::PreflightCheckerHandler;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::{debug, error, o, Drain};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;

@@ -38,7 +38,7 @@ use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

@@ -7,7 +7,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
     InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, SshKeyCreate,
+    InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -15,7 +15,6 @@ use russh_keys::key::{KeyPair, PublicKey};
 use russh_keys::PublicKeyBase64;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
 
 #[tokio::test]
 async fn instance_launch() -> Result<()> {
@@ -92,6 +91,7 @@ async fn instance_launch() -> Result<()> {
         .first()
         .context("no external IPs")?
         .clone();
+
     let ExternalIp::Ephemeral { ip: ip_addr } = ip_addr else {
         anyhow::bail!("IP bound to instance was not ephemeral as required.")
     };
@@ -104,6 +104,19 @@ async fn instance_launch() -> Result<()> {
         || async {
             type Error =
                 CondCheckError<oxide_client::Error<oxide_client::types::Error>>;
+
+            let instance_state = ctx
+                .client
+                .instance_view()
+                .project(ctx.project_name.clone())
+                .instance(instance.name.clone())
+                .send()
+                .await?
+                .run_state;
+
+            if instance_state == InstanceState::Starting {
+                return Err(Error::NotYet);
+            }
 
             let data = String::from_utf8_lossy(
                 &ctx.client
@@ -187,19 +200,49 @@ async fn instance_launch() -> Result<()> {
 
     // check that we saw it on the console
     eprintln!("waiting for serial console");
-    sleep(Duration::from_secs(5)).await;
-    let data = String::from_utf8_lossy(
-        &ctx.client
-            .instance_serial_console()
-            .project(ctx.project_name.clone())
-            .instance(instance.name.clone())
-            .most_recent(1024 * 1024)
-            .max_bytes(1024 * 1024)
-            .send()
-            .await?
-            .data,
+
+    let data = wait_for_condition(
+        || async {
+            type Error =
+                CondCheckError<oxide_client::Error<oxide_client::types::Error>>;
+
+            let instance_state = ctx
+                .client
+                .instance_view()
+                .project(ctx.project_name.clone())
+                .instance(instance.name.clone())
+                .send()
+                .await?
+                .run_state;
+
+            if instance_state == InstanceState::Starting {
+                return Err(Error::NotYet);
+            }
+
+            let data = String::from_utf8_lossy(
+                &ctx.client
+                    .instance_serial_console()
+                    .project(ctx.project_name.clone())
+                    .instance(instance.name.clone())
+                    .most_recent(1024 * 1024)
+                    .max_bytes(1024 * 1024)
+                    .send()
+                    .await
+                    .map_err(|_e| Error::NotYet)?
+                    .data,
+            )
+            .into_owned();
+            if data.contains("-----END SSH HOST KEY KEYS-----") {
+                Ok(data)
+            } else {
+                Err(Error::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(300),
     )
-    .into_owned();
+    .await?;
+
     ensure!(
         data.contains("Hello, Oxide!"),
         "string not seen on console\n{}",

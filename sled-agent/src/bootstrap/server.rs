@@ -30,16 +30,18 @@ use crate::storage_monitor::UnderlayAccess;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use ddm_admin_client::Client as DdmAdminClient;
-use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
 use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
+use internal_dns::resolver::Resolver;
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
+use omicron_ddm_admin_client::DdmError;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -408,6 +410,17 @@ async fn start_sled_agent(
     // addrs (either talk to a differently-configured ddmd, or include info
     // indicating which kind of address we're advertising).
     ddmd_client.advertise_prefix(request.body.subnet);
+
+    let az_prefix =
+        Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().network());
+    let addr = request.body.subnet.net().iter().nth(1).unwrap();
+    let dns_servers = Resolver::servers_from_subnet(az_prefix);
+    ddmd_client.enable_stats(
+        addr.into(),
+        dns_servers,
+        request.body.rack_id,
+        request.body.id,
+    );
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(

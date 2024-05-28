@@ -14,7 +14,7 @@ use anyhow::bail;
 use anyhow::Result;
 use gateway_client::types::SpIdentifier;
 use internal_dns::resolver::Resolver;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::info;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;

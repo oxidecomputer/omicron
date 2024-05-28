@@ -204,6 +204,27 @@ where
 
     /// Issues the CTE asynchronously and parses the result.
     ///
+    /// The four outcomes are:
+    /// - Ok(Some(new row))
+    /// - Ok(None)
+    /// - Error(collection not found)
+    /// - Error(other diesel error)
+    pub async fn insert_and_get_optional_result_async(
+        self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> AsyncInsertIntoCollectionResult<Option<ResourceType>>
+    where
+        // We require this bound to ensure that "Self" is runnable as query.
+        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
+    {
+        self.get_result_async::<ResourceType>(conn)
+            .await
+            .optional()
+            .map_err(|e| Self::translate_async_error(e))
+    }
+
+    /// Issues the CTE asynchronously and parses the result.
+    ///
     /// The three outcomes are:
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)

@@ -158,7 +158,8 @@
           "autoneg": false
         }
       ],
-      "bgp": []
+      "bgp": [],
+      "bfd": []
     }
   }
 }

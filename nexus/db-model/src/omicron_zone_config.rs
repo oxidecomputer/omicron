@@ -18,6 +18,9 @@ use crate::{ipv6, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use anyhow::{anyhow, bail, ensure, Context};
 use ipnetwork::IpNetwork;
 use nexus_types::inventory::OmicronZoneType;
+use omicron_common::api::internal::shared::{
+    NetworkInterface, NetworkInterfaceKind,
+};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -410,9 +413,7 @@ impl OmicronZoneNic {
                 ensure!(
                     matches!(
                         nic.kind,
-                        nexus_types::inventory::NetworkInterfaceKind::Service(
-                            id
-                        ) if id == zone.id
+                        NetworkInterfaceKind::Service{ id } if id == zone.id
                     ),
                     "expected zone's NIC kind to be \"service\" and the \
                     id to match the zone's id ({})",
@@ -424,7 +425,7 @@ impl OmicronZoneNic {
                     name: Name::from(nic.name.clone()),
                     ip: IpNetwork::from(nic.ip),
                     mac: MacAddr::from(nic.mac),
-                    subnet: IpNetwork::from(nic.subnet.clone()),
+                    subnet: IpNetwork::from(nic.subnet),
                     vni: SqlU32::from(u32::from(nic.vni)),
                     is_primary: nic.primary,
                     slot: SqlU8::from(nic.slot),
@@ -437,13 +438,11 @@ impl OmicronZoneNic {
     pub(crate) fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> anyhow::Result<nexus_types::inventory::NetworkInterface> {
-        Ok(nexus_types::inventory::NetworkInterface {
+    ) -> anyhow::Result<NetworkInterface> {
+        Ok(NetworkInterface {
             id: self.id,
             ip: self.ip.ip(),
-            kind: nexus_types::inventory::NetworkInterfaceKind::Service(
-                zone_id,
-            ),
+            kind: NetworkInterfaceKind::Service { id: zone_id },
             mac: *self.mac,
             name: self.name.into(),
             primary: self.is_primary,

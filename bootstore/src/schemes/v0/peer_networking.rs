@@ -11,7 +11,7 @@ use crate::schemes::Hello;
 use bytes::Buf;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::{debug, error, info, o, warn, Logger};
 use std::collections::VecDeque;
 use std::io::Cursor;

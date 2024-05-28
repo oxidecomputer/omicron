@@ -671,7 +671,7 @@ impl KstatSamplerWorker {
         let n_current_samples = current_samples.len();
         let n_total_samples = n_new_samples + n_current_samples;
         let n_overflow_samples =
-            n_total_samples.checked_sub(self.sample_limit).unwrap_or(0);
+            n_total_samples.saturating_sub(self.sample_limit);
         if n_overflow_samples > 0 {
             warn!(
                 self.log,
@@ -788,7 +788,7 @@ impl KstatSamplerWorker {
                         // or the time we added the kstat if not.
                         let start = sampled_kstat
                             .time_of_last_collection
-                            .unwrap_or_else(|| sampled_kstat.time_added);
+                            .unwrap_or(sampled_kstat.time_added);
                         let expire_at = start + duration;
                         cfg_if::cfg_if! {
                             if #[cfg(test)] {

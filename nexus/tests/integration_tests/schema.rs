@@ -6,20 +6,20 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
-use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
-use nexus_db_queries::db::datastore::{
-    all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
-};
+use nexus_config::NexusConfig;
+use nexus_config::SchemaConfig;
+use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
+use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
+use nexus_db_model::{AllSchemaVersions, SchemaVersion};
+use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::Config;
-use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use tokio::time::timeout;
 use tokio::time::Duration;
@@ -44,7 +44,7 @@ async fn test_setup_just_crdb<'a>(
 // Helper to ensure we perform the same setup for the positive and negative test
 // cases.
 async fn test_setup<'a>(
-    config: &'a mut Config,
+    config: &'a mut NexusConfig,
     name: &'static str,
 ) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
     let mut builder =
@@ -110,35 +110,59 @@ async fn apply_update_as_transaction(
 async fn apply_update(
     log: &Logger,
     crdb: &CockroachInstance,
-    version: &str,
+    version: &SchemaVersion,
     times_to_apply: usize,
 ) {
-    let log = log.new(o!("target version" => version.to_string()));
+    let log = log.new(o!("target version" => version.semver().to_string()));
     info!(log, "Performing upgrade");
 
     let client = crdb.connect().await.expect("failed to connect");
 
+    client
+        .batch_execute(DISALLOW_FULL_TABLE_SCAN_SQL)
+        .await
+        .expect("failed to disallow full table scans");
+
     // We skip this for the earliest supported version because these tables
     // might not exist yet.
-    if version != EARLIEST_SUPPORTED_VERSION {
+    if *version.semver() != EARLIEST_SUPPORTED_VERSION {
         info!(log, "Updating schema version in db_metadata (setting target)");
-        let sql = format!("UPDATE omicron.public.db_metadata SET target_version = '{}' WHERE singleton = true;", version);
+        let sql = format!(
+            "UPDATE omicron.public.db_metadata SET target_version = '{}' \
+            WHERE singleton = true;",
+            version
+        );
         client
             .batch_execute(&sql)
             .await
             .expect("Failed to bump version number");
     }
 
-    let target_dir = Utf8PathBuf::from(SCHEMA_DIR).join(version);
-    let schema_change =
-        all_sql_for_version_migration(&target_dir).await.unwrap();
+    // Each step is applied `times_to_apply` times, but once we start applying
+    // a step within an upgrade, we will not attempt to apply prior steps.
+    for step in version.upgrade_steps() {
+        info!(
+            log,
+            "Applying sql schema upgrade step";
+            "file" => step.label()
+        );
 
-    for _ in 0..times_to_apply {
-        for nexus_db_queries::db::datastore::SchemaUpgradeStep { path, sql } in
-            &schema_change.steps
-        {
-            info!(log, "Applying sql schema upgrade step"; "path" => path.to_string());
-            apply_update_as_transaction(&log, &client, sql).await;
+        for _ in 0..times_to_apply {
+            apply_update_as_transaction(&log, &client, step.sql()).await;
+
+            // The following is a set of "versions exempt from being
+            // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
+            const NOT_IDEMPOTENT_VERSIONS: [semver::Version; 1] = [
+                // Why: This calls "ALTER TYPE ... DROP VALUE", which does not
+                // support the "IF EXISTS" syntax in CockroachDB.
+                //
+                // https://github.com/cockroachdb/cockroach/issues/120801
+                semver::Version::new(10, 0, 0),
+            ];
+
+            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver().0) {
+                break;
+            }
         }
     }
 
@@ -146,7 +170,11 @@ async fn apply_update(
     //
     // We do so explicitly here.
     info!(log, "Updating schema version in db_metadata (removing target)");
-    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}', target_version = NULL WHERE singleton = true;", version);
+    let sql = format!(
+        "UPDATE omicron.public.db_metadata SET version = '{}', \
+        target_version = NULL WHERE singleton = true;",
+        version
+    );
     client.batch_execute(&sql).await.expect("Failed to bump version number");
 
     client.cleanup().await.expect("cleaning up after wipe");
@@ -180,7 +208,8 @@ impl From<(&str, &str)> for SqlEnum {
 // interpret SQL types.
 //
 // Note that for the purposes of schema comparisons, we don't care about parsing
-// the contents of the database, merely the schema and equality of contained data.
+// the contents of the database, merely the schema and equality of contained
+// data.
 #[derive(PartialEq, Clone, Debug)]
 enum AnySqlType {
     Bool(bool),
@@ -437,20 +466,8 @@ async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
     process_rows(&rows)
 }
 
-async fn read_all_schema_versions() -> BTreeSet<SemverVersion> {
-    let mut all_versions = BTreeSet::new();
-
-    let mut dir =
-        tokio::fs::read_dir(SCHEMA_DIR).await.expect("Access schema dir");
-    while let Some(entry) = dir.next_entry().await.expect("Read dirent") {
-        if entry.file_type().await.unwrap().is_dir() {
-            let name = entry.file_name().into_string().unwrap();
-            if let Ok(observed_version) = name.parse::<SemverVersion>() {
-                all_versions.insert(observed_version);
-            }
-        }
-    }
-    all_versions
+fn read_all_schema_versions() -> AllSchemaVersions {
+    AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
 
 // This test confirms the following behavior:
@@ -468,10 +485,16 @@ async fn nexus_applies_update_on_boot() {
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
     // We started with an empty database -- apply an update here to bring
-    // us forward to our oldest supported schema version before trying to boot nexus.
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, 1).await;
+    // us forward to our oldest supported schema version before trying to boot
+    // nexus.
+    let all_versions = read_all_schema_versions();
+    let earliest = all_versions
+        .iter_versions()
+        .next()
+        .expect("missing earliest schema version");
+    apply_update(log, &crdb, earliest, 1).await;
     assert_eq!(
-        EARLIEST_SUPPORTED_VERSION,
+        EARLIEST_SUPPORTED_VERSION.to_string(),
         query_crdb_schema_version(&crdb).await
     );
 
@@ -536,16 +559,26 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, 1).await;
+    let all_versions = read_all_schema_versions();
+    let earliest = all_versions
+        .iter_versions()
+        .next()
+        .expect("missing earliest schema version");
+    apply_update(log, &crdb, earliest, 1).await;
     assert_eq!(
-        EARLIEST_SUPPORTED_VERSION,
+        EARLIEST_SUPPORTED_VERSION.to_string(),
         query_crdb_schema_version(&crdb).await
     );
 
     // This version is not valid; it does not exist.
     let version = "0.0.0";
-    crdb.connect().await.expect("Failed to connect")
-        .batch_execute(&format!("UPDATE omicron.public.db_metadata SET version = '{version}' WHERE singleton = true"))
+    crdb.connect()
+        .await
+        .expect("Failed to connect")
+        .batch_execute(&format!(
+            "UPDATE omicron.public.db_metadata SET version = '{version}' \
+            WHERE singleton = true"
+        ))
         .await
         .expect("Failed to update schema");
 
@@ -577,11 +610,13 @@ async fn versions_have_idempotent_up() {
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
-    let all_versions = read_all_schema_versions().await;
-
-    for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), 2).await;
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
+    let all_versions = read_all_schema_versions();
+    for version in all_versions.iter_versions() {
+        apply_update(log, &crdb, &version, 2).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
@@ -904,12 +939,15 @@ async fn dbinit_equals_sum_of_all_up() {
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
-    let all_versions = read_all_schema_versions().await;
+    let all_versions = read_all_schema_versions();
 
     // Go from the first version to the latest version.
-    for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), 1).await;
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
+    for version in all_versions.iter_versions() {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
@@ -1042,7 +1080,8 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
 fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
     // IP addresses were pulled off dogfood sled 16
     Box::pin(async move {
-        // Create two sleds
+        // Create two sleds. (SLED2 is marked non_provisionable for
+        // after_37_0_1.)
         client
             .batch_execute(&format!(
                 "INSERT INTO sled
@@ -1056,7 +1095,7 @@ fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
             'fd00:1122:3344:104::1ac', 'provisionable'),
           ('{SLED2}', now(), now(), NULL, 1, '{RACK1}', false, 'zzzz', 'xxxx',
              '2', 64, 12345678, 77,'fd00:1122:3344:107::1', 12345,
-            'fd00:1122:3344:107::d4', 'provisionable');
+            'fd00:1122:3344:107::d4', 'non_provisionable');
         "
             ))
             .await
@@ -1089,6 +1128,45 @@ fn after_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
+// This reuses the sleds created in before_24_0_0.
+fn after_37_0_1(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
+        let rows = client
+            .query("SELECT sled_policy, sled_state FROM sled ORDER BY id", &[])
+            .await
+            .expect("Failed to select sled policy and state");
+        let policy_and_state = process_rows(&rows);
+
+        assert_eq!(
+            policy_and_state[0].values,
+            vec![
+                ColumnValue::new(
+                    "sled_policy",
+                    SqlEnum::from(("sled_policy", "in_service"))
+                ),
+                ColumnValue::new(
+                    "sled_state",
+                    SqlEnum::from(("sled_state", "active"))
+                ),
+            ]
+        );
+        assert_eq!(
+            policy_and_state[1].values,
+            vec![
+                ColumnValue::new(
+                    "sled_policy",
+                    SqlEnum::from(("sled_policy", "no_provision"))
+                ),
+                ColumnValue::new(
+                    "sled_state",
+                    SqlEnum::from(("sled_state", "active"))
+                ),
+            ]
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1105,6 +1183,10 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("24.0.0").unwrap()),
         DataMigrationFns { before: Some(before_24_0_0), after: after_24_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("37.0.1").unwrap()),
+        DataMigrationFns { before: None, after: after_37_0_1 },
     );
 
     map
@@ -1140,19 +1222,22 @@ async fn validate_data_migration() {
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
     let client = crdb.connect().await.expect("Failed to access CRDB client");
 
-    let all_versions = read_all_schema_versions().await;
+    let all_versions = read_all_schema_versions();
     let all_checks = get_migration_checks();
 
     // Go from the first version to the latest version.
-    for version in &all_versions {
+    for version in all_versions.iter_versions() {
         // If this check has preconditions (or setup), run them.
-        let checks = all_checks.get(version);
+        let checks = all_checks.get(version.semver());
         if let Some(before) = checks.and_then(|check| check.before) {
             before(&client).await;
         }
 
-        apply_update(log, &crdb, &version.to_string(), 1).await;
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
 
         // If this check has postconditions (or cleanup), run them.
         if let Some(after) = checks.map(|check| check.after) {

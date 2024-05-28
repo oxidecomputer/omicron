@@ -1,0 +1,73 @@
+# omicron-uuid-kinds
+
+In omicron and other Oxide projects, we use UUIDs to identify many different
+kinds of entities. Using a single `Uuid` type for all of them risks mixing up
+all the different kinds of IDs.
+
+To address that, we're actively moving towards typed UUIDs with the
+https://github.com/oxidecomputer/newtype-uuid[newtype-uuid] crate. The goal is
+that each kind of entity will have a marker type representing a _UUID kind_
+associated with it. Then, the type system will make it significantly harder to
+mix different kinds of entities.
+
+*`omicron-uuid-kinds` is a centralized registry for UUID kinds*, one that can
+be shared across Oxide repos. `omicron-uuid-kinds` supports no-std so the kinds
+can be shared with embedded code as well.
+
+## Determinations
+
+As part of this effort, we've made several decisions that could have gone a
+different way. This section documents those choices.
+
+### One big registry or several smaller ones?
+
+Rather than having a single registry, an option is to have several smaller ones
+(perhaps one to two in each repo). The best answer to that is currently
+unclear, but putting them in the same crate for now has several advantages:
+
+* The macros updated in this PR know where uuid kinds will be found, so they
+let you specify just a bare name as the kind.
+
+* It's simpler.
+
+The disadvantage of this is that any change to this registry will cause all of
+omicron to be rebuilt. Hopefully, once most UUIDs are converted over, this
+crate won't be touched too much.
+
+This decision involves some level of commitment, because splitting up a
+registry will probably require several days of work. For example, macros may
+need to be updated to handle multiple sources, import paths would have to be
+changed across several repos, and so on.
+
+Crates which solve more abstract problems and are completely independent of
+omicron, like https://github.com/oxidecomputer/dropshot/[Dropshot] and
+https://github.com/oxidecomputer/steno[Steno], will have their own registries
+(probably as a module within the crates themselves).
+
+### Where should the registry live?
+
+Once we've decided on a single registry, the next question is where this
+registry should be stored. There was some debate in `#oxide-control-plane`, and
+two options stood out:
+
+1. In omicron itself.
+
+    * The upside of this is that it is easy to add new UUID kinds within
+      omicron, especially as we transition over existing untyped UUIDs.
+
+    * The downside is that we also want to use these kinds in crucible and
+      propolis -- and pulling in `omicron-uuid-kinds` as a Git dependency would
+      typically cause two copies of `omicron-uuid-kinds` to be floating around.
+      That can result in a lot of pain, including confusing errors.
+
+2. In a separate repo. While it eliminates the issue with duplicated
+dependencies, it does add a fair bit more friction. That's because users
+updating omicron would now have to make two separate, coordinated PRs.
+
+We've chosen 1 for now, because agility within omicron outweighs other
+concerns. *The downside is mitigated* by using a `[patch]` directive; see the
+workspace root's `Cargo.toml` for more about this.
+
+This is straightforward to change in the future. If we find that 1 is too much
+of a bother, we'll easily be able to switch to 2 while keeping the name of the
+crate the same (minimizing churn).

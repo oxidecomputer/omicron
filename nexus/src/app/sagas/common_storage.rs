@@ -6,7 +6,6 @@
 
 use super::*;
 
-use crate::app::sagas::retry_until_known_result;
 use crate::Nexus;
 use anyhow::anyhow;
 use crucible_agent_client::{
@@ -22,6 +21,7 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
+use omicron_common::retry_until_known_result;
 use slog::Logger;
 use std::net::SocketAddrV6;
 

@@ -14,7 +14,7 @@ use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
 use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::{error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};

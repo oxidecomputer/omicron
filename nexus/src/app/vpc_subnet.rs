@@ -5,6 +5,7 @@
 //! VPC Subnets and their network interfaces
 
 use crate::external_api::params;
+use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -22,7 +23,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
 use uuid::Uuid;
 
 impl super::Nexus {

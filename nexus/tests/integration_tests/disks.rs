@@ -11,7 +11,7 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
@@ -1073,7 +1073,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1137,7 +1137,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1194,7 +1194,7 @@ async fn test_disk_virtual_provisioning_collection(
         disk_size
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1232,7 +1232,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(

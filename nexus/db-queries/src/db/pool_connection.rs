@@ -44,6 +44,8 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "caboose_which",
     "dataset_kind",
     "dns_group",
+    "downstairs_client_stop_request_reason_type",
+    "downstairs_client_stopped_reason_type",
     "hw_power_state",
     "hw_rot_slot",
     "identity_type",
@@ -59,15 +61,18 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "router_route_kind",
     "saga_state",
     "service_kind",
-    "sled_provision_state",
+    "sled_policy",
     "sled_resource_kind",
     "sled_role",
+    "sled_state",
     "snapshot_state",
     "sp_type",
     "switch_interface_kind",
     "switch_link_fec",
     "switch_link_speed",
     "switch_port_geometry",
+    "upstairs_repair_notification_type",
+    "upstairs_repair_type",
     "user_provision_type",
     "vpc_firewall_rule_action",
     "vpc_firewall_rule_direction",
@@ -78,7 +83,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
 ];
 const CUSTOM_TYPE_SCHEMA: &'static str = "public";
 
-const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
+pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 
 #[derive(Debug)]

@@ -373,7 +373,9 @@ impl<'a> Project<'a> {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Project,
-                        LookupType::ById(v0.clone()),
+                        LookupType::ById(
+                            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0),
+                        ),
                     ),
                 )
             })?;
@@ -386,7 +388,7 @@ impl<'a> Project<'a> {
         let authz_project = Self::make_authz(
             &authz_silo,
             &db_row,
-            LookupType::ById(v0.clone()),
+            LookupType::ById(::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0)),
         );
         Ok((authz_silo, authz_project, db_row))
     }

@@ -12,7 +12,7 @@ use rand::{rngs::OsRng, RngCore};
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::BTreeSet;
 use std::fmt;
 use uuid::Uuid;

@@ -14,3 +14,6 @@ rusty-tags.vi
 *.sw*
 tags
 .direnv
+.falcon/*
+.img/*
+connectivity-report.json

@@ -84,7 +84,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                         longer any target blueprint",
                         old.1.id
                     );
-                    let old_id = old.1.id.to_string();
+                    let old_id = old.1.id;
                     self.last = None;
                     self.tx.send_replace(self.last.clone());
                     error!(&log, "{message:?}");
@@ -97,33 +97,33 @@ impl BackgroundTask for TargetBlueprintLoader {
                 (None, Ok(Some((new_bp_target, new_blueprint)))) => {
                     // We've found a target blueprint for the first time.
                     // Save it and notify any watchers.
-                    let target_id = new_blueprint.id.to_string();
-                    let time_created = new_blueprint.time_created.to_string();
+                    let target_id = new_blueprint.id;
+                    let time_created = new_blueprint.time_created;
                     info!(
                         log,
                         "found new target blueprint (first find)";
-                        "target_id" => &target_id,
-                        "time_created" => &time_created
+                        "target_id" => %target_id,
+                        "time_created" => %time_created
                     );
                     self.last = Some(Arc::new((new_bp_target, new_blueprint)));
                     self.tx.send_replace(self.last.clone());
                     json!({
                         "target_id": target_id,
                         "time_created": time_created,
-                        "time_found": chrono::Utc::now().to_string(),
-                        "status": "first target blueprint"
+                        "time_found": chrono::Utc::now(),
+                        "status": "first target blueprint",
                     })
                 }
                 (Some(old), Ok(Some((new_bp_target, new_blueprint)))) => {
-                    let target_id = new_blueprint.id.to_string();
-                    let time_created = new_blueprint.time_created.to_string();
+                    let target_id = new_blueprint.id;
+                    let time_created = new_blueprint.time_created;
                     if old.1.id != new_blueprint.id {
                         // The current target blueprint has been updated
                         info!(
                             log,
                             "found new target blueprint";
-                            "target_id" => &target_id,
-                            "time_created" => &time_created
+                            "target_id" => %target_id,
+                            "time_created" => %time_created
                         );
                         self.last =
                             Some(Arc::new((new_bp_target, new_blueprint)));
@@ -131,7 +131,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                         json!({
                             "target_id": target_id,
                             "time_created": time_created,
-                            "time_found": chrono::Utc::now().to_string(),
+                            "time_found": chrono::Utc::now(),
                             "status": "target blueprint updated"
                         })
                     } else {
@@ -153,15 +153,39 @@ impl BackgroundTask for TargetBlueprintLoader {
                                 "status": "target blueprint unchanged (error)",
                                 "error": message
                             })
+                        } else if old.0.enabled != new_bp_target.enabled {
+                            // The blueprints have the same contents, but its
+                            // enabled bit has flipped.
+                            let status = if new_bp_target.enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            };
+                            info!(
+                                log,
+                                "target blueprint enabled state changed";
+                                "target_id" => %target_id,
+                                "time_created" => %time_created,
+                                "state" => status,
+                            );
+                            self.last =
+                                Some(Arc::new((new_bp_target, new_blueprint)));
+                            self.tx.send_replace(self.last.clone());
+                            json!({
+                                "target_id": target_id,
+                                "time_created": time_created,
+                                "time_found": chrono::Utc::now(),
+                                "status": format!("target blueprint {status}"),
+                            })
                         } else {
-                            // We found a new target blueprint that exactly matches
-                            // the old target blueprint. This is the common case
-                            // when we're activated by a timeout.
+                            // We found a new target blueprint that exactly
+                            // matches the old target blueprint. This is the
+                            // common case when we're activated by a timeout.
                             debug!(
                                log,
                                 "found latest target blueprint (unchanged)";
-                                "target_id" => &target_id,
-                                "time_created" => &time_created.clone()
+                                "target_id" => %target_id,
+                                "time_created" => %time_created.clone()
                             );
                             json!({
                                 "target_id": target_id,
@@ -184,15 +208,16 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
+    use omicron_common::api::external::Generation;
     use serde::Deserialize;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     fn create_blueprint(
-        parent_blueprint_id: Option<Uuid>,
+        parent_blueprint_id: Uuid,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -203,9 +228,10 @@ mod test {
             },
             Blueprint {
                 id,
-                omicron_zones: BTreeMap::new(),
-                zones_in_service: BTreeSet::new(),
-                parent_blueprint_id,
+                blueprint_zones: BTreeMap::new(),
+                parent_blueprint_id: Some(parent_blueprint_id),
+                internal_dns_version: Generation::new(),
+                external_dns_version: Generation::new(),
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -234,26 +260,31 @@ mod test {
         let mut task = TargetBlueprintLoader::new(datastore.clone());
         let mut rx = task.watcher();
 
-        // We expect an appropriate status with no blueprint in the datastore
+        // We expect to see the initial blueprint set up by nexus-test-utils
+        // (emulating RSS).
         let value = task.activate(&opctx).await;
-        assert_eq!(json!({"status": "no target blueprint"}), value);
-        assert!(rx.borrow().is_none());
+        let initial_blueprint =
+            rx.borrow_and_update().clone().expect("no initial blueprint");
+        let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
+        assert_eq!(update.target_id, initial_blueprint.1.id);
+        assert_eq!(update.status, "first target blueprint");
 
-        let (target, blueprint) = create_blueprint(None);
+        let (target, blueprint) = create_blueprint(update.target_id);
 
-        // Inserting a blueprint, but not making it the target returns the same
-        // status
+        // Inserting a blueprint, but not making it the target return status
+        // indicating that the target hasn't changed
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
         let value = task.activate(&opctx).await;
-        assert_eq!(json!({"status": "no target blueprint"}), value);
-        assert!(rx.borrow().is_none());
+        let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
+        assert_eq!(update.target_id, initial_blueprint.1.id);
+        assert_eq!(update.status, "target blueprint unchanged");
 
         // Setting a target blueprint makes the loader see it and broadcast it
         datastore.blueprint_target_set_current(&opctx, target).await.unwrap();
         let value = task.activate(&opctx).await;
         let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
         assert_eq!(update.target_id, blueprint.id);
-        assert_eq!(update.status, "first target blueprint");
+        assert_eq!(update.status, "target blueprint updated");
         let rx_update = rx.borrow_and_update().clone().unwrap();
         assert_eq!(rx_update.0, target);
         assert_eq!(rx_update.1, blueprint);
@@ -266,7 +297,7 @@ mod test {
         assert_eq!(false, rx.has_changed().unwrap());
 
         // Adding a new blueprint and updating the target triggers a change
-        let (new_target, new_blueprint) = create_blueprint(Some(blueprint.id));
+        let (new_target, new_blueprint) = create_blueprint(blueprint.id);
         datastore.blueprint_insert(&opctx, &new_blueprint).await.unwrap();
         datastore
             .blueprint_target_set_current(&opctx, new_target)

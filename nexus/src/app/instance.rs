@@ -29,7 +29,6 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -50,6 +49,7 @@ use propolis_client::support::tungstenite::Message as WebSocketMessage;
 use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
+use sagas::instance_common::ExternalIpAttach;
 use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
@@ -986,6 +986,9 @@ impl super::Nexus {
                 //
                 // If the operation failed, kick the sled agent error back up to
                 // the caller to let it decide how to handle it.
+                //
+                // When creating the zone for the first time, we just get
+                // Ok(None) here, which is a no-op in write_returned_instance_state.
                 match instance_put_result {
                     Ok(state) => self
                         .write_returned_instance_state(&instance_id, state)
@@ -1183,6 +1186,25 @@ impl super::Nexus {
         let ssh_keys: Vec<String> =
             ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
 
+        // Construct instance metadata used to track its statistics.
+        //
+        // This requires another fetch on the silo and project, to extract their
+        // IDs.
+        let (.., db_project) = self
+            .project_lookup(
+                opctx,
+                params::ProjectSelector {
+                    project: NameOrId::Id(db_instance.project_id),
+                },
+            )?
+            .fetch()
+            .await?;
+        let (_, db_silo) = self.current_silo_lookup(opctx)?.fetch().await?;
+        let metadata = sled_agent_client::types::InstanceMetadata {
+            silo_id: db_silo.id(),
+            project_id: db_project.id(),
+        };
+
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
@@ -1223,9 +1245,10 @@ impl super::Nexus {
                     propolis_id: *propolis_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
-                        PROPOLIS_PORT,
+                        initial_vmm.propolis_port.into(),
                     )
                     .to_string(),
+                    metadata,
                 },
             )
             .await
@@ -1762,7 +1785,7 @@ impl super::Nexus {
                 | InstanceState::Rebooting
                 | InstanceState::Migrating
                 | InstanceState::Repairing => {
-                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), PROPOLIS_PORT))
+                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
                 InstanceState::Creating
                 | InstanceState::Starting
@@ -1953,20 +1976,63 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Attach an external IP to an instance.
-    pub(crate) async fn instance_attach_external_ip(
+    /// Attach an ephemeral IP to an instance.
+    pub(crate) async fn instance_attach_ephemeral_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        ext_ip: &params::ExternalIpCreate,
+        pool: Option<NameOrId>,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
+        self.instance_attach_external_ip(
+            opctx,
+            authz_instance,
+            authz_project.id(),
+            ExternalIpAttach::Ephemeral { pool },
+        )
+        .await
+    }
+
+    /// Attach an ephemeral IP to an instance.
+    pub(crate) async fn instance_attach_floating_ip(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        authz_fip: authz::FloatingIp,
+        authz_fip_project: authz::Project,
+    ) -> UpdateResult<views::ExternalIp> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if authz_fip_project.id() != authz_project.id() {
+            return Err(Error::invalid_request(
+                "floating IP must be in the same project as the instance",
+            ));
+        }
+
+        self.instance_attach_external_ip(
+            opctx,
+            authz_instance,
+            authz_project.id(),
+            ExternalIpAttach::Floating { floating_ip: authz_fip },
+        )
+        .await
+    }
+
+    /// Attach an external IP to an instance.
+    pub(crate) async fn instance_attach_external_ip(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_instance: authz::Instance,
+        project_id: Uuid,
+        ext_ip: ExternalIpAttach,
+    ) -> UpdateResult<views::ExternalIp> {
         let saga_params = sagas::instance_ip_attach::Params {
             create_params: ext_ip.clone(),
             authz_instance,
-            project_id: authz_project.id(),
+            project_id,
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
         };
 

@@ -686,7 +686,7 @@ mod tests {
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
         let (mut manager, _) = StorageManager::new(&logctx.log, key_requester);
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
-        let raw_disk: RawDisk = SyntheticDisk::new(zpool_name).into();
+        let raw_disk: RawDisk = SyntheticDisk::new(zpool_name, 0).into();
         assert_eq!(StorageManagerState::WaitingForKeyManager, manager.state);
         manager.add_u2_disk(raw_disk.clone()).await.unwrap();
         assert!(manager.resources.all_u2_zpools().is_empty());
@@ -710,7 +710,8 @@ mod tests {
         let (mut manager, _) = StorageManager::new(&logctx.log, key_requester);
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
-        let disk = SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+        let disk =
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name, 0).into();
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
@@ -742,7 +743,8 @@ mod tests {
         // Create a synthetic internal disk
         let zpool_name = ZpoolName::new_internal(Uuid::new_v4());
         let dir = tempdir().unwrap();
-        let disk = SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+        let disk =
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name, 0).into();
 
         handle.upsert_disk(disk).await;
         handle.wait_for_boot_disk().await;
@@ -770,7 +772,8 @@ mod tests {
         // the `KeyManager` is ready yet.
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
-        let disk = SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+        let disk =
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name, 0).into();
         handle.upsert_disk(disk).await;
         let resources = handle.get_latest_resources().await;
         assert!(resources.all_u2_zpools().is_empty());
@@ -808,7 +811,8 @@ mod tests {
         // the `KeyManager` is ready yet.
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
-        let disk = SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+        let disk =
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name, 0).into();
         handle.upsert_disk(disk).await;
         manager.step().await.unwrap();
 
@@ -865,7 +869,7 @@ mod tests {
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
         let disk: RawDisk =
-            SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name, 0).into();
         handle.upsert_disk(disk.clone()).await;
 
         // Wait for the add disk notification
@@ -904,8 +908,14 @@ mod tests {
             (0..10).map(|_| ZpoolName::new_external(Uuid::new_v4())).collect();
         let disks: Vec<RawDisk> = zpools
             .iter()
-            .map(|zpool_name| {
-                SyntheticDisk::create_zpool(dir.path(), zpool_name).into()
+            .enumerate()
+            .map(|(slot, zpool_name)| {
+                SyntheticDisk::create_zpool(
+                    dir.path(),
+                    zpool_name,
+                    slot.try_into().unwrap(),
+                )
+                .into()
             })
             .collect();
 
@@ -1020,7 +1030,7 @@ mod tests {
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
         let disk: RawDisk =
-            SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name, 0).into();
         handle.upsert_disk(disk.clone()).await;
 
         // Create a filesystem

@@ -5,7 +5,7 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "out/console-assets"
-session_idle_timeout_minutes = 480 # 6 hours
+session_idle_timeout_minutes = 480      # 6 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
@@ -35,7 +35,7 @@ rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 
 # Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
 # These are the DNS servers it should use.
-external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
@@ -109,6 +109,7 @@ phantom_disks.period_secs = 30
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
 sync_service_zone_nat.period_secs = 30
+switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
 
 [default_region_allocation_strategy]

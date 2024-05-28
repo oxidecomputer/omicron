@@ -14,7 +14,6 @@
 
 pub mod app; // Public for documentation examples
 mod cidata;
-mod config;
 mod context; // Public for documentation examples
 pub mod external_api; // Public for testing
 mod internal_api;
@@ -23,13 +22,17 @@ mod saga_interface;
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
-pub use config::Config;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::{
     ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
@@ -47,7 +50,7 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "0.0.6")
+        .openapi("Oxide Region API", "20240327.0")
         .description("API for interacting with the Oxide control plane")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
@@ -73,14 +76,14 @@ pub struct InternalServer {
     /// dropshot server for internal API
     http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 
-    config: Config,
+    config: NexusConfig,
     log: Logger,
 }
 
 impl InternalServer {
     /// Start a nexus server.
     pub async fn start(
-        config: &Config,
+        config: &NexusConfig,
         log: &Logger,
     ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
@@ -219,7 +222,7 @@ impl nexus_test_interface::NexusServer for Server {
     type InternalServer = InternalServer;
 
     async fn start_internal(
-        config: &Config,
+        config: &NexusConfig,
         log: &Logger,
     ) -> (InternalServer, SocketAddr) {
         let internal_server =
@@ -231,13 +234,15 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn start(
         internal_server: InternalServer,
-        config: &Config,
+        config: &NexusConfig,
+        blueprint: Blueprint,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         certs: Vec<nexus_types::internal_api::params::Certificate>,
+        disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -275,6 +280,7 @@ impl nexus_test_interface::NexusServer for Server {
                 &opctx,
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
+                    blueprint,
                     services,
                     datasets,
                     internal_services_ip_pool_ranges,
@@ -296,6 +302,7 @@ impl nexus_test_interface::NexusServer for Server {
                         infra_ip_last: Ipv4Addr::UNSPECIFIED,
                         ports: Vec::new(),
                         bgp: Vec::new(),
+                        bfd: Vec::new(),
                     },
                 },
             )
@@ -303,7 +310,25 @@ impl nexus_test_interface::NexusServer for Server {
             .expect("Could not initialize rack");
 
         // Start the Nexus external API.
-        Server::start(internal_server).await.unwrap()
+        let rv = Server::start(internal_server).await.unwrap();
+
+        // Historically, tests have assumed that there's only one provisionable
+        // sled, and that's convenient for a lot of purposes.  Mark our second
+        // sled non-provisionable.
+        let nexus = &rv.apictx().nexus;
+        nexus
+            .sled_set_provision_policy(
+                &opctx,
+                &nexus_db_queries::db::lookup::LookupPath::new(
+                    &opctx,
+                    nexus.datastore(),
+                )
+                .sled_id(disable_sled_id),
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .unwrap();
+        rv
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {
@@ -332,6 +357,17 @@ impl nexus_test_interface::NexusServer for Server {
             .unwrap();
     }
 
+    async fn inventory_collect_and_get_latest_collection(
+        &self,
+    ) -> Result<Option<Collection>, Error> {
+        let nexus = &self.apictx.nexus;
+
+        nexus.activate_inventory_collection();
+
+        let opctx = nexus.opctx_for_internal_api();
+        nexus.datastore().inventory_get_latest_collection(&opctx).await
+    }
+
     async fn close(mut self) {
         self.apictx
             .nexus
@@ -343,7 +379,7 @@ impl nexus_test_interface::NexusServer for Server {
 }
 
 /// Run an instance of the Nexus server.
-pub async fn run_server(config: &Config) -> Result<(), String> {
+pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) =
         slog_dtrace::with_drain(

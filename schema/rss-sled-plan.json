@@ -91,6 +91,53 @@
         }
       ]
     },
+    "BfdMode": {
+      "description": "BFD connection mode.",
+      "type": "string",
+      "enum": [
+        "single_hop",
+        "multi_hop"
+      ]
+    },
+    "BfdPeerConfig": {
+      "type": "object",
+      "required": [
+        "detection_threshold",
+        "mode",
+        "remote",
+        "required_rx",
+        "switch"
+      ],
+      "properties": {
+        "detection_threshold": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "local": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "ip"
+        },
+        "mode": {
+          "$ref": "#/definitions/BfdMode"
+        },
+        "remote": {
+          "type": "string",
+          "format": "ip"
+        },
+        "required_rx": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "switch": {
+          "$ref": "#/definitions/SwitchLocation"
+        }
+      }
+    },
     "BgpConfig": {
       "type": "object",
       "required": [
@@ -558,6 +605,14 @@
         "rack_subnet"
       ],
       "properties": {
+        "bfd": {
+          "description": "BFD configuration for connecting the rack to external networks",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BfdPeerConfig"
+          }
+        },
         "bgp": {
           "description": "BGP configurations for connecting the rack to external networks",
           "type": "array",

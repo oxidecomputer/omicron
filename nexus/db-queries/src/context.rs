@@ -257,6 +257,72 @@ impl OpContext {
         );
         result
     }
+
+    /// Returns an error if we're currently in a context where expensive or
+    /// complex operations should not be allowed
+    ///
+    /// This is intended for checking that we're not trying to perform expensive
+    /// or complex (multi-step) operations from HTTP request handlers.
+    /// Generally, expensive or complex operations should be broken up into
+    /// multiple requests (e.g., pagination).  That's for a variety reasons:
+    ///
+    /// - DoS mitigation: requests that kick off an arbitrarily-large amount of
+    ///   work can tie up server resources without requiring commensurate
+    ///   resources from the client, which makes it very easy to attack the
+    ///   system
+    ///
+    /// - monitoring: it's easier to reason about metrics for operations that
+    ///   are roughly bounded in size (otherwise, things like "requests per
+    ///   second" can become meaningless)
+    ///
+    /// - stability: very large database queries have outsize effects on the
+    ///   rest of the system (potentially blocking other clients for extended
+    ///   periods of time, or preventing the database from timely cleanup of
+    ///   invalidated data, etc.)
+    ///
+    /// - throttling: separate requests gives us an opportunity to dynamically
+    ///   throttle clients that are hitting the system hard
+    ///
+    /// - failure transparency: when one request kicks off a complex
+    ///   (multi-step) operation, it's harder to communicate programmatically
+    ///   why the request failed
+    ///
+    /// - retries: when failures happen during smaller operations, clients can
+    ///   retry only the part that failed.  When failures happen during complex
+    ///   (multi-step) operations, the client has to retry the whole thing.
+    ///   This is much worse than it sounds: it means that for the request to
+    ///   succeed, _all_ of the suboperations have to succeed.  During a period
+    ///   of transient failures, that could be extremely unlikely.  With smaller
+    ///   requests, clients can just retry each one until it succeeds without
+    ///   having to retry the requests that already succeeded (whose failures
+    ///   would trigger another attempt at the whole thing).
+    ///
+    /// - Simple request-response HTTP is not well-suited to long-running
+    ///   operations.  There's no way to communicate progress or even that the
+    ///   request is still going.  There's no good way to cancel such a request,
+    ///   either.  Clients and proxies often don't expect long requests and
+    ///   apply aggressive timeouts.  Depending on the HTTP version, a
+    ///   long-running request can tie up the TCP connection.
+    ///
+    /// We shouldn't allow these in either internal or external API handlers,
+    /// but we currently have some internal APIs for exercising some expensive
+    /// blueprint operations and so we allow these cases here.
+    pub fn check_complex_operations_allowed(&self) -> Result<(), Error> {
+        let api_handler = match self.kind {
+            OpKind::ExternalApiRequest => true,
+            OpKind::InternalApiRequest
+            | OpKind::Saga
+            | OpKind::Background
+            | OpKind::Test => false,
+        };
+        if api_handler {
+            Err(Error::internal_error(
+                "operation not allowed from API handlers",
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Session for ConsoleSessionWithSiloId {
@@ -291,7 +357,8 @@ mod test {
         let logctx = dev::test_setup_log("test_background_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -323,7 +390,8 @@ mod test {
         let logctx = dev::test_setup_log("test_background_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
@@ -344,7 +412,8 @@ mod test {
         let logctx = dev::test_setup_log("test_child_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),

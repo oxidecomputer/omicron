@@ -12,7 +12,6 @@ use crate::app::sagas::{
 use crate::external_api::params;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::PROPOLIS_PORT;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{
@@ -424,8 +423,10 @@ async fn sim_instance_migrate(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
-    let src_vmm_addr =
-        SocketAddr::new(params.src_vmm.propolis_ip.ip(), PROPOLIS_PORT);
+    let src_vmm_addr = SocketAddr::new(
+        params.src_vmm.propolis_ip.ip(),
+        params.src_vmm.propolis_port.into(),
+    );
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
     let dst_vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;

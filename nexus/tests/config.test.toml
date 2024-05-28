@@ -10,7 +10,7 @@ session_absolute_timeout_minutes = 480
 
 # List of authentication schemes to support.
 [authn]
-schemes_external = [ "spoof", "session_cookie" ]
+schemes_external = ["spoof", "session_cookie"]
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel
@@ -43,7 +43,7 @@ techport_external_server_port = 0
 
 # Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
 # These are the DNS servers it should use.
-external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
 [deployment.dropshot_external]
 # NOTE: for the test suite, the port MUST be 0 (in order to bind to any
@@ -103,6 +103,7 @@ phantom_disks.period_secs = 30
 blueprints.period_secs_load = 100
 blueprints.period_secs_execute = 600
 sync_service_zone_nat.period_secs = 30
+switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
 
 [default_region_allocation_strategy]

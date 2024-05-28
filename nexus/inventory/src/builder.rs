@@ -26,6 +26,7 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::Zpool;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -93,11 +94,14 @@ impl CollectionBuilder {
     /// `collector` is an arbitrary string describing the agent that collected
     /// this data.  It's generally a Nexus instance uuid but it can be anything.
     /// It's just for debugging.
-    pub fn new(collector: &str) -> Self {
+    pub fn new<S>(collector: S) -> Self
+    where
+        String: From<S>,
+    {
         CollectionBuilder {
             errors: vec![],
             time_started: now_db_precision(),
-            collector: collector.to_owned(),
+            collector: String::from(collector),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),
@@ -448,6 +452,7 @@ impl CollectionBuilder {
                 return Ok(());
             }
         };
+        let time_collected = now_db_precision();
         let sled = SledAgent {
             source: source.to_string(),
             sled_agent_address,
@@ -456,8 +461,14 @@ impl CollectionBuilder {
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
             reservoir_size: inventory.reservoir_size,
-            time_collected: now_db_precision(),
+            time_collected,
             sled_id,
+            disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
+            zpools: inventory
+                .zpools
+                .into_iter()
+                .map(|z| Zpool::new(time_collected, z))
+                .collect(),
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
@@ -907,6 +918,11 @@ mod test {
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
+        assert_eq!(sled1_agent.disks.len(), 4);
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
+        assert_eq!(sled1_agent.disks[0].identity.model, "box");
+        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+
         let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");

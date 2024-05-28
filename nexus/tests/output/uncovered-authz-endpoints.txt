@@ -1,8 +1,12 @@
 API endpoints with no coverage in authz tests:
+probe_delete                             (delete "/experimental/v1/probes/{probe}")
+probe_list                               (get    "/experimental/v1/probes")
+probe_view                               (get    "/experimental/v1/probes/{probe}")
 ping                                     (get    "/v1/ping")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")
+probe_create                             (post   "/experimental/v1/probes")
 login_saml                               (post   "/login/{silo_name}/saml/{provider_name}")
 login_local                              (post   "/v1/login/{silo_name}/local")
 logout                                   (post   "/v1/logout")

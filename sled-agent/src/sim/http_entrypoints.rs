@@ -98,6 +98,7 @@ async fn instance_register(
             body_args.hardware,
             body_args.instance_runtime,
             body_args.vmm_runtime,
+            body_args.metadata,
         )
         .await?,
     ))
@@ -406,6 +407,7 @@ async fn read_network_bootstore_config(
                 infra_ip_last: Ipv4Addr::UNSPECIFIED,
                 ports: Vec::new(),
                 bgp: Vec::new(),
+                bfd: Vec::new(),
             }),
         },
     };
@@ -434,6 +436,7 @@ async fn inventory(
     let sa = rqctx.context();
     Ok(HttpResponseOk(
         sa.inventory(rqctx.server.local_addr)
+            .await
             .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?,
     ))
 }

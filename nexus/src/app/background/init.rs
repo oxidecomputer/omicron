@@ -17,15 +17,14 @@ use super::nat_cleanup;
 use super::phantom_disks;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
+use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::sagas::SagaRequest;
+use nexus_config::BackgroundTaskConfig;
+use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::BackgroundTaskConfig;
-use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -76,6 +75,9 @@ pub struct BackgroundTasks {
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
 
+    /// task handle for the switch port settings manager
+    pub task_switch_port_settings_manager: common::TaskHandle,
+
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
@@ -88,8 +90,6 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
-        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
-        mgd_clients: &HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
@@ -134,8 +134,6 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
-        let dpd_clients: Vec<_> = dpd_clients.values().cloned().collect();
-
         let nat_cleanup = {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
@@ -146,7 +144,7 @@ impl BackgroundTasks {
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    dpd_clients.clone(),
+                    resolver.clone()
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -163,35 +161,11 @@ impl BackgroundTasks {
                 config.bfd_manager.period_secs,
                 Box::new(bfd::BfdManager::new(
                     datastore.clone(),
-                    mgd_clients.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
             )
-        };
-
-        // Background task: inventory collector
-        let task_inventory_collection = {
-            let collector = inventory_collection::InventoryCollector::new(
-                datastore.clone(),
-                resolver,
-                &nexus_id.to_string(),
-                config.inventory.nkeep,
-                config.inventory.disable,
-            );
-            let task = driver.register(
-                String::from("inventory_collection"),
-                String::from(
-                    "collects hardware and software inventory data from the \
-                    whole system",
-                ),
-                config.inventory.period_secs,
-                Box::new(collector),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            );
-
-            task
         };
 
         // Background task: phantom disk detection
@@ -228,7 +202,9 @@ impl BackgroundTasks {
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
             datastore.clone(),
             rx_blueprint.clone(),
+            nexus_id.to_string(),
         );
+        let rx_blueprint_exec = blueprint_executor.watcher();
         let task_blueprint_executor = driver.register(
             String::from("blueprint_executor"),
             String::from("Executes the target blueprint"),
@@ -237,6 +213,37 @@ impl BackgroundTasks {
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
         );
+
+        // Background task: inventory collector
+        //
+        // This currently depends on the "output" of the blueprint executor in
+        // order to automatically trigger inventory collection whenever the
+        // blueprint executor runs.  In the limit, this could become a problem
+        // because the blueprint executor might also depend indirectly on the
+        // inventory collector.  In that case, we may need to do something more
+        // complicated.  But for now, this works.
+        let task_inventory_collection = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore.clone(),
+                resolver.clone(),
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(collector),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(rx_blueprint_exec)],
+            );
+
+            task
+        };
 
         let task_service_zone_nat_tracker = {
             driver.register(
@@ -247,7 +254,21 @@ impl BackgroundTasks {
                 config.sync_service_zone_nat.period_secs,
                 Box::new(ServiceZoneNatTracker::new(
                     datastore.clone(),
-                    dpd_clients.clone(),
+                    resolver.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        let task_switch_port_settings_manager = {
+            driver.register(
+                "switch_port_config_manager".to_string(),
+                String::from("manages switch port settings for rack switches"),
+                config.switch_port_settings_manager.period_secs,
+                Box::new(SwitchPortSettingsManager::new(
+                    datastore.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -289,6 +310,7 @@ impl BackgroundTasks {
             task_blueprint_loader,
             task_blueprint_executor,
             task_service_zone_nat_tracker,
+            task_switch_port_settings_manager,
             task_region_replacement,
         }
     }
@@ -628,7 +650,7 @@ pub mod test {
     ) {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         info!(opctx.log, "writing DNS update...");
-        datastore.dns_update(opctx, &conn, update).await.unwrap();
+        datastore.dns_update_incremental(opctx, &conn, update).await.unwrap();
     }
 
     pub(crate) async fn write_test_dns_generation(

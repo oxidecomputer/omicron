@@ -4,8 +4,22 @@
 
 //! Disk related types shared among crates
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
 /// Uniquely identifies a disk.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 pub struct DiskIdentity {
     pub vendor: String,
     pub serial: String,
