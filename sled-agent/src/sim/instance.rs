@@ -339,6 +339,16 @@ impl SimInstanceInner {
         self.destroyed = true;
         self.state.sled_instance_state()
     }
+
+    /// Sets or clears this instance's migration IDs and advances its Propolis
+    /// generation number.
+    fn put_migration_ids(
+        &mut self,
+        ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<SledInstanceState, Error> {
+        self.state.set_migration_ids(ids, Utc::now());
+        Ok(self.state.sled_instance_state())
+    }
 }
 
 /// A simulation of an Instance created by the external Oxide API.
@@ -364,6 +374,14 @@ pub struct SimInstance {
 impl SimInstance {
     pub fn terminate(&self) -> SledInstanceState {
         self.inner.lock().unwrap().terminate()
+    }
+
+    pub fn put_migration_ids(
+        &self,
+        ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<SledInstanceState, Error> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.put_migration_ids(ids)
     }
 }
 

@@ -414,14 +414,13 @@ impl InstanceRunner {
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(PutMigrationIds{ old_runtime, migration_ids, tx }) => {
-                            // tx.send(
-                            //     self.put_migration_ids(
-                            //         &old_runtime,
-                            //         &migration_ids
-                            //     ).await.map_err(|e| e.into())
-                            // )
-                            // .map_err(|_| Error::FailedSendClientClosed)
-                            Ok(())
+                            tx.send(
+                                self.put_migration_ids(
+                                    &old_runtime,
+                                    &migration_ids
+                                ).await.map_err(|e| e.into())
+                            )
+                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(Terminate { tx }) => {
                             tx.send(Ok(InstanceUnregisterResponse {
@@ -1275,35 +1274,36 @@ impl InstanceRunner {
         Ok(self.state.sled_instance_state())
     }
 
-    // async fn put_migration_ids(
-    //     &mut self,
-    //     old_runtime: &InstanceRuntimeState,
-    //     migration_ids: &Option<InstanceMigrationSourceParams>,
-    // ) -> Result<SledInstanceState, Error> {
-    //     // Check that the instance's current generation matches the one the
-    //     // caller expects to transition from. This helps Nexus ensure that if
-    //     // multiple migration sagas launch at Propolis generation N, then only
-    //     // one of them will successfully set the instance's migration IDs.
-    //     if self.state.instance().gen != old_runtime.gen {
-    //         // Allow this transition for idempotency if the instance is
-    //         // already in the requested goal state.
-    //         if self.state.migration_ids_already_set(old_runtime, migration_ids)
-    //         {
-    //             return Ok(self.state.sled_instance_state());
-    //         }
+    async fn put_migration_ids(
+        &mut self,
+        _old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<SledInstanceState, Error> {
+        // // Check that the instance's current generation matches the one the
+        // // caller expects to transition from. This helps Nexus ensure that if
+        // // multiple migration sagas launch at Propolis generation N, then only
+        // // one of them will successfully set the instance's migration IDs.
+        // if self.state.instance().gen != old_runtime.gen {
+        //     // Allow this transition for idempotency if the instance is
+        //     // already in the requested goal state.
+        //     if self.state.migration_ids_already_set(old_runtime, migration_ids)
+        //     {
+        //         return Ok(self.state.sled_instance_state());
+        //     }
 
-    //         return Err(Error::Transition(
-    //             omicron_common::api::external::Error::conflict(format!(
-    //                 "wrong instance state generation: expected {}, got {}",
-    //                 self.state.instance().gen,
-    //                 old_runtime.gen
-    //             )),
-    //         ));
-    //     }
+        //     return Err(Error::Transition(
+        //         omicron_common::api::external::Error::conflict(format!(
+        //             "wrong instance state generation: expected {}, got {}",
+        //             self.state.instance().gen,
+        //             old_runtime.gen
+        //         )),
+        //     ));
+        // }
+        // TODO(eliza): figure out what to do about this part...
 
-    //     self.state.set_migration_ids(migration_ids, Utc::now());
-    //     Ok(self.state.sled_instance_state())
-    // }
+        self.state.set_migration_ids(migration_ids, Utc::now());
+        Ok(self.state.sled_instance_state())
+    }
 
     async fn setup_propolis_inner(&mut self) -> Result<PropolisSetup, Error> {
         // Create OPTE ports for the instance

@@ -506,14 +506,13 @@ impl SledAgent {
     pub async fn instance_put_migration_ids(
         self: &Arc<Self>,
         instance_id: Uuid,
-        old_runtime: &InstanceRuntimeState,
+        _old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<SledInstanceState, Error> {
         let instance =
             self.instances.sim_get_cloned_object(&instance_id).await?;
 
-        // instance.put_migration_ids(old_runtime, migration_ids).await
-        Ok(instance.current())
+        instance.put_migration_ids(migration_ids)
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
