@@ -32,6 +32,7 @@ use crate::query::measurement_table_name;
 use crate::DatumType;
 use crate::Error as OxdbError;
 use crate::FieldType;
+use crate::QuerySummary;
 use crate::TimeseriesName;
 use crate::TimeseriesSchema;
 use indexmap::IndexSet;
@@ -129,6 +130,31 @@ macro_rules! unsupported {
     ($msg:literal) => {
         Err(OxdbError::from(Error::UnsupportedSql($msg)))
     };
+}
+
+/// A tabular result from a SQL query against a timeseries.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct Table {
+    /// The name of each column in the result set.
+    pub column_names: Vec<String>,
+    /// The rows of the result set, one per column.
+    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
+/// The full result of running a SQL query against a timeseries.
+#[derive(Clone, Debug)]
+pub struct QueryResult {
+    /// The query as written by the client.
+    pub original_query: String,
+    /// The rewritten query, run against the JOINed representation of the
+    /// timeseries.
+    ///
+    /// This is the query that is actually run in the database itself.
+    pub rewritten_query: String,
+    /// Summary of the resource usage of the query.
+    pub summary: QuerySummary,
+    /// The result of the query, with column names and rows.
+    pub table: Table,
 }
 
 /// A helper type to preprocess any ClickHouse-specific SQL, and present a
@@ -562,10 +588,11 @@ impl RestrictedQuery {
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         };
         let mut query = Self::select_to_query(top_level_select);
         query.order_by = order_by;
-        Cte { alias, query, from: None }
+        Cte { alias, query, from: None, materialized: None }
     }
 
     // Create a SQL parser `Ident` with a the given name.
@@ -690,6 +717,7 @@ impl RestrictedQuery {
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         }
     }
 
@@ -760,6 +788,7 @@ impl RestrictedQuery {
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         }
     }
 

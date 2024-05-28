@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240327.0"
+    "version": "20240502.0"
   },
   "paths": {
     "/device/auth": {
@@ -3089,7 +3089,8 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Access metrics data",
+        "summary": "View metrics",
+        "description": "View CPU, memory, or storage utilization metrics at the silo or project level.",
         "operationId": "silo_metric",
         "parameters": [
           {
@@ -4113,6 +4114,45 @@
         }
       }
     },
+    "/v1/system/hardware/disks/{disk_id}": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get a physical disk",
+        "operationId": "physical_disk_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "description": "ID of the physical disk",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
@@ -4286,8 +4326,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -4743,6 +4790,63 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/switch-port/{port}/status": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get switch port status",
+        "operationId": "networking_switch_port_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchLinkState"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -5915,7 +6019,8 @@
         "tags": [
           "system/metrics"
         ],
-        "summary": "Access metrics data",
+        "summary": "View metrics",
+        "description": "View CPU, memory, or storage utilization metrics at the fleet or silo level.",
         "operationId": "system_metric",
         "parameters": [
           {
@@ -6197,6 +6302,68 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/networking/allow-list": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get user-facing services IP allowlist",
+        "operationId": "networking_allow_list_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowList"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update user-facing services IP allowlist",
+        "operationId": "networking_allow_list_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowListUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowList"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -7890,6 +8057,100 @@
         }
       }
     },
+    "/v1/timeseries/query": {
+      "post": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Run timeseries query",
+        "description": "Queries are written in OxQL.",
+        "operationId": "timeseries_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeseriesQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Table",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Table"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/timeseries/schema": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "List timeseries schemas",
+        "operationId": "timeseries_schema_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeseriesSchemaResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/users": {
       "get": {
         "tags": [
@@ -8988,6 +9249,94 @@
           "switch_histories"
         ]
       },
+      "AllowList": {
+        "description": "Allowlist of IPs or subnets that can make requests to user-facing services.",
+        "type": "object",
+        "properties": {
+          "allowed_ips": {
+            "description": "The allowlist of IPs or subnets.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "Time the list was created.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Time the list was last modified.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "allowed_ips",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "AllowListUpdate": {
+        "description": "Parameters for updating allowed source IPs",
+        "type": "object",
+        "properties": {
+          "allowed_ips": {
+            "description": "The new list of allowed source IPs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          }
+        },
+        "required": [
+          "allowed_ips"
+        ]
+      },
+      "AllowedSourceIps": {
+        "description": "Description of source IPs allowed to reach rack services.",
+        "oneOf": [
+          {
+            "description": "Allow traffic from any external IP address.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "ips": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "allow",
+              "ips"
+            ]
+          }
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -9442,11 +9791,19 @@
             "type": "string",
             "format": "ip"
           },
-          "bgp_announce_set": {
-            "description": "The set of announcements advertised by the peer.",
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/NameOrId"
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
               }
             ]
           },
@@ -9457,6 +9814,15 @@
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
           },
           "connect_retry": {
             "description": "How long to to wait between TCP connection retries (seconds).",
@@ -9470,8 +9836,12 @@
             "format": "uint32",
             "minimum": 0
           },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "type": "boolean"
+          },
           "hold_time": {
-            "description": "How long to hold peer connections between keppalives (seconds).",
+            "description": "How long to hold peer connections between keepalives (seconds).",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -9491,14 +9861,57 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a peer.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
-          "bgp_announce_set",
+          "allowed_export",
+          "allowed_import",
           "bgp_config",
+          "communities",
           "connect_retry",
           "delay_open",
+          "enforce_first_as",
           "hold_time",
           "idle_hold_time",
           "interface_name",
@@ -9523,7 +9936,7 @@
         "description": "The current state of a BGP peer.",
         "oneOf": [
           {
-            "description": "Initial state. Refuse all incomming BGP connections. No resources allocated to peer.",
+            "description": "Initial state. Refuse all incoming BGP connections. No resources allocated to peer.",
             "type": "string",
             "enum": [
               "idle"
@@ -9565,7 +9978,7 @@
             ]
           },
           {
-            "description": "Session established. Able to exchange update, notification and keepliave messages with peers.",
+            "description": "Session established. Able to exchange update, notification and keepalive messages with peers.",
             "type": "string",
             "enum": [
               "established"
@@ -11878,6 +12291,56 @@
           }
         ]
       },
+      "Distributiondouble": {
+        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "bins",
+          "counts"
+        ]
+      },
+      "Distributionint64": {
+        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "bins",
+          "counts"
+        ]
+      },
       "EphemeralIpCreate": {
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
@@ -11957,6 +12420,11 @@
                 "type": "string",
                 "format": "ip"
               },
+              "ip_pool_id": {
+                "description": "The ID of the IP pool this resource belongs to.",
+                "type": "string",
+                "format": "uuid"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -11991,6 +12459,7 @@
               "description",
               "id",
               "ip",
+              "ip_pool_id",
               "kind",
               "name",
               "project_id",
@@ -12066,6 +12535,287 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "FieldSchema": {
+        "description": "The name and type information for a field of a timeseries schema.",
+        "type": "object",
+        "properties": {
+          "field_type": {
+            "$ref": "#/components/schemas/FieldType"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FieldSource"
+          }
+        },
+        "required": [
+          "field_type",
+          "name",
+          "source"
+        ]
+      },
+      "FieldSource": {
+        "description": "The source from which a field is derived, the target or metric.",
+        "type": "string",
+        "enum": [
+          "target",
+          "metric"
+        ]
+      },
+      "FieldType": {
+        "description": "The `FieldType` identifies the data type of a target or metric field.",
+        "type": "string",
+        "enum": [
+          "string",
+          "i8",
+          "u8",
+          "i16",
+          "u16",
+          "i32",
+          "u32",
+          "i64",
+          "u64",
+          "ip_addr",
+          "uuid",
+          "bool"
+        ]
+      },
+      "FieldValue": {
+        "description": "The `FieldValue` contains the value of a target or metric field.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i8"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int8"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u8"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i16"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int16"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u16"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i32"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int32"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u32"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u64"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_addr"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "uuid"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "FinalizeDisk": {
@@ -12152,6 +12902,11 @@
             "type": "string",
             "format": "ip"
           },
+          "ip_pool_id": {
+            "description": "The ID of the IP pool this resource belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -12180,6 +12935,7 @@
           "description",
           "id",
           "ip",
+          "ip_pool_id",
           "name",
           "project_id",
           "time_created",
@@ -12927,6 +13683,47 @@
           "offset"
         ]
       },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Instance": {
         "description": "View of an Instance",
         "type": "object",
@@ -13517,6 +14314,11 @@
         ]
       },
       "IpNet": {
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::IpNet",
+          "version": "0.1.0"
+        },
         "oneOf": [
           {
             "title": "v4",
@@ -13798,7 +14600,12 @@
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
-        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "description": "An IPv4 subnet, including prefix and prefix length",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv4Net",
+          "version": "0.1.0"
+        },
         "type": "string",
         "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
@@ -13845,8 +14652,13 @@
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv6Net",
+          "version": "0.1.0"
+        },
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -13945,7 +14757,7 @@
         "description": "The forward error correction mode of a link.",
         "oneOf": [
           {
-            "description": "Firecode foward error correction.",
+            "description": "Firecode forward error correction.",
             "type": "string",
             "enum": [
               "firecode"
@@ -14240,6 +15052,32 @@
           "items"
         ]
       },
+      "MetricType": {
+        "description": "The type of the metric itself, indicating what its values represent.",
+        "oneOf": [
+          {
+            "description": "The value represents an instantaneous measurement in time.",
+            "type": "string",
+            "enum": [
+              "gauge"
+            ]
+          },
+          {
+            "description": "The value represents a difference between two points in time.",
+            "type": "string",
+            "enum": [
+              "delta"
+            ]
+          },
+          {
+            "description": "The value represents an accumulation between two points in time.",
+            "type": "string",
+            "enum": [
+              "cumulative"
+            ]
+          }
+        ]
+      },
       "MissingDatum": {
         "type": "object",
         "properties": {
@@ -14419,6 +15257,14 @@
           "model": {
             "type": "string"
           },
+          "policy": {
+            "description": "The operator-defined policy for a physical disk.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalDiskPolicy"
+              }
+            ]
+          },
           "serial": {
             "type": "string"
           },
@@ -14427,6 +15273,14 @@
             "description": "The sled to which this disk is attached, if any.",
             "type": "string",
             "format": "uuid"
+          },
+          "state": {
+            "description": "The current state Nexus believes the disk to be in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalDiskState"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -14446,7 +15300,9 @@
           "form_factor",
           "id",
           "model",
+          "policy",
           "serial",
+          "state",
           "time_created",
           "time_modified",
           "vendor"
@@ -14458,6 +15314,41 @@
         "enum": [
           "m2",
           "u2"
+        ]
+      },
+      "PhysicalDiskPolicy": {
+        "description": "The operator-defined policy of a physical disk.",
+        "oneOf": [
+          {
+            "description": "The operator has indicated that the disk is in-service.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The operator has indicated that the disk has been permanently removed from service.\n\nThis is a terminal state: once a particular disk ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new disk.)\n\nAn expunged disk is always non-provisionable.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
         ]
       },
       "PhysicalDiskResultsPage": {
@@ -14481,6 +15372,25 @@
           "items"
         ]
       },
+      "PhysicalDiskState": {
+        "description": "The current state of the disk, as determined by Nexus.",
+        "oneOf": [
+          {
+            "description": "The disk is currently active, and has resources allocated on it.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The disk has been permanently removed from service.\n\nThis is a terminal state: once a particular disk ID is decommissioned, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new disk.)",
+            "type": "string",
+            "enum": [
+              "decommissioned"
+            ]
+          }
+        ]
+      },
       "Ping": {
         "type": "object",
         "properties": {
@@ -14501,6 +15411,37 @@
         "type": "string",
         "enum": [
           "ok"
+        ]
+      },
+      "Points": {
+        "description": "Timepoints and values for one timeseries.",
+        "type": "object",
+        "properties": {
+          "start_times": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "timestamps": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Values"
+            }
+          }
+        },
+        "required": [
+          "timestamps",
+          "values"
         ]
       },
       "Probe": {
@@ -15044,7 +15985,6 @@
           "signing_keypair": {
             "nullable": true,
             "description": "request signing key pair",
-            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"
@@ -15606,6 +16546,19 @@
           "time_modified",
           "usable_hardware_threads",
           "usable_physical_ram"
+        ]
+      },
+      "SledId": {
+        "description": "The unique ID of a sled.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "SledInstance": {
@@ -16248,6 +17201,7 @@
           }
         ]
       },
+      "SwitchLinkState": {},
       "SwitchLocation": {
         "description": "Identifies switch physical location",
         "oneOf": [
@@ -16354,37 +17308,6 @@
           "port_settings"
         ]
       },
-      "SwitchPortBgpPeerConfig": {
-        "description": "A BGP peer configuration for a port settings object.",
-        "type": "object",
-        "properties": {
-          "addr": {
-            "description": "The address of the peer.",
-            "type": "string",
-            "format": "ip"
-          },
-          "bgp_config_id": {
-            "description": "The id of the global BGP configuration referenced by this peer configuration.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "interface_name": {
-            "description": "The interface name used to establish a peer session.",
-            "type": "string"
-          },
-          "port_settings_id": {
-            "description": "The port settings object this BGP configuration belongs to.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "addr",
-          "bgp_config_id",
-          "interface_name",
-          "port_settings_id"
-        ]
-      },
       "SwitchPortConfig": {
         "description": "A physical port configuration for a port settings object.",
         "type": "object",
@@ -16481,6 +17404,18 @@
         "description": "A link configuration for a port settings object.",
         "type": "object",
         "properties": {
+          "autoneg": {
+            "description": "Whether or not the link has autonegotiation enabled.",
+            "type": "boolean"
+          },
+          "fec": {
+            "description": "The forward error correction mode of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
           "link_name": {
             "description": "The name of this link.",
             "type": "string"
@@ -16500,13 +17435,24 @@
             "description": "The port settings this link configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "speed": {
+            "description": "The configured speed of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
           }
         },
         "required": [
+          "autoneg",
+          "fec",
           "link_name",
           "lldp_service_config_id",
           "mtu",
-          "port_settings_id"
+          "port_settings_id",
+          "speed"
         ]
       },
       "SwitchPortResultsPage": {
@@ -16737,7 +17683,7 @@
             "description": "BGP peer settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortBgpPeerConfig"
+              "$ref": "#/components/schemas/BgpPeer"
             }
           },
           "groups": {
@@ -16852,6 +17798,113 @@
         "required": [
           "interface_config_id",
           "vlan_id"
+        ]
+      },
+      "Table": {
+        "description": "A table represents one or more timeseries with the same schema.\n\nA table is the result of an OxQL query. It contains a name, usually the name of the timeseries schema from which the data is derived, and any number of timeseries, which contain the actual data.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "timeseries": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Timeseries"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "timeseries"
+        ]
+      },
+      "Timeseries": {
+        "description": "A timeseries contains a timestamped set of values from one source.\n\nThis includes the typed key-value pairs that uniquely identify it, and the set of timestamps and data values from it.",
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldValue"
+            }
+          },
+          "points": {
+            "$ref": "#/components/schemas/Points"
+          }
+        },
+        "required": [
+          "fields",
+          "points"
+        ]
+      },
+      "TimeseriesName": {
+        "title": "The name of a timeseries",
+        "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
+        "type": "string",
+        "pattern": "^(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)$"
+      },
+      "TimeseriesQuery": {
+        "description": "A timeseries query string, written in the Oximeter query language.",
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "A timeseries query string, written in the Oximeter query language.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "TimeseriesSchema": {
+        "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "field_schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldSchema"
+            },
+            "uniqueItems": true
+          },
+          "timeseries_name": {
+            "$ref": "#/components/schemas/TimeseriesName"
+          }
+        },
+        "required": [
+          "created",
+          "datum_type",
+          "field_schema",
+          "timeseries_name"
+        ]
+      },
+      "TimeseriesSchemaResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimeseriesSchema"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "UninitializedSled": {
@@ -17133,6 +18186,169 @@
         "required": [
           "capacity",
           "provisioned"
+        ]
+      },
+      "ValueArray": {
+        "description": "List of data values for one timeseries.\n\nEach element is an option, where `None` represents a missing sample.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "integer"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "double"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "number",
+                  "format": "double"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boolean"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "boolean"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "integer_distribution"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Distributionint64"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "double_distribution"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "nullable": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Distributiondouble"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type",
+              "values"
+            ]
+          }
+        ]
+      },
+      "Values": {
+        "description": "A single list of values, for one dimension of a timeseries.",
+        "type": "object",
+        "properties": {
+          "metric_type": {
+            "$ref": "#/components/schemas/MetricType"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ValueArray"
+          }
+        },
+        "required": [
+          "metric_type",
+          "values"
         ]
       },
       "VirtualResourceCounts": {

@@ -199,6 +199,25 @@ async fn do_dot(config: &Config) -> Result<()> {
     Ok(())
 }
 
+async fn do_list_outputs(
+    config: &Config,
+    output_directory: &Utf8Path,
+    intermediate: bool,
+) -> Result<()> {
+    for (name, package) in
+        config.package_config.packages_to_build(&config.target).0
+    {
+        if !intermediate
+            && package.output
+                == (PackageOutput::Zone { intermediate_only: true })
+        {
+            continue;
+        }
+        println!("{}", package.get_output_path(name, output_directory));
+    }
+    Ok(())
+}
+
 // The name reserved for the currently-in-use build target.
 const ACTIVE: &str = "active";
 
@@ -919,7 +938,7 @@ async fn main() -> Result<()> {
     tokio::fs::create_dir_all(&args.artifact_dir).await?;
     let logpath = args.artifact_dir.join("LOG");
     let logfile = std::io::LineWriter::new(open_options.open(&logpath)?);
-    println!("Logging to: {}", std::fs::canonicalize(logpath)?.display());
+    eprintln!("Logging to: {}", std::fs::canonicalize(logpath)?.display());
 
     let drain = slog_bunyan::new(logfile).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
@@ -980,6 +999,10 @@ async fn main() -> Result<()> {
         }
         SubCommand::Build(BuildCommand::Dot) => {
             do_dot(&get_config()?).await?;
+        }
+        SubCommand::Build(BuildCommand::ListOutputs { intermediate }) => {
+            do_list_outputs(&get_config()?, &args.artifact_dir, *intermediate)
+                .await?;
         }
         SubCommand::Build(BuildCommand::Package { disable_cache }) => {
             do_package(&get_config()?, &args.artifact_dir, *disable_cache)

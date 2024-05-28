@@ -118,7 +118,7 @@ impl Resolver {
             .get_dns_subnets()
             .into_iter()
             .map(|dns_subnet| {
-                let ip_addr = IpAddr::V6(dns_subnet.dns_address().ip());
+                let ip_addr = IpAddr::V6(dns_subnet.dns_address());
                 SocketAddr::new(ip_addr, DNS_PORT)
             })
             .collect()
@@ -382,6 +382,7 @@ mod test {
         RequestContext,
     };
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use slog::{o, Logger};
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
@@ -389,7 +390,6 @@ mod test {
     use std::net::SocketAddrV6;
     use std::str::FromStr;
     use tempfile::TempDir;
-    use uuid::Uuid;
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
@@ -526,11 +526,11 @@ mod test {
 
         let mut dns_config = DnsConfigBuilder::new();
         let ip = Ipv6Addr::from_str("ff::01").unwrap();
-        let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
+        let zone = dns_config.host_zone(OmicronZoneUuid::new_v4(), ip).unwrap();
         dns_config
             .service_backend_zone(ServiceName::Cockroach, &zone, 12345)
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         let resolver = dns_server.resolver().unwrap();
@@ -584,31 +584,34 @@ mod test {
 
         let srv_crdb = ServiceName::Cockroach;
         let srv_clickhouse = ServiceName::Clickhouse;
-        let srv_backend = ServiceName::Crucible(Uuid::new_v4());
+        let srv_backend = ServiceName::Crucible(OmicronZoneUuid::new_v4());
 
         let mut dns_builder = DnsConfigBuilder::new();
         for db_ip in &cockroach_addrs {
-            let zone =
-                dns_builder.host_zone(Uuid::new_v4(), *db_ip.ip()).unwrap();
+            let zone = dns_builder
+                .host_zone(OmicronZoneUuid::new_v4(), *db_ip.ip())
+                .unwrap();
             dns_builder
                 .service_backend_zone(srv_crdb, &zone, db_ip.port())
                 .unwrap();
         }
 
         let zone = dns_builder
-            .host_zone(Uuid::new_v4(), *clickhouse_addr.ip())
+            .host_zone(OmicronZoneUuid::new_v4(), *clickhouse_addr.ip())
             .unwrap();
         dns_builder
             .service_backend_zone(srv_clickhouse, &zone, clickhouse_addr.port())
             .unwrap();
 
-        let zone =
-            dns_builder.host_zone(Uuid::new_v4(), *crucible_addr.ip()).unwrap();
+        let zone = dns_builder
+            .host_zone(OmicronZoneUuid::new_v4(), *crucible_addr.ip())
+            .unwrap();
         dns_builder
             .service_backend_zone(srv_backend, &zone, crucible_addr.port())
             .unwrap();
 
-        let mut dns_config = dns_builder.build();
+        let mut dns_config =
+            dns_builder.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         // Look up Cockroach
@@ -684,10 +687,11 @@ mod test {
         // Insert a record, observe that it exists.
         let mut dns_builder = DnsConfigBuilder::new();
         let ip1 = Ipv6Addr::from_str("ff::01").unwrap();
-        let zone = dns_builder.host_zone(Uuid::new_v4(), ip1).unwrap();
+        let zone =
+            dns_builder.host_zone(OmicronZoneUuid::new_v4(), ip1).unwrap();
         let srv_crdb = ServiceName::Cockroach;
         dns_builder.service_backend_zone(srv_crdb, &zone, 12345).unwrap();
-        let dns_config = dns_builder.build();
+        let dns_config = dns_builder.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
             .lookup_ipv6(ServiceName::Cockroach)
@@ -699,10 +703,12 @@ mod test {
         // updated.
         let mut dns_builder = DnsConfigBuilder::new();
         let ip2 = Ipv6Addr::from_str("ee::02").unwrap();
-        let zone = dns_builder.host_zone(Uuid::new_v4(), ip2).unwrap();
+        let zone =
+            dns_builder.host_zone(OmicronZoneUuid::new_v4(), ip2).unwrap();
         let srv_crdb = ServiceName::Cockroach;
         dns_builder.service_backend_zone(srv_crdb, &zone, 54321).unwrap();
-        let mut dns_config = dns_builder.build();
+        let mut dns_config =
+            dns_builder.build_full_config_for_initial_generation();
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
@@ -832,11 +838,11 @@ mod test {
 
         // Add a record for the new service.
         let mut dns_config = DnsConfigBuilder::new();
-        let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
+        let zone = dns_config.host_zone(OmicronZoneUuid::new_v4(), ip).unwrap();
         dns_config
             .service_backend_zone(ServiceName::Nexus, &zone, port)
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         // Confirm that we can access this record manually.
@@ -914,11 +920,11 @@ mod test {
         // Since both servers are authoritative, we also shut down the first
         // server.
         let mut dns_config = DnsConfigBuilder::new();
-        let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
+        let zone = dns_config.host_zone(OmicronZoneUuid::new_v4(), ip).unwrap();
         dns_config
             .service_backend_zone(ServiceName::Nexus, &zone, port)
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_server1.cleanup_successful();
         dns_server2.update(&dns_config).await.unwrap();
 
@@ -950,7 +956,7 @@ mod test {
         // Create DNS config with a single service and multiple backends.
         let mut dns_config = DnsConfigBuilder::new();
 
-        let id1 = Uuid::new_v4();
+        let id1 = OmicronZoneUuid::new_v4();
         let ip1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
         let addr1 = SocketAddrV6::new(ip1, 15001, 0, 0);
         let zone1 = dns_config.host_zone(id1, ip1).unwrap();
@@ -958,7 +964,7 @@ mod test {
             .service_backend_zone(ServiceName::Cockroach, &zone1, addr1.port())
             .unwrap();
 
-        let id2 = Uuid::new_v4();
+        let id2 = OmicronZoneUuid::new_v4();
         let ip2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
         let addr2 = SocketAddrV6::new(ip2, 15002, 0, 0);
         let zone2 = dns_config.host_zone(id2, ip2).unwrap();
@@ -967,7 +973,8 @@ mod test {
             .unwrap();
 
         // Plumb records onto DNS server
-        let mut dns_config = dns_config.build();
+        let mut dns_config =
+            dns_config.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         // Using the resolver we should get back both addresses

@@ -130,7 +130,8 @@ pub(crate) struct Params {
     pub silo_id: Uuid,
     pub project_id: Uuid,
     pub disk_id: Uuid,
-    pub attached_instance_and_sled: Option<(Uuid, Uuid)>,
+    pub attach_instance_id: Option<Uuid>,
+    pub use_the_pantry: bool,
     pub create_params: params::SnapshotCreate,
 }
 
@@ -251,8 +252,7 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Tracks virtual resource provisioning.
         builder.append(space_account_action());
 
-        let use_the_pantry = params.attached_instance_and_sled.is_none();
-        if !use_the_pantry {
+        if !params.use_the_pantry {
             // (Sleds) If the disk is attached to an instance, send a
             // snapshot request to sled-agent to create a ZFS snapshot.
             builder.append(send_snapshot_request_to_sled_agent_action());
@@ -284,7 +284,7 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Mark snapshot as "ready"
         builder.append(finalize_snapshot_record_action());
 
-        if use_the_pantry {
+        if params.use_the_pantry {
             // (Pantry) Set the state back to Detached
             //
             // This has to be the last saga node! Otherwise, concurrent
@@ -336,7 +336,7 @@ async fn ssc_alloc_regions(
 
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(
+        .disk_region_allocate(
             &opctx,
             destination_volume_id,
             &params::DiskSource::Blank {
@@ -400,7 +400,7 @@ async fn ssc_regions_ensure(
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
             blocks_per_extent,
-            extent_count: extent_count.try_into().unwrap(),
+            extent_count,
             gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,
@@ -675,22 +675,47 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
     // If this node was reached, the saga initiator thought the disk was
-    // attached to an instance that was running on a specific sled. Contact that
-    // sled and ask it to initiate a snapshot. Note that this is best-effort:
-    // the instance may have stopped (or may be have stopped, had the disk
-    // detached, and resumed running on the same sled) while the saga was
-    // executing.
-    let (instance_id, sled_id) =
-        params.attached_instance_and_sled.ok_or_else(|| {
-            ActionError::action_failed(Error::internal_error(
-                "snapshot saga in send_snapshot_request_to_sled_agent but no \
-                instance/sled pair was provided",
-            ))
-        })?;
+    // attached to an instance that _may_ have a running Propolis. Contact that
+    // Propolis and ask it to initiate a snapshot. Note that this is
+    // best-effort: the instance may have stopped (or may be have stopped, had
+    // the disk detached, and resumed running on the same sled) while the saga
+    // was executing.
+    let Some(attach_instance_id) = params.attach_instance_id else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "attach instance id is None!",
+        )));
+    };
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(attach_instance_id)
+        .lookup_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let sled_id = osagactx
+        .datastore()
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?
+        .sled_id();
+
+    // If this instance does not currently have a sled, we can't continue this
+    // saga - the user will have to reissue the snapshot request and it will get
+    // run on a Pantry.
+    let Some(sled_id) = sled_id else {
+        return Err(ActionError::action_failed(Error::unavail(
+            "sled id is None!",
+        )));
+    };
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
           "disk_id" => %params.disk_id,
-          "instance_id" => %instance_id,
+          "instance_id" => %attach_instance_id,
           "sled_id" => %sled_id);
 
     let sled_agent_client = osagactx
@@ -702,7 +727,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     retry_until_known_result(log, || async {
         sled_agent_client
             .instance_issue_disk_snapshot_request(
-                &instance_id,
+                &attach_instance_id,
                 &params.disk_id,
                 &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
             )
@@ -836,6 +861,16 @@ async fn ssc_attach_disk_to_pantry(
             // specified an optional snapshot should be taken. No state change
             // is required.
             info!(log, "disk {} in state finalizing", params.disk_id);
+        }
+
+        external::DiskState::Attached(attach_instance_id) => {
+            // No state change required
+            info!(
+                log,
+                "disk {} in state attached to instance id {}",
+                params.disk_id,
+                attach_instance_id
+            );
         }
 
         _ => {
@@ -1358,7 +1393,10 @@ async fn ssc_create_volume_record(
 
     let disk_volume = osagactx
         .datastore()
-        .volume_checkout(disk.volume_id)
+        .volume_checkout(
+            disk.volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1534,12 +1572,9 @@ fn create_snapshot_from_disk(
 
             if let Some(socket_map) = socket_map {
                 for target in &mut opts.target {
-                    *target = socket_map
-                        .get(target)
-                        .ok_or_else(|| {
-                            anyhow!("target {} not found in map!", target)
-                        })?
-                        .clone();
+                    target.clone_from(socket_map.get(target).ok_or_else(
+                        || anyhow!("target {} not found in map!", target),
+                    )?);
                 }
             }
 
@@ -1815,14 +1850,16 @@ mod test {
         project_id: Uuid,
         disk_id: Uuid,
         disk: NameOrId,
-        instance_and_sled: Option<(Uuid, Uuid)>,
+        attach_instance_id: Option<Uuid>,
+        use_the_pantry: bool,
     ) -> Params {
         Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id,
             project_id,
             disk_id,
-            attached_instance_and_sled: instance_and_sled,
+            attach_instance_id,
+            use_the_pantry,
             create_params: params::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
@@ -1836,7 +1873,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -1849,7 +1886,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1871,7 +1908,8 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            None,
+            None, // not attached to an instance
+            true, // use the pantry
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1935,7 +1973,7 @@ mod test {
         // Verifies:
         // - No snapshot records exist
         // - No region snapshot records exist
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
         assert!(no_snapshot_records_exist(datastore).await);
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
@@ -1975,7 +2013,7 @@ mod test {
         // Read out the instance's assigned sled, then poke the instance to get
         // it from the Starting state to the Running state so the test disk can
         // be snapshotted.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
             .instance_id(instance.identity.id)
@@ -2039,7 +2077,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2079,7 +2117,7 @@ mod test {
                         // since this is just a test, bypass the normal
                         // attachment machinery and just update the disk's
                         // database record directly.
-                        let instance_and_sled = if !use_the_pantry {
+                        let attach_instance_id = if !use_the_pantry {
                             let state = setup_test_instance(
                                 cptestctx,
                                 client,
@@ -2092,11 +2130,7 @@ mod test {
                             )
                             .await;
 
-                            let sled_id = state
-                                .sled_id()
-                                .expect("running instance should have a vmm");
-
-                            Some((state.instance().id(), sled_id))
+                            Some(state.instance().id())
                         } else {
                             None
                         };
@@ -2107,7 +2141,8 @@ mod test {
                             project_id,
                             disk_id,
                             Name::from_str(DISK_NAME).unwrap().into(),
-                            instance_and_sled,
+                            attach_instance_id,
+                            use_the_pantry,
                         )
                     }
                 })
@@ -2181,7 +2216,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2205,36 +2240,31 @@ mod test {
             Name::from_str(DISK_NAME).unwrap().into(),
             // The disk isn't attached at this time, so don't supply a sled.
             None,
+            true, // use the pantry
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
 
         // Before running the saga, attach the disk to an instance!
-        let (.., authz_disk, db_disk) =
-            LookupPath::new(&opctx, nexus.datastore())
-                .disk_id(disk_id)
-                .fetch_for(authz::Action::Read)
-                .await
-                .expect("Failed to look up created disk");
-
-        assert!(nexus
-            .datastore()
-            .disk_update_runtime(
-                &opctx,
-                &authz_disk,
-                &db_disk.runtime().attach(Uuid::new_v4()),
-            )
-            .await
-            .expect("failed to attach disk"));
+        let _instance_and_vmm = setup_test_instance(
+            &cptestctx,
+            &client,
+            vec![params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::from_str(DISK_NAME).unwrap(),
+                },
+            )],
+        )
+        .await;
 
         // Actually run the saga
         let output = nexus.run_saga(runnable_saga).await;
 
-        // Expect to see 503
+        // Expect to see 409
         match output {
             Err(e) => {
-                assert!(matches!(e, Error::ServiceUnavailable { .. }));
+                assert!(matches!(e, Error::Conflict { .. }));
             }
 
             Ok(_) => {
@@ -2269,6 +2299,7 @@ mod test {
             Name::from_str(DISK_NAME).unwrap().into(),
             // The disk isn't attached at this time, so don't supply a sled.
             None,
+            true, // use the pantry
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2290,7 +2321,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2313,8 +2344,6 @@ mod test {
         // the saga, stopping the instance, detaching the disk, and then letting
         // the saga run.
         let fake_instance_id = Uuid::new_v4();
-        let fake_sled_id =
-            Uuid::parse_str(nexus_test_utils::SLED_AGENT_UUID).unwrap();
 
         let params = new_test_params(
             &opctx,
@@ -2322,7 +2351,8 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            Some((fake_instance_id, fake_sled_id)),
+            Some(fake_instance_id),
+            false, // use the pantry
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2363,10 +2393,6 @@ mod test {
         )
         .await;
 
-        let sled_id = instance_state
-            .sled_id()
-            .expect("running instance should have a vmm");
-
         // Rerun the saga
         let params = new_test_params(
             &opctx,
@@ -2374,7 +2400,8 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            Some((instance_state.instance().id(), sled_id)),
+            Some(instance_state.instance().id()),
+            false, // use the pantry
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();

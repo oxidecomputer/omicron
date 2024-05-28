@@ -28,6 +28,7 @@ pub mod disk;
 pub mod ledger;
 pub mod update;
 pub mod vlan;
+pub mod zpool_name;
 
 pub use update::hex_schema;
 

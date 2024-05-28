@@ -384,7 +384,7 @@ pub(crate) async fn try_reserve_block(
         address_lot_id: lot_id,
         first_address: inet,
         last_address: inet,
-        anycast: anycast,
+        anycast,
     };
 
     diesel::insert_into(rsvd_block_dsl::address_lot_rsvd_block)

@@ -1300,6 +1300,62 @@
         }
       }
     },
+    "/sp/{type}/{slot}/sensor/{sensor_id}/value": {
+      "get": {
+        "summary": "Read the current value of a sensor by ID",
+        "description": "Sensor IDs come from the host topo tree.",
+        "operationId": "sp_sensor_read_value",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "description": "ID for the sensor on the SP.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpSensorReading"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/startup-options": {
       "get": {
         "summary": "Get host startup options for a sled",
@@ -2784,6 +2840,124 @@
             "required": [
               "id",
               "system_type"
+            ]
+          }
+        ]
+      },
+      "SpSensorReading": {
+        "description": "Result of reading an SP sensor.",
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "Value (or error) from the sensor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpSensorReadingResult"
+              }
+            ]
+          },
+          "timestamp": {
+            "description": "SP-centric timestamp of when `result` was recorded from this sensor.\n\nCurrently this value represents \"milliseconds since the last SP boot\" and is primarily useful as a delta between sensors on this SP (assuming no reboot in between). The meaning could change with future SP releases.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "result",
+          "timestamp"
+        ]
+      },
+      "SpSensorReadingResult": {
+        "description": "Single reading (or error) from an SP sensor.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_off"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_error"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_not_present"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_timeout"
+                ]
+              }
+            },
+            "required": [
+              "kind"
             ]
           }
         ]

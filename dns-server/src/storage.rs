@@ -783,6 +783,7 @@ mod test {
     use crate::storage::QueryError;
     use anyhow::Context;
     use camino::Utf8PathBuf;
+    use camino_tempfile::Utf8TempDir;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -796,7 +797,7 @@ mod test {
     /// our tests and helps make sure they get cleaned up properly.
     struct TestContext {
         logctx: dropshot::test_util::LogContext,
-        tmpdir: tempdir::TempDir,
+        tmpdir: Utf8TempDir,
         store: Store,
         db: Arc<sled::Db>,
     }
@@ -804,12 +805,9 @@ mod test {
     impl TestContext {
         fn new(test_name: &str) -> TestContext {
             let logctx = test_setup_log(test_name);
-            let tmpdir = tempdir::TempDir::new("dns-server-storage-test")
+            let tmpdir = Utf8TempDir::with_prefix("dns-server-storage-test")
                 .expect("failed to create tmp directory for test");
-            let storage_path =
-                Utf8PathBuf::from_path_buf(tmpdir.path().to_path_buf()).expect(
-                    "failed to create Utf8PathBuf for test temporary directory",
-                );
+            let storage_path = tmpdir.path().to_path_buf();
 
             let db = Arc::new(
                 sled::open(&storage_path).context("creating db").unwrap(),

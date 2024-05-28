@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -19,6 +22,7 @@ macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-uuid-kinds.workspace = true
 once_cell.workspace = true
+oxnet.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -28,6 +32,8 @@ schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true

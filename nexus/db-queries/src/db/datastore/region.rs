@@ -8,10 +8,12 @@ use super::DataStore;
 use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -21,6 +23,7 @@ use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupResult;
 use slog::Logger;
 use uuid::Uuid;
 
@@ -53,6 +56,34 @@ impl DataStore {
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region(&self, region_id: Uuid) -> Result<Region, Error> {
+        use db::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region_optional(
+        &self,
+        region_id: Uuid,
+    ) -> Result<Option<Region>, Error> {
+        use db::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -99,7 +130,7 @@ impl DataStore {
         size: external::ByteCount,
     ) -> (u64, u64) {
         let blocks_per_extent =
-            Self::EXTENT_SIZE / block_size.to_bytes() as u64;
+            Self::EXTENT_SIZE / u64::from(block_size.to_bytes());
 
         let size = size.to_bytes();
 
@@ -115,7 +146,7 @@ impl DataStore {
     ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
-    pub async fn region_allocate(
+    pub async fn disk_region_allocate(
         &self,
         opctx: &OpContext,
         volume_id: Uuid,
@@ -123,19 +154,77 @@ impl DataStore {
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
+        self.arbitrary_region_allocate(
+            opctx,
+            volume_id,
+            disk_source,
+            size,
+            allocation_strategy,
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await
+    }
+
+    /// Idempotently allocates an arbitrary number of regions for a volume.
+    ///
+    /// For regular disk creation, this will be REGION_REDUNDANCY_THRESHOLD.
+    ///
+    /// For region replacement, it's important to allocate the *new* region for
+    /// a volume while respecting the current region allocation strategy.  This
+    /// requires setting `num_regions_required` to one more than the current
+    /// level for a volume. If a single region is allocated in isolation this
+    /// could land on the same dataset as one of the existing volume's regions.
+    ///
+    /// Returns the allocated regions, as well as the datasets to which they
+    /// belong.
+    pub async fn arbitrary_region_allocate(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+        disk_source: &params::DiskSource,
+        size: external::ByteCount,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
         let block_size =
             self.get_block_size_from_disk_source(opctx, &disk_source).await?;
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
-        let query = crate::db::queries::region_allocation::allocation_query(
+        self.arbitrary_region_allocate_direct(
+            opctx,
             volume_id,
-            block_size.to_bytes() as u64,
+            u64::from(block_size.to_bytes()),
             blocks_per_extent,
             extent_count,
             allocation_strategy,
+            num_regions_required,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn arbitrary_region_allocate_direct(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        let query = crate::db::queries::region_allocation::allocation_query(
+            volume_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            allocation_strategy,
+            num_regions_required,
         );
+
         let conn = self.pool_connection_authorized(&opctx).await?;
+
         let dataset_and_regions: Vec<(Dataset, Region)> =
             query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
@@ -147,6 +236,7 @@ impl DataStore {
             "volume_id" => %volume_id,
             "datasets_and_regions" => ?dataset_and_regions,
         );
+
         Ok(dataset_and_regions)
     }
 
@@ -275,6 +365,40 @@ impl DataStore {
             Ok(0)
         }
     }
+
+    /// Find regions on expunged disks
+    pub async fn find_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
@@ -329,7 +453,7 @@ mod test {
         // Note that i64::MAX bytes is an invalid disk size as it's not
         // divisible by 4096. Create the maximum sized disk here.
         let max_disk_size = i64::MAX
-            - (i64::MAX % (BlockSize::AdvancedFormat.to_bytes() as i64));
+            - (i64::MAX % i64::from(BlockSize::AdvancedFormat.to_bytes()));
         let (blocks_per_extent, extent_count) =
             DataStore::get_crucible_allocation(
                 &BlockSize::AdvancedFormat,
@@ -338,16 +462,16 @@ mod test {
 
         // We should still be rounding up to the nearest extent size.
         assert_eq!(
-            extent_count as u128 * DataStore::EXTENT_SIZE as u128,
+            u128::from(extent_count) * u128::from(DataStore::EXTENT_SIZE),
             i64::MAX as u128 + 1,
         );
 
         // Assert that the regions allocated will fit this disk
         assert!(
             max_disk_size as u128
-                <= extent_count as u128
-                    * blocks_per_extent as u128
-                    * DataStore::EXTENT_SIZE as u128
+                <= u128::from(extent_count)
+                    * u128::from(blocks_per_extent)
+                    * u128::from(DataStore::EXTENT_SIZE)
         );
     }
 }

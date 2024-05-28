@@ -19,7 +19,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
-use omicron_common::api::external;
+use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use sled_agent_client::types::OmicronZoneType;
 use std::net::{IpAddr, SocketAddr};
@@ -107,7 +107,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
             for (sled_id, zones_found) in collection.omicron_zones {
                 let (_, sled) = match LookupPath::new(opctx, &self.datastore)
-                    .sled_id(sled_id)
+                    .sled_id(sled_id.into_untyped_uuid())
                     .fetch()
                     .await
                     .context("failed to look up sled")
@@ -124,9 +124,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                     }
                 };
 
-                let sled_address = external::Ipv6Net(
-                    ipnetwork::Ipv6Network::new(*sled.ip, 128).unwrap(),
-                );
+                let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
                 let zones_config: sled_agent_client::types::OmicronZonesConfig =
                     zones_found.zones;
@@ -151,17 +149,17 @@ impl BackgroundTask for ServiceZoneNatTracker {
                             };
 
                             let external_address =
-                                ipnetwork::Ipv4Network::new(external_ip, 32)
+                                oxnet::Ipv4Net::new(external_ip, 32)
                                     .unwrap();
 
+                            let (snat_first_port, snat_last_port) =
+                                snat_cfg.port_range_raw();
                             let nat_value = Ipv4NatValues {
                                 external_address: nexus_db_model::Ipv4Net(
-                                    omicron_common::api::external::Ipv4Net(
                                         external_address,
-                                    ),
                                 ),
-                                first_port: snat_cfg.first_port.into(),
-                                last_port: snat_cfg.last_port.into(),
+                                first_port: snat_first_port.into(),
+                                last_port: snat_last_port.into(),
                                 sled_address: sled_address.into(),
                                 vni: nexus_db_model::Vni(nic.vni),
                                 mac: nexus_db_model::MacAddr(nic.mac),
@@ -184,14 +182,12 @@ impl BackgroundTask for ServiceZoneNatTracker {
                             };
 
                             let external_address =
-                                ipnetwork::Ipv4Network::new(external_ip, 32)
+                                oxnet::Ipv4Net::new(external_ip, 32)
                                     .unwrap();
 
                             let nat_value = Ipv4NatValues {
                                 external_address: nexus_db_model::Ipv4Net(
-                                    omicron_common::api::external::Ipv4Net(
                                         external_address,
-                                    ),
                                 ),
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
@@ -231,14 +227,12 @@ impl BackgroundTask for ServiceZoneNatTracker {
                             };
 
                             let external_address =
-                                ipnetwork::Ipv4Network::new(external_ip, 32)
+                                oxnet::Ipv4Net::new(external_ip, 32)
                                     .unwrap();
 
                             let nat_value = Ipv4NatValues {
                                 external_address: nexus_db_model::Ipv4Net(
-                                    omicron_common::api::external::Ipv4Net(
                                         external_address,
-                                    ),
                                 ),
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),

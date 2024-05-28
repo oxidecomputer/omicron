@@ -5,7 +5,7 @@
 //! Utilities for poking at ZFS.
 
 use crate::{execute, PFEXEC};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
@@ -28,8 +28,6 @@ pub const ZFS: &str = "/usr/sbin/zfs";
 /// the keys and recreate the files on demand when creating and mounting
 /// encrypted filesystems. We then zero them and unlink them.
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
-// Use /tmp so we don't have to worry about running tests with pfexec
-pub const TEST_KEYPATH_ROOT: &str = "/tmp";
 
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
@@ -168,25 +166,32 @@ impl fmt::Display for Keypath {
     }
 }
 
-#[cfg(not(feature = "tmp_keypath"))]
-impl From<&DiskIdentity> for Keypath {
-    fn from(id: &DiskIdentity) -> Self {
-        build_keypath(id, KEYPATH_ROOT)
-    }
-}
+impl Keypath {
+    /// Constructs a Keypath for the specified disk within the supplied root
+    /// directory.
+    ///
+    /// By supplying "root", tests can override the location where these paths
+    /// are stored to non-global locations.
+    pub fn new<P: AsRef<Utf8Path>>(id: &DiskIdentity, root: &P) -> Keypath {
+        let keypath_root = Utf8PathBuf::from(KEYPATH_ROOT);
+        let mut keypath = keypath_root.as_path();
+        let keypath_directory = loop {
+            match keypath.strip_prefix("/") {
+                Ok(stripped) => keypath = stripped,
+                Err(_) => break root.as_ref().join(keypath),
+            }
+        };
+        std::fs::create_dir_all(&keypath_directory)
+            .expect("Cannot ensure directory for keys");
 
-#[cfg(feature = "tmp_keypath")]
-impl From<&DiskIdentity> for Keypath {
-    fn from(id: &DiskIdentity) -> Self {
-        build_keypath(id, TEST_KEYPATH_ROOT)
+        let filename = format!(
+            "{}-{}-{}-zfs-aes-256-gcm.key",
+            id.vendor, id.serial, id.model
+        );
+        let path: Utf8PathBuf =
+            [keypath_directory.as_str(), &filename].iter().collect();
+        Keypath(path)
     }
-}
-
-fn build_keypath(id: &DiskIdentity, root: &str) -> Keypath {
-    let filename =
-        format!("{}-{}-{}-zfs-aes-256-gcm.key", id.vendor, id.serial, id.model);
-    let path: Utf8PathBuf = [root, &filename].iter().collect();
-    Keypath(path)
 }
 
 #[derive(Debug)]
@@ -331,6 +336,20 @@ impl Zfs {
             mountpoint: mountpoint.clone(),
             err: err.into(),
         })?;
+
+        // We ensure that the currently running process has the ability to
+        // act on the underlying mountpoint.
+        if !zoned {
+            let mut command = std::process::Command::new(PFEXEC);
+            let user = whoami::username();
+            let mount = format!("{mountpoint}");
+            let cmd = command.args(["chown", "-R", &user, &mount]);
+            execute(cmd).map_err(|err| EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                err: err.into(),
+            })?;
+        }
 
         if let Some(SizeDetails { quota, compression }) = size_details {
             // Apply any quota and compression mode.
@@ -603,7 +622,8 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
-        let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
+        let internal =
+            pool.kind() == omicron_common::zpool_name::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
             // Avoid erasing crashdump, backing data and swap datasets on

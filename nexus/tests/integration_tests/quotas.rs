@@ -20,6 +20,7 @@ use nexus_types::external_api::views::{Silo, SiloQuotas};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCpuCount;
+use serde_json::json;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -314,4 +315,70 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
         .provision_disk(client, "disk", 1)
         .await
         .expect("Disk should be provisioned");
+}
+
+#[nexus_test]
+async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let system = setup_silo_with_quota(
+        &client,
+        "quota-test-silo",
+        params::SiloQuotasCreate::empty(),
+    )
+    .await;
+
+    // Maximal legal limits should be allowed.
+    let quota_limit = params::SiloQuotasUpdate {
+        cpus: Some(i64::MAX),
+        memory: Some(i64::MAX.try_into().unwrap()),
+        storage: Some(i64::MAX.try_into().unwrap()),
+    };
+    system
+        .set_quotas(client, quota_limit.clone())
+        .await
+        .expect("set max quotas");
+    let quotas = system.get_quotas(client).await;
+    assert_eq!(quotas.limits.cpus, quota_limit.cpus.unwrap());
+    assert_eq!(quotas.limits.memory, quota_limit.memory.unwrap());
+    assert_eq!(quotas.limits.storage, quota_limit.storage.unwrap());
+
+    // Construct a value that fits in a u64 but not an i64.
+    let out_of_bounds = u64::try_from(i64::MAX).unwrap() + 1;
+
+    for key in ["cpus", "memory", "storage"] {
+        // We can't construct a `SiloQuotasUpdate` with higher-than-maximal
+        // values, but we can construct the equivalent JSON blob of such a
+        // request.
+        let request = json!({ key: out_of_bounds });
+
+        let err = NexusRequest::expect_failure_with_body(
+            client,
+            http::StatusCode::BAD_REQUEST,
+            http::Method::PUT,
+            "/v1/system/silos/quota-test-silo/quotas",
+            &request,
+        )
+        .authn_as(system.auth.clone())
+        .execute()
+        .await
+        .expect("sent quota update")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("parsed error body");
+        assert!(
+            err.message.contains(key)
+                && (err.message.contains("invalid value")
+                    || err
+                        .message
+                        .contains("value is too large for a byte count")),
+            "Unexpected error: {0}",
+            err.message
+        );
+
+        // The quota limits we set above should be unchanged.
+        let quotas = system.get_quotas(client).await;
+        assert_eq!(quotas.limits.cpus, quota_limit.cpus.unwrap());
+        assert_eq!(quotas.limits.memory, quota_limit.memory.unwrap());
+        assert_eq!(quotas.limits.storage, quota_limit.storage.unwrap());
+    }
 }

@@ -13,6 +13,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -82,6 +83,8 @@ pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
+    pub id: Uuid,
+
     pub vendor: String,
     pub serial: String,
     pub model: String,
@@ -90,34 +93,14 @@ pub struct PhysicalDiskPutRequest {
     pub sled_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskPutResponse {}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskDeleteRequest {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
-
-    pub sled_id: Uuid,
-}
-
-/// Sent by a sled agent on startup to Nexus to request further instruction
+/// Identifies information about a Zpool that should be part of the control
+/// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    /// Total size of the pool.
-    pub size: ByteCount,
-
-    // Information to identify the disk to which this zpool belongs
-    pub disk_vendor: String,
-    pub disk_serial: String,
-    pub disk_model: String,
-    // TODO: We could include any other data from `ZpoolInfo` we want,
-    // such as "allocated/free" space and pool health?
+    pub id: Uuid,
+    pub sled_id: Uuid,
+    pub physical_disk_id: Uuid,
 }
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
 #[derive(
@@ -211,20 +194,6 @@ impl fmt::Display for ServiceKind {
     }
 }
 
-/// Describes a service on a sled
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ServicePutRequest {
-    pub service_id: Uuid,
-    pub sled_id: Uuid,
-    pub zone_id: Option<Uuid>,
-
-    /// Address on which a service is responding to requests.
-    pub address: SocketAddrV6,
-
-    /// Type of service being inserted.
-    pub kind: ServiceKind,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetCreateRequest {
     pub zpool_id: Uuid,
@@ -251,8 +220,13 @@ impl std::fmt::Debug for Certificate {
 pub struct RackInitializationRequest {
     /// Blueprint describing services initialized by RSS.
     pub blueprint: Blueprint,
-    /// Services on the rack which have been created by RSS.
-    pub services: Vec<ServicePutRequest>,
+
+    /// "Managed" physical disks owned by the control plane
+    pub physical_disks: Vec<PhysicalDiskPutRequest>,
+
+    /// Zpools created within the physical disks created by the control plane.
+    pub zpools: Vec<ZpoolPutRequest>,
+
     /// Datasets on the rack which have been provisioned by RSS.
     pub datasets: Vec<DatasetCreateRequest>,
     /// Ranges of the service IP pool which may be used for internal services,
@@ -270,6 +244,8 @@ pub struct RackInitializationRequest {
     pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: RackNetworkConfig,
+    /// IPs or subnets allowed to make requests to user-facing services
+    pub allowed_source_ips: AllowedSourceIps,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;

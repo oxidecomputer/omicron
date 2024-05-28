@@ -11,9 +11,16 @@ use crate::DbConfig;
 use crate::Error;
 use crate::ProducerEndpoint;
 use anyhow::anyhow;
+use chrono::DateTime;
+use chrono::Utc;
+use futures::TryStreamExt;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
+use nexus_client::types::IdSortMode;
 use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::backoff;
+use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
@@ -31,10 +38,12 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::ops::Bound;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use uuid::Uuid;
@@ -71,11 +80,7 @@ async fn perform_collection(
 ) {
     debug!(log, "collecting from producer");
     let res = client
-        .get(format!(
-            "http://{}{}",
-            producer.address,
-            producer.collection_route()
-        ))
+        .get(format!("http://{}/{}", producer.address, producer.id,))
         .send()
         .await;
     match res {
@@ -140,12 +145,13 @@ async fn perform_collection(
 // also send a `CollectionMessage`, for example to update the collection interval. This is not
 // currently used, but will likely be exposed via control plane interfaces in the future.
 async fn collection_task(
-    log: Logger,
+    orig_log: Logger,
     collector: self_stats::OximeterCollector,
     mut producer: ProducerEndpoint,
     mut inbox: mpsc::Receiver<CollectionMessage>,
     outbox: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
 ) {
+    let mut log = orig_log.new(o!("address" => producer.address));
     let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
     collection_timer.tick().await; // completes immediately
@@ -184,6 +190,9 @@ async fn collection_task(
                             "interval" => ?producer.interval,
                             "address" => producer.address,
                         );
+
+                        // Update the logger with the new information as well.
+                        log = orig_log.new(o!("address" => producer.address));
                         collection_timer = interval(producer.interval);
                         collection_timer.tick().await; // completes immediately
                     }
@@ -343,7 +352,7 @@ async fn results_sink(
 }
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OximeterAgent {
     /// The collector ID for this agent
     pub id: Uuid,
@@ -355,6 +364,12 @@ pub struct OximeterAgent {
     // The actual tokio tasks running the collection on a timer.
     collection_tasks:
         Arc<Mutex<BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>>>,
+    // The interval on which we refresh our list of producers from Nexus
+    refresh_interval: Duration,
+    // Handle to the task used to periodically refresh the list of producers.
+    refresh_task: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// The last time we've refreshed our list of producers from Nexus.
+    pub last_refresh_time: Arc<StdMutex<Option<DateTime<Utc>>>>,
 }
 
 impl OximeterAgent {
@@ -362,6 +377,7 @@ impl OximeterAgent {
     pub async fn with_id(
         id: Uuid,
         address: SocketAddrV6,
+        refresh_interval: Duration,
         db_config: DbConfig,
         resolver: &Resolver,
         log: &Logger,
@@ -370,6 +386,7 @@ impl OximeterAgent {
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
+            "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
 
@@ -435,13 +452,30 @@ impl OximeterAgent {
             )
             .await
         });
-        Ok(Self {
+
+        let self_ = Self {
             id,
             log,
             collection_target,
             result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
-        })
+            refresh_interval,
+            refresh_task: Arc::new(StdMutex::new(None)),
+            last_refresh_time: Arc::new(StdMutex::new(None)),
+        };
+
+        Ok(self_)
+    }
+
+    /// Ensure the background task that polls Nexus periodically for our list of
+    /// assigned producers is running.
+    pub(crate) fn ensure_producer_refresh_task(&self, resolver: Resolver) {
+        let mut task = self.refresh_task.lock().unwrap();
+        if task.is_none() {
+            let refresh_task =
+                tokio::spawn(refresh_producer_list(self.clone(), resolver));
+            *task = Some(refresh_task);
+        }
     }
 
     /// Construct a new standalone `oximeter` collector.
@@ -455,6 +489,7 @@ impl OximeterAgent {
     pub async fn new_standalone(
         id: Uuid,
         address: SocketAddrV6,
+        refresh_interval: Duration,
         db_config: Option<DbConfig>,
         log: &Logger,
     ) -> Result<Self, Error> {
@@ -462,6 +497,7 @@ impl OximeterAgent {
         let log = log.new(o!(
             "component" => "oximeter-standalone",
             "collector_id" => id.to_string(),
+            "collector_ip" => address.ip().to_string(),
         ));
 
         // If we have configuration for ClickHouse, we'll spawn the results
@@ -503,12 +539,21 @@ impl OximeterAgent {
             collector_ip: (*address.ip()).into(),
             collector_port: address.port(),
         };
+
+        // We don't spawn the task to periodically refresh producers when run
+        // in standalone mode. We can just pretend we registered once, and
+        // that's it.
+        let last_refresh_time = Arc::new(StdMutex::new(Some(Utc::now())));
+
         Ok(Self {
             id,
             log,
             collection_target,
             result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
+            refresh_interval,
+            refresh_task: Arc::new(StdMutex::new(None)),
+            last_refresh_time,
         })
     }
 
@@ -517,8 +562,23 @@ impl OximeterAgent {
         &self,
         info: ProducerEndpoint,
     ) -> Result<(), Error> {
+        let mut tasks = self.collection_tasks.lock().await;
+        self.register_producer_locked(&mut tasks, info).await;
+        Ok(())
+    }
+
+    // Internal implementation that registers a producer, assuming the lock on
+    // the map is held.
+    async fn register_producer_locked(
+        &self,
+        tasks: &mut MutexGuard<
+            '_,
+            BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>,
+        >,
+        info: ProducerEndpoint,
+    ) {
         let id = info.id;
-        match self.collection_tasks.lock().await.entry(id) {
+        match tasks.entry(id) {
             Entry::Vacant(value) => {
                 debug!(
                     self.log,
@@ -530,7 +590,10 @@ impl OximeterAgent {
                 // Build channel to control the task and receive results.
                 let (tx, rx) = mpsc::channel(4);
                 let q = self.result_sender.clone();
-                let log = self.log.new(o!("component" => "collection-task", "producer_id" => id.to_string()));
+                let log = self.log.new(o!(
+                    "component" => "collection-task",
+                    "producer_id" => id.to_string(),
+                ));
                 let info_clone = info.clone();
                 let target = self.collection_target;
                 let task = tokio::spawn(async move {
@@ -557,7 +620,6 @@ impl OximeterAgent {
                     .unwrap();
             }
         }
-        Ok(())
     }
 
     /// Forces a collection from all producers.
@@ -607,12 +669,24 @@ impl OximeterAgent {
 
     /// Delete a producer by ID, stopping its collection task.
     pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
-        let (_info, task) = self
-            .collection_tasks
-            .lock()
-            .await
-            .remove(&id)
-            .ok_or_else(|| Error::NoSuchProducer(id))?;
+        let mut tasks = self.collection_tasks.lock().await;
+        self.delete_producer_locked(&mut tasks, id).await
+    }
+
+    // Internal implementation that deletes a producer, assuming the lock on
+    // the map is held.
+    async fn delete_producer_locked(
+        &self,
+        tasks: &mut MutexGuard<
+            '_,
+            BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>,
+        >,
+        id: Uuid,
+    ) -> Result<(), Error> {
+        let Some((_info, task)) = tasks.remove(&id) else {
+            // We have no such producer, so good news, we've removed it!
+            return Ok(());
+        };
         debug!(
             self.log,
             "removed collection task from set";
@@ -633,6 +707,140 @@ impl OximeterAgent {
         }
         Ok(())
     }
+
+    // Ensure that exactly the set of producers is registered with `self`.
+    //
+    // Errors logged, but not returned, and an attempt to register all producers
+    // is made, even if an error is encountered part-way through.
+    //
+    // This returns the number of pruned tasks.
+    async fn ensure_producers(
+        &self,
+        expected_producers: BTreeMap<Uuid, ProducerEndpoint>,
+    ) -> usize {
+        let mut tasks = self.collection_tasks.lock().await;
+
+        // First prune unwanted collection tasks.
+        //
+        // This is set of all producers that we currently have, which are not in
+        // the new list from Nexus.
+        let ids_to_prune: Vec<_> = tasks
+            .keys()
+            .filter(|id| !expected_producers.contains_key(id))
+            .copied()
+            .collect();
+        let n_pruned = ids_to_prune.len();
+        for id in ids_to_prune.into_iter() {
+            // This method only returns an error if the provided ID does not
+            // exist in the current tasks. That is impossible, because we hold
+            // the lock, and we've just computed this as the set that _is_ in
+            // the map, and not in the new set from Nexus.
+            self.delete_producer_locked(&mut tasks, id).await.unwrap();
+        }
+
+        // And then ensure everything in the list.
+        //
+        // This will insert new tasks, and update any that we already know
+        // about.
+        for info in expected_producers.into_values() {
+            self.register_producer_locked(&mut tasks, info).await;
+        }
+        n_pruned
+    }
+}
+
+// A task which periodically updates our list of producers from Nexus.
+async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
+    let mut interval = tokio::time::interval(agent.refresh_interval);
+    loop {
+        interval.tick().await;
+        info!(agent.log, "refreshing list of producers from Nexus");
+        let nexus_addr =
+            resolve_nexus_with_backoff(&agent.log, &resolver).await;
+        let url = format!("http://{}", nexus_addr);
+        let client = nexus_client::Client::new(&url, agent.log.clone());
+        let mut stream = client.cpapi_assigned_producers_list_stream(
+            &agent.id,
+            // This is a _total_ limit, not a page size, so `None` means "get
+            // all entries".
+            None,
+            Some(IdSortMode::IdAscending),
+        );
+        let mut expected_producers = BTreeMap::new();
+        loop {
+            match stream.try_next().await {
+                Err(e) => {
+                    error!(
+                        agent.log,
+                        "error fetching next assigned producer";
+                        "err" => ?e,
+                    );
+                }
+                Ok(Some(p)) => {
+                    let endpoint = match ProducerEndpoint::try_from(p) {
+                        Ok(ep) => ep,
+                        Err(e) => {
+                            error!(
+                                agent.log,
+                                "failed to convert producer description \
+                                from Nexus, skipping producer";
+                                "err" => e
+                            );
+                            continue;
+                        }
+                    };
+                    let old = expected_producers.insert(endpoint.id, endpoint);
+                    if let Some(ProducerEndpoint { id, .. }) = old {
+                        error!(
+                            agent.log,
+                            "Nexus appears to have sent duplicate producer info";
+                            "producer_id" => %id,
+                        );
+                    }
+                }
+                Ok(None) => break,
+            }
+        }
+        let n_current_tasks = expected_producers.len();
+        let n_pruned_tasks = agent.ensure_producers(expected_producers).await;
+        *agent.last_refresh_time.lock().unwrap() = Some(Utc::now());
+        info!(
+            agent.log,
+            "refreshed list of producers from Nexus";
+            "n_pruned_tasks" => n_pruned_tasks,
+            "n_current_tasks" => n_current_tasks,
+        );
+    }
+}
+
+async fn resolve_nexus_with_backoff(
+    log: &Logger,
+    resolver: &Resolver,
+) -> SocketAddr {
+    let log_failure = |error, delay| {
+        warn!(
+            log,
+            "failed to lookup Nexus IP, will retry";
+            "delay" => ?delay,
+            "error" => ?error,
+        );
+    };
+    let do_lookup = || async {
+        resolver
+            .lookup_ipv6(ServiceName::Nexus)
+            .await
+            .map_err(|e| BackoffError::transient(e.to_string()))
+            .map(|ip| {
+                SocketAddr::V6(SocketAddrV6::new(ip, NEXUS_INTERNAL_PORT, 0, 0))
+            })
+    };
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service(),
+        do_lookup,
+        log_failure,
+    )
+    .await
+    .expect("Expected infinite retry loop resolving Nexus address")
 }
 
 #[cfg(test)]
@@ -696,6 +904,7 @@ mod tests {
         let collector = OximeterAgent::new_standalone(
             Uuid::new_v4(),
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
             None,
             log,
         )
@@ -721,7 +930,6 @@ mod tests {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address,
-            base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -772,6 +980,7 @@ mod tests {
         let collector = OximeterAgent::new_standalone(
             Uuid::new_v4(),
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
             None,
             log,
         )
@@ -789,7 +998,6 @@ mod tests {
                 0,
                 0,
             )),
-            base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -842,6 +1050,7 @@ mod tests {
         let collector = OximeterAgent::new_standalone(
             Uuid::new_v4(),
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
             None,
             log,
         )
@@ -868,7 +1077,6 @@ mod tests {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address,
-            base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -915,6 +1123,29 @@ mod tests {
             N_FAILED_COLLECTIONS.load(Ordering::SeqCst),
         );
         assert_eq!(stats.failed_collections.len(), 1);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_producer_succeeds() {
+        let logctx =
+            test_setup_log("test_delete_nonexistent_producer_succeeds");
+        let log = &logctx.log;
+
+        // Spawn an oximeter collector ...
+        let collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            None,
+            log,
+        )
+        .await
+        .unwrap();
+        assert!(
+            collector.delete_producer(Uuid::new_v4()).await.is_ok(),
+            "Deleting a non-existent producer should be OK"
+        );
         logctx.cleanup_successful();
     }
 }

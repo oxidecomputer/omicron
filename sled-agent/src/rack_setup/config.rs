@@ -70,13 +70,15 @@ impl SetupServiceConfig {
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_network_config.rack_subnet.ip())
+        Ipv6Subnet::<AZ_PREFIX>::new(
+            self.rack_network_config.rack_subnet.addr(),
+        )
     }
 
     /// Returns the subnet for our rack.
     pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
         Ipv6Subnet::<RACK_PREFIX>::new(
-            self.rack_network_config.rack_subnet.ip(),
+            self.rack_network_config.rack_subnet.addr(),
         )
     }
 
@@ -94,7 +96,9 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use oxnet::Ipv6Net;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
@@ -122,13 +126,18 @@ mod test {
                     .unwrap(),
             },
             rack_network_config: RackNetworkConfig {
-                rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+                rack_subnet: Ipv6Net::new(
+                    "fd00:1122:3344:0100::".parse().unwrap(),
+                    RACK_PREFIX,
+                )
+                .unwrap(),
                 infra_ip_first: Ipv4Addr::LOCALHOST,
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         assert_eq!(
@@ -231,7 +240,7 @@ mod test {
         let read_cfg = SetupServiceConfig::from_file(&cfg_path)
             .expect("failed to read generated config with certificate");
         assert_eq!(read_cfg.external_certificates.len(), 1);
-        let cert = read_cfg.external_certificates.iter().next().unwrap();
+        let cert = read_cfg.external_certificates.first().unwrap();
         let _ = rcgen::KeyPair::from_pem(&cert.key)
             .expect("generated PEM did not parse as KeyPair");
     }

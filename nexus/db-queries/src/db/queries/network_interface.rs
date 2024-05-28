@@ -11,15 +11,16 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
 use crate::db::schema::network_interface::dsl;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
 use diesel::prelude::Column;
-use diesel::query_builder::AstPass;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::query_builder::{AstPass, Query};
 use diesel::result::Error as DieselError;
-use diesel::sql_types;
+use diesel::sql_types::{self, Nullable};
 use diesel::Insertable;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
@@ -31,6 +32,7 @@ use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
 use once_cell::sync::Lazy;
+use slog_error_chain::SlogInlineError;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -1059,7 +1061,7 @@ impl InsertQuery {
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
-            interface.subnet.ipv4_block.0 .0,
+            interface.subnet.ipv4_block.0.into(),
             interface.subnet.identity.id,
         );
         let next_slot_subquery = NextNicSlot::new(interface.parent_id);
@@ -1502,18 +1504,39 @@ fn push_instance_state_verification_subquery<'a>(
 ///                     parent_id = <parent_id> AND
 ///                     kind = <kind> AND
 ///                     time_deleted IS NULL
-///             ) = 1,
+///             ) <= 1,
 ///             '<interface_id>',
 ///             'secondaries'
 ///         ) AS UUID)
+///     ),
+///     found_interface AS (
+///         SELECT
+///             id
+///         FROM
+///             network_interface
+///         WHERE
+///             id = <interface_id>
+///     ),
+///     updated AS (
+///         UPDATE
+///             network_interface
+///         SET
+///             time_deleted = NOW()
+///         WHERE
+///             id = <interface_id> AND
+///             time_deleted IS NULL
+///         RETURNING
+///             id
 ///     )
-/// UPDATE
-///     network_interface
-/// SET
-///     time_deleted = NOW()
-/// WHERE
-///     id = <interface_id> AND
-///     time_deleted IS NULL
+/// SELECT
+///     found_interface.id,
+///     updated.id
+/// FROM
+///     found_interface
+/// LEFT JOIN
+///     updated
+/// ON
+///     found_interface.id = updated.id
 /// ```
 ///
 /// Notes
@@ -1543,6 +1566,37 @@ impl DeleteQuery {
             kind,
             parent_id,
             parent_id_str: parent_id.to_string(),
+        }
+    }
+
+    /// Issue the delete and parses the result.
+    ///
+    /// The three outcomes are:
+    /// - Ok(Row exists and was deleted)
+    /// - Ok(Row exists, but was not deleted)
+    /// - Error (row doesn't exist, or other diesel error)
+    pub async fn execute_and_check(
+        self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<bool, DieselError> {
+        let (found_id, deleted_id) =
+            self.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
+        match (found_id, deleted_id) {
+            (Some(found), Some(deleted)) => {
+                assert_eq!(
+                    found, deleted,
+                    "internal query error: mismatched interface IDs"
+                );
+                Ok(true)
+            }
+            (Some(_), None) => Ok(false),
+            (None, Some(deleted)) => {
+                panic!(
+                    "internal query error: \
+                     deleted nonexisted interface {deleted}"
+                )
+            }
+            (None, None) => Err(DieselError::NotFound),
         }
     }
 }
@@ -1592,13 +1646,21 @@ impl QueryFragment<Pg> for DeleteQuery {
         )?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL) = 1, ");
+        out.push_sql(" IS NULL) <= 1, ");
         out.push_bind_param::<sql_types::Text, String>(&self.parent_id_str)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, &str>(
             &DeleteError::HAS_SECONDARIES_SENTINEL,
         )?;
-        out.push_sql(") AS UUID)) UPDATE ");
+        out.push_sql(") AS UUID)), found_interface AS (SELECT ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" FROM ");
+        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
+        out.push_sql("), updated AS (UPDATE ");
         NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
         out.push_identifier(dsl::time_deleted::NAME)?;
@@ -1608,25 +1670,43 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL");
+        out.push_sql(" IS NULL RETURNING ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(") SELECT found_interface.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(", updated.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" FROM found_interface LEFT JOIN updated");
+        out.push_sql(" ON found_interface.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = updated.");
+        out.push_identifier(dsl::id::NAME)?;
         Ok(())
     }
+}
+
+impl Query for DeleteQuery {
+    type SqlType = (Nullable<sql_types::Uuid>, Nullable<sql_types::Uuid>);
 }
 
 impl RunQueryDsl<DbConnection> for DeleteQuery {}
 
 /// Errors related to deleting a network interface
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error, SlogInlineError, PartialEq)]
 pub enum DeleteError {
     /// Attempting to delete the primary interface, while there still exist
     /// secondary interfaces.
+    #[error("cannot delete primary interface while secondaries exist")]
     SecondariesExist(Uuid),
     /// Instance must be stopped or failed prior to deleting interfaces from it
+    #[error("cannot delete interface in current instance state")]
     InstanceBadState(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
+    #[error("instance not found ({0})")]
     InstanceNotFound(Uuid),
     /// Any other error
-    External(external::Error),
+    #[error("cannot delete interface")]
+    External(#[source] external::Error),
 }
 
 impl DeleteError {
@@ -1648,6 +1728,24 @@ impl DeleteError {
                     e,
                     query.parent_id,
                 )
+            }
+            // Faithfully plumb through `NotFound`
+            DieselError::NotFound => {
+                let type_name = match query.kind {
+                    NetworkInterfaceKind::Instance => {
+                        external::ResourceType::InstanceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Service => {
+                        external::ResourceType::ServiceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
+                    }
+                };
+                DeleteError::External(external::Error::ObjectNotFound {
+                    type_name,
+                    lookup_type: external::LookupType::ById(query.interface_id),
+                })
             }
             // Any other error at all is a bug
             _ => DeleteError::External(error::public_error_from_diesel(
@@ -1743,6 +1841,7 @@ fn decode_delete_network_interface_database_error(
 mod tests {
     use super::first_available_address;
     use super::last_address_offset;
+    use super::DeleteError;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -1760,8 +1859,6 @@ mod tests {
     use crate::db::queries::network_interface::NextMacShifts;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use model::NetworkInterfaceKind;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
@@ -1772,11 +1869,11 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceCpuCount;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
@@ -1896,25 +1993,13 @@ mod tests {
             let vpc_id = Uuid::new_v4();
             let mut subnets = Vec::with_capacity(n_subnets as _);
             for i in 0..n_subnets {
-                let ipv4net = Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap(),
-                );
-                let ipv6net = Ipv6Net(
-                    Ipv6Network::new(
-                        Ipv6Addr::new(
-                            0xfd12,
-                            0x3456,
-                            0x7890,
-                            i.into(),
-                            0,
-                            0,
-                            0,
-                            0,
-                        ),
-                        64,
-                    )
-                    .unwrap(),
-                );
+                let ipv4net =
+                    Ipv4Net::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap();
+                let ipv6net = Ipv6Net::new(
+                    Ipv6Addr::new(0xfd12, 0x3456, 0x7890, i.into(), 0, 0, 0, 0),
+                    64,
+                )
+                .unwrap();
                 let subnet = VpcSubnet::new(
                     Uuid::new_v4(),
                     vpc_id,
@@ -1934,9 +2019,11 @@ mod tests {
             self.subnets
                 .iter()
                 .map(|subnet| {
-                    subnet.ipv4_block.size() as usize
-                        - NUM_INITIAL_RESERVED_IP_ADDRESSES
-                        - 1
+                    let size_minus_1 = match subnet.ipv4_block.size() {
+                        Some(n) => n - 1,
+                        None => u32::MAX,
+                    } as usize;
+                    size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES
                 })
                 .collect()
         }
@@ -2043,6 +2130,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_delete_service_is_idempotent() {
+        let context =
+            TestContext::new("test_delete_service_is_idempotent", 2).await;
+        let service_id = Uuid::new_v4();
+        let ip = context.net1.subnets[0]
+            .ipv4_block
+            .addr_iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            ip.into(),
+            MacAddr::random_system(),
+            0,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
+
+        // We should be able to delete twice, and be told that the first delete
+        // modified the row and the second did not.
+        let first_deleted = context
+            .db_datastore
+            .service_delete_network_interface(
+                &context.opctx,
+                service_id,
+                inserted_interface.id(),
+            )
+            .await
+            .expect("failed first delete");
+        assert!(first_deleted, "first delete removed interface");
+
+        let second_deleted = context
+            .db_datastore
+            .service_delete_network_interface(
+                &context.opctx,
+                service_id,
+                inserted_interface.id(),
+            )
+            .await
+            .expect("failed second delete");
+        assert!(!second_deleted, "second delete did nothing");
+
+        // Attempting to delete a nonexistent interface should fail.
+        let bogus_id = Uuid::new_v4();
+        let err = context
+            .db_datastore
+            .service_delete_network_interface(
+                &context.opctx,
+                service_id,
+                bogus_id,
+            )
+            .await
+            .expect_err(
+                "unexpectedly succeeded deleting nonexistent interface",
+            );
+        let expected_err =
+            DeleteError::External(external::Error::ObjectNotFound {
+                type_name: external::ResourceType::ServiceNetworkInterface,
+                lookup_type: external::LookupType::ById(bogus_id),
+            });
+        assert_eq!(err, expected_err);
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_running_instance_fails() {
         let context =
             TestContext::new("test_insert_running_instance_fails", 2).await;
@@ -2142,7 +2304,7 @@ mod tests {
             TestContext::new("test_insert_sequential_ip_allocation", 2).await;
         let addresses = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
@@ -2238,7 +2400,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let mac = MacAddr::random_system();
@@ -2273,7 +2435,7 @@ mod tests {
         let mut used_macs = HashSet::new();
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
         for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
             let service_id = Uuid::new_v4();
@@ -2300,7 +2462,7 @@ mod tests {
                 .service_create_network_interface_raw(&context.opctx, interface)
                 .await
                 .expect("Failed to insert interface");
-            assert_eq!(inserted_interface.slot, i16::from(slot));
+            assert_eq!(*inserted_interface.slot, slot);
         }
 
         context.success().await;
@@ -2313,7 +2475,7 @@ mod tests {
 
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         // Insert a service NIC
@@ -2373,12 +2535,12 @@ mod tests {
 
         let ip0 = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let ip1 = context.net1.subnets[1]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
 
@@ -2413,7 +2575,7 @@ mod tests {
             .service_create_network_interface_raw(&context.opctx, interface)
             .await
             .expect("Failed to insert interface");
-        assert_eq!(inserted_interface.slot, 0);
+        assert_eq!(*inserted_interface.slot, 0);
 
         // Inserting an interface with the same slot on the same service should
         let new_interface = IncompleteNetworkInterface::new_service(
@@ -2776,8 +2938,7 @@ mod tests {
                 )
                 .await
                 .expect("Should be able to insert up to 8 interfaces");
-            let actual_slot = usize::try_from(inserted_interface.slot)
-                .expect("Bad slot index");
+            let actual_slot = usize::from(*inserted_interface.slot);
             assert_eq!(
                 slot, actual_slot,
                 "Failed to allocate next available interface slot"

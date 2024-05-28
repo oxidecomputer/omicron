@@ -15,7 +15,6 @@ use http::StatusCode;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
@@ -37,9 +36,12 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
+use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::debug;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -338,55 +340,6 @@ pub async fn create_switch(
         },
     )
     .await
-}
-
-pub async fn create_physical_disk(
-    client: &ClientTestContext,
-    vendor: &str,
-    serial: &str,
-    model: &str,
-    variant: PhysicalDiskKind,
-    sled_id: Uuid,
-) -> internal_params::PhysicalDiskPutResponse {
-    object_put(
-        client,
-        "/physical-disk",
-        &internal_params::PhysicalDiskPutRequest {
-            vendor: vendor.to_string(),
-            serial: serial.to_string(),
-            model: model.to_string(),
-            variant,
-            sled_id,
-        },
-    )
-    .await
-}
-
-pub async fn delete_physical_disk(
-    client: &ClientTestContext,
-    vendor: &str,
-    serial: &str,
-    model: &str,
-    sled_id: Uuid,
-) {
-    let body = internal_params::PhysicalDiskDeleteRequest {
-        vendor: vendor.to_string(),
-        serial: serial.to_string(),
-        model: model.to_string(),
-        sled_id,
-    };
-
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, "/physical-disk")
-            .body(Some(&body))
-            .expect_status(Some(http::StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap_or_else(|_| {
-        panic!("failed to make \"delete\" request of physical disk")
-    });
 }
 
 pub async fn create_silo(
@@ -745,7 +698,7 @@ pub struct TestDataset {
 }
 
 pub struct TestZpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub size: ByteCount,
     pub datasets: Vec<TestDataset>,
 }
@@ -757,8 +710,17 @@ pub struct DiskTest {
 
 impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+    pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
-    // Creates fake physical storage, an organization, and a project.
+    /// Creates a new "DiskTest", but does not actually add any zpools.
+    pub async fn empty<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+    ) -> Self {
+        let sled_agent = cptestctx.sled_agent.sled_agent.clone();
+
+        Self { sled_agent, zpools: vec![] }
+    }
+
     pub async fn new<N: NexusServer>(
         cptestctx: &ControlPlaneTestContext<N>,
     ) -> Self {
@@ -767,10 +729,8 @@ impl DiskTest {
         let mut disk_test = Self { sled_agent, zpools: vec![] };
 
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
-        for _ in 0..3 {
-            disk_test
-                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
-                .await;
+        for _ in 0..Self::DEFAULT_ZPOOL_COUNT {
+            disk_test.add_zpool_with_dataset(cptestctx).await;
         }
 
         disk_test
@@ -779,38 +739,77 @@ impl DiskTest {
     pub async fn add_zpool_with_dataset<N: NexusServer>(
         &mut self,
         cptestctx: &ControlPlaneTestContext<N>,
+    ) {
+        self.add_zpool_with_dataset_ext(
+            cptestctx,
+            Uuid::new_v4(),
+            ZpoolUuid::new_v4(),
+            Uuid::new_v4(),
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    pub async fn add_zpool_with_dataset_ext<N: NexusServer>(
+        &mut self,
+        cptestctx: &ControlPlaneTestContext<N>,
+        physical_disk_id: Uuid,
+        zpool_id: ZpoolUuid,
+        dataset_id: Uuid,
         gibibytes: u32,
     ) {
+        // To get a dataset, we actually need to create a new simulated physical
+        // disk, zpool, and dataset, all contained within one another.
         let zpool = TestZpool {
-            id: Uuid::new_v4(),
+            id: zpool_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
-            datasets: vec![TestDataset { id: Uuid::new_v4() }],
+            datasets: vec![TestDataset { id: dataset_id }],
         };
+
+        let disk_identity = DiskIdentity {
+            vendor: "test-vendor".into(),
+            serial: format!("totally-unique-serial: {}", physical_disk_id),
+            model: "test-model".into(),
+        };
+
+        let physical_disk_request =
+            nexus_types::internal_api::params::PhysicalDiskPutRequest {
+                id: physical_disk_id,
+                vendor: disk_identity.vendor.clone(),
+                serial: disk_identity.serial.clone(),
+                model: disk_identity.model.clone(),
+                variant:
+                    nexus_types::external_api::params::PhysicalDiskKind::U2,
+                sled_id: self.sled_agent.id,
+            };
+
+        let zpool_request =
+            nexus_types::internal_api::params::ZpoolPutRequest {
+                id: zpool.id.into_untyped_uuid(),
+                physical_disk_id,
+                sled_id: self.sled_agent.id,
+            };
+
+        // Tell the simulated sled agent to create the disk and zpool containing
+        // these datasets.
 
         self.sled_agent
             .create_external_physical_disk(
-                "test-vendor".into(),
-                "test-serial".into(),
-                "test-model".into(),
+                physical_disk_id,
+                disk_identity.clone(),
             )
             .await;
         self.sled_agent
-            .create_zpool(
-                zpool.id,
-                "test-vendor".into(),
-                "test-serial".into(),
-                "test-model".into(),
-                zpool.size.to_bytes(),
-            )
+            .create_zpool(zpool.id, physical_disk_id, zpool.size.to_bytes())
             .await;
 
         for dataset in &zpool.datasets {
+            // Sled Agent side: Create the Dataset, make sure regions can be
+            // created immediately if Nexus requests anything.
             let address = self
                 .sled_agent
                 .create_crucible_dataset(zpool.id, dataset.id)
                 .await;
-
-            // By default, regions are created immediately.
             let crucible = self
                 .sled_agent
                 .get_crucible_dataset(zpool.id, dataset.id)
@@ -819,6 +818,9 @@ impl DiskTest {
                 .set_create_callback(Box::new(|_| RegionState::Created))
                 .await;
 
+            // Nexus side: Notify Nexus of the physical disk/zpool/dataset
+            // combination that exists.
+
             let address = match address {
                 std::net::SocketAddr::V6(addr) => addr,
                 _ => panic!("Unsupported address type: {address} "),
@@ -826,7 +828,12 @@ impl DiskTest {
 
             cptestctx
                 .server
-                .upsert_crucible_dataset(dataset.id, zpool.id, address)
+                .upsert_crucible_dataset(
+                    physical_disk_request.clone(),
+                    zpool_request.clone(),
+                    dataset.id,
+                    address,
+                )
                 .await;
         }
 
@@ -860,7 +867,7 @@ impl DiskTest {
                             .flat_map(|sled_agent| {
                                 sled_agent.zpools.iter().map(|z| z.id)
                             })
-                            .collect::<std::collections::HashSet<Uuid>>();
+                            .collect::<std::collections::HashSet<ZpoolUuid>>();
 
                         if all_zpools.contains(&zpool.id) {
                             Ok(())

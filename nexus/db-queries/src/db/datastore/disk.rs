@@ -170,7 +170,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        let ok_to_attach_disk_states = vec![
+        let ok_to_attach_disk_states = [
             api::external::DiskState::Creating,
             api::external::DiskState::Detached,
         ];
@@ -311,7 +311,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let ok_to_detach_disk_states =
-            vec![api::external::DiskState::Attached(authz_instance.id())];
+            [api::external::DiskState::Attached(authz_instance.id())];
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
@@ -810,6 +810,22 @@ impl DataStore {
             })
             .map(|(disk, _, _)| disk)
             .collect())
+    }
+
+    pub async fn disk_for_volume_id(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Disk>> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        use db::schema::disk::dsl;
+        dsl::disk
+            .filter(dsl::volume_id.eq(volume_id))
+            .select(Disk::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

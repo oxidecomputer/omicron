@@ -413,7 +413,7 @@ impl SamlIdentityProvider {
                                                 group.trim().to_string();
 
                                             // Skip empty groups
-                                            if group.len() == 0 {
+                                            if group.is_empty() {
                                                 continue;
                                             }
 

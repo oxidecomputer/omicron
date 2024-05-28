@@ -60,16 +60,6 @@ impl NexusClientWithResolver {
         }
     }
 
-    // for when we have a NexusClient constructed from a FakeNexusServer
-    // (no need to expose this function outside of tests)
-    #[cfg(test)]
-    pub(crate) fn new_with_client(
-        client: NexusClient,
-        resolver: Arc<Resolver>,
-    ) -> Self {
-        Self { client, resolver }
-    }
-
     /// Access the progenitor-based Nexus Client.
     pub fn client(&self) -> &NexusClient {
         &self.client

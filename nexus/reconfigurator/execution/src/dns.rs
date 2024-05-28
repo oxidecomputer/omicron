@@ -6,20 +6,19 @@
 
 use crate::overridables::Overridables;
 use crate::Sled;
-use anyhow::Context;
 use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
 use internal_dns::ServiceName;
 use nexus_db_model::DnsGroup;
-use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
@@ -27,19 +26,20 @@ use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::Name;
+use omicron_common::bail_unless;
+use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
     creator: String,
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
@@ -59,34 +59,37 @@ pub(crate) async fn deploy_dns(
     // we know it's being hit when we exercise this condition.
 
     // Next, construct the DNS config represented by the blueprint.
-    let internal_dns_config_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error constructing internal DNS config: {:#}",
-                    e
-                ))
-            })?;
+    let internal_dns_zone_blueprint =
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides);
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
         .internal_context("listing Silos (for configuring external DNS)")?
         .into_iter()
-        // We do not generate a DNS name for the "default" Silo.
-        .filter(|silo| silo.id() != *DEFAULT_SILO_ID)
+        .map(|silo| silo.name().clone())
         .collect::<Vec<_>>();
 
-    let (nexus_external_ips, nexus_external_dns_zones) =
-        datastore.nexus_external_addresses(opctx, Some(blueprint)).await?;
-    let nexus_external_dns_zone_names = nexus_external_dns_zones
+    let nexus_external_dns_zone_names = datastore
+        .dns_zones_list_all(opctx, DnsGroup::External)
+        .await
+        .internal_context("listing DNS zones")?
         .into_iter()
         .map(|z| z.zone_name)
         .collect::<Vec<_>>();
-    let external_dns_config_blueprint = blueprint_external_dns_config(
+    // Other parts of the system support multiple external DNS zone names.  We
+    // do not here.  If we decide to support this in the future, this mechanism
+    // will need to be updated.
+    bail_unless!(
+        nexus_external_dns_zone_names.len() == 1,
+        "expected exactly one external DNS zone"
+    );
+    // unwrap: we just checked the length.
+    let external_dns_zone_name =
+        nexus_external_dns_zone_names.into_iter().next().unwrap();
+    let external_dns_zone_blueprint = blueprint_external_dns_config(
         blueprint,
-        &nexus_external_ips,
         &silos,
-        &nexus_external_dns_zone_names,
+        external_dns_zone_name,
     );
 
     // Deploy the changes.
@@ -96,7 +99,7 @@ pub(crate) async fn deploy_dns(
         creator.clone(),
         blueprint,
         &internal_dns_config_current,
-        &internal_dns_config_blueprint,
+        internal_dns_zone_blueprint,
         DnsGroup::Internal,
     )
     .await?;
@@ -106,7 +109,7 @@ pub(crate) async fn deploy_dns(
         creator,
         blueprint,
         &external_dns_config_current,
-        &external_dns_config_blueprint,
+        external_dns_zone_blueprint,
         DnsGroup::External,
     )
     .await?;
@@ -119,12 +122,18 @@ pub(crate) async fn deploy_dns_one(
     creator: String,
     blueprint: &Blueprint,
     dns_config_current: &DnsConfigParams,
-    dns_config_blueprint: &DnsConfigParams,
+    dns_zone_blueprint: DnsConfigZone,
     dns_group: DnsGroup,
 ) -> Result<(), Error> {
     let log = opctx
         .log
         .new(o!("blueprint_execution" => format!("dns {:?}", dns_group)));
+
+    // Other parts of the system support multiple external DNS zones.  We do not
+    // do so here.
+    let dns_zone_current = dns_config_current
+        .sole_zone()
+        .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
 
     // Looking at the current contents of DNS, prepare an update that will make
     // it match what it should be.
@@ -134,8 +143,8 @@ pub(crate) async fn deploy_dns_one(
         dns_group,
         comment,
         creator,
-        dns_config_current,
-        dns_config_blueprint,
+        dns_zone_current,
+        &dns_zone_blueprint,
     )?;
     let Some(update) = maybe_update else {
         // Nothing to do.
@@ -208,6 +217,16 @@ pub(crate) async fn deploy_dns_one(
     // In both cases, the system will (1) converge to having successfully
     // executed the target blueprint, and (2) never have rolled any changes back
     // -- DNS only ever moves forward, closer to the latest desired state.
+    let blueprint_generation = match dns_group {
+        DnsGroup::Internal => blueprint.internal_dns_version,
+        DnsGroup::External => blueprint.external_dns_version,
+    };
+    let dns_config_blueprint = DnsConfigParams {
+        zones: vec![dns_zone_blueprint],
+        time_created: chrono::Utc::now(),
+        generation: u64::from(blueprint_generation.next()),
+    };
+
     info!(
         log,
         "attempting to update from generation {} to generation {}",
@@ -229,9 +248,9 @@ pub(crate) async fn deploy_dns_one(
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
-) -> Result<DnsConfigParams, anyhow::Error> {
+) -> DnsConfigZone {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
     // Sled Agent's _internal_ `OmicronZoneConfig` (and friends), whereas we're
@@ -240,80 +259,53 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    // It's annoying that we have to parse this because it really should be
-    // valid already.  See oxidecomputer/omicron#4988.
-    fn parse_port(address: &str) -> Result<u16, anyhow::Error> {
-        address
-            .parse::<SocketAddrV6>()
-            .with_context(|| format!("parsing socket address {:?}", address))
-            .map(|addr| addr.port())
-    }
-
     for (_, zone) in
-        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+        blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
-        let context = || {
-            format!(
-                "parsing {} zone with id {}",
-                zone.config.zone_type.label(),
-                zone.config.id
-            )
-        };
-
-        let (service_name, port) = match &zone.config.zone_type {
-            OmicronZoneType::BoundaryNtp { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::BoundaryNtp, port)
-            }
-            OmicronZoneType::InternalNtp { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::InternalNtp, port)
-            }
-            OmicronZoneType::Clickhouse { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::Clickhouse, port)
-            }
-            OmicronZoneType::ClickhouseKeeper { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::ClickhouseKeeper, port)
-            }
-            OmicronZoneType::CockroachDb { address, .. } => {
-                let port = parse_port(&address).with_context(context)?;
-                (ServiceName::Cockroach, port)
-            }
-            OmicronZoneType::Nexus { internal_address, .. } => {
-                let port =
-                    parse_port(internal_address).with_context(context)?;
-                (ServiceName::Nexus, port)
-            }
-            OmicronZoneType::Crucible { address, .. } => {
-                let port = parse_port(address).with_context(context)?;
-                (ServiceName::Crucible(zone.config.id), port)
-            }
-            OmicronZoneType::CruciblePantry { address } => {
-                let port = parse_port(address).with_context(context)?;
-                (ServiceName::CruciblePantry, port)
-            }
-            OmicronZoneType::Oximeter { address } => {
-                let port = parse_port(address).with_context(context)?;
-                (ServiceName::Oximeter, port)
-            }
-            OmicronZoneType::ExternalDns { http_address, .. } => {
-                let port = parse_port(http_address).with_context(context)?;
-                (ServiceName::ExternalDns, port)
-            }
-            OmicronZoneType::InternalDns { http_address, .. } => {
-                let port = parse_port(http_address).with_context(context)?;
-                (ServiceName::InternalDns, port)
-            }
+        let (service_name, port) = match &zone.zone_type {
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { address, .. },
+            ) => (ServiceName::BoundaryNtp, address.port()),
+            BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address, .. },
+            ) => (ServiceName::InternalNtp, address.port()),
+            BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { address, .. },
+            ) => (ServiceName::Clickhouse, address.port()),
+            BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { address, .. },
+            ) => (ServiceName::ClickhouseKeeper, address.port()),
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            ) => (ServiceName::Cockroach, address.port()),
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address,
+                ..
+            }) => (ServiceName::Nexus, internal_address.port()),
+            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address,
+                ..
+            }) => (ServiceName::Crucible(zone.id), address.port()),
+            BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            ) => (ServiceName::CruciblePantry, address.port()),
+            BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                address,
+            }) => (ServiceName::Oximeter, address.port()),
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { http_address, .. },
+            ) => (ServiceName::ExternalDns, http_address.port()),
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns { http_address, .. },
+            ) => (ServiceName::InternalDns, http_address.port()),
         };
 
         // This unwrap is safe because this function only fails if we provide
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                zone.config.id,
-                zone.config.underlay_address,
+                zone.id,
+                zone.underlay_address,
                 service_name,
                 port,
             )
@@ -336,44 +328,43 @@ pub fn blueprint_internal_dns_config(
             .unwrap();
     }
 
-    // We set the generation number for the internal DNS to be newer than
-    // whatever it was when this blueprint was generated.  This will only be
-    // used if the generated DNS contents are different from what's current.
-    dns_builder.generation(blueprint.internal_dns_version.next());
-    Ok(dns_builder.build())
+    dns_builder.build_zone()
 }
 
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
-    nexus_external_ips: &[IpAddr],
-    silos: &[Silo],
-    external_dns_zone_names: &[String],
-) -> DnsConfigParams {
+    silos: &[Name],
+    external_dns_zone_name: String,
+) -> DnsConfigZone {
+    let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
+
     let dns_records: Vec<DnsRecord> = nexus_external_ips
         .into_iter()
         .map(|addr| match addr {
-            IpAddr::V4(addr) => DnsRecord::A(*addr),
-            IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
+            IpAddr::V4(addr) => DnsRecord::A(addr),
+            IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
         })
         .collect();
 
     let records = silos
         .into_iter()
-        .map(|silo| (silo_dns_name(&silo.name()), dns_records.clone()))
+        // We do not generate a DNS name for the "default" Silo.
+        //
+        // We use the name here rather than the id.  It shouldn't really matter
+        // since every system will have this silo and so no other Silo could
+        // have this name.  But callers (particularly the test suite and
+        // reconfigurator-cli) specify silos by name, not id, so if we used the
+        // id here then they'd have to apply this filter themselves (and this
+        // abstraction, such as it is, would be leakier).
+        .filter_map(|silo_name| {
+            (silo_name != DEFAULT_SILO.name())
+                .then(|| (silo_dns_name(&silo_name), dns_records.clone()))
+        })
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
-    let zones = external_dns_zone_names
-        .into_iter()
-        .map(|zone_name| DnsConfigZone {
-            zone_name: zone_name.to_owned(),
-            records: records.clone(),
-        })
-        .collect();
-
-    DnsConfigParams {
-        generation: u64::from(blueprint.external_dns_version.next()),
-        time_created: chrono::Utc::now(),
-        zones,
+    DnsConfigZone {
+        zone_name: external_dns_zone_name,
+        records: records.clone(),
     }
 }
 
@@ -382,12 +373,12 @@ fn dns_compute_update(
     dns_group: DnsGroup,
     comment: String,
     creator: String,
-    current_config: &DnsConfigParams,
-    new_config: &DnsConfigParams,
+    current_zone: &DnsConfigZone,
+    new_zone: &DnsConfigZone,
 ) -> Result<Option<DnsVersionUpdateBuilder>, Error> {
     let mut update = DnsVersionUpdateBuilder::new(dns_group, comment, creator);
 
-    let diff = DnsDiff::new(&current_config, &new_config)
+    let diff = DnsDiff::new(&current_zone, &new_zone)
         .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
     if diff.is_empty() {
         info!(log, "no changes");
@@ -446,6 +437,20 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
     format!("{}.sys", name)
 }
 
+/// Return the Nexus external addresses according to the given blueprint
+pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
+    blueprint
+        .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
+        .filter_map(|(_, z)| match z.zone_type {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ip,
+                ..
+            }) => Some(external_ip.ip),
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -460,25 +465,24 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
+    use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_reconfigurator_preparation::policy_from_db;
+    use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::OmicronZoneConfig;
-    use nexus_types::deployment::OmicronZoneType;
-    use nexus_types::deployment::Policy;
-    use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::ZpoolName;
+    use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
-    use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
@@ -495,6 +499,8 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -502,30 +508,11 @@ mod test {
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
-
-    fn blueprint_empty() -> Blueprint {
-        let builder = CollectionBuilder::new("test-suite");
-        let collection = builder.build();
-        let policy = Policy {
-            sleds: BTreeMap::new(),
-            service_ip_pool_ranges: vec![],
-            target_nexus_zone_count: 3,
-        };
-        BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            &policy,
-            "test-suite",
-        )
-        .expect("failed to generate empty blueprint")
-    }
 
     fn dns_config_empty() -> DnsConfigParams {
         DnsConfigParams {
@@ -541,14 +528,16 @@ mod test {
     /// test blueprint_internal_dns_config(): trivial case of an empty blueprint
     #[test]
     fn test_blueprint_internal_dns_empty() {
-        let blueprint = blueprint_empty();
+        let blueprint = BlueprintBuilder::build_empty_with_sleds(
+            std::iter::empty(),
+            "test-suite",
+        );
         let blueprint_dns = blueprint_internal_dns_config(
             &blueprint,
             &BTreeMap::new(),
             &Default::default(),
-        )
-        .unwrap();
-        assert!(blueprint_dns.sole_zone().unwrap().records.is_empty());
+        );
+        assert!(blueprint_dns.records.is_empty());
     }
 
     /// test blueprint_dns_config(): exercise various different conditions
@@ -567,78 +556,95 @@ mod test {
         let rack_subnet =
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
-        // Ignore sleds with no associated zones in the inventory.
-        // This is included in the "representative" collection, but it's
-        // not allowed by BlueprintBuilder::build_initial_from_collection().
-        let policy_sleds = collection
-            .omicron_zones
-            .keys()
-            .zip(possible_sled_subnets)
-            .map(|(sled_id, subnet)| {
-                let sled_resources = SledResources {
-                    policy: SledPolicy::provisionable(),
-                    state: SledState::Active,
-                    zpools: BTreeSet::from([ZpoolName::from_str(&format!(
-                        "oxp_{}",
-                        Uuid::new_v4()
-                    ))
-                    .unwrap()]),
-                    subnet: Ipv6Subnet::new(subnet.network()),
-                };
-                (*sled_id, sled_resources)
-            })
-            .collect();
 
-        let policy = Policy {
-            sleds: policy_sleds,
-            service_ip_pool_ranges: vec![],
-            target_nexus_zone_count: 3,
-        };
+        // Convert the inventory `OmicronZonesConfig`s into
+        // `BlueprintZonesConfig`. This is going to get more painful over time
+        // as we add to blueprints, but for now we can make this work.
+        let mut blueprint_zones = BTreeMap::new();
+
+        // Also assume any sled in the collection is active.
+        let mut sled_state = BTreeMap::new();
+
+        for (sled_id, zones_config) in collection.omicron_zones {
+            blueprint_zones.insert(
+                sled_id,
+                BlueprintZonesConfig {
+                    generation: zones_config.zones.generation,
+                    zones: zones_config
+                        .zones
+                        .zones
+                        .into_iter()
+                        .map(|config| -> BlueprintZoneConfig {
+                            BlueprintZoneConfig::from_omicron_zone_config(
+                                config,
+                                BlueprintZoneDisposition::InService,
+                                // We don't get external IP IDs in inventory
+                                // collections. We'll just make one up for every
+                                // zone that needs one here. This is gross.
+                                Some(ExternalIpUuid::new_v4()),
+                            )
+                            .expect("failed to convert zone config")
+                        })
+                        .collect(),
+                },
+            );
+            sled_state.insert(sled_id, SledState::Active);
+        }
+
         let dns_empty = dns_config_empty();
         let initial_dns_generation =
             Generation::from(u32::try_from(dns_empty.generation).unwrap());
-        let mut blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            initial_dns_generation,
-            Generation::new(),
-            &policy,
-            "test-suite",
-        )
-        .expect("failed to build initial blueprint");
+        let mut blueprint = Blueprint {
+            id: Uuid::new_v4(),
+            blueprint_zones,
+            blueprint_disks: BTreeMap::new(),
+            sled_state,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            parent_blueprint_id: None,
+            internal_dns_version: initial_dns_generation,
+            external_dns_version: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
+            time_created: now_db_precision(),
+            creator: "test-suite".to_string(),
+            comment: "test blueprint".to_string(),
+        };
 
         // To make things slightly more interesting, let's add a zone that's
         // not currently in service.
-        let out_of_service_id = Uuid::new_v4();
+        let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
         blueprint.blueprint_zones.values_mut().next().unwrap().zones.push(
             BlueprintZoneConfig {
-                config: OmicronZoneConfig {
-                    id: out_of_service_id,
-                    underlay_address: out_of_service_addr,
-                    zone_type: OmicronZoneType::Oximeter {
+                disposition: BlueprintZoneDisposition::Quiesced,
+                id: out_of_service_id,
+                underlay_address: out_of_service_addr,
+                zone_type: BlueprintZoneType::Oximeter(
+                    blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
                             out_of_service_addr,
                             12345,
                             0,
                             0,
-                        )
-                        .to_string(),
+                        ),
                     },
-                },
-                disposition: BlueprintZoneDisposition::Quiesced,
+                ),
             },
         );
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.
-        let sleds_by_id = policy
-            .sleds
-            .iter()
+        let sleds_by_id = blueprint
+            .blueprint_zones
+            .keys()
+            .zip(possible_sled_subnets)
             .enumerate()
-            .map(|(i, (sled_id, sled_resources))| {
+            .map(|(i, (sled_id, subnet))| {
                 let sled_info = Sled {
                     id: *sled_id,
-                    sled_agent_address: get_sled_address(sled_resources.subnet),
+                    sled_agent_address: get_sled_address(Ipv6Subnet::new(
+                        subnet.network(),
+                    )),
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     is_scrimlet: i < 2,
@@ -647,17 +653,11 @@ mod test {
             })
             .collect();
 
-        let dns_config_blueprint = blueprint_internal_dns_config(
+        let blueprint_dns_zone = blueprint_internal_dns_config(
             &blueprint,
             &sleds_by_id,
             &Default::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            dns_config_blueprint.generation,
-            u64::from(initial_dns_generation.next())
         );
-        let blueprint_dns_zone = dns_config_blueprint.sole_zone().unwrap();
         assert_eq!(blueprint_dns_zone.zone_name, DNS_ZONE);
 
         // Now, verify a few different properties about the generated DNS
@@ -685,11 +685,15 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones()
-            .filter(|(_, zone)| zone.id != out_of_service_id)
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
             .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
+
+        // Check to see that the quiesced zone was actually excluded
+        assert!(omicron_zones_by_ip
+            .values()
+            .all(|id| *id != out_of_service_id));
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.
@@ -697,7 +701,8 @@ mod test {
             .iter()
             .filter_map(|(sled_id, sled)| {
                 if sled.is_scrimlet {
-                    let sled_subnet = policy.sleds.get(sled_id).unwrap().subnet;
+                    let sled_subnet =
+                        sleds_by_id.get(sled_id).unwrap().subnet();
                     let switch_zone_ip = get_switch_zone_address(sled_subnet);
                     Some((switch_zone_ip, *sled_id))
                 } else {
@@ -833,16 +838,9 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, policy) = example(&logctx.log, TEST_NAME, 5);
-        let initial_external_dns_generation = Generation::new();
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            initial_external_dns_generation,
-            &policy,
-            "test suite",
-        )
-        .expect("failed to generate initial blueprint");
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME, 5);
+        blueprint.internal_dns_version = Generation::new();
+        blueprint.external_dns_version = Generation::new();
 
         let my_silo = Silo::new(params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -858,101 +856,47 @@ mod test {
         })
         .unwrap();
 
-        let nexus_external_ips: Vec<_> = blueprint
-            .all_omicron_zones()
-            .filter_map(|(_, z)| match &z.zone_type {
-                OmicronZoneType::Nexus { external_ip, .. } => {
-                    Some(*external_ip)
-                }
-                _ => None,
-            })
-            .collect();
-
         // It shouldn't ever be possible to have no Silos at all, but at least
         // make sure we don't panic.
-        let external_dns_config = blueprint_external_dns_config(
-            &blueprint,
-            &nexus_external_ips,
-            &[],
-            &[String::from("oxide.test")],
-        );
-        assert_eq!(
-            external_dns_config.generation,
-            u64::from(initial_external_dns_generation.next())
-        );
-        assert_eq!(external_dns_config.zones.len(), 1);
-        assert_eq!(external_dns_config.zones[0].zone_name, "oxide.test");
-        assert!(external_dns_config.zones[0].records.is_empty());
-
-        // Same with external DNS zones.
-        let external_dns_config = blueprint_external_dns_config(
-            &blueprint,
-            &nexus_external_ips,
-            std::slice::from_ref(&my_silo),
-            &[],
-        );
-        assert_eq!(
-            external_dns_config.generation,
-            u64::from(initial_external_dns_generation.next())
-        );
-        assert!(external_dns_config.zones.is_empty());
-
-        // Same with external IPs.
-        let external_dns_config = blueprint_external_dns_config(
+        let external_dns_zone = blueprint_external_dns_config(
             &blueprint,
             &[],
-            std::slice::from_ref(&my_silo),
-            &[String::from("oxide.test")],
+            String::from("oxide.test"),
         );
-        assert_eq!(
-            external_dns_config.generation,
-            u64::from(initial_external_dns_generation.next())
-        );
+        assert_eq!(external_dns_zone.zone_name, "oxide.test");
+        assert!(external_dns_zone.records.is_empty());
 
-        // Now check a more typical case.  (Although we wouldn't normally have
-        // more than one external DNS zone, it's a more general case and pretty
-        // easy to test.)
-        let external_dns_config = blueprint_external_dns_config(
+        // Now check a more typical case.
+        let external_dns_zone = blueprint_external_dns_config(
             &blueprint,
-            &nexus_external_ips,
-            std::slice::from_ref(&my_silo),
-            &[String::from("oxide1.test"), String::from("oxide2.test")],
+            std::slice::from_ref(my_silo.name()),
+            String::from("oxide.test"),
         );
-        assert_eq!(
-            external_dns_config.generation,
-            u64::from(initial_external_dns_generation.next())
-        );
-        assert_eq!(external_dns_config.zones.len(), 2);
-        assert_eq!(
-            external_dns_config.zones[0].records,
-            external_dns_config.zones[1].records
-        );
-        assert_eq!(
-            external_dns_config.zones[0].zone_name,
-            String::from("oxide1.test"),
-        );
-        assert_eq!(
-            external_dns_config.zones[1].zone_name,
-            String::from("oxide2.test"),
-        );
-        let records = &external_dns_config.zones[0].records;
+        assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
+        let records = &external_dns_zone.records;
         assert_eq!(records.len(), 1);
         let silo_records = records
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
 
+        // Helper for converting dns records for a given silo to IpAddrs
+        let records_to_ips = |silo_records: &Vec<_>| {
+            let mut ips: Vec<_> = silo_records
+                .into_iter()
+                .map(|record| match record {
+                    DnsRecord::A(v) => IpAddr::V4(*v),
+                    DnsRecord::Aaaa(v) => IpAddr::V6(*v),
+                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                })
+                .collect();
+            ips.sort();
+            ips
+        };
+
         // Here we're hardcoding the contents of the example blueprint.  It
         // currently puts one Nexus zone on each sled.  If we change the example
         // blueprint, change the expected set of IPs here.
-        let mut silo_record_ips: Vec<_> = silo_records
-            .into_iter()
-            .map(|record| match record {
-                DnsRecord::A(v) => IpAddr::V4(*v),
-                DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                DnsRecord::Srv(_) => panic!("unexpected SRV record"),
-            })
-            .collect();
-        silo_record_ips.sort();
+        let silo_record_ips: Vec<_> = records_to_ips(silo_records);
         assert_eq!(
             silo_record_ips,
             &[
@@ -963,6 +907,42 @@ mod test {
                 "192.0.2.6".parse::<IpAddr>().unwrap(),
             ]
         );
+
+        // Change the zone disposition to quiesced for the nexus zone on the
+        // first sled. This should ensure we don't get an external DNS record
+        // back for that sled.
+        let (_, bp_zones_config) =
+            blueprint.blueprint_zones.iter_mut().next().unwrap();
+        let nexus_zone = bp_zones_config
+            .zones
+            .iter_mut()
+            .find(|z| z.zone_type.is_nexus())
+            .unwrap();
+        nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+
+        // Retrieve the DNS config based on the modified blueprint
+        let external_dns_zone = blueprint_external_dns_config(
+            &blueprint,
+            std::slice::from_ref(my_silo.name()),
+            String::from("oxide.test"),
+        );
+        let silo_records = &external_dns_zone
+            .records
+            .get(&silo_dns_name(my_silo.name()))
+            .expect("missing silo DNS records");
+        let silo_record_ips: Vec<_> = records_to_ips(silo_records);
+
+        // We shouldn't see the excluded Nexus address
+        assert_eq!(
+            silo_record_ips,
+            &[
+                "192.0.2.3".parse::<IpAddr>().unwrap(),
+                "192.0.2.4".parse::<IpAddr>().unwrap(),
+                "192.0.2.5".parse::<IpAddr>().unwrap(),
+                "192.0.2.6".parse::<IpAddr>().unwrap(),
+            ]
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -972,14 +952,14 @@ mod test {
 
         // Start with an empty DNS config.  There's no database update needed
         // when updating the DNS config to itself.
-        let dns_empty = dns_config_empty();
+        let dns_empty = &dns_config_empty().zones[0];
         match dns_compute_update(
             &logctx.log,
             DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
-            &dns_empty,
-            &dns_empty,
+            dns_empty,
+            dns_empty,
         ) {
             Ok(None) => (),
             Err(error) => {
@@ -991,40 +971,26 @@ mod test {
         // Now let's do something a little less trivial.  Set up two slightly
         // different DNS configurations, compute the database update, and make
         // sure it matches what we expect.
-        let dns_config1 = DnsConfigParams {
-            generation: 4,
-            time_created: chrono::Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: "my-zone".to_string(),
-                records: HashMap::from([
-                    (
-                        "ex1".to_string(),
-                        vec![DnsRecord::A(Ipv4Addr::LOCALHOST)],
-                    ),
-                    (
-                        "ex2".to_string(),
-                        vec![DnsRecord::A("192.168.1.3".parse().unwrap())],
-                    ),
-                ]),
-            }],
+        let dns_zone1 = DnsConfigZone {
+            zone_name: "my-zone".to_string(),
+            records: HashMap::from([
+                ("ex1".to_string(), vec![DnsRecord::A(Ipv4Addr::LOCALHOST)]),
+                (
+                    "ex2".to_string(),
+                    vec![DnsRecord::A("192.168.1.3".parse().unwrap())],
+                ),
+            ]),
         };
 
-        let dns_config2 = DnsConfigParams {
-            generation: 4,
-            time_created: chrono::Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: "my-zone".to_string(),
-                records: HashMap::from([
-                    (
-                        "ex2".to_string(),
-                        vec![DnsRecord::A("192.168.1.4".parse().unwrap())],
-                    ),
-                    (
-                        "ex3".to_string(),
-                        vec![DnsRecord::A(Ipv4Addr::LOCALHOST)],
-                    ),
-                ]),
-            }],
+        let dns_zone2 = DnsConfigZone {
+            zone_name: "my-zone".to_string(),
+            records: HashMap::from([
+                (
+                    "ex2".to_string(),
+                    vec![DnsRecord::A("192.168.1.4".parse().unwrap())],
+                ),
+                ("ex3".to_string(), vec![DnsRecord::A(Ipv4Addr::LOCALHOST)]),
+            ]),
         };
 
         let update = dns_compute_update(
@@ -1032,8 +998,8 @@ mod test {
             DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
-            &dns_config1,
-            &dns_config2,
+            &dns_zone1,
+            &dns_zone2,
         )
         .expect("failed to compute update")
         .expect("unexpectedly produced no update");
@@ -1056,8 +1022,8 @@ mod test {
         );
 
         // Test the difference between two configs whose SRV records differ.
-        let mut dns_config1 = dns_config1.clone();
-        dns_config1.zones[0].records.insert(
+        let mut dns_zone1 = dns_zone1.clone();
+        dns_zone1.records.insert(
             String::from("_nexus._tcp"),
             vec![
                 DnsRecord::Srv(Srv {
@@ -1075,40 +1041,36 @@ mod test {
             ],
         );
         // A clone of the same one should of course be the same as the original.
-        let mut dns_config2 = dns_config1.clone();
+        let mut dns_zone2 = dns_zone1.clone();
         let update = dns_compute_update(
             &logctx.log,
             DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
-            &dns_config1,
-            &dns_config2,
+            &dns_zone1,
+            &dns_zone2,
         )
         .expect("failed to compute update");
         assert!(update.is_none());
 
         // If we shift the order of the items, it should still reflect no
         // changes.
-        let records =
-            dns_config2.zones[0].records.get_mut("_nexus._tcp").unwrap();
+        let records = dns_zone2.records.get_mut("_nexus._tcp").unwrap();
         records.rotate_left(1);
-        assert!(
-            records != dns_config1.zones[0].records.get("_nexus._tcp").unwrap()
-        );
+        assert!(records != dns_zone1.records.get("_nexus._tcp").unwrap());
         let update = dns_compute_update(
             &logctx.log,
             DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
-            &dns_config1,
-            &dns_config2,
+            &dns_zone1,
+            &dns_zone2,
         )
         .expect("failed to compute update");
         assert!(update.is_none());
 
         // If we add another record, there should indeed be a new update.
-        let records =
-            dns_config2.zones[0].records.get_mut("_nexus._tcp").unwrap();
+        let records = dns_zone2.records.get_mut("_nexus._tcp").unwrap();
         records.push(DnsRecord::Srv(Srv {
             port: 123,
             prio: 1,
@@ -1122,8 +1084,8 @@ mod test {
             DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
-            &dns_config1,
-            &dns_config2,
+            &dns_zone1,
+            &dns_zone2,
         )
         .expect("failed to compute update")
         .expect("expected an update");
@@ -1138,6 +1100,15 @@ mod test {
         );
 
         logctx.cleanup_successful();
+    }
+
+    fn diff_sole_zones<'a>(
+        left: &'a DnsConfigParams,
+        right: &'a DnsConfigParams,
+    ) -> DnsDiff<'a> {
+        let left_zone = left.sole_zone().unwrap();
+        let right_zone = right.sole_zone().unwrap();
+        DnsDiff::new(left_zone, right_zone).unwrap()
     }
 
     // Tests end-to-end DNS behavior:
@@ -1161,7 +1132,7 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
@@ -1182,12 +1153,14 @@ mod test {
             .expect("fetching initial external DNS");
 
         // Fetch the initial blueprint installed during rack initialization.
-        let (_blueprint_target, blueprint) = datastore
+        let (_blueprint_target, mut blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
-            .expect("failed to read current target blueprint")
-            .expect("no target blueprint set");
-        eprintln!("blueprint: {:?}", blueprint);
+            .expect("failed to read current target blueprint");
+        eprintln!("blueprint: {}", blueprint.display());
+        // Override the CockroachDB settings so that we don't try to set them.
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::DoNotModify;
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
@@ -1229,7 +1202,10 @@ mod test {
         // Now, go through the motions of provisioning a new Nexus zone.
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
-        let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
+        let sled_rows = datastore
+            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
+            .await
+            .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows = {
@@ -1240,29 +1216,45 @@ mod test {
                 .await
                 .unwrap()
         };
-        let mut policy = policy_from_db(
-            &sled_rows,
-            &zpool_rows,
-            &ip_pool_range_rows,
-            // This is not used because we're not actually going through the
-            // planner.
-            NEXUS_REDUNDANCY,
-        )
-        .unwrap();
-        // We'll need another (fake) external IP for this new Nexus.
-        policy
-            .service_ip_pool_ranges
-            .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        let planning_input = {
+            let mut builder = PlanningInputFromDb {
+                sled_rows: &sled_rows,
+                zpool_rows: &zpool_rows,
+                ip_pool_range_rows: &ip_pool_range_rows,
+                internal_dns_version: Generation::from(
+                    u32::try_from(dns_initial_internal.generation).unwrap(),
+                )
+                .into(),
+                external_dns_version: Generation::from(
+                    u32::try_from(dns_latest_external.generation).unwrap(),
+                )
+                .into(),
+                // These are not used because we're not actually going through
+                // the planner.
+                cockroachdb_settings: &CockroachDbSettings::empty(),
+                external_ip_rows: &[],
+                service_nic_rows: &[],
+                target_nexus_zone_count: NEXUS_REDUNDANCY,
+                target_cockroachdb_cluster_version:
+                    CockroachDbClusterVersion::POLICY,
+                log,
+            }
+            .build()
+            .unwrap()
+            .into_builder();
+
+            // We'll need another (fake) external IP for this new Nexus.
+            builder
+                .policy_mut()
+                .service_ip_pool_ranges
+                .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+
+            builder.build()
+        };
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
-            Generation::from(
-                u32::try_from(dns_initial_internal.generation).unwrap(),
-            ),
-            Generation::from(
-                u32::try_from(dns_latest_external.generation).unwrap(),
-            ),
-            &policy,
+            &planning_input,
             "test suite",
         )
         .unwrap();
@@ -1274,14 +1266,14 @@ mod test {
             .unwrap();
         assert_eq!(rv, EnsureMultiple::Added(1));
         let blueprint2 = builder.build();
-        eprintln!("blueprint2: {:?}", blueprint2);
+        eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();
@@ -1328,16 +1320,14 @@ mod test {
             dns_initial_internal.generation + 1,
         );
 
-        let diff =
-            DnsDiff::new(&dns_initial_internal, &dns_latest_internal).unwrap();
+        let diff = diff_sole_zones(&dns_initial_internal, &dns_latest_internal);
         // There should be one new AAAA record for the zone itself.
         let new_records: Vec<_> = diff.names_added().collect();
         let (new_name, &[DnsRecord::Aaaa(_)]) = new_records[0] else {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
         let new_zone_host = internal_dns::config::Host::for_zone(
-            new_zone_id,
-            internal_dns::config::ZoneVariant::Other,
+            internal_dns::config::Zone::Other(new_zone_id),
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));
 
@@ -1368,7 +1358,7 @@ mod test {
             dns_previous_external.generation + 1,
         );
         let diff =
-            DnsDiff::new(&dns_previous_external, &dns_latest_external).unwrap();
+            diff_sole_zones(&dns_previous_external, &dns_latest_external);
         assert!(diff.names_added().next().is_none());
         assert!(diff.names_removed().next().is_none());
         let changed: Vec<_> = diff.names_changed().collect();
@@ -1494,7 +1484,7 @@ mod test {
         assert_eq!(old_external.generation + 1, dns_latest_external.generation);
 
         // Specifically, there should be one new name (for the new Silo).
-        let diff = DnsDiff::new(&old_external, &dns_latest_external).unwrap();
+        let diff = diff_sole_zones(&old_external, &dns_latest_external);
         assert!(diff.names_removed().next().is_none());
         assert!(diff.names_changed().next().is_none());
         let added = diff.names_added().collect::<Vec<_>>();

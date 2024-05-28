@@ -85,6 +85,7 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+metrics_producer_gc.period_secs = 60
 # How frequently we check the list of stored TLS certificates.  This is
 # approximately an upper bound on how soon after updating the list of
 # certificates it will take _other_ Nexus instances to notice and stop serving
@@ -100,11 +101,18 @@ inventory.nkeep = 3
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
 phantom_disks.period_secs = 30
+physical_disk_adoption.period_secs = 30
+# Disable automatic disk adoption to avoid interfering with tests.
+physical_disk_adoption.disable = true
 blueprints.period_secs_load = 100
 blueprints.period_secs_execute = 600
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
+instance_watcher.period_secs = 30
+service_firewall_propagation.period_secs = 300
+v2p_mapping_propagation.period_secs = 30
+abandoned_vmm_reaper.period_secs = 60
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

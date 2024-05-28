@@ -27,14 +27,11 @@ impl KeyFile {
         key: &[u8; 32],
         log: &Logger,
     ) -> std::io::Result<KeyFile> {
+        info!(log, "About to create keyfile"; "path" => ?path);
         // We want to overwrite any existing contents.
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&path.0)
-            .await?;
+        let mut file = tokio::fs::File::create(&path.0).await?;
         file.write_all(key).await?;
-        info!(log, "Created keyfile {}", path);
+        info!(log, "Created keyfile"; "path" => ?path);
         Ok(KeyFile {
             path,
             file,

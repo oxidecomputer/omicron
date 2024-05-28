@@ -116,6 +116,7 @@ impl WriteDestination {
 
                     let zpool_name = disk.zpool_name().clone();
                     let control_plane_dir = zpool_name.dataset_mountpoint(
+                        illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into(),
                         sled_storage::dataset::INSTALL_DATASET,
                     );
 

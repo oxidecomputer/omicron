@@ -563,7 +563,6 @@ mod test {
             mem_cost: ARGON2_COST_M_KIB,
             time_cost: ARGON2_COST_T,
             lanes: ARGON2_COST_P,
-            thread_mode: argon2alt::ThreadMode::Sequential,
             secret: &[],
             ad: &[],
             hash_length: 32,

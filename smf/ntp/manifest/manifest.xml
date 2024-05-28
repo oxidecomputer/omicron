@@ -39,6 +39,11 @@
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
+  <dependency name='chrony-setup' grouping='require_all' restart_on='refresh'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
   <!-- 
     Only Boundary NTP needs the opte interface.
   -->
@@ -57,7 +62,9 @@
     The service also always starts the binary with ASLR enabled,
     regardless of whether it was linked with -zaslr
   -->
-  <exec_method type="method" name="start" exec="/var/svc/method/svc-site-ntp %m"
+
+  <exec_method type="method" name="start" 
+    exec='/usr/sbin/chronyd -d &amp;' 
     timeout_seconds="60">
   <method_context security_flags="aslr">
   <method_credential user="root" group="root"
@@ -65,20 +72,9 @@
   </method_context>
   </exec_method>
 
-  <exec_method type="method" name="refresh"
-    exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}" timeout_seconds="60">
-  </exec_method>
-
   <exec_method type="method" name="stop"
-    exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
+    exec=":kill"
     timeout_seconds="60" />
-
-  <property_group name="config" type="application">
-    <propval name="file" type="astring" value="/etc/inet/chrony.conf" />
-    <propval name="boundary" type="boolean" value="false" />
-    <propval name="server" type="astring" value="" />
-    <propval name="allow" type="astring" value="" />
-  </property_group>
 
   <stability value="Unstable" />
 

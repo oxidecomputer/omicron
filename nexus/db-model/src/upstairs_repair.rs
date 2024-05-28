@@ -106,6 +106,7 @@ pub struct UpstairsRepairNotification {
     pub upstairs_id: DbTypedUuid<UpstairsKind>,
     pub session_id: DbTypedUuid<UpstairsSessionKind>,
 
+    // The Downstairs being repaired
     pub region_id: DbTypedUuid<DownstairsRegionKind>,
     pub target_ip: ipv6::Ipv6Addr,
     pub target_port: SqlU16,

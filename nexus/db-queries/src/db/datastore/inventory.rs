@@ -28,6 +28,7 @@ use diesel::QueryDsl;
 use diesel::Table;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::CabooseWhichEnum;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
@@ -62,6 +63,9 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -92,7 +96,8 @@ impl DataStore {
         // It's helpful to assemble some values before entering the transaction
         // so that we can produce the `Error` type that we want here.
         let row_collection = InvCollection::from(collection);
-        let collection_id = row_collection.id;
+        let collection_id = row_collection.id();
+        let db_collection_id = to_db_typed_uuid(collection_id);
         let baseboards = collection
             .baseboards
             .iter()
@@ -289,7 +294,8 @@ impl DataStore {
                 for (baseboard_id, sp) in &collection.sps {
                     let selection = db::schema::hw_baseboard_id::table
                         .select((
-                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
                             baseboard_dsl::id,
                             sp.time_collected
                                 .into_sql::<diesel::sql_types::Timestamptz>(),
@@ -372,7 +378,8 @@ impl DataStore {
                 for (baseboard_id, rot) in &collection.rots {
                     let selection = db::schema::hw_baseboard_id::table
                         .select((
-                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
                             baseboard_dsl::id,
                             rot.time_collected
                                 .into_sql::<diesel::sql_types::Timestamptz>(),
@@ -546,7 +553,8 @@ impl DataStore {
                         .select((
                             dsl_baseboard_id::id,
                             dsl_sw_caboose::id,
-                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
                             found_caboose
                                 .time_collected
                                 .into_sql::<diesel::sql_types::Timestamptz>(),
@@ -623,7 +631,8 @@ impl DataStore {
                         .select((
                             dsl_baseboard_id::id,
                             dsl_sw_rot_page::id,
-                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
                             found_rot_page
                                 .time_collected
                                 .into_sql::<diesel::sql_types::Timestamptz>(),
@@ -718,7 +727,8 @@ impl DataStore {
                     );
                     let selection = db::schema::hw_baseboard_id::table
                         .select((
-                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
                             sled_agent
                                 .time_collected
                                 .into_sql::<diesel::sql_types::Timestamptz>(),
@@ -726,8 +736,7 @@ impl DataStore {
                                 .source
                                 .clone()
                                 .into_sql::<diesel::sql_types::Text>(),
-                            sled_agent
-                                .sled_id
+                            (sled_agent.sled_id.into_untyped_uuid())
                                 .into_sql::<diesel::sql_types::Uuid>(),
                             baseboard_dsl::id.nullable(),
                             nexus_db_model::ipv6::Ipv6Addr::from(
@@ -954,7 +963,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nkeep: u32,
-    ) -> Result<Option<Uuid>, Error> {
+    ) -> Result<Option<CollectionUuid>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         // Diesel requires us to use aliases in order to refer to the
         // `inv_collection` table twice in the same query.
@@ -1049,8 +1058,8 @@ impl DataStore {
             .rev()
             .find(|(_i, (_collection_id, nerrors))| *nerrors == 0);
         let candidate = match last_completed_idx {
-            Some((0, _)) => candidates.iter().skip(1).next(),
-            _ => candidates.iter().next(),
+            Some((0, _)) => candidates.get(1),
+            _ => candidates.first(),
         }
         .map(|(collection_id, _nerrors)| *collection_id);
         if let Some(c) = candidate {
@@ -1067,7 +1076,7 @@ impl DataStore {
                 "candidates" => ?candidates,
             );
         }
-        Ok(candidate)
+        Ok(candidate.map(CollectionUuid::from_untyped_uuid))
     }
 
     /// Removes an inventory collection from the database
@@ -1076,7 +1085,7 @@ impl DataStore {
     async fn inventory_delete_collection(
         &self,
         opctx: &OpContext,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
     ) -> Result<(), Error> {
         // As with inserting a whole collection, we remove it in one big
         // transaction for simplicity.  Similar considerations apply.  We could
@@ -1085,6 +1094,7 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
+        let db_collection_id = to_db_typed_uuid(collection_id);
         let (
             ncollections,
             nsps,
@@ -1104,129 +1114,130 @@ impl DataStore {
                 let ncollections = {
                     use db::schema::inv_collection::dsl;
                     diesel::delete(
-                        dsl::inv_collection.filter(dsl::id.eq(collection_id)),
+                        dsl::inv_collection
+                            .filter(dsl::id.eq(db_collection_id)),
                     )
                     .execute_async(&conn)
                     .await?
                 };
 
                 // Remove rows for service processors.
-                let nsps = {
-                    use db::schema::inv_service_processor::dsl;
-                    diesel::delete(
-                        dsl::inv_service_processor
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nsps =
+                    {
+                        use db::schema::inv_service_processor::dsl;
+                        diesel::delete(dsl::inv_service_processor.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows for roots of trust.
-                let nrots = {
-                    use db::schema::inv_root_of_trust::dsl;
-                    diesel::delete(
-                        dsl::inv_root_of_trust
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nrots =
+                    {
+                        use db::schema::inv_root_of_trust::dsl;
+                        diesel::delete(dsl::inv_root_of_trust.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows for cabooses found.
-                let ncabooses = {
-                    use db::schema::inv_caboose::dsl;
-                    diesel::delete(
-                        dsl::inv_caboose
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let ncabooses =
+                    {
+                        use db::schema::inv_caboose::dsl;
+                        diesel::delete(dsl::inv_caboose.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows for root of trust pages found.
-                let nrot_pages = {
-                    use db::schema::inv_root_of_trust_page::dsl;
-                    diesel::delete(
-                        dsl::inv_root_of_trust_page
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nrot_pages =
+                    {
+                        use db::schema::inv_root_of_trust_page::dsl;
+                        diesel::delete(dsl::inv_root_of_trust_page.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows for sled agents found.
-                let nsled_agents = {
-                    use db::schema::inv_sled_agent::dsl;
-                    diesel::delete(
-                        dsl::inv_sled_agent
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nsled_agents =
+                    {
+                        use db::schema::inv_sled_agent::dsl;
+                        diesel::delete(dsl::inv_sled_agent.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows for physical disks found.
-                let nphysical_disks = {
-                    use db::schema::inv_physical_disk::dsl;
-                    diesel::delete(
-                        dsl::inv_physical_disk
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nphysical_disks =
+                    {
+                        use db::schema::inv_physical_disk::dsl;
+                        diesel::delete(dsl::inv_physical_disk.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows associated with Omicron zones
-                let nsled_agent_zones = {
-                    use db::schema::inv_sled_omicron_zones::dsl;
-                    diesel::delete(
-                        dsl::inv_sled_omicron_zones
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nsled_agent_zones =
+                    {
+                        use db::schema::inv_sled_omicron_zones::dsl;
+                        diesel::delete(dsl::inv_sled_omicron_zones.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nzones = {
-                    use db::schema::inv_omicron_zone::dsl;
-                    diesel::delete(
-                        dsl::inv_omicron_zone
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nzones =
+                    {
+                        use db::schema::inv_omicron_zone::dsl;
+                        diesel::delete(dsl::inv_omicron_zone.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nnics = {
-                    use db::schema::inv_omicron_zone_nic::dsl;
-                    diesel::delete(
-                        dsl::inv_omicron_zone_nic
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nnics =
+                    {
+                        use db::schema::inv_omicron_zone_nic::dsl;
+                        diesel::delete(dsl::inv_omicron_zone_nic.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nzpools = {
-                    use db::schema::inv_zpool::dsl;
-                    diesel::delete(
-                        dsl::inv_zpool
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nzpools =
+                    {
+                        use db::schema::inv_zpool::dsl;
+                        diesel::delete(dsl::inv_zpool.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 // Remove rows for errors encountered.
-                let nerrors = {
-                    use db::schema::inv_collection_error::dsl;
-                    diesel::delete(
-                        dsl::inv_collection_error
-                            .filter(dsl::inv_collection_id.eq(collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                let nerrors =
+                    {
+                        use db::schema::inv_collection_error::dsl;
+                        diesel::delete(dsl::inv_collection_error.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                 Ok((
                     ncollections,
@@ -1316,14 +1327,20 @@ impl DataStore {
             return Ok(None);
         };
 
-        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
+        Ok(Some(
+            self.inventory_collection_read(
+                opctx,
+                CollectionUuid::from_untyped_uuid(collection_id),
+            )
+            .await?,
+        ))
     }
 
     /// Attempt to read the current collection
     pub async fn inventory_collection_read(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: CollectionUuid,
     ) -> Result<Collection, Error> {
         self.inventory_collection_read_batched(opctx, id, SQL_BATCH_SIZE).await
     }
@@ -1343,15 +1360,16 @@ impl DataStore {
     async fn inventory_collection_read_batched(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: CollectionUuid,
         batch_size: NonZeroU32,
     ) -> Result<Collection, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
+        let db_id = to_db_typed_uuid(id);
         let (time_started, time_done, collector) = {
             use db::schema::inv_collection::dsl;
 
             let collections = dsl::inv_collection
-                .filter(dsl::id.eq(id))
+                .filter(dsl::id.eq(db_id))
                 .limit(2)
                 .select(InvCollection::as_select())
                 .load_async(&*conn)
@@ -1378,7 +1396,7 @@ impl DataStore {
                     dsl::idx,
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .order_by(dsl::idx)
                 .select(InvCollectionError::as_select())
                 .load_async(&*conn)
@@ -1405,7 +1423,7 @@ impl DataStore {
                     dsl::hw_baseboard_id,
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvServiceProcessor::as_select())
                 .load_async(&*conn)
                 .await
@@ -1436,7 +1454,7 @@ impl DataStore {
                     dsl::hw_baseboard_id,
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvRootOfTrust::as_select())
                 .load_async(&*conn)
                 .await
@@ -1467,7 +1485,7 @@ impl DataStore {
                     dsl::sled_id,
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledAgent::as_select())
                 .load_async(&*conn)
                 .await
@@ -1499,7 +1517,7 @@ impl DataStore {
                     (dsl::sled_id, dsl::slot),
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvPhysicalDisk::as_select())
                 .load_async(&*conn)
                 .await
@@ -1509,7 +1527,10 @@ impl DataStore {
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
-                    disks.entry(disk.sled_id).or_default().push(disk.into());
+                    disks
+                        .entry(disk.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(disk.into());
                 }
             }
             disks
@@ -1528,7 +1549,7 @@ impl DataStore {
                     (dsl::sled_id, dsl::id),
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZpool::as_select())
                 .load_async(&*conn)
                 .await
@@ -1537,7 +1558,10 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for zpool in batch {
-                    zpools.entry(zpool.sled_id).or_default().push(zpool.into());
+                    zpools
+                        .entry(zpool.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(zpool.into());
                 }
             }
             zpools
@@ -1610,57 +1634,54 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let sled_agents: BTreeMap<_, _> =
-            sled_agent_rows
-                .into_iter()
-                .map(|s: InvSledAgent| {
-                    let sled_id = s.sled_id;
-                    let baseboard_id = s
-                        .hw_baseboard_id
-                        .map(|id| {
-                            baseboards_by_id.get(&id).cloned().ok_or_else(
-                                || {
-                                    Error::internal_error(
+        let sled_agents: BTreeMap<_, _> = sled_agent_rows
+            .into_iter()
+            .map(|s: InvSledAgent| {
+                let sled_id = SledUuid::from(s.sled_id);
+                let baseboard_id = s
+                    .hw_baseboard_id
+                    .map(|id| {
+                        baseboards_by_id.get(&id).cloned().ok_or_else(|| {
+                            Error::internal_error(
                                 "missing baseboard that we should have fetched",
                             )
-                                },
-                            )
                         })
-                        .transpose()?;
-                    let sled_agent = nexus_types::inventory::SledAgent {
-                        time_collected: s.time_collected,
-                        source: s.source,
-                        sled_id,
-                        baseboard_id,
-                        sled_agent_address: std::net::SocketAddrV6::new(
-                            std::net::Ipv6Addr::from(s.sled_agent_ip),
-                            u16::from(s.sled_agent_port),
-                            0,
-                            0,
-                        ),
-                        sled_role: nexus_types::inventory::SledRole::from(
-                            s.sled_role,
-                        ),
-                        usable_hardware_threads: u32::from(
-                            s.usable_hardware_threads,
-                        ),
-                        usable_physical_ram: s.usable_physical_ram.into(),
-                        reservoir_size: s.reservoir_size.into(),
-                        disks: physical_disks
-                            .get(&sled_id)
-                            .map(|disks| disks.to_vec())
-                            .unwrap_or_default(),
-                        zpools: zpools
-                            .get(&sled_id)
-                            .map(|zpools| zpools.to_vec())
-                            .unwrap_or_default(),
-                    };
-                    Ok((sled_id, sled_agent))
-                })
-                .collect::<Result<
-                    BTreeMap<Uuid, nexus_types::inventory::SledAgent>,
-                    Error,
-                >>()?;
+                    })
+                    .transpose()?;
+                let sled_agent = nexus_types::inventory::SledAgent {
+                    time_collected: s.time_collected,
+                    source: s.source,
+                    sled_id,
+                    baseboard_id,
+                    sled_agent_address: std::net::SocketAddrV6::new(
+                        std::net::Ipv6Addr::from(s.sled_agent_ip),
+                        u16::from(s.sled_agent_port),
+                        0,
+                        0,
+                    ),
+                    sled_role: nexus_types::inventory::SledRole::from(
+                        s.sled_role,
+                    ),
+                    usable_hardware_threads: u32::from(
+                        s.usable_hardware_threads,
+                    ),
+                    usable_physical_ram: s.usable_physical_ram.into(),
+                    reservoir_size: s.reservoir_size.into(),
+                    disks: physical_disks
+                        .get(sled_id.as_untyped_uuid())
+                        .map(|disks| disks.to_vec())
+                        .unwrap_or_default(),
+                    zpools: zpools
+                        .get(sled_id.as_untyped_uuid())
+                        .map(|zpools| zpools.to_vec())
+                        .unwrap_or_default(),
+                };
+                Ok((sled_id, sled_agent))
+            })
+            .collect::<Result<
+                BTreeMap<SledUuid, nexus_types::inventory::SledAgent>,
+                Error,
+            >>()?;
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -1675,7 +1696,7 @@ impl DataStore {
                     (dsl::hw_baseboard_id, dsl::which),
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvCaboose::as_select())
                 .load_async(&*conn)
                 .await
@@ -1777,7 +1798,7 @@ impl DataStore {
                     (dsl::hw_baseboard_id, dsl::which),
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvRotPage::as_select())
                 .load_async(&*conn)
                 .await
@@ -1879,7 +1900,7 @@ impl DataStore {
         // number.  We'll assemble these directly into the data structure we're
         // trying to build, which maps sled ids to objects describing the zones
         // found on each sled.
-        let mut omicron_zones: BTreeMap<_, _> = {
+        let mut omicron_zones: BTreeMap<SledUuid, _> = {
             use db::schema::inv_sled_omicron_zones::dsl;
 
             let mut zones = BTreeMap::new();
@@ -1891,7 +1912,7 @@ impl DataStore {
                     dsl::sled_id,
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledOmicronZones::as_select())
                 .load_async(&*conn)
                 .await
@@ -1901,7 +1922,7 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
-                        sled_zones_config.sled_id,
+                        sled_zones_config.sled_id.into(),
                         sled_zones_config.into_uninit_zones_found(),
                     )
                 }))
@@ -1927,7 +1948,7 @@ impl DataStore {
                         dsl::id,
                         &p.current_pagparams(),
                     )
-                    .filter(dsl::inv_collection_id.eq(id))
+                    .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvOmicronZoneNic::as_select())
                     .load_async(&*conn)
                     .await
@@ -1956,7 +1977,7 @@ impl DataStore {
                     dsl::id,
                     &p.current_pagparams(),
                 )
-                .filter(dsl::inv_collection_id.eq(id))
+                .filter(dsl::inv_collection_id.eq(db_id))
                 // It's not strictly necessary to order these by id.  Doing so
                 // ensures a consistent representation for `Collection`, which
                 // makes testing easier.  It's already indexed to do this, too.
@@ -1990,16 +2011,17 @@ impl DataStore {
                     })
                 })
                 .transpose()?;
-            let map = omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
-                // This error means that we found a row in inv_omicron_zone with
-                // no associated record in inv_sled_omicron_zones.  This should
-                // be impossible and reflects either a bug or database
-                // corruption.
-                Error::internal_error(&format!(
-                    "zone {:?}: unknown sled: {:?}",
-                    z.id, z.sled_id
-                ))
-            })?;
+            let map =
+                omicron_zones.get_mut(&z.sled_id.into()).ok_or_else(|| {
+                    // This error means that we found a row in inv_omicron_zone
+                    // with no associated record in inv_sled_omicron_zones.
+                    // This should be impossible and reflects either a bug or
+                    // database corruption.
+                    Error::internal_error(&format!(
+                        "zone {:?}: unknown sled: {:?}",
+                        z.id, z.sled_id
+                    ))
+                })?;
             let zone_id = z.id;
             let zone = z
                 .into_omicron_zone_config(nic_row)
@@ -2043,11 +2065,15 @@ pub trait DataStoreInventoryTest: Send + Sync {
     /// List all collections
     ///
     /// This does not paginate.
-    fn inventory_collections(&self) -> BoxFuture<anyhow::Result<Vec<Uuid>>>;
+    fn inventory_collections(
+        &self,
+    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>>;
 }
 
 impl DataStoreInventoryTest for DataStore {
-    fn inventory_collections(&self) -> BoxFuture<anyhow::Result<Vec<Uuid>>> {
+    fn inventory_collections(
+        &self,
+    ) -> BoxFuture<anyhow::Result<Vec<InvCollection>>> {
         async {
             let conn = self
                 .pool_connection_for_tests()
@@ -2059,12 +2085,14 @@ impl DataStoreInventoryTest for DataStore {
                     .context("failed to allow table scan")?;
 
                 use db::schema::inv_collection::dsl;
-                dsl::inv_collection
-                    .select(dsl::id)
+                let collections = dsl::inv_collection
+                    .select(InvCollection::as_select())
                     .order_by(dsl::time_started)
                     .load_async(&conn)
                     .await
-                    .context("failed to list collections")
+                    .context("failed to list collections")?;
+
+                Ok(collections)
             })
             .await
         }
@@ -2093,6 +2121,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
 
@@ -2355,7 +2384,13 @@ mod test {
         // `collection1`, which _is_ the only one with no errors.  So we should
         // get back `collection2`.
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            &datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[
                 collection1.id,
                 collection2.id,
@@ -2379,7 +2414,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection3.id, collection4.id, collection5.id,]
         );
         // Again, we should skip over collection1 and delete the next oldest:
@@ -2389,7 +2430,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection4.id, collection5.id,]
         );
         // At this point, if we're keeping 3, we don't need to prune anything.
@@ -2398,7 +2445,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection4.id, collection5.id,]
         );
 
@@ -2415,7 +2468,13 @@ mod test {
             .await
             .expect("failed to insert collection");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection1.id, collection4.id, collection5.id, collection6.id,]
         );
         datastore
@@ -2423,7 +2482,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection4.id, collection5.id, collection6.id,]
         );
         // Again, at this point, we should not prune anything.
@@ -2432,7 +2497,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection4.id, collection5.id, collection6.id,]
         );
 
@@ -2453,7 +2524,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection5.id, collection6.id, collection7.id,]
         );
 
@@ -2487,7 +2564,13 @@ mod test {
             .await
             .expect("failed to prune collections");
         assert_eq!(
-            datastore.inventory_collections().await.unwrap(),
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
             &[collection6.id,]
         );
 
@@ -2497,7 +2580,7 @@ mod test {
             .inventory_delete_collection(&opctx, collection6.id)
             .await
             .expect("failed to delete collection");
-        assert_eq!(datastore.inventory_collections().await.unwrap(), &[]);
+        assert!(datastore.inventory_collections().await.unwrap().is_empty());
 
         conn.transaction_async(|conn| async move {
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();

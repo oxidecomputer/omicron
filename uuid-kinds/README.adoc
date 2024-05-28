@@ -14,6 +14,50 @@ mix different kinds of entities.
 be shared across Oxide repos. `omicron-uuid-kinds` supports no-std so the kinds
 can be shared with embedded code as well.
 
+## Adding a new UUID kind
+
+Start by adding a new element to the invocation of the `impl_typed_uuid_kind!` macro in `src/lib.rs`. For example:
+
+[source,rust]
+```
+impl_typed_uuid_kind! {
+    // ...
+    Widget => "widget",
+    // ...
+}
+```
+
+This will:
+
+- Create a new `TypedUuidKind` called `WidgetKind`. This kind will become the type parameter to `TypedUuid` and other related generic types.
+- Create a type alias `type WidgetUuid = TypedUuid<WidgetKind>`.
+
+Then, start changing your UUID types over. It's generally easiest to change the type of a UUID in a struct or enum field, and start pulling that thread.
+
+- If your UUID isn't used in too many places, you can usually just change all users in one go. For an example, see the conversions of several UUID types in https://github.com/oxidecomputer/omicron/pull/5135[#5135].
+
+- If your UUID is widely used, you may need to break your change up across several commits. It's easiest to carve out a section of your code to make changes in, and use the `GenericUuid` conversions into and out of this code. For an example, see the ongoing conversion for sled UUIDs in https://github.com/oxidecomputer/omicron/pull/5404[#5404] and https://github.com/oxidecomputer/omicron/pull/5488[#5488].
+
+[IMPORTANT] 
+.Using type aliases
+==== 
+For `TypedUuid<T>`, prefer to use the type aliases. For example, `SledUuid` rather than `TypedUuid<SledKind>`.
+
+Some older code is still being ported over to type aliases; see https://github.com/oxidecomputer/omicron/pull/5511[#5511] for an example.
+
+Other types that use the same kinds, like `nexus_db_model::DbTypedUuid<T>` and
+`typed_rng::TypedUuidRng<T>`, don't have aliases defined for them. That's
+because their frequency of use falls below the threshold at which the benefits
+of type aliases outweigh the costs.
+
+====
+
+Some special cases:
+
+. If part of your change is at an OpenAPI schema boundary, then you generally also want to have clients use the same UUID types. The best way to do that currently is to use a `replace` directive, as in https://github.com/oxidecomputer/omicron/pull/5135[#5135]. There is ongoing design work to make this work automatically, in https://github.com/oxidecomputer/typify/issues/503[typify#503] and elsewhere.
+
+. For Nexus database storage, `nexus-db-model` has a `DbTypedUuid` generic type which can be used. `DbTypedUuid` should not be exposed outside of `nexus-db-model`; instead, prefer to use the regular `TypedUuid` and only convert to `DbTypedUuid` within the lowest layers (i.e. using getters/setters and not making it a public field). This is because the regular `TypedUuid` has much more infrastructure built around it.
+
 ## Determinations
 
 As part of this effort, we've made several decisions that could have gone a

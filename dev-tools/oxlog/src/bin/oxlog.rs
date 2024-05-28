@@ -47,7 +47,7 @@ struct FilterArgs {
     #[arg(short, long)]
     archived: bool,
 
-    // Print only the extra log files
+    /// Print only the extra log files
     #[arg(short, long)]
     extra: bool,
 
@@ -57,6 +57,8 @@ struct FilterArgs {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    sigpipe::reset();
+
     let cli = Cli::parse();
 
     match cli.command {

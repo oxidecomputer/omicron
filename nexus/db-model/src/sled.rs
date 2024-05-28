@@ -5,7 +5,7 @@
 use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{physical_disk, service, sled, zpool};
+use crate::schema::{physical_disk, sled, zpool};
 use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
@@ -114,6 +114,10 @@ impl Sled {
     pub fn state(&self) -> SledState {
         self.state
     }
+
+    pub fn time_modified(&self) -> DateTime<Utc> {
+        self.identity.time_modified
+    }
 }
 
 impl From<Sled> for views::Sled {
@@ -175,13 +179,6 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
-}
-
-impl DatastoreCollectionConfig<super::Service> for Sled {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = sled::dsl::rcgen;
-    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
-    type CollectionIdColumn = service::dsl::sled_id;
 }
 
 /// Form of `Sled` used for updates from sled-agent. This is missing some
@@ -347,3 +344,67 @@ impl SledReservationConstraintBuilder {
         self.constraints
     }
 }
+
+mod diesel_util {
+    use crate::{
+        schema::sled::{sled_policy, sled_state},
+        sled_policy::DbSledPolicy,
+        to_db_sled_policy,
+    };
+    use diesel::{
+        helper_types::{And, EqAny},
+        prelude::*,
+        query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::{
+        deployment::SledFilter,
+        external_api::views::{SledPolicy, SledState},
+    };
+
+    /// An extension trait to apply a [`SledFilter`] to a Diesel expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the `sled`
+    /// table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbSledPolicy` type which is private to this crate.
+    pub trait ApplySledFilterExt {
+        type Output;
+
+        /// Applies a [`SledFilter`] to a Diesel expression.
+        fn sled_filter(self, filter: SledFilter) -> Self::Output;
+    }
+
+    impl<E> ApplySledFilterExt for E
+    where
+        E: FilterDsl<SledFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn sled_filter(self, filter: SledFilter) -> Self::Output {
+            use crate::schema::sled::dsl as sled_dsl;
+
+            // These are only boxed for ease of reference above.
+            let all_matching_policies: BoxedIterator<DbSledPolicy> = Box::new(
+                SledPolicy::all_matching(filter).map(to_db_sled_policy),
+            );
+            let all_matching_states: BoxedIterator<crate::SledState> =
+                Box::new(SledState::all_matching(filter).map(Into::into));
+
+            FilterDsl::filter(
+                self,
+                sled_dsl::sled_policy
+                    .eq_any(all_matching_policies)
+                    .and(sled_dsl::sled_state.eq_any(all_matching_states)),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type SledFilterQuery = And<
+        EqAny<sled_policy, BoxedIterator<DbSledPolicy>>,
+        EqAny<sled_state, BoxedIterator<crate::SledState>>,
+    >;
+}
+
+pub use diesel_util::ApplySledFilterExt;

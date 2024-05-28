@@ -11,17 +11,14 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
-use nexus_types::identity::Asset;
+use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::CollectionUuid;
 use serde_json::json;
-use std::num::NonZeroU32;
 use std::sync::Arc;
-
-/// How many rows to request in each paginated database query
-const DB_PAGE_SIZE: u32 = 1024;
+use tokio::sync::watch;
 
 /// Background task that reads inventory for the rack
 pub struct InventoryCollector {
@@ -30,6 +27,7 @@ pub struct InventoryCollector {
     creator: String,
     nkeep: u32,
     disable: bool,
+    tx: watch::Sender<Option<CollectionUuid>>,
 }
 
 impl InventoryCollector {
@@ -40,13 +38,19 @@ impl InventoryCollector {
         nkeep: u32,
         disable: bool,
     ) -> InventoryCollector {
+        let (tx, _) = watch::channel(None);
         InventoryCollector {
             datastore,
             resolver,
             creator: creator.to_owned(),
             nkeep,
             disable,
+            tx,
         }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<Option<CollectionUuid>> {
+        self.tx.subscribe()
     }
 }
 
@@ -78,11 +82,13 @@ impl BackgroundTask for InventoryCollector {
                         "collection_id" => collection.id.to_string(),
                         "time_started" => collection.time_started.to_string(),
                     );
-                    json!({
+                    let json = json!({
                         "collection_id": collection.id.to_string(),
                         "time_started": collection.time_started.to_string(),
                         "time_done": collection.time_done.to_string()
-                    })
+                    });
+                    self.tx.send_replace(Some(collection.id));
+                    json
                 }
             }
         }
@@ -127,8 +133,7 @@ async fn inventory_activate(
         .collect::<Vec<_>>();
 
     // Create an enumerator to find sled agents.
-    let page_size = NonZeroU32::new(DB_PAGE_SIZE).unwrap();
-    let sled_enum = DbSledAgentEnumerator { opctx, datastore, page_size };
+    let sled_enum = DbSledAgentEnumerator { opctx, datastore };
 
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
@@ -156,7 +161,6 @@ async fn inventory_activate(
 struct DbSledAgentEnumerator<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
-    page_size: NonZeroU32,
 }
 
 impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
@@ -164,26 +168,17 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
         &self,
     ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
         async {
-            let mut all_sleds = Vec::new();
-            let mut paginator = Paginator::new(self.page_size);
-            while let Some(p) = paginator.next() {
-                let records_batch = self
-                    .datastore
-                    .sled_list(&self.opctx, &p.current_pagparams())
-                    .await
-                    .context("listing sleds")?;
-                paginator = p.found_batch(
-                    &records_batch,
-                    &|s: &nexus_db_model::Sled| s.id(),
-                );
-                all_sleds.extend(
-                    records_batch
-                        .into_iter()
-                        .map(|sled| format!("http://{}", sled.address())),
-                );
-            }
-
-            Ok(all_sleds)
+            Ok(self
+                .datastore
+                .sled_list_all_batched(
+                    &self.opctx,
+                    SledFilter::QueryDuringInventory,
+                )
+                .await
+                .context("listing sleds")?
+                .into_iter()
+                .map(|sled| format!("http://{}", sled.address()))
+                .collect())
         }
         .boxed()
     }
@@ -191,6 +186,7 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
 
 #[cfg(test)]
 mod test {
+    use crate::app::authz;
     use crate::app::background::common::BackgroundTask;
     use crate::app::background::inventory_collection::DbSledAgentEnumerator;
     use crate::app::background::inventory_collection::InventoryCollector;
@@ -202,11 +198,13 @@ mod test {
     use nexus_db_queries::db::datastore::DataStoreInventoryTest;
     use nexus_inventory::SledAgentEnumerator;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
-    use omicron_test_utils::dev::poll;
+    use omicron_common::api::external::LookupType;
+    use omicron_uuid_kinds::CollectionUuid;
+    use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -216,36 +214,12 @@ mod test {
     // collections, too.
     #[nexus_test(server = crate::Server)]
     async fn test_basic(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-
-        // Nexus starts the very background task that we're also testing
-        // manually here.  As a result, we should find a collection in the
-        // database before too long.  Wait for it so that after it appears, we
-        // can assume the rest of the collections came from the instance that
-        // we're testing.
-        let mut last_collections =
-            poll::wait_for_condition::<_, anyhow::Error, _, _>(
-                || async {
-                    let collections = datastore
-                        .inventory_collections()
-                        .await
-                        .map_err(poll::CondCheckError::Failed)?;
-                    if collections.is_empty() {
-                        Err(poll::CondCheckError::NotYet)
-                    } else {
-                        Ok(collections)
-                    }
-                },
-                &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(15),
-            )
-            .await
-            .expect("background task did not populate initial collection");
 
         let resolver = internal_dns::resolver::Resolver::new_from_addrs(
             cptestctx.logctx.log.clone(),
@@ -253,9 +227,9 @@ mod test {
         )
         .unwrap();
 
-        // Now we'll create our own copy of the background task and activate it
-        // a bunch and make sure that it always creates a new collection and
-        // does not allow a backlog to accumulate.
+        // Create our own copy of the background task and activate it a bunch
+        // and make sure that it always creates a new collection and does not
+        // allow a backlog to accumulate.
         let nkeep = 3;
         let mut task = InventoryCollector::new(
             datastore.clone(),
@@ -265,25 +239,60 @@ mod test {
             false,
         );
         let nkeep = usize::try_from(nkeep).unwrap();
-        for i in 0..10 {
+        let mut all_our_collection_ids = Vec::new();
+        for i in 0..20 {
             let _ = task.activate(&opctx).await;
             let collections = datastore.inventory_collections().await.unwrap();
-            println!(
-                "iter {}: last = {:?}, current = {:?}",
-                i, last_collections, collections
-            );
 
-            let expected_from_last: Vec<_> = if last_collections.len() <= nkeep
-            {
-                last_collections
-            } else {
-                last_collections.into_iter().skip(1).collect()
-            };
-            let expected_from_current: Vec<_> =
-                collections.iter().rev().skip(1).rev().cloned().collect();
-            assert_eq!(expected_from_last, expected_from_current);
-            assert_eq!(collections.len(), std::cmp::min(i + 2, nkeep + 1));
-            last_collections = collections;
+            // Nexus is creating inventory collections concurrently with us,
+            // so our expectations here have to be flexible to account for the
+            // fact that there might be collections other than the ones we've
+            // activated interspersed with the ones we care about.
+            let num_collections = collections.len();
+
+            // We should have at least one collection (the one we just
+            // activated).
+            assert!(num_collections > 0);
+
+            // Regardless of the activation source, we should have at
+            // most `nkeep + 1` collections.
+            assert!(num_collections <= nkeep + 1);
+
+            // Filter down to just the collections we activated. (This could be
+            // empty if Nexus shoved several collections in!)
+            let our_collections = collections
+                .into_iter()
+                .filter(|c| c.collector == "me")
+                .map(|c| CollectionUuid::from(c.id))
+                .collect::<Vec<_>>();
+
+            // If we have no collections, we have nothing else to check; Nexus
+            // has pushed us out.
+            if our_collections.is_empty() {
+                println!(
+                    "iter {i}: no test collections \
+                    ({num_collections} Nexus collections)",
+                );
+                continue;
+            }
+
+            // The most recent collection should be new.
+            let new_collection_id = our_collections.last().unwrap();
+            assert!(!all_our_collection_ids.contains(new_collection_id));
+            all_our_collection_ids.push(*new_collection_id);
+
+            // Push this onto the collections we've seen, then assert that the
+            // tail of all IDs we've seen matches the ones we saw in this
+            // iteration (i.e., we're pushing out old collections in order).
+            println!(
+                "iter {i}: saw {our_collections:?}; \
+                 should match tail of {all_our_collection_ids:?}"
+            );
+            assert_eq!(
+                all_our_collection_ids
+                    [all_our_collection_ids.len() - our_collections.len()..],
+                our_collections
+            );
         }
 
         // Create a disabled task and make sure that does nothing.
@@ -294,29 +303,43 @@ mod test {
             3,
             true,
         );
-        let previous = datastore.inventory_collections().await.unwrap();
         let _ = task.activate(&opctx).await;
-        let latest = datastore.inventory_collections().await.unwrap();
-        assert_eq!(previous, latest);
+
+        // It's possible that Nexus is concurrently running with us still, so
+        // we'll activate this task and ensure that:
+        //
+        // (a) at least one of the collections is from `"me"` above, and
+        // (b) there is no collection from `"disabled"`
+        //
+        // This is technically still racy if Nexus manages to collect `nkeep +
+        // 1` collections in between the loop above and this check, but we don't
+        // expect that to be the case.
+        let latest_collectors = datastore
+            .inventory_collections()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.collector)
+            .collect::<BTreeSet<_>>();
+        println!("latest_collectors: {latest_collectors:?}");
+        assert!(latest_collectors.contains("me"));
+        assert!(!latest_collectors.contains("disabled"));
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_db_sled_enumerator(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let db_enum = DbSledAgentEnumerator {
-            opctx: &opctx,
-            datastore: &datastore,
-            page_size: NonZeroU32::new(3).unwrap(),
-        };
+        let db_enum =
+            DbSledAgentEnumerator { opctx: &opctx, datastore: &datastore };
 
         // There will be two sled agents set up as part of the test context.
-        let found_urls = db_enum.list_sled_agents().await.unwrap();
-        assert_eq!(found_urls.len(), 2);
+        let initial_found_urls = db_enum.list_sled_agents().await.unwrap();
+        assert_eq!(initial_found_urls.len(), 2);
 
         // Insert some sleds.
         let rack_id = Uuid::new_v4();
@@ -340,13 +363,14 @@ mod test {
                 rack_id,
                 Generation::new(),
             );
-            sleds.push(datastore.sled_upsert(sled).await.unwrap());
+            let (sled, _) = datastore.sled_upsert(sled).await.unwrap();
+            sleds.push(sled);
         }
 
         // The same enumerator should immediately find all the new sleds.
-        let mut expected_urls: Vec<_> = found_urls
+        let mut expected_urls: Vec<_> = initial_found_urls
             .into_iter()
-            .chain(sleds.into_iter().map(|s| format!("http://{}", s.address())))
+            .chain(sleds.iter().map(|s| format!("http://{}", s.address())))
             .collect();
         expected_urls.sort();
         println!("expected_urls: {:?}", expected_urls);
@@ -355,25 +379,30 @@ mod test {
         found_urls.sort();
         assert_eq!(expected_urls, found_urls);
 
-        // We should get the same result even with a page size of 1.
-        let db_enum = DbSledAgentEnumerator {
-            opctx: &opctx,
-            datastore: &datastore,
-            page_size: NonZeroU32::new(1).unwrap(),
-        };
+        // Now mark one expunged.  We should not find that sled any more.
+        let expunged_sled = &sleds[0];
+        let expunged_sled_id = expunged_sled.id();
+        let authz_sled = authz::Sled::new(
+            authz::FLEET,
+            expunged_sled_id,
+            LookupType::ById(expunged_sled_id),
+        );
+        datastore
+            .sled_set_policy_to_expunged(&opctx, &authz_sled)
+            .await
+            .expect("failed to mark sled expunged");
+        let expunged_sled_url = format!("http://{}", expunged_sled.address());
+        let (remaining_urls, removed_urls): (Vec<_>, Vec<_>) = expected_urls
+            .into_iter()
+            .partition(|sled_url| *sled_url != expunged_sled_url);
+        assert_eq!(
+            removed_urls.len(),
+            1,
+            "expected to find exactly one sled URL matching our \
+            expunged sled's URL"
+        );
         let mut found_urls = db_enum.list_sled_agents().await.unwrap();
         found_urls.sort();
-        assert_eq!(expected_urls, found_urls);
-
-        // We should get the same result even with a page size much larger than
-        // we need.
-        let db_enum = DbSledAgentEnumerator {
-            opctx: &opctx,
-            datastore: &datastore,
-            page_size: NonZeroU32::new(1024).unwrap(),
-        };
-        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
-        found_urls.sort();
-        assert_eq!(expected_urls, found_urls);
+        assert_eq!(remaining_urls, found_urls);
     }
 }
