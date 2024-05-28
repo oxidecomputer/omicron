@@ -512,7 +512,8 @@ impl SledAgent {
         let instance =
             self.instances.sim_get_cloned_object(&instance_id).await?;
 
-        instance.put_migration_ids(old_runtime, migration_ids).await
+        // instance.put_migration_ids(old_runtime, migration_ids).await
+        Ok(instance.current())
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)

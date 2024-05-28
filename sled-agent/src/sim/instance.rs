@@ -122,7 +122,7 @@ impl SimInstanceInner {
                 // actually starting migration.
                 self.queue_propolis_state(PropolisInstanceState::Migrating);
                 let migration_id =
-                    self.state.instance().migration_id.unwrap_or_else(|| {
+                    self.state.migration_id.unwrap_or_else(|| {
                         panic!(
                         "should have migration ID set before getting request to
                         migrate in (current state: {:?})",
@@ -250,7 +250,6 @@ impl SimInstanceInner {
             }
 
             self.state.apply_propolis_observation(&ObservedPropolisState::new(
-                &self.state.instance(),
                 &self.last_response,
             ))
         } else {
@@ -340,28 +339,6 @@ impl SimInstanceInner {
         self.destroyed = true;
         self.state.sled_instance_state()
     }
-
-    /// Stores a set of migration IDs in the instance's runtime state.
-    fn put_migration_ids(
-        &mut self,
-        old_runtime: &InstanceRuntimeState,
-        ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        if self.state.migration_ids_already_set(old_runtime, ids) {
-            return Ok(self.state.sled_instance_state());
-        }
-
-        if self.state.instance().gen != old_runtime.gen {
-            return Err(Error::invalid_request(format!(
-                "wrong Propolis ID generation: expected {}, got {}",
-                self.state.instance().gen,
-                old_runtime.gen
-            )));
-        }
-
-        self.state.set_migration_ids(ids, Utc::now());
-        Ok(self.state.sled_instance_state())
-    }
 }
 
 /// A simulation of an Instance created by the external Oxide API.
@@ -388,15 +365,6 @@ impl SimInstance {
     pub fn terminate(&self) -> SledInstanceState {
         self.inner.lock().unwrap().terminate()
     }
-
-    pub async fn put_migration_ids(
-        &self,
-        old_runtime: &InstanceRuntimeState,
-        ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let mut inner = self.inner.lock().unwrap();
-        inner.put_migration_ids(old_runtime, ids)
-    }
 }
 
 #[async_trait]
@@ -418,7 +386,6 @@ impl Simulatable for SimInstance {
         SimInstance {
             inner: Arc::new(Mutex::new(SimInstanceInner {
                 state: InstanceStates::new(
-                    todo!(),
                     current.vmm_state,
                     current.propolis_id,
                 ),
