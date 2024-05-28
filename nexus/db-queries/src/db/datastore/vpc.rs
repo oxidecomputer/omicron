@@ -1575,8 +1575,9 @@ impl DataStore {
                     .eq(subnet_dsl::custom_router_id)),
             )
             .filter(subnet_dsl::time_deleted.is_null())
-            .filter(subnet_dsl::vpc_id.is_null())
+            .filter(subnet_dsl::vpc_id.eq(vpc_id))
             .filter(router_dsl::time_deleted.is_null())
+            .filter(router_dsl::vpc_id.eq(vpc_id))
             .select((VpcSubnet::as_select(), VpcRouter::as_select()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
