@@ -14,6 +14,8 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
+use crate::db::model::ApplyBlueprintZoneFilterExt;
+use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
@@ -43,8 +45,8 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -653,7 +655,7 @@ impl DataStore {
         // Sleds to notify when firewall rules change.
         use db::schema::{
             bp_omicron_zone, bp_target, instance, instance_network_interface,
-            service, service_network_interface, sled, vmm,
+            service_network_interface, sled, vmm,
         };
         // Diesel requires us to use aliases in order to refer to the
         // `bp_target` table twice in the same query.
@@ -663,11 +665,7 @@ impl DataStore {
         );
 
         let instance_query = instance_network_interface::table
-            .inner_join(
-                instance::table
-                    .on(instance::id
-                        .eq(instance_network_interface::instance_id)),
-            )
+            .inner_join(instance::table)
             .inner_join(
                 vmm::table
                     .on(vmm::id.nullable().eq(instance::active_propolis_id)),
@@ -679,62 +677,7 @@ impl DataStore {
             .filter(vmm::time_deleted.is_null())
             .select(Sled::as_select());
 
-        // When Nexus accepts the rack initialization handoff from RSS, it
-        // populates the `service` table. We eventually want to retire it
-        // (https://github.com/oxidecomputer/omicron/issues/4947), and the
-        // Reconfigurator does not add new entries to it. We still need to query
-        // it for systems that are not yet under Reconfigurator control...
-        let rss_service_query = service_network_interface::table
-            .inner_join(
-                service::table
-                    .on(service::id.eq(service_network_interface::service_id)),
-            )
-            .inner_join(sled::table.on(sled::id.eq(service::sled_id)))
-            .filter(service_network_interface::vpc_id.eq(vpc_id))
-            .filter(service_network_interface::time_deleted.is_null())
-            .select(Sled::as_select());
-
-        // ... and we also need to query for the current target blueprint to
-        // support systems that _are_ under Reconfigurator control.
-
-        {
-            // Ideally this would do something like:
-            //
-            // .filter(bp_omicron_zone::disposition.eq_any(
-            //     BlueprintZoneDisposition::all_matching(
-            //         BlueprintZoneFilter::VpcFirewall,
-            //     ),
-            // )
-            //
-            // But that doesn't quite work today because we currently don't
-            // store the disposition enum next to each zone. Instead, this code
-            // makes its decision to select which sleds to return by just
-            // ignoring the zones_in_service table today.
-            //
-            // The purpose of this otherwise pointless block is to ensure that
-            // it is correct to ensure that the expressed logic by
-            // `BlueprintZoneFilter::VpcFirewall` matches the actual
-            // implementation. It will hopefully soon be replaced with storing
-            // the disposition in the bp_omicron_zone table and using the
-            // filter directly.
-
-            let mut matching = BlueprintZoneDisposition::all_matching(
-                BlueprintZoneFilter::VpcFirewall,
-            )
-            .collect::<Vec<_>>();
-            matching.sort();
-            let mut all = BlueprintZoneDisposition::all_matching(
-                BlueprintZoneFilter::All,
-            )
-            .collect::<Vec<_>>();
-            all.sort();
-            debug_assert_eq!(
-                matching, all,
-                "vpc firewall dispositions should match all dispositions"
-            );
-        }
-
-        let reconfig_service_query = service_network_interface::table
+        let service_query = service_network_interface::table
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
             ))
@@ -759,6 +702,11 @@ impl DataStore {
                         .limit(1),
                 ),
             )
+            // Filter out services that are expunged and shouldn't be resolved
+            // here.
+            .blueprint_zone_filter(
+                BlueprintZoneFilter::ShouldDeployVpcFirewallRules,
+            )
             .filter(service_network_interface::vpc_id.eq(vpc_id))
             .filter(service_network_interface::time_deleted.is_null())
             .select(Sled::as_select());
@@ -766,6 +714,7 @@ impl DataStore {
         let mut sleds = sled::table
             .select(Sled::as_select())
             .filter(sled::time_deleted.is_null())
+            .sled_filter(SledFilter::VpcFirewall)
             .into_boxed();
         if !sleds_filter.is_empty() {
             sleds = sleds.filter(sled::id.eq_any(sleds_filter.to_vec()));
@@ -773,11 +722,7 @@ impl DataStore {
 
         let conn = self.pool_connection_unauthorized().await?;
         sleds
-            .intersect(
-                instance_query
-                    .union(rss_service_query)
-                    .union(reconfig_service_query),
-            )
+            .intersect(instance_query.union(service_query))
             .get_results_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -1223,8 +1168,8 @@ impl DataStore {
         let mut result = BTreeMap::new();
         for subnet in subnets {
             let entry = result.entry(subnet.name).or_insert_with(Vec::new);
-            entry.push(IpNetwork::V4(subnet.ipv4_block.0 .0));
-            entry.push(IpNetwork::V6(subnet.ipv6_block.0 .0));
+            entry.push(IpNetwork::V4(subnet.ipv4_block.0.into()));
+            entry.push(IpNetwork::V6(subnet.ipv6_block.0.into()));
         }
         Ok(result)
     }
@@ -1284,33 +1229,28 @@ mod tests {
     use crate::db::datastore::test::sled_baseboard_for_test;
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
-    use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::SledUpdate;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::system::SledBuilder;
+    use nexus_reconfigurator_planning::system::SystemDescription;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZonesConfig;
-    use nexus_types::deployment::OmicronZoneConfig;
-    use nexus_types::deployment::OmicronZoneType;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
-    use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::external::IpNet;
-    use omicron_common::api::external::MacAddr;
-    use omicron_common::api::external::Vni;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use slog::info;
-    use std::collections::BTreeMap;
-    use std::net::IpAddr;
 
     // Test that we detect the right error condition and return None when we
     // fail to insert a VPC due to VNI exhaustion.
@@ -1530,123 +1470,41 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[derive(Debug)]
-    struct Harness {
-        rack_id: Uuid,
-        sled_ids: Vec<Uuid>,
-        nexuses: Vec<HarnessNexus>,
+    async fn assert_service_sled_ids(
+        datastore: &DataStore,
+        expected_sled_ids: &[SledUuid],
+    ) {
+        let mut service_sled_ids = datastore
+            .vpc_resolve_to_sleds(*SERVICES_VPC_ID, &[])
+            .await
+            .expect("failed to resolve to sleds")
+            .into_iter()
+            .map(|sled| SledUuid::from_untyped_uuid(sled.id()))
+            .collect::<Vec<_>>();
+        service_sled_ids.sort();
+        assert_eq!(expected_sled_ids, service_sled_ids);
     }
 
-    #[derive(Debug)]
-    struct HarnessNexus {
-        id: Uuid,
-        ip: IpAddr,
-        mac: MacAddr,
-        nic_id: Uuid,
-    }
-
-    impl Harness {
-        fn new(num_sleds: usize) -> Self {
-            let mut sled_ids =
-                (0..num_sleds).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
-            sled_ids.sort();
-
-            let mut nexus_ips = NEXUS_OPTE_IPV4_SUBNET
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                .map(IpAddr::from);
-            let mut nexus_macs = MacAddr::iter_system();
-            let nexuses = (0..num_sleds)
-                .map(|_| HarnessNexus {
-                    id: Uuid::new_v4(),
-                    ip: nexus_ips.next().unwrap(),
-                    mac: nexus_macs.next().unwrap(),
-                    nic_id: Uuid::new_v4(),
-                })
-                .collect::<Vec<_>>();
-            Self { rack_id: Uuid::new_v4(), sled_ids, nexuses }
-        }
-
-        fn db_sleds(&self) -> impl Iterator<Item = SledUpdate> + '_ {
-            self.sled_ids.iter().copied().map(|sled_id| {
-                SledUpdate::new(
-                    sled_id,
-                    "[::1]:0".parse().unwrap(),
-                    sled_baseboard_for_test(),
-                    sled_system_hardware_for_test(),
-                    self.rack_id,
-                    Generation::new().into(),
-                )
-            })
-        }
-
-        fn db_services(
-            &self,
-        ) -> impl Iterator<
-            Item = (db::model::Service, db::model::IncompleteNetworkInterface),
-        > + '_ {
-            self.sled_ids.iter().zip(&self.nexuses).map(|(sled_id, nexus)| {
-                let service = db::model::Service::new(
-                    nexus.id,
-                    *sled_id,
-                    Some(nexus.id),
-                    "[::1]:0".parse().unwrap(),
-                    db::model::ServiceKind::Nexus,
-                );
-                let name = format!("test-nexus-{}", nexus.id);
-                let nic = db::model::IncompleteNetworkInterface::new_service(
-                    nexus.nic_id,
-                    nexus.id,
-                    NEXUS_VPC_SUBNET.clone(),
-                    IdentityMetadataCreateParams {
-                        name: name.parse().unwrap(),
-                        description: name,
-                    },
-                    nexus.ip,
-                    nexus.mac,
-                    0,
-                )
-                .expect("failed to create incomplete Nexus NIC");
-                (service, nic)
-            })
-        }
-
-        fn blueprint_zone_configs(
-            &self,
-        ) -> impl Iterator<Item = (Uuid, BlueprintZoneConfig)> + '_ {
-            self.db_services().map(|(service, nic)| {
-                let config = OmicronZoneConfig {
-                    id: service.id(),
-                    underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::Nexus {
-                        internal_address: "[::1]:0".to_string(),
-                        external_ip: "::1".parse().unwrap(),
-                        nic: NetworkInterface {
-                            id: nic.identity.id,
-                            kind: NetworkInterfaceKind::Service {
-                                id: service.id(),
-                            },
-                            name: format!("test-nic-{}", nic.identity.id)
-                                .parse()
-                                .unwrap(),
-                            ip: nic.ip.unwrap(),
-                            mac: nic.mac.unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-                            vni: Vni::SERVICES_VNI,
-                            primary: true,
-                            slot: nic.slot.unwrap(),
-                        },
-                        external_tls: false,
-                        external_dns_servers: Vec::new(),
-                    },
-                };
-                let zone_config = BlueprintZoneConfig {
-                    config,
-                    disposition: BlueprintZoneDisposition::InService,
-                };
-                (service.sled_id, zone_config)
-            })
-        }
+    async fn bp_insert_and_make_target(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        bp: &Blueprint,
+    ) {
+        datastore
+            .blueprint_insert(opctx, bp)
+            .await
+            .expect("inserted blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: bp.id,
+                    enabled: true,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("made blueprint the target");
     }
 
     #[tokio::test]
@@ -1659,250 +1517,233 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Helper function to fetch and sort the IDs of sleds we've resolved the
-        // SERVICES_VPC_ID to.
-        let fetch_service_sled_ids = || async {
-            let mut service_sled_ids = datastore
-                .vpc_resolve_to_sleds(*SERVICES_VPC_ID, &[])
-                .await
-                .expect("failed to resolve to sleds")
-                .into_iter()
-                .map(|sled| sled.id())
-                .collect::<Vec<_>>();
-            service_sled_ids.sort();
-            service_sled_ids
-        };
-
-        // Create four sleds.
-        let harness = Harness::new(4);
-        for sled in harness.db_sleds() {
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
-        }
-
-        // Insert two Nexus records into `service`, emulating RSS.
-        for (service, nic) in harness.db_services().take(2) {
+        // Set up our fake system with 5 sleds.
+        let rack_id = Uuid::new_v4();
+        let mut system = SystemDescription::new();
+        let mut sled_ids = Vec::new();
+        for _ in 0..5 {
+            let sled_id = SledUuid::new_v4();
+            sled_ids.push(sled_id);
+            system.sled(SledBuilder::new().id(sled_id)).expect("adding sled");
             datastore
-                .service_upsert(&opctx, service)
+                .sled_upsert(SledUpdate::new(
+                    sled_id.into_untyped_uuid(),
+                    "[::1]:0".parse().unwrap(),
+                    sled_baseboard_for_test(),
+                    sled_system_hardware_for_test(),
+                    rack_id,
+                    Generation::new().into(),
+                ))
                 .await
-                .expect("failed to insert RSS-like service");
-            datastore
-                .service_create_network_interface_raw(&opctx, nic)
-                .await
-                .expect("failed to insert Nexus NIC");
+                .expect("upserting sled");
         }
+        sled_ids.sort_unstable();
+        let planning_input = system
+            .to_planning_input_builder()
+            .expect("creating planning builder")
+            .build();
 
-        // Ensure we find the two sleds we expect after adding Nexus records.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
-
-        // Create a blueprint that has a Nexus on our third sled. (This
-        // blueprint is completely invalid in many ways, but all we care about
-        // here is inserting relevant records in `bp_omicron_zone`.)
-        let bp1_zones = {
-            let (sled_id, zone_config) = harness
-                .blueprint_zone_configs()
-                .nth(2)
-                .expect("fewer than 3 services in test harness");
-            let mut zones = BTreeMap::new();
-            zones.insert(
-                sled_id,
-                BlueprintZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![zone_config],
+        // Helper to convert a zone's nic into an insertable nic.
+        let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
+            let (_, nic) = zone_config
+                .zone_type
+                .external_networking()
+                .expect("external networking for zone type");
+            IncompleteNetworkInterface::new_service(
+                nic.id,
+                zone_config.id.into_untyped_uuid(),
+                NEXUS_VPC_SUBNET.clone(),
+                IdentityMetadataCreateParams {
+                    name: nic.name.clone(),
+                    description: nic.name.to_string(),
                 },
-            );
-            zones
-        };
-        let bp1_id = Uuid::new_v4();
-        let bp1 = Blueprint {
-            id: bp1_id,
-            blueprint_zones: bp1_zones,
-            parent_blueprint_id: None,
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            time_created: Utc::now(),
-            creator: "test".to_string(),
-            comment: "test".to_string(),
-        };
-        datastore
-            .blueprint_insert(&opctx, &bp1)
-            .await
-            .expect("failed to insert blueprint");
-
-        // We haven't set a blueprint target yet, so we should still only see
-        // the two RSS-inserted service-running sleds.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
-
-        // Make bp1 the current target.
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: bp1_id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
+                nic.ip,
+                nic.mac,
+                nic.slot,
             )
-            .await
-            .expect("failed to set blueprint target");
+            .expect("creating service nic")
+        };
+
+        // Create an initial, empty blueprint, and make it the target.
+        let bp0 = BlueprintBuilder::build_empty_with_sleds(
+            sled_ids.iter().copied(),
+            "test",
+        );
+        bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
+
+        // Our blueprint doesn't describe any services, so we shouldn't find any
+        // sled IDs running services.
+        assert_service_sled_ids(&datastore, &[]).await;
+
+        // Create a blueprint that has a Nexus on our third sled.
+        let bp1 = {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &bp0,
+                &planning_input,
+                "test",
+            )
+            .expect("created blueprint builder");
+            builder
+                .sled_ensure_zone_multiple_nexus_with_config(
+                    sled_ids[2],
+                    1,
+                    false,
+                    Vec::new(),
+                )
+                .expect("added nexus to third sled");
+            builder.build()
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // bp1 is the target, but we haven't yet inserted a vNIC record, so
-        // we'll still only see the original 2 sleds.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        // we still won't see any services on sleds.
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Insert the relevant service NIC record (normally performed by the
         // reconfigurator's executor).
-        datastore
+        let bp1_nic = datastore
             .service_create_network_interface_raw(
                 &opctx,
-                harness.db_services().nth(2).unwrap().1,
+                db_nic_from_zone(&bp1.blueprint_zones[&sled_ids[2]].zones[0]),
             )
             .await
             .expect("failed to insert service VNIC");
+        // We should now see our third sled running a service.
+        assert_service_sled_ids(&datastore, &[sled_ids[2]]).await;
 
-        // We should now see _three_ sleds running services.
-        assert_eq!(&harness.sled_ids[..3], fetch_service_sled_ids().await);
-
-        // Create another blueprint with no services and make it the target.
-        let bp2_id = Uuid::new_v4();
-        let bp2 = Blueprint {
-            id: bp2_id,
-            blueprint_zones: BTreeMap::new(),
-            parent_blueprint_id: Some(bp1_id),
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            time_created: Utc::now(),
-            creator: "test".to_string(),
-            comment: "test".to_string(),
+        // Create another blueprint, remove the one nexus we added, and make it
+        // the target.
+        let bp2 = {
+            let mut bp2 = bp1.clone();
+            bp2.id = Uuid::new_v4();
+            bp2.parent_blueprint_id = Some(bp1.id);
+            let sled2_zones = bp2
+                .blueprint_zones
+                .get_mut(&sled_ids[2])
+                .expect("zones for third sled");
+            sled2_zones.zones.clear();
+            sled2_zones.generation = sled2_zones.generation.next();
+            bp2
         };
-        datastore
-            .blueprint_insert(&opctx, &bp2)
-            .await
-            .expect("failed to insert blueprint");
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: bp2_id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
-            )
-            .await
-            .expect("failed to set blueprint target");
+        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
 
         // We haven't removed the service NIC record, but we should no longer
-        // see the third sled here, because we should be back to just the
-        // original two services in the `service` table.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        // see the third sled here. We should be back to no sleds with services.
+        assert_service_sled_ids(&datastore, &[]).await;
 
-        // Insert a service NIC record for our fourth sled's Nexus. This
-        // shouldn't change our VPC resolution.
+        // Delete the service NIC record so we can reuse this IP later.
         datastore
-            .service_create_network_interface_raw(
+            .service_delete_network_interface(
                 &opctx,
-                harness.db_services().nth(3).unwrap().1,
+                bp1.blueprint_zones[&sled_ids[2]].zones[0]
+                    .id
+                    .into_untyped_uuid(),
+                bp1_nic.id(),
             )
             .await
-            .expect("failed to insert service VNIC");
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+            .expect("deleted bp1 nic");
 
-        // Create a blueprint that has a Nexus on our fourth sled. This
-        // shouldn't change our VPC resolution.
-        let bp3_zones = {
-            let (sled_id, zone_config) = harness
-                .blueprint_zone_configs()
-                .nth(3)
-                .expect("fewer than 3 services in test harness");
-            let mut zones = BTreeMap::new();
-            zones.insert(
-                sled_id,
-                BlueprintZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![zone_config],
-                },
-            );
-            zones
-        };
-        let bp3_id = Uuid::new_v4();
-        let bp3 = Blueprint {
-            id: bp3_id,
-            blueprint_zones: bp3_zones,
-            parent_blueprint_id: Some(bp2_id),
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            time_created: Utc::now(),
-            creator: "test".to_string(),
-            comment: "test".to_string(),
-        };
-        datastore
-            .blueprint_insert(&opctx, &bp3)
-            .await
-            .expect("failed to insert blueprint");
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
-
-        // Make this blueprint the target. We've already created the service
-        // VNIC, so we should immediately see our fourth sled in VPC resolution.
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: bp3_id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
+        // Create a blueprint with Nexus on all our sleds.
+        let bp3 = {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &bp2,
+                &planning_input,
+                "test",
             )
-            .await
-            .expect("failed to set blueprint target");
-        assert_eq!(
-            &[harness.sled_ids[0], harness.sled_ids[1], harness.sled_ids[3]]
-                as &[Uuid],
-            fetch_service_sled_ids().await
-        );
-
-        // Finally, create a blueprint that includes our third and fourth sleds,
-        // make it the target, and ensure we resolve to all four sleds.
-        let bp4_zones = {
-            let mut zones = BTreeMap::new();
-            for (sled_id, zone_config) in
-                harness.blueprint_zone_configs().skip(2)
-            {
-                zones.insert(
-                    sled_id,
-                    BlueprintZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![zone_config],
-                    },
-                );
+            .expect("created blueprint builder");
+            for &sled_id in &sled_ids {
+                builder
+                    .sled_ensure_zone_multiple_nexus_with_config(
+                        sled_id,
+                        1,
+                        false,
+                        Vec::new(),
+                    )
+                    .expect("added nexus to third sled");
             }
-            zones
+            builder.build()
         };
-        let bp4_id = Uuid::new_v4();
-        let bp4 = Blueprint {
-            id: bp4_id,
-            blueprint_zones: bp4_zones,
-            parent_blueprint_id: Some(bp3_id),
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            time_created: Utc::now(),
-            creator: "test".to_string(),
-            comment: "test".to_string(),
+
+        // Insert the service NIC records for all the Nexuses.
+        for &sled_id in &sled_ids {
+            datastore
+                .service_create_network_interface_raw(
+                    &opctx,
+                    db_nic_from_zone(&bp3.blueprint_zones[&sled_id].zones[0]),
+                )
+                .await
+                .expect("failed to insert service VNIC");
+        }
+
+        // We haven't made bp3 the target yet, so our resolution is still based
+        // on bp2; more service vNICs shouldn't matter.
+        assert_service_sled_ids(&datastore, &[]).await;
+
+        // Make bp3 the target; we should immediately resolve that there are
+        // services on the sleds we set up in bp3.
+        bp_insert_and_make_target(&opctx, &datastore, &bp3).await;
+        assert_service_sled_ids(&datastore, &sled_ids).await;
+
+        // ---
+
+        // Mark some sleds as ineligible. Only the non-provisionable and
+        // in-service sleds should be returned.
+        let ineligible = IneligibleSleds {
+            expunged: sled_ids[0],
+            decommissioned: sled_ids[1],
+            illegal_decommissioned: sled_ids[2],
+            non_provisionable: sled_ids[3],
         };
-        datastore
-            .blueprint_insert(&opctx, &bp4)
+        ineligible
+            .setup(&opctx, &datastore)
             .await
-            .expect("failed to insert blueprint");
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: bp4_id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
-            )
+            .expect("failed to set up ineligible sleds");
+        assert_service_sled_ids(&datastore, &sled_ids[3..=4]).await;
+
+        // ---
+
+        // Bring the sleds marked above back to life.
+        ineligible
+            .undo(&opctx, &datastore)
             .await
-            .expect("failed to set blueprint target");
-        assert_eq!(harness.sled_ids, fetch_service_sled_ids().await);
+            .expect("failed to undo ineligible sleds");
+        assert_service_sled_ids(&datastore, &sled_ids).await;
+
+        // Make a new blueprint marking one of the zones as quiesced and one as
+        // expunged. Ensure that the sled with *quiesced* zone is returned by
+        // vpc_resolve_to_sleds, but the sled with the *expunged* zone is not.
+        // (But other services are still running.)
+        let bp4 = {
+            let mut bp4 = bp3.clone();
+            bp4.id = Uuid::new_v4();
+            bp4.parent_blueprint_id = Some(bp3.id);
+
+            // Sled index 2's Nexus is quiesced (should be included).
+            let sled2 = bp4
+                .blueprint_zones
+                .get_mut(&sled_ids[2])
+                .expect("zones for sled");
+            sled2.zones[0].disposition = BlueprintZoneDisposition::Quiesced;
+            sled2.generation = sled2.generation.next();
+
+            // Sled index 3's zone is expunged (should be excluded).
+            let sled3 = bp4
+                .blueprint_zones
+                .get_mut(&sled_ids[3])
+                .expect("zones for sled");
+            sled3.zones[0].disposition = BlueprintZoneDisposition::Expunged;
+            sled3.generation = sled3.generation.next();
+
+            bp4
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp4).await;
+        assert_service_sled_ids(
+            &datastore,
+            &[sled_ids[0], sled_ids[1], sled_ids[2], sled_ids[4]],
+        )
+        .await;
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

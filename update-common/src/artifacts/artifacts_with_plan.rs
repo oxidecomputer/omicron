@@ -207,7 +207,7 @@ impl ArtifactsWithPlan {
                 .find_target(&target_name)
                 .map_err(|error| RepositoryError::TargetHashRead {
                     target: artifact.target.clone(),
-                    error,
+                    error: Box::new(error),
                 })?
                 .hashes
                 .sha256

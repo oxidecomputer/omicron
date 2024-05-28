@@ -17,9 +17,10 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use uuid::Uuid;
 
 /// Returns an example Collection used for testing
 ///
@@ -276,7 +277,7 @@ pub fn representative() -> Representative {
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "macrohard".to_string(),
                 model: "box".to_string(),
                 serial: "XXIV".to_string(),
@@ -286,7 +287,7 @@ pub fn representative() -> Representative {
         },
         // ... and a couple different vendors for our U.2s
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0001".to_string(),
@@ -295,7 +296,7 @@ pub fn representative() -> Representative {
             slot: 1,
         },
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0002".to_string(),
@@ -304,7 +305,7 @@ pub fn representative() -> Representative {
             slot: 2,
         },
         sled_agent_client::types::InventoryDisk {
-            identity: sled_agent_client::types::DiskIdentity {
+            identity: omicron_common::disk::DiskIdentity {
                 vendor: "tony".to_string(),
                 model: "craystation".to_string(),
                 serial: "5".to_string(),
@@ -447,7 +448,19 @@ pub struct Representative {
     pub sleds: [Arc<BaseboardId>; 4],
     pub switch: Arc<BaseboardId>,
     pub psc: Arc<BaseboardId>,
-    pub sled_agents: [Uuid; 4],
+    pub sled_agents: [SledUuid; 4],
+}
+
+impl Representative {
+    pub fn new(
+        builder: CollectionBuilder,
+        sleds: [Arc<BaseboardId>; 4],
+        switch: Arc<BaseboardId>,
+        psc: Arc<BaseboardId>,
+        sled_agents: [SledUuid; 4],
+    ) -> Self {
+        Self { builder, sleds, switch, psc, sled_agents }
+    }
 }
 
 /// Returns an SP state that can be used to populate a collection for testing
@@ -487,7 +500,7 @@ pub fn rot_page(unique: &str) -> RotPage {
 }
 
 pub fn sled_agent(
-    sled_id: Uuid,
+    sled_id: SledUuid,
     baseboard: sled_agent_client::types::Baseboard,
     sled_role: sled_agent_client::types::SledRole,
     disks: Vec<sled_agent_client::types::InventoryDisk>,
@@ -498,7 +511,7 @@ pub fn sled_agent(
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
-        sled_id,
+        sled_id: sled_id.into_untyped_uuid(),
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
         disks,

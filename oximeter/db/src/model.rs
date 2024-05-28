@@ -64,7 +64,7 @@ impl From<u64> for DbBool {
 
 impl From<bool> for DbBool {
     fn from(b: bool) -> Self {
-        DbBool { inner: b as _ }
+        DbBool { inner: u8::from(b) }
     }
 }
 
@@ -391,7 +391,7 @@ declare_field_row! {I32FieldRow, i32, "i32"}
 declare_field_row! {U32FieldRow, u32, "u32"}
 declare_field_row! {I64FieldRow, i64, "i64"}
 declare_field_row! {U64FieldRow, u64, "u64"}
-declare_field_row! {StringFieldRow, String, "string"}
+declare_field_row! {StringFieldRow, std::borrow::Cow<'static, str>, "string"}
 declare_field_row! {IpAddrFieldRow, Ipv6Addr, "ipaddr"}
 declare_field_row! {UuidFieldRow, Uuid, "uuid"}
 
@@ -1600,30 +1600,23 @@ pub(crate) fn parse_field_select_row(
 ) -> (TimeseriesKey, Target, Metric) {
     assert_eq!(
         row.fields.len(),
-        2 * schema.field_schema.len(),
-        "Expected pairs of (field_name, field_value) from the field query"
+        schema.field_schema.len(),
+        "Expected the same number of fields in each row as the schema itself",
     );
     let (target_name, metric_name) = schema.component_names();
     let mut target_fields = Vec::new();
     let mut metric_fields = Vec::new();
-    let mut actual_fields = row.fields.values();
+    let mut actual_fields = row.fields.iter();
     for _ in 0..schema.field_schema.len() {
         // Extract the field name from the row and find a matching expected field.
-        let actual_field_name = actual_fields
+        let (actual_field_name, actual_field_value) = actual_fields
             .next()
             .expect("Missing a field name from a field select query");
-        let name = actual_field_name
-            .as_str()
-            .expect("Expected a string field name")
-            .to_string();
-        let expected_field = schema.schema_for_field(&name).expect(
+        let expected_field = schema.schema_for_field(actual_field_name).expect(
             "Found field with name that is not part of the timeseries schema",
         );
 
         // Parse the field value as the expected type
-        let actual_field_value = actual_fields
-            .next()
-            .expect("Missing a field value from a field select query");
         let value = match expected_field.field_type {
             FieldType::Bool => {
                 FieldValue::Bool(bool::from(DbBool::from(
@@ -1723,10 +1716,11 @@ pub(crate) fn parse_field_select_row(
                         .as_str()
                         .expect("Expected a UUID string for a Uuid field from the database")
                         .to_string()
+                        .into()
                     )
             }
         };
-        let field = Field { name, value };
+        let field = Field { name: actual_field_name.to_string(), value };
         match expected_field.source {
             FieldSource::Target => target_fields.push(field),
             FieldSource::Metric => metric_fields.push(field),

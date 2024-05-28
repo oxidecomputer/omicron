@@ -5,12 +5,15 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::params::{OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType};
+use crate::params::{
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, OmicronZoneConfig,
+    OmicronZoneDataset, OmicronZoneType,
+};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::config::{Host, ZoneVariant};
+use internal_dns::config::{Host, Zone};
 use internal_dns::ServiceName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
@@ -18,14 +21,16 @@ use omicron_common::address::{
     MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
     RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
-use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
+    SourceNatConfigError,
 };
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -59,7 +64,7 @@ const CLICKHOUSE_COUNT: usize = 1;
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
-const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
+const MINIMUM_U2_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
 const PANTRY_COUNT: usize = 3;
@@ -94,10 +99,16 @@ pub enum PlanError {
 
     #[error("Found only v1 service plan")]
     FoundV1,
+
+    #[error("Found only v2 service plan")]
+    FoundV2,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
+    /// Control plane disks configured for this sled
+    pub disks: OmicronPhysicalDisksConfig,
+
     /// zones configured for this sled
     pub zones: Vec<OmicronZoneConfig>,
 }
@@ -115,7 +126,8 @@ impl Ledgerable for Plan {
     fn generation_bump(&mut self) {}
 }
 const RSS_SERVICE_PLAN_V1_FILENAME: &str = "rss-service-plan.json";
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v2.json";
+const RSS_SERVICE_PLAN_V2_FILENAME: &str = "rss-service-plan-v2.json";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v3.json";
 
 impl Plan {
     pub async fn load(
@@ -123,7 +135,7 @@ impl Plan {
         storage_manager: &StorageHandle,
     ) -> Result<Option<Plan>, PlanError> {
         let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -167,6 +179,14 @@ impl Plan {
             // support a condition that we do not believe can ever happen in any
             // system.
             Err(PlanError::FoundV1)
+        } else if Self::has_v2(storage_manager).await.map_err(|err| {
+            // Same as the comment above, but for version 2.
+            PlanError::Io {
+                message: String::from("looking for v2 RSS plan"),
+                err,
+            }
+        })? {
+            Err(PlanError::FoundV2)
         } else {
             Ok(None)
         }
@@ -176,11 +196,30 @@ impl Plan {
         storage_manager: &StorageHandle,
     ) -> Result<bool, std::io::Error> {
         let paths = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME));
+
+        for p in paths {
+            if p.try_exists()? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn has_v2(
+        storage_manager: &StorageHandle,
+    ) -> Result<bool, std::io::Error> {
+        let paths = storage_manager
+            .get_latest_disks()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_V2_FILENAME));
 
         for p in paths {
             if p.try_exists()? {
@@ -214,11 +253,10 @@ impl Plan {
         }
     }
 
-    // Gets zpool UUIDs from U.2 devices on the sled.
-    async fn get_u2_zpools_from_sled(
+    async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
-    ) -> Result<Vec<ZpoolName>, PlanError> {
+    ) -> Result<SledAgentTypes::Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -231,52 +269,47 @@ impl Plan {
             log.new(o!("SledAgentClient" => address.to_string())),
         );
 
-        let get_u2_zpools = || async {
-            let zpools: Vec<ZpoolName> = client
-                .zpools_get()
+        let get_inventory = || async {
+            let inventory = client
+                .inventory()
                 .await
-                .map(|response| {
-                    response
-                        .into_inner()
-                        .into_iter()
-                        .filter_map(|zpool| match zpool.disk_type {
-                            SledAgentTypes::DiskType::U2 => {
-                                Some(ZpoolName::new_external(zpool.id))
-                            }
-                            SledAgentTypes::DiskType::M2 => None,
-                        })
-                        .collect()
-                })
+                .map(|response| response.into_inner())
                 .map_err(|err| {
                     BackoffError::transient(PlanError::SledApi(err))
                 })?;
 
-            if zpools.len() < MINIMUM_U2_ZPOOL_COUNT {
+            if inventory
+                .disks
+                .iter()
+                .filter(|disk| {
+                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
+                })
+                .count()
+                < MINIMUM_U2_COUNT
+            {
                 return Err(BackoffError::transient(
-                    PlanError::SledInitialization(
-                        "Awaiting zpools".to_string(),
-                    ),
+                    PlanError::SledInitialization("Awaiting disks".to_string()),
                 ));
             }
 
-            Ok(zpools)
+            Ok(inventory)
         };
 
-        let log_failure = |error, call_count, total_duration| {
+        let log_failure = |error: PlanError, call_count, total_duration| {
             if call_count == 0 {
-                info!(log, "failed to get zpools from {address}"; "error" => ?error);
+                info!(log, "failed to get inventory from {address}"; "error" => ?error);
             } else if total_duration > std::time::Duration::from_secs(20) {
-                warn!(log, "failed to get zpools from {address}"; "error" => ?error, "total duration" => ?total_duration);
+                warn!(log, "failed to get inventory from {address}"; "error" => ?error, "total duration" => ?total_duration);
             }
         };
-        let u2_zpools = retry_notify_ext(
+        let inventory = retry_notify_ext(
             retry_policy_internal_service_aggressive(),
-            get_u2_zpools,
+            get_inventory,
             log_failure,
         )
         .await?;
 
-        Ok(u2_zpools)
+        Ok(inventory)
     }
 
     pub fn create_transient(
@@ -307,6 +340,37 @@ impl Plan {
                 .unwrap();
         }
 
+        // Set up storage early, as it'll be necessary for placement of
+        // many subsequent services.
+        //
+        // Our policy at RSS time is currently "adopt all the U.2 disks we can see".
+        for sled_info in sled_info.iter_mut() {
+            let disks = sled_info
+                .inventory
+                .disks
+                .iter()
+                .filter(|disk| {
+                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
+                })
+                .map(|disk| OmicronPhysicalDiskConfig {
+                    identity: disk.identity.clone(),
+                    id: Uuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
+                })
+                .collect();
+            sled_info.request.disks = OmicronPhysicalDisksConfig {
+                generation: Generation::new(),
+                disks,
+            };
+            sled_info.u2_zpools = sled_info
+                .request
+                .disks
+                .disks
+                .iter()
+                .map(|disk| ZpoolName::new_external(disk.pool_id))
+                .collect();
+        }
+
         // We'll stripe most services across all available Sleds, round-robin
         // style.  In development and CI, this might only be one Sled.  We'll
         // only report `NotEnoughSleds` below if there are zero Sleds or if we
@@ -320,11 +384,11 @@ impl Plan {
             &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
             .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().ip().into())
+            .map(|dns_subnet| dns_subnet.dns_address().into())
             .collect::<Vec<IpAddr>>();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
-            let ip = dns_subnet.dns_address().ip();
+            let ip = dns_subnet.dns_address();
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -333,7 +397,7 @@ impl Plan {
             let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
             let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
 
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -346,7 +410,8 @@ impl Plan {
                 sled.alloc_from_u2_zpool(DatasetKind::InternalDns)?;
 
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::InternalDns {
                     dataset: OmicronZoneDataset {
@@ -354,7 +419,7 @@ impl Plan {
                     },
                     http_address,
                     dns_address,
-                    gz_address: dns_subnet.gz_address().ip(),
+                    gz_address: dns_subnet.gz_address(),
                     gz_address_index: i.try_into().expect("Giant indices?"),
                 },
             });
@@ -367,7 +432,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -382,7 +447,8 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::CockroachDb)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::CockroachDb {
                     dataset: OmicronZoneDataset {
@@ -398,7 +464,7 @@ impl Plan {
         // server IP addresses given to us at RSS-time.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         loop {
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let Some((nic, external_ip)) = svc_port_builder.next_dns(id) else {
                 break;
             };
@@ -425,7 +491,8 @@ impl Plan {
             let dataset_name = sled.alloc_from_u2_zpool(dataset_kind)?;
 
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: *http_address.ip(),
                 zone_type: OmicronZoneType::ExternalDns {
                     dataset: OmicronZoneDataset {
@@ -445,7 +512,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             dns_builder
                 .host_zone_with_one_backend(
@@ -457,7 +524,8 @@ impl Plan {
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type: OmicronZoneType::Nexus {
                     internal_address: SocketAddrV6::new(
@@ -488,7 +556,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             dns_builder
                 .host_zone_with_one_backend(
@@ -499,7 +567,8 @@ impl Plan {
                 )
                 .unwrap();
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type: OmicronZoneType::Oximeter {
                     address: SocketAddrV6::new(
@@ -520,7 +589,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -535,7 +604,8 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::Clickhouse)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::Clickhouse {
                     address,
@@ -556,7 +626,7 @@ impl Plan {
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -571,7 +641,8 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::ClickhouseKeeper {
                     address,
@@ -592,7 +663,7 @@ impl Plan {
             };
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -602,7 +673,8 @@ impl Plan {
                 )
                 .unwrap();
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type: OmicronZoneType::CruciblePantry {
                     address: SocketAddrV6::new(address, port, 0, 0),
@@ -617,7 +689,7 @@ impl Plan {
                 let ip = sled.addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CRUCIBLE_PORT;
                 let address = SocketAddrV6::new(ip, port, 0, 0);
-                let id = Uuid::new_v4();
+                let id = OmicronZoneUuid::new_v4();
                 dns_builder
                     .host_zone_with_one_backend(
                         id,
@@ -628,7 +700,8 @@ impl Plan {
                     .unwrap();
 
                 sled.request.zones.push(OmicronZoneConfig {
-                    id,
+                    // TODO-cleanup use TypedUuid everywhere
+                    id: id.into_untyped_uuid(),
                     underlay_address: ip,
                     zone_type: OmicronZoneType::Crucible {
                         address,
@@ -643,13 +716,13 @@ impl Plan {
         // network.
         let mut boundary_ntp_servers = vec![];
         for (idx, sled) in sled_info.iter_mut().enumerate() {
-            let id = Uuid::new_v4();
+            let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
                 boundary_ntp_servers
-                    .push(Host::for_zone(id, ZoneVariant::Other).fqdn());
+                    .push(Host::for_zone(Zone::Other(id)).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
                 (
                     OmicronZoneType::BoundaryNtp {
@@ -679,7 +752,8 @@ impl Plan {
                 .unwrap();
 
             sled.request.zones.push(OmicronZoneConfig {
-                id,
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
                 underlay_address: address,
                 zone_type,
             });
@@ -690,7 +764,7 @@ impl Plan {
             .map(|sled_info| (sled_info.sled_address, sled_info.request))
             .collect();
 
-        let dns_config = dns_builder.build();
+        let dns_config = dns_builder.build_full_config_for_initial_generation();
         Ok(Self { services, dns_config })
     }
 
@@ -708,16 +782,16 @@ impl Plan {
                     |sled_request| async {
                         let subnet = sled_request.body.subnet;
                         let sled_address = get_sled_address(subnet);
-                        let u2_zpools =
-                            Self::get_u2_zpools_from_sled(log, sled_address)
-                                .await?;
+                        let inventory =
+                            Self::get_inventory(log, sled_address).await?;
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            sled_request.body.id,
+                            // TODO-cleanup use TypedUuid everywhere
+                            SledUuid::from_untyped_uuid(sled_request.body.id),
                             subnet,
                             sled_address,
-                            u2_zpools,
+                            inventory,
                             is_scrimlet,
                         ))
                     },
@@ -730,7 +804,7 @@ impl Plan {
 
         // Once we've constructed a plan, write it down to durable storage.
         let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -766,12 +840,14 @@ impl AddressBumpAllocator {
 /// Wraps up the information used to allocate components to a Sled
 pub struct SledInfo {
     /// unique id for the sled agent
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     /// the sled's unique IPv6 subnet
     subnet: Ipv6Subnet<SLED_PREFIX>,
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
-    /// the list of zpools on the Sled
+    /// the inventory returned by the Sled
+    inventory: SledAgentTypes::Inventory,
+    /// The Zpools available for usage by services
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
     u2_zpool_allocators:
@@ -786,17 +862,18 @@ pub struct SledInfo {
 
 impl SledInfo {
     pub fn new(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
-        u2_zpools: Vec<ZpoolName>,
+        inventory: SledAgentTypes::Inventory,
         is_scrimlet: bool,
     ) -> SledInfo {
         SledInfo {
             sled_id,
             subnet,
             sled_address,
-            u2_zpools,
+            inventory,
+            u2_zpools: vec![],
             u2_zpool_allocators: HashMap::new(),
             is_scrimlet,
             addr_alloc: AddressBumpAllocator::new(subnet),
@@ -884,39 +961,29 @@ impl ServicePortBuilder {
 
         let dns_v4_ips = Box::new(
             DNS_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let dns_v6_ips = Box::new(
-            DNS_OPTE_IPV6_SUBNET
-                .0
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            DNS_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let nexus_v4_ips = Box::new(
             NEXUS_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let nexus_v6_ips = Box::new(
             NEXUS_OPTE_IPV6_SUBNET
-                .0
                 .iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let ntp_v4_ips = Box::new(
             NTP_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let ntp_v6_ips = Box::new(
-            NTP_OPTE_IPV6_SUBNET
-                .0
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            NTP_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         Self {
             internal_services_ip_pool,
@@ -945,7 +1012,10 @@ impl ServicePortBuilder {
         mac
     }
 
-    fn next_dns(&mut self, svc_id: Uuid) -> Option<(NetworkInterface, IpAddr)> {
+    fn next_dns(
+        &mut self,
+        svc_id: OmicronZoneUuid,
+    ) -> Option<(NetworkInterface, IpAddr)> {
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET,
         };
@@ -964,7 +1034,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service { id: svc_id },
+            kind: NetworkInterfaceKind::Service {
+                // TODO-cleanup use TypedUuid everywhere
+                id: svc_id.into_untyped_uuid(),
+            },
             name: format!("external-dns-{svc_id}").parse().unwrap(),
             ip,
             mac: self.random_mac(),
@@ -979,7 +1052,7 @@ impl ServicePortBuilder {
 
     fn next_nexus(
         &mut self,
-        svc_id: Uuid,
+        svc_id: OmicronZoneUuid,
     ) -> Result<(NetworkInterface, IpAddr), PlanError> {
         use omicron_common::address::{
             NEXUS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV6_SUBNET,
@@ -1001,7 +1074,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service { id: svc_id },
+            kind: NetworkInterfaceKind::Service {
+                // TODO-cleanup use TypedUuid everywhere
+                id: svc_id.into_untyped_uuid(),
+            },
             name: format!("nexus-{svc_id}").parse().unwrap(),
             ip,
             mac: self.random_mac(),
@@ -1016,7 +1092,7 @@ impl ServicePortBuilder {
 
     fn next_snat(
         &mut self,
-        svc_id: Uuid,
+        svc_id: OmicronZoneUuid,
     ) -> Result<(NetworkInterface, SourceNatConfig), PlanError> {
         use omicron_common::address::{
             NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
@@ -1033,7 +1109,14 @@ impl ServicePortBuilder {
             self.next_snat_ip = None;
         }
 
-        let snat_cfg = SourceNatConfig { ip: snat_ip, first_port, last_port };
+        let snat_cfg =
+            match SourceNatConfig::new(snat_ip, first_port, last_port) {
+                Ok(cfg) => cfg,
+                // We know our port pair is aligned, making this unreachable.
+                Err(err @ SourceNatConfigError::UnalignedPortPair { .. }) => {
+                    unreachable!("{err}");
+                }
+            };
 
         let (ip, subnet) = match snat_ip {
             IpAddr::V4(_) => (
@@ -1048,7 +1131,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service { id: svc_id },
+            kind: NetworkInterfaceKind::Service {
+                // TODO-cleanup use TypedUuid everywhere
+                id: svc_id.into_untyped_uuid(),
+            },
             name: format!("ntp-{svc_id}").parse().unwrap(),
             ip,
             mac: self.random_mac(),
@@ -1068,7 +1154,9 @@ mod tests {
     use crate::bootstrap::params::BootstrapAddressDiscovery;
     use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use oxnet::Ipv6Net;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1164,20 +1252,23 @@ mod tests {
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
             rack_network_config: RackNetworkConfig {
-                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
                 infra_ip_first: Ipv4Addr::LOCALHOST,
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
+            allowed_source_ips: AllowedSourceIps::Any,
         };
 
         let mut svp = ServicePortBuilder::new(&config);
 
         // We should only get back the 5 DNS IPs we specified.
         let mut svp_dns_ips = Vec::new();
-        while let Some((_interface, ip)) = svp.next_dns(Uuid::new_v4()) {
+        while let Some((_interface, ip)) =
+            svp.next_dns(OmicronZoneUuid::new_v4())
+        {
             svp_dns_ips.push(ip.to_string());
         }
         assert_eq!(svp_dns_ips, dns_ips);
@@ -1207,10 +1298,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rss_service_plan_v2_schema() {
+    fn test_rss_service_plan_v3_schema() {
         let schema = schemars::schema_for!(Plan);
         expectorate::assert_contents(
-            "../schema/rss-service-plan-v2.json",
+            "../schema/rss-service-plan-v3.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

@@ -298,6 +298,49 @@ struct UpdatePreparationProgress {
     total: u32,
 }
 
+/// Result of reading an SP sensor.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct SpSensorReading {
+    /// SP-centric timestamp of when `result` was recorded from this sensor.
+    ///
+    /// Currently this value represents "milliseconds since the last SP boot"
+    /// and is primarily useful as a delta between sensors on this SP (assuming
+    /// no reboot in between). The meaning could change with future SP releases.
+    pub timestamp: u64,
+    /// Value (or error) from the sensor.
+    pub result: SpSensorReadingResult,
+}
+
+/// Single reading (or error) from an SP sensor.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SpSensorReadingResult {
+    Success { value: f32 },
+    DeviceOff,
+    DeviceError,
+    DeviceNotPresent,
+    DeviceUnavailable,
+    DeviceTimeout,
+}
+
 /// List of components from a single SP.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpComponentList {
@@ -535,6 +578,16 @@ struct PathSp {
     sp: SpIdentifier,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct PathSpSensorId {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    sp: SpIdentifier,
+    /// ID for the sensor on the SP.
+    sensor_id: u32,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct PathSpComponent {
     /// ID for the SP that the gateway service translates into the appropriate
@@ -623,6 +676,28 @@ async fn sp_startup_options_set(
     })?;
 
     Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Read the current value of a sensor by ID
+///
+/// Sensor IDs come from the host topo tree.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/sensor/{sensor_id}/value",
+}]
+async fn sp_sensor_read_value(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpSensorId>,
+) -> Result<HttpResponseOk<SpSensorReading>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpSensorId { sp, sensor_id } = path.into_inner();
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
+    let value = sp.read_sensor_value(sensor_id).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
+
+    Ok(HttpResponseOk(value.into()))
 }
 
 /// List components of an SP
@@ -1511,6 +1586,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_power_state_set)?;
         api.register(sp_installinator_image_id_set)?;
         api.register(sp_installinator_image_id_delete)?;
+        api.register(sp_sensor_read_value)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_caboose_get)?;

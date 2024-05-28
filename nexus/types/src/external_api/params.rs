@@ -9,11 +9,12 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
-    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
-    SemverVersion,
+    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
+    RouteDestination, RouteTarget, SemverVersion,
 };
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
@@ -88,6 +89,7 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
+id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
@@ -1288,7 +1290,7 @@ impl Into<ByteCount> for BlockSize {
 
 impl From<BlockSize> for u64 {
     fn from(bs: BlockSize) -> u64 {
-        bs.0 as u64
+        u64::from(bs.0)
     }
 }
 
@@ -1518,88 +1520,6 @@ pub enum SwitchPortGeometry {
     Sfp28x4,
 }
 
-/// The forward error correction mode of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkFec {
-    /// Firecode foward error correction.
-    Firecode,
-    /// No forward error correction.
-    None,
-    /// Reed-Solomon forward error correction.
-    Rs,
-}
-
-impl From<omicron_common::api::internal::shared::PortFec> for LinkFec {
-    fn from(x: omicron_common::api::internal::shared::PortFec) -> LinkFec {
-        match x {
-            omicron_common::api::internal::shared::PortFec::Firecode => {
-                Self::Firecode
-            }
-            omicron_common::api::internal::shared::PortFec::None => Self::None,
-            omicron_common::api::internal::shared::PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-/// The speed of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkSpeed {
-    /// Zero gigabits per second.
-    Speed0G,
-    /// 1 gigabit per second.
-    Speed1G,
-    /// 10 gigabits per second.
-    Speed10G,
-    /// 25 gigabits per second.
-    Speed25G,
-    /// 40 gigabits per second.
-    Speed40G,
-    /// 50 gigabits per second.
-    Speed50G,
-    /// 100 gigabits per second.
-    Speed100G,
-    /// 200 gigabits per second.
-    Speed200G,
-    /// 400 gigabits per second.
-    Speed400G,
-}
-
-impl From<omicron_common::api::internal::shared::PortSpeed> for LinkSpeed {
-    fn from(x: omicron_common::api::internal::shared::PortSpeed) -> Self {
-        match x {
-            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
-                Self::Speed0G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
-                Self::Speed1G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
-                Self::Speed10G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
-                Self::Speed25G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
-                Self::Speed40G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
-                Self::Speed50G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
-                Self::Speed100G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
-                Self::Speed200G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
-                Self::Speed400G
-            }
-        }
-    }
-}
-
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfigCreate {
@@ -1709,46 +1629,6 @@ pub struct BgpPeerConfig {
     pub peers: Vec<BgpPeer>,
 }
 
-/// A BGP peer configuration for an interface. Includes the set of announcements
-/// that will be advertised to the peer identified by `addr`. The `bgp_config`
-/// parameter is a reference to global BGP parameters. The `interface_name`
-/// indicates what interface the peer should be contacted on.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpPeer {
-    /// The set of announcements advertised by the peer.
-    pub bgp_announce_set: NameOrId,
-
-    /// The global BGP configuration used for establishing a session with this
-    /// peer.
-    pub bgp_config: NameOrId,
-
-    /// The name of interface to peer on. This is relative to the port
-    /// configuration this BGP peer configuration is a part of. For example this
-    /// value could be phy0 to refer to a primary physical interface. Or it
-    /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: String,
-
-    /// The address of the host to peer with.
-    pub addr: IpAddr,
-
-    /// How long to hold peer connections between keppalives (seconds).
-    pub hold_time: u32,
-
-    /// How long to hold a peer in idle before attempting a new session
-    /// (seconds).
-    pub idle_hold_time: u32,
-
-    /// How long to delay sending an open request after establishing a TCP
-    /// session (seconds).
-    pub delay_open: u32,
-
-    /// How long to to wait between TCP connection retries (seconds).
-    pub connect_retry: u32,
-
-    /// How often to send keepalive requests (seconds).
-    pub keepalive: u32,
-}
-
 /// Parameters for creating a named set of BGP announcements.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpAnnounceSetCreate {
@@ -1805,6 +1685,14 @@ pub struct BgpConfigCreate {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<Name>,
+
+    // Dynamic BGP policy is not yet available so we skip adding it to the API
+    /// A shaper program to apply to outgoing open and update messages.
+    #[serde(skip)]
+    pub shaper: Option<String>,
+    /// A checker program to apply to incoming open and update messages.
+    #[serde(skip)]
+    pub checker: Option<String>,
 }
 
 /// Select a BGP status information by BGP config id.
@@ -2053,4 +1941,20 @@ pub struct ProbeCreate {
 pub struct ProbeListSelector {
     /// A name or id to use when selecting a probe.
     pub name_or_id: Option<NameOrId>,
+}
+
+/// A timeseries query string, written in the Oximeter query language.
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct TimeseriesQuery {
+    /// A timeseries query string, written in the Oximeter query language.
+    pub query: String,
+}
+
+// Allowed source IPs
+
+/// Parameters for updating allowed source IPs
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AllowListUpdate {
+    /// The new list of allowed source IPs.
+    pub allowed_ips: AllowedSourceIps,
 }

@@ -213,6 +213,18 @@ impl super::Nexus {
         let runnable_saga = self.create_runnable_saga(dag).await?;
 
         // Actually run the saga to completion.
+        //
+        // XXX: This may loop forever in case `SecStore::record_event` fails.
+        // Ideally, `run_saga` wouldn't both start the saga and wait for it to
+        // be finished -- instead, it would start off the saga, and then return
+        // a notification channel that the caller could use to decide:
+        //
+        // - either to .await until completion
+        // - or to stop waiting after a certain period, while still letting the
+        //   saga run in the background.
+        //
+        // For more, see https://github.com/oxidecomputer/omicron/issues/5406
+        // and the note in `sec_store.rs`'s `record_event`.
         self.run_saga(runnable_saga).await
     }
 }

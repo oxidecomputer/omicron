@@ -10,22 +10,23 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::HttpServer;
+use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -35,13 +36,18 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,7 +72,7 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
-    pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
+    pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
@@ -74,6 +80,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
     pub log: Logger,
 }
 
@@ -141,6 +148,23 @@ impl SledAgent {
         let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
+        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
+            generation: 0,
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: Vec::new(),
+                rack_network_config: Some(RackNetworkConfig {
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    ports: Vec::new(),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                }),
+            },
+        });
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -156,7 +180,6 @@ impl SledAgent {
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                Arc::clone(&nexus_client),
                 config.storage.ip,
                 storage_log,
             )),
@@ -164,7 +187,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
-            v2p_mappings: Mutex::new(HashMap::new()),
+            v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
@@ -174,6 +197,7 @@ impl SledAgent {
             }),
             instance_ensure_state_error: Mutex::new(None),
             log,
+            bootstore_network_config,
         })
     }
 
@@ -451,6 +475,22 @@ impl SledAgent {
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
     }
 
+    pub async fn instance_get_state(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<SledInstanceState, HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id)
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        Ok(instance.current())
+    }
+
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().await = error;
     }
@@ -521,25 +561,32 @@ impl SledAgent {
     /// Adds a Physical Disk to the simulated sled agent.
     pub async fn create_external_physical_disk(
         &self,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: Uuid,
+        identity: DiskIdentity,
     ) {
         let variant = sled_hardware::DiskVariant::U2;
         self.storage
             .lock()
             .await
-            .insert_physical_disk(vendor, serial, model, variant)
+            .insert_physical_disk(id, identity, variant)
             .await;
     }
 
-    pub async fn get_zpools(&self) -> Vec<Uuid> {
+    pub async fn get_all_physical_disks(
+        &self,
+    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+        self.storage.lock().await.get_all_physical_disks()
+    }
+
+    pub async fn get_zpools(
+        &self,
+    ) -> Vec<nexus_client::types::ZpoolPutRequest> {
         self.storage.lock().await.get_all_zpools()
     }
 
     pub async fn get_datasets(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
     ) -> Vec<(Uuid, SocketAddr)> {
         self.storage.lock().await.get_all_datasets(zpool_id)
     }
@@ -547,23 +594,21 @@ impl SledAgent {
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(
         &self,
-        id: Uuid,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: ZpoolUuid,
+        physical_disk_id: Uuid,
         size: u64,
     ) {
         self.storage
             .lock()
             .await
-            .insert_zpool(id, vendor, serial, model, size)
+            .insert_zpool(id, physical_disk_id, size)
             .await;
     }
 
     /// Adds a Crucible Dataset within a zpool.
     pub async fn create_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
@@ -572,7 +617,7 @@ impl SledAgent {
     /// Returns a crucible dataset within a particular zpool.
     pub async fn get_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
@@ -625,34 +670,27 @@ impl SledAgent {
 
     pub async fn set_virtual_nic_host(
         &self,
-        interface_id: Uuid,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.push(mapping.clone());
+        v2p_mappings.insert(mapping.clone());
         Ok(())
     }
 
     pub async fn unset_virtual_nic_host(
         &self,
-        interface_id: Uuid,
-        mapping: &DeleteVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.retain(|x| {
-            x.virtual_ip != mapping.virtual_ip || x.vni != mapping.vni
-        });
-
-        // If the last entry was removed, remove the entire interface ID so that
-        // tests don't have to distinguish never-created entries from
-        // previously-extant-but-now-empty entries.
-        if vec.is_empty() {
-            v2p_mappings.remove(&interface_id);
-        }
-
+        v2p_mappings.remove(mapping);
         Ok(())
+    }
+
+    pub async fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        let v2p_mappings = self.v2p_mappings.lock().await;
+        Ok(Vec::from_iter(v2p_mappings.clone()))
     }
 
     pub async fn instance_put_external_ip(
@@ -780,9 +818,9 @@ impl SledAgent {
             .context("reservoir_size")?,
             disks: storage
                 .physical_disks()
-                .iter()
-                .map(|(identity, info)| crate::params::InventoryDisk {
-                    identity: identity.clone(),
+                .values()
+                .map(|info| crate::params::InventoryDisk {
+                    identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
                 })
@@ -798,6 +836,19 @@ impl SledAgent {
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
+    }
+
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_list().await
+    }
+
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_ensure(config).await
     }
 
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {

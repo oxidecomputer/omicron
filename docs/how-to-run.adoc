@@ -199,46 +199,40 @@ The rest of these instructions assume that you're building and running Omicron o
 The Sled Agent supports operation on both:
 
 * a Gimlet (i.e., real Oxide hardware), and
-* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script (described next).
+* an ordinary PC running illumos that's been set up to look like a Gimlet using `cargo xtask virtual-hardware create` (described next).
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few environment vaiables set. These environment variables tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
+If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few argumnets set. These arguments tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
 
 [source,bash]
 ----
-export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network (see above)
-export PXA_START=192.168.1.20       # The first IP address your Oxide cluster can use (see above)
-export PXA_END=192.168.1.40         # The last IP address your Oxide cluster can use (see above)
+cargo xtask virtual-hardware create
+    --gateway-ip 192.168.1.199     # The gateway IP address for your local network (see above)
+    --pxa-start 192.168.1.20       # The first IP address your Oxide cluster can use (see above)
+    --pxa-end 192.168.1.40         # The last IP address your Oxide cluster can use (see above)
 ----
 
-If you're using the fake sled-local external network mentioned above, then you'll need to set PHYSICAL_LINK:
+If you're using the fake sled-local external network mentioned above, then you'll need to set `--physical-link`:
 
 [source,bash]
 ----
-export PHYSICAL_LINK=fake_external_stub0 	# The etherstub for the fake external network
+    --physical-link fake_external_stub0    # The etherstub for the fake external network
 ----
 
 If you're using an existing external network, you likely don't need to specify anything here because the script will choose one.  You can specify a particular one if you want, though:
 
 [source,bash]
 ----
-export PHYSICAL_LINK=igb0           # The physical link for your external network.
+    --physical-link igb0           # The physical link for your external network.
 ----
 
-Having set those variables, you're ready to run:
+If you're running on a bench Gimlet, you may not need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU. You can tweak what resources are created with the `--scope` flag.
 
-[source,bash]
-----
-$ pfexec ./tools/create_virtual_hardware.sh
-----
-
-If you're running on a Gimlet, you don't need (or want) most of what `create_virtual_hardware.sh` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
-
-Later, you can clean up the resources created by `create_virtual_hardware.sh` with:
+Later, you can clean up the resources created by `cargo xtask virtual-hardware create` with:
 
 ----
-$ pfexec ./tools/destroy_virtual_hardware.sh
+$ cargo xtask virtual-hardware destroy
 ----
 
 If you've done all this before and Omicron is still running, these resources will be in use and this script will fail.  Uninstall Omicron (see below) before running this script.
@@ -702,7 +696,7 @@ Once all the Omicron services are uninstalled, you can also remove the previousl
 
 [source,console]
 ----
-$ pfexec ./tools/destroy_virtual_hardware.sh
+$ cargo xtask virtual-hardware destroy
 ----
 
 == More information

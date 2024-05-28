@@ -137,8 +137,8 @@ async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
 }
 
 async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
-    let re = regex::Regex::new(r#""local_addr":"\[::\]:?([0-9]+)""#).unwrap();
-    let reader = BufReader::new(File::open(logfile).await?);
+    let re = regex::Regex::new(r#""local_addr":"\[::1?\]:([0-9]+)""#).unwrap();
+    let mut reader = BufReader::new(File::open(&logfile).await?);
     let mut lines = reader.lines();
     loop {
         match lines.next_line().await? {
@@ -153,7 +153,52 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
             }
             None => {
                 sleep(Duration::from_millis(10)).await;
+
+                // We might have gotten a partial line; close the file, reopen
+                // it, and start reading again from the beginning.
+                reader = BufReader::new(File::open(&logfile).await?);
+                lines = reader.lines();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_mgd_port_in_log;
+    use std::io::Write;
+    use std::process::Stdio;
+    use tempfile::NamedTempFile;
+
+    const EXPECTED_PORT: u16 = 4676;
+
+    #[tokio::test]
+    async fn test_mgd_in_path() {
+        // With no arguments, we expect to see the default help message.
+        tokio::process::Command::new("mgd")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Cannot find 'mgd' on PATH. Refer to README.md for installation instructions");
+    }
+
+    #[tokio::test]
+    async fn test_discover_local_listening_port() {
+        // Write some data to a fake log file
+        // This line is representative of the kind of output that mgd currently logs
+        let line = r#"msg":"registered endpoint","v":0,"name":"slog-rs","level":20,"time":"2024-05-15T19:45:52.620737793-07:00","hostname":"masaka","pid":6854,"local_addr":"[::]:4676","unit":"api-server","path":"/bfd/peers","method":"GET"}"#;
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "A garbage line").unwrap();
+        writeln!(file, "{}", line).unwrap();
+        writeln!(file, "Another garbage line").unwrap();
+        file.flush().unwrap();
+
+        assert_eq!(
+            find_mgd_port_in_log(file.path().display().to_string())
+                .await
+                .unwrap(),
+            EXPECTED_PORT
+        );
     }
 }

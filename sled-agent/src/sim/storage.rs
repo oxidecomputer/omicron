@@ -8,7 +8,7 @@
 //! than the representation of "virtual disks" which would be presented
 //! through Nexus' external API.
 
-use crate::nexus::NexusClient;
+use crate::params::OmicronPhysicalDisksConfig;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::SledAgent;
 use anyhow::{self, bail, Result};
@@ -19,12 +19,14 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
-use nexus_client::types::{
-    ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
-};
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use sled_hardware::DiskVariant;
+use sled_storage::resources::DiskManagementStatus;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -95,6 +97,8 @@ impl CrucibleDataInner {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
+            source: None,
+            read_only: false,
         };
 
         let old = self.regions.insert(id, region.clone());
@@ -474,18 +478,21 @@ impl CrucibleServer {
 }
 
 pub(crate) struct PhysicalDisk {
+    pub(crate) identity: DiskIdentity,
     pub(crate) variant: DiskVariant,
     pub(crate) slot: i64,
 }
 
 pub(crate) struct Zpool {
-    datasets: HashMap<Uuid, CrucibleServer>,
+    id: ZpoolUuid,
+    physical_disk_id: Uuid,
     total_size: u64,
+    datasets: HashMap<Uuid, CrucibleServer>,
 }
 
 impl Zpool {
-    fn new(total_size: u64) -> Self {
-        Zpool { datasets: HashMap::new(), total_size }
+    fn new(id: ZpoolUuid, physical_disk_id: Uuid, total_size: u64) -> Self {
+        Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
     }
 
     fn insert_dataset(
@@ -541,26 +548,21 @@ impl Zpool {
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
     sled_id: Uuid,
-    nexus_client: Arc<NexusClient>,
     log: Logger,
-    physical_disks: HashMap<DiskIdentity, PhysicalDisk>,
+    config: Option<OmicronPhysicalDisksConfig>,
+    physical_disks: HashMap<Uuid, PhysicalDisk>,
     next_disk_slot: i64,
-    zpools: HashMap<Uuid, Zpool>,
+    zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
 }
 
 impl Storage {
-    pub fn new(
-        sled_id: Uuid,
-        nexus_client: Arc<NexusClient>,
-        crucible_ip: IpAddr,
-        log: Logger,
-    ) -> Self {
+    pub fn new(sled_id: Uuid, crucible_ip: IpAddr, log: Logger) -> Self {
         Self {
             sled_id,
-            nexus_client,
             log,
+            config: None,
             physical_disks: HashMap::new(),
             next_disk_slot: 0,
             zpools: HashMap::new(),
@@ -570,78 +572,80 @@ impl Storage {
     }
 
     /// Returns an immutable reference to all (currently known) physical disks
-    pub fn physical_disks(&self) -> &HashMap<DiskIdentity, PhysicalDisk> {
+    pub fn physical_disks(&self) -> &HashMap<Uuid, PhysicalDisk> {
         &self.physical_disks
+    }
+
+    pub async fn omicron_physical_disks_list(
+        &mut self,
+    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
+        let Some(config) = self.config.as_ref() else {
+            return Err(HttpError::for_not_found(
+                None,
+                "No control plane disks".into(),
+            ));
+        };
+        Ok(config.clone())
+    }
+
+    pub async fn omicron_physical_disks_ensure(
+        &mut self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, HttpError> {
+        if let Some(stored_config) = self.config.as_ref() {
+            if stored_config.generation < config.generation {
+                return Err(HttpError::for_client_error(
+                    None,
+                    http::StatusCode::BAD_REQUEST,
+                    "Generation number too old".to_string(),
+                ));
+            }
+        }
+        self.config.replace(config.clone());
+
+        Ok(DisksManagementResult {
+            status: config
+                .disks
+                .into_iter()
+                .map(|config| DiskManagementStatus {
+                    identity: config.identity,
+                    err: None,
+                })
+                .collect(),
+        })
     }
 
     pub async fn insert_physical_disk(
         &mut self,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: Uuid,
+        identity: DiskIdentity,
         variant: DiskVariant,
     ) {
-        let identifier = DiskIdentity {
-            vendor: vendor.clone(),
-            serial: serial.clone(),
-            model: model.clone(),
-        };
         let slot = self.next_disk_slot;
         self.next_disk_slot += 1;
-        self.physical_disks.insert(identifier, PhysicalDisk { variant, slot });
-
-        let variant = match variant {
-            DiskVariant::U2 => PhysicalDiskKind::U2,
-            DiskVariant::M2 => PhysicalDiskKind::M2,
-        };
-
-        // Notify Nexus
-        let request = PhysicalDiskPutRequest {
-            vendor,
-            serial,
-            model,
-            variant,
-            sled_id: self.sled_id,
-        };
-        self.nexus_client
-            .physical_disk_put(&request)
-            .await
-            .expect("Failed to notify Nexus about new Physical Disk");
+        self.physical_disks
+            .insert(id, PhysicalDisk { identity, variant, slot });
     }
 
-    /// Adds a Zpool to the sled's simulated storage and notifies Nexus.
+    /// Adds a Zpool to the sled's simulated storage.
     pub async fn insert_zpool(
         &mut self,
-        zpool_id: Uuid,
-        disk_vendor: String,
-        disk_serial: String,
-        disk_model: String,
+        zpool_id: ZpoolUuid,
+        disk_id: Uuid,
         size: u64,
     ) {
         // Update our local data
-        self.zpools.insert(zpool_id, Zpool::new(size));
-
-        // Notify Nexus
-        let request = ZpoolPutRequest {
-            size: ByteCount(size),
-            disk_vendor,
-            disk_serial,
-            disk_model,
-        };
-        self.nexus_client
-            .zpool_put(&self.sled_id, &zpool_id, &request)
-            .await
-            .expect("Failed to notify Nexus about new Zpool");
+        self.zpools.insert(zpool_id, Zpool::new(zpool_id, disk_id, size));
     }
 
     /// Returns an immutable reference to all zpools
-    pub fn zpools(&self) -> &HashMap<Uuid, Zpool> {
+    pub fn zpools(&self) -> &HashMap<ZpoolUuid, Zpool> {
         &self.zpools
     }
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         // Update our local data
@@ -661,11 +665,48 @@ impl Storage {
         dataset.address()
     }
 
-    pub fn get_all_zpools(&self) -> Vec<Uuid> {
-        self.zpools.keys().cloned().collect()
+    pub fn get_all_physical_disks(
+        &self,
+    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+        self.physical_disks
+            .iter()
+            .map(|(id, disk)| {
+                let variant = match disk.variant {
+                    DiskVariant::U2 => {
+                        nexus_client::types::PhysicalDiskKind::U2
+                    }
+                    DiskVariant::M2 => {
+                        nexus_client::types::PhysicalDiskKind::M2
+                    }
+                };
+
+                nexus_client::types::PhysicalDiskPutRequest {
+                    id: *id,
+                    vendor: disk.identity.vendor.clone(),
+                    serial: disk.identity.serial.clone(),
+                    model: disk.identity.model.clone(),
+                    variant,
+                    sled_id: self.sled_id,
+                }
+            })
+            .collect()
     }
 
-    pub fn get_all_datasets(&self, zpool_id: Uuid) -> Vec<(Uuid, SocketAddr)> {
+    pub fn get_all_zpools(&self) -> Vec<nexus_client::types::ZpoolPutRequest> {
+        self.zpools
+            .values()
+            .map(|pool| nexus_client::types::ZpoolPutRequest {
+                id: pool.id.into_untyped_uuid(),
+                sled_id: self.sled_id,
+                physical_disk_id: pool.physical_disk_id,
+            })
+            .collect()
+    }
+
+    pub fn get_all_datasets(
+        &self,
+        zpool_id: ZpoolUuid,
+    ) -> Vec<(Uuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
@@ -677,7 +718,7 @@ impl Storage {
 
     pub async fn get_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.zpools
@@ -720,7 +761,7 @@ impl Storage {
 
 /// Simulated crucible pantry
 pub struct Pantry {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
     sled_agent: Arc<SledAgent>,
     jobs: Mutex<HashSet<String>>,
@@ -729,7 +770,7 @@ pub struct Pantry {
 impl Pantry {
     pub fn new(sled_agent: Arc<SledAgent>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: OmicronZoneUuid::new_v4(),
             vcrs: Mutex::new(HashMap::default()),
             sled_agent,
             jobs: Mutex::new(HashSet::default()),
@@ -843,7 +884,9 @@ impl Pantry {
                         ..
                     } => (
                         block_size,
-                        block_size * blocks_per_extent * (extent_count as u64),
+                        block_size
+                            * blocks_per_extent
+                            * u64::from(extent_count),
                     ),
 
                     _ => {

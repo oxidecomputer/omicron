@@ -10,6 +10,7 @@ extern crate diesel;
 extern crate newtype_derive;
 
 mod address_lot;
+mod allow_list;
 mod bfd;
 mod bgp;
 mod block_size;
@@ -46,12 +47,15 @@ mod network_interface;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;
+mod physical_disk_policy;
+mod physical_disk_state;
 mod probe;
 mod producer_endpoint;
 mod project;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
+mod v2p_mapping;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -62,13 +66,14 @@ pub mod queries;
 mod quota;
 mod rack;
 mod region;
+mod region_replacement;
+mod region_replacement_step;
 mod region_snapshot;
 mod role_assignment;
 mod role_builtin;
 pub mod saga_types;
 pub mod schema;
 mod schema_versions;
-mod service;
 mod service_kind;
 mod silo;
 mod silo_group;
@@ -95,6 +100,7 @@ mod virtual_provisioning_resource;
 mod vmm;
 mod vni;
 mod volume;
+mod volume_repair;
 mod vpc;
 mod vpc_firewall_rule;
 mod vpc_route;
@@ -113,6 +119,7 @@ mod db {
 pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
+pub use allow_list::*;
 pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;
@@ -150,18 +157,21 @@ pub use network_interface::*;
 pub use oximeter_info::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;
+pub use physical_disk_policy::*;
+pub use physical_disk_state::*;
 pub use probe::*;
 pub use producer_endpoint::*;
 pub use project::*;
 pub use quota::*;
 pub use rack::*;
 pub use region::*;
+pub use region_replacement::*;
+pub use region_replacement_step::*;
 pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
 pub use schema_versions::*;
 pub use semver_version::*;
-pub use service::*;
 pub use service_kind::*;
 pub use silo::*;
 pub use silo_group::*;
@@ -184,11 +194,13 @@ pub use typed_uuid::to_db_typed_uuid;
 pub use upstairs_repair::*;
 pub use user_builtin::*;
 pub use utilization::*;
+pub use v2p_mapping::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
 pub use vni::*;
 pub use volume::*;
+pub use volume_repair::*;
 pub use vpc::*;
 pub use vpc_firewall_rule::*;
 pub use vpc_route::*;
@@ -425,12 +437,10 @@ mod tests {
     use crate::RequestAddressError;
 
     use super::VpcSubnet;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::IpNet;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -438,9 +448,8 @@ mod tests {
 
     #[test]
     fn test_vpc_subnet_check_requestable_addr() {
-        let ipv4_block =
-            Ipv4Net("192.168.0.0/16".parse::<Ipv4Network>().unwrap());
-        let ipv6_block = Ipv6Net("fd00::/48".parse::<Ipv6Network>().unwrap());
+        let ipv4_block = "192.168.0.0/16".parse::<Ipv4Net>().unwrap();
+        let ipv6_block = "fd00::/48".parse::<Ipv6Net>().unwrap();
         let identity = IdentityMetadataCreateParams {
             name: "net-test-vpc".parse().unwrap(),
             description: "A test VPC".parse().unwrap(),
@@ -499,9 +508,7 @@ mod tests {
 
     #[test]
     fn test_ipv6_net_random_subnet() {
-        let base = super::Ipv6Net(Ipv6Net(
-            "fd00::/48".parse::<Ipv6Network>().unwrap(),
-        ));
+        let base = super::Ipv6Net("fd00::/48".parse::<Ipv6Net>().unwrap());
         assert!(
             base.random_subnet(8).is_none(),
             "random_subnet() should fail when prefix is less than the base prefix"
@@ -512,11 +519,11 @@ mod tests {
         );
         let subnet = base.random_subnet(64).unwrap();
         assert_eq!(
-            subnet.prefix(),
+            subnet.width(),
             64,
             "random_subnet() returned an incorrect prefix"
         );
-        let octets = subnet.network().octets();
+        let octets = subnet.prefix().octets();
         const EXPECTED_RANDOM_BYTES: [u8; 8] = [253, 0, 0, 0, 0, 0, 111, 127];
         assert_eq!(octets[..8], EXPECTED_RANDOM_BYTES);
         assert!(
@@ -524,15 +531,15 @@ mod tests {
             "Host address portion should be 0"
         );
         assert!(
-            base.is_supernet_of(subnet.0 .0),
+            base.is_supernet_of(&subnet.0),
             "random_subnet should generate an actual subnet"
         );
-        assert_eq!(base.random_subnet(base.prefix()), Some(base));
+        assert_eq!(base.random_subnet(base.width()), Some(base));
     }
 
     #[test]
     fn test_ip_subnet_check_requestable_address() {
-        let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
+        let subnet = super::Ipv4Net("192.168.0.0/16".parse().unwrap());
         subnet.check_requestable_addr("192.168.0.10".parse().unwrap()).unwrap();
         subnet.check_requestable_addr("192.168.1.0".parse().unwrap()).unwrap();
         let addr = "192.178.0.10".parse().unwrap();
@@ -557,7 +564,7 @@ mod tests {
             Err(RequestAddressError::Broadcast)
         );
 
-        let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
+        let subnet = super::Ipv6Net("fd00::/64".parse().unwrap());
         subnet.check_requestable_addr("fd00::a".parse().unwrap()).unwrap();
         assert_eq!(
             subnet.check_requestable_addr("fd00::1".parse().unwrap()),

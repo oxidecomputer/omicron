@@ -5,7 +5,6 @@
 //! Implementation of queries for provisioning regions.
 
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::model::{Dataset, Region};
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::schema;
@@ -74,6 +73,7 @@ pub fn allocation_query(
     blocks_per_extent: u64,
     extent_count: u64,
     allocation_strategy: &RegionAllocationStrategy,
+    redundancy: usize,
 ) -> TypedSqlQuery<(SelectableSql<Dataset>, SelectableSql<Region>)> {
     let (seed, distinct_sleds) = {
         let (input_seed, distinct_sleds) = match allocation_strategy {
@@ -90,7 +90,7 @@ pub fn allocation_query(
                         .unwrap()
                         .as_nanos()
                 },
-                |seed| seed as u128,
+                |seed| u128::from(seed),
             ),
             distinct_sleds,
         )
@@ -99,7 +99,7 @@ pub fn allocation_query(
     let seed = seed.to_le_bytes().to_vec();
 
     let size_delta = block_size * blocks_per_extent * extent_count;
-    let redundancy: i64 = i64::try_from(REGION_REDUNDANCY_THRESHOLD).unwrap();
+    let redundancy: i64 = i64::try_from(redundancy).unwrap();
 
     let builder = QueryBuilder::new().sql(
     // Find all old regions associated with a particular volume
@@ -117,13 +117,23 @@ pub fn allocation_query(
       dataset.pool_id,
       sum(dataset.size_used) AS size_used
     FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),")
-    .sql("
-  candidate_zpools AS (");
 
-    // Identifies zpools with enough space for region allocation.
+    // Any zpool already have this volume's existing regions?
+    .sql("
+  existing_zpools AS (
+    SELECT
+      dataset.pool_id
+    FROM
+      dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+  ),")
+
+    // Identifies zpools with enough space for region allocation, that are not
+    // currently used by this Volume's existing regions.
     //
     // NOTE: 'distinct_sleds' changes the format of the underlying SQL query, as it uses
     // distinct bind parameters depending on the conditional branch.
+    .sql("
+  candidate_zpools AS (");
     let builder = if distinct_sleds {
         builder.sql("SELECT DISTINCT ON (zpool.sled_id) ")
     } else {
@@ -131,21 +141,22 @@ pub fn allocation_query(
     };
     let builder = builder.sql("
         old_zpool_usage.pool_id
-    FROM (
+    FROM
         old_zpool_usage
-          INNER JOIN
+        INNER JOIN
         (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)
-    )
+        INNER JOIN
+        physical_disk ON (zpool.physical_disk_id = physical_disk.id)
     WHERE (
-      ((old_zpool_usage.size_used + ").param().sql(" ) <=
+      (old_zpool_usage.size_used + ").param().sql(" ) <=
          (SELECT total_size FROM omicron.public.inv_zpool WHERE
           inv_zpool.id = old_zpool_usage.pool_id
           ORDER BY inv_zpool.time_collected DESC LIMIT 1)
-      )
-      AND
-      (sled.sled_policy = 'in_service')
-      AND
-      (sled.sled_state = 'active')
+      AND sled.sled_policy = 'in_service'
+      AND sled.sled_state = 'active'
+      AND physical_disk.disk_policy = 'in_service'
+      AND physical_disk.disk_state = 'active'
+      AND NOT(zpool.id = ANY(SELECT existing_zpools.pool_id FROM existing_zpools))
     )"
     ).bind::<sql_types::BigInt, _>(size_delta as i64);
 
@@ -182,6 +193,7 @@ pub fn allocation_query(
     ORDER BY dataset.pool_id, md5((CAST(dataset.id as BYTEA) || ").param().sql("))
   ),")
     .bind::<sql_types::Bytea, _>(seed.clone())
+
     // We order by md5 to shuffle the ordering of the datasets.
     // md5 has a uniform output distribution so it does the job.
     .sql("
@@ -194,6 +206,7 @@ pub fn allocation_query(
   ),")
     .bind::<sql_types::Bytea, _>(seed)
     .bind::<sql_types::BigInt, _>(redundancy)
+
     // Create the regions-to-be-inserted for the volume.
     .sql("
   candidate_regions AS (
@@ -206,12 +219,20 @@ pub fn allocation_query(
       ").param().sql(" AS block_size,
       ").param().sql(" AS blocks_per_extent,
       ").param().sql(" AS extent_count
-    FROM shuffled_candidate_datasets
+    FROM shuffled_candidate_datasets")
+  // Only select the *additional* number of candidate regions for the required
+  // redundancy level
+  .sql("
+    LIMIT (").param().sql(" - (
+      SELECT COUNT(*) FROM old_regions
+    ))
   ),")
     .bind::<sql_types::Uuid, _>(volume_id)
     .bind::<sql_types::BigInt, _>(block_size as i64)
     .bind::<sql_types::BigInt, _>(blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(extent_count as i64)
+    .bind::<sql_types::BigInt, _>(redundancy)
+
     // A subquery which summarizes the changes we intend to make, showing:
     //
     // 1. Which datasets will have size adjustments
@@ -225,6 +246,7 @@ pub fn allocation_query(
       ((candidate_regions.block_size * candidate_regions.blocks_per_extent) * candidate_regions.extent_count) AS size_used_delta
     FROM (candidate_regions INNER JOIN dataset ON (dataset.id = candidate_regions.dataset_id))
   ),")
+
     // Confirms whether or not the insertion and updates should
     // occur.
     //
@@ -251,17 +273,60 @@ pub fn allocation_query(
     // an error instead.
     .sql("
   do_insert AS (
-    SELECT (((
-        ((SELECT COUNT(*) FROM old_regions LIMIT 1) < ").param().sql(") AND
-        CAST(IF(((SELECT COUNT(*) FROM candidate_zpools LIMIT 1) >= ").param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_ZPOOL_SPACE_SENTINEL, "') AS BOOL)) AND
-        CAST(IF(((SELECT COUNT(*) FROM candidate_regions LIMIT 1) >= ")).param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_DATASETS_SENTINEL, "') AS BOOL)) AND
-        CAST(IF(((SELECT COUNT(DISTINCT dataset.pool_id) FROM (candidate_regions INNER JOIN dataset ON (candidate_regions.dataset_id = dataset.id)) LIMIT 1) >= ")).param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL, "') AS BOOL)
-    ) AS insert
-  ),"))
+    SELECT (((")
+    // There's regions not allocated yet
+    .sql("
+        ((SELECT COUNT(*) FROM old_regions LIMIT 1) < ").param().sql(") AND")
+    // Enough filtered candidate zpools + existing zpools to meet redundancy
+    .sql("
+        CAST(IF(((
+          (
+            (SELECT COUNT(*) FROM candidate_zpools LIMIT 1) +
+            (SELECT COUNT(*) FROM existing_zpools LIMIT 1)
+          )
+        ) >= ").param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_ZPOOL_SPACE_SENTINEL, "') AS BOOL)) AND"))
+    // Enough candidate regions + existing regions to meet redundancy
+    .sql("
+        CAST(IF(((
+          (
+            (SELECT COUNT(*) FROM candidate_regions LIMIT 1) +
+            (SELECT COUNT(*) FROM old_regions LIMIT 1)
+          )
+        ) >= ").param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_DATASETS_SENTINEL, "') AS BOOL)) AND"))
+    // Enough unique zpools (looking at both existing and new) to meet redundancy
+    .sql("
+        CAST(IF(((
+         (
+           SELECT
+             COUNT(DISTINCT pool_id)
+           FROM
+            (
+              (
+               SELECT
+                 dataset.pool_id
+               FROM
+                 candidate_regions
+                   INNER JOIN dataset ON (candidate_regions.dataset_id = dataset.id)
+              )
+              UNION
+              (
+               SELECT
+                 dataset.pool_id
+               FROM
+                 old_regions
+                   INNER JOIN dataset ON (old_regions.dataset_id = dataset.id)
+              )
+            )
+           LIMIT 1
+         )
+        ) >= ").param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL, "') AS BOOL)
+     ) AS insert
+   ),"))
     .bind::<sql_types::BigInt, _>(redundancy)
     .bind::<sql_types::BigInt, _>(redundancy)
     .bind::<sql_types::BigInt, _>(redundancy)
     .bind::<sql_types::BigInt, _>(redundancy)
+
     .sql("
   inserted_regions AS (
     INSERT INTO region
@@ -302,6 +367,7 @@ UNION
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
     use crate::db::explain::ExplainableAsync;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
@@ -327,6 +393,7 @@ mod test {
             &RegionAllocationStrategy::RandomWithDistinctSleds {
                 seed: Some(1),
             },
+            REGION_REDUNDANCY_THRESHOLD,
         );
         let s = dev::db::format_sql(
             &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
@@ -346,6 +413,7 @@ mod test {
             blocks_per_extent,
             extent_count,
             &RegionAllocationStrategy::Random { seed: Some(1) },
+            REGION_REDUNDANCY_THRESHOLD,
         );
         let s = dev::db::format_sql(
             &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
@@ -382,6 +450,7 @@ mod test {
             blocks_per_extent,
             extent_count,
             &RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
+            REGION_REDUNDANCY_THRESHOLD,
         );
         let _ = region_allocate
             .explain_async(&conn)
@@ -396,6 +465,7 @@ mod test {
             blocks_per_extent,
             extent_count,
             &RegionAllocationStrategy::Random { seed: None },
+            REGION_REDUNDANCY_THRESHOLD,
         );
         let _ = region_allocate
             .explain_async(&conn)

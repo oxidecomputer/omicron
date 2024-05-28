@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -30,6 +33,7 @@ newtype_derive.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
 oso.workspace = true
+oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -64,6 +68,13 @@ omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
+
+# only enabled during tests or via the `testing` feature
+omicron-test-utils = { workspace = true, optional = true }
+
+[features]
+# Enable to export `datastore_test`
+testing = ["omicron-test-utils"]
 
 [dev-dependencies]
 assert_matches.workspace = true

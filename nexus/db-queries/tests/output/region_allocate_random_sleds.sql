@@ -26,6 +26,13 @@ WITH
       GROUP BY
         dataset.pool_id
     ),
+  existing_zpools
+    AS (
+      SELECT
+        dataset.pool_id
+      FROM
+        dataset INNER JOIN old_regions ON old_regions.dataset_id = dataset.id
+    ),
   candidate_zpools
     AS (
       SELECT
@@ -34,6 +41,7 @@ WITH
         old_zpool_usage
         INNER JOIN (zpool INNER JOIN sled ON zpool.sled_id = sled.id) ON
             zpool.id = old_zpool_usage.pool_id
+        INNER JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
       WHERE
         (old_zpool_usage.size_used + $2)
         <= (
@@ -50,6 +58,9 @@ WITH
           )
         AND sled.sled_policy = 'in_service'
         AND sled.sled_state = 'active'
+        AND physical_disk.disk_policy = 'in_service'
+        AND physical_disk.disk_state = 'active'
+        AND NOT (zpool.id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
     ),
   candidate_datasets
     AS (
@@ -87,6 +98,8 @@ WITH
         $9 AS extent_count
       FROM
         shuffled_candidate_datasets
+      LIMIT
+        $10 - (SELECT count(*) FROM old_regions)
     ),
   proposed_dataset_changes
     AS (
@@ -105,10 +118,18 @@ WITH
       SELECT
         (
           (
-            (SELECT count(*) FROM old_regions LIMIT 1) < $10
+            (SELECT count(*) FROM old_regions LIMIT 1) < $11
             AND CAST(
                 IF(
-                  ((SELECT count(*) FROM candidate_zpools LIMIT 1) >= $11),
+                  (
+                    (
+                      (
+                        (SELECT count(*) FROM candidate_zpools LIMIT 1)
+                        + (SELECT count(*) FROM existing_zpools LIMIT 1)
+                      )
+                    )
+                    >= $12
+                  ),
                   'TRUE',
                   'Not enough space'
                 )
@@ -117,7 +138,15 @@ WITH
           )
           AND CAST(
               IF(
-                ((SELECT count(*) FROM candidate_regions LIMIT 1) >= $12),
+                (
+                  (
+                    (
+                      (SELECT count(*) FROM candidate_regions LIMIT 1)
+                      + (SELECT count(*) FROM old_regions LIMIT 1)
+                    )
+                  )
+                  >= $13
+                ),
                 'TRUE',
                 'Not enough datasets'
               )
@@ -128,15 +157,31 @@ WITH
             IF(
               (
                 (
-                  SELECT
-                    count(DISTINCT dataset.pool_id)
-                  FROM
-                    candidate_regions
-                    INNER JOIN dataset ON candidate_regions.dataset_id = dataset.id
-                  LIMIT
-                    1
+                  (
+                    SELECT
+                      count(DISTINCT pool_id)
+                    FROM
+                      (
+                        (
+                          SELECT
+                            dataset.pool_id
+                          FROM
+                            candidate_regions
+                            INNER JOIN dataset ON candidate_regions.dataset_id = dataset.id
+                        )
+                        UNION
+                          (
+                            SELECT
+                              dataset.pool_id
+                            FROM
+                              old_regions INNER JOIN dataset ON old_regions.dataset_id = dataset.id
+                          )
+                      )
+                    LIMIT
+                      1
+                  )
                 )
-                >= $13
+                >= $14
               ),
               'TRUE',
               'Not enough unique zpools selected'

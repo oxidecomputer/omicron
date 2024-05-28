@@ -53,7 +53,7 @@ pub enum RepositoryError {
     TargetHashRead {
         target: String,
         #[source]
-        error: tough::schema::Error,
+        error: Box<tough::schema::Error>,
     },
 
     #[error("target hash `{}` expected to be 32 bytes long, was {}", hex::encode(.0), .0.len())]
@@ -140,6 +140,14 @@ pub enum RepositoryError {
         "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
     )]
     DuplicateHashEntry(ArtifactHashId),
+    #[error("error creating reader stream")]
+    CreateReaderStream(#[source] anyhow::Error),
+    #[error("error reading extracted archive kind {}, hash {}", .artifact.kind, .artifact.hash)]
+    ReadExtractedArchive {
+        artifact: ArtifactHashId,
+        #[source]
+        error: std::io::Error,
+    },
 }
 
 impl RepositoryError {
@@ -153,7 +161,9 @@ impl RepositoryError {
             | RepositoryError::TempFileCreate(_)
             | RepositoryError::TempFileWrite(_)
             | RepositoryError::TempFileFlush(_)
-            | RepositoryError::NamedTempFileCreate { .. } => {
+            | RepositoryError::NamedTempFileCreate { .. }
+            | RepositoryError::ReadExtractedArchive { .. }
+            | RepositoryError::CreateReaderStream { .. } => {
                 HttpError::for_unavail(None, message)
             }
 

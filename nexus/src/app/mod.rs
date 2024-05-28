@@ -28,6 +28,7 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
@@ -38,6 +39,7 @@ use uuid::Uuid;
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
+mod allow_list;
 pub(crate) mod background;
 mod bfd;
 mod bgp;
@@ -55,7 +57,7 @@ mod instance_network;
 mod ip_pool;
 mod metrics;
 mod network_interface;
-mod oximeter;
+pub(crate) mod oximeter;
 mod probe;
 mod project;
 mod quota;
@@ -147,6 +149,16 @@ pub struct Nexus {
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 
+    /// The metric producer server from which oximeter collects metric data.
+    producer_server: std::sync::Mutex<Option<ProducerServer>>,
+
+    /// Reusable `reqwest::Client`, to be cloned and used with the Progenitor-
+    /// generated `Client::new_with_client`.
+    ///
+    /// (This does not need to be in an `Arc` because `reqwest::Client` uses
+    /// `Arc` internally.)
+    reqwest_client: reqwest::Client,
+
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
 
@@ -188,6 +200,9 @@ pub struct Nexus {
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
+
+    /// Channel for notifying background task of change to opte v2p state
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 }
 
 impl Nexus {
@@ -214,7 +229,7 @@ impl Nexus {
             db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
                 .await?,
         );
-        db_datastore.register_producers(&producer_registry);
+        db_datastore.register_producers(producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
@@ -338,6 +353,12 @@ impl Nexus {
             }
         }
 
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
         let timeseries_client = if let Some(address) =
@@ -372,15 +393,20 @@ impl Nexus {
             Arc::clone(&db_datastore),
         );
 
+        let v2p_watcher_channel = tokio::sync::watch::channel(());
+
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
         let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
+            rack_id,
             config.deployment.id,
             resolver.clone(),
             saga_request,
+            v2p_watcher_channel.clone(),
+            producer_registry,
         );
 
         let external_resolver = {
@@ -403,7 +429,9 @@ impl Nexus {
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
+            producer_server: std::sync::Mutex::new(None),
             populate_status,
+            reqwest_client,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
@@ -431,16 +459,11 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
+            v2p_notification_tx: v2p_watcher_channel.0,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
-        let bootstore_opctx = OpContext::for_background(
-            log.new(o!("component" => "Bootstore")),
-            Arc::clone(&authz),
-            authn::Context::internal_api(),
-            Arc::clone(&db_datastore),
-        );
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -480,12 +503,6 @@ impl Nexus {
                     for task in task_nexus.background_tasks.driver.tasks() {
                         task_nexus.background_tasks.driver.activate(task);
                     }
-                    if let Err(e) = task_nexus
-                        .initial_bootstore_sync(&bootstore_opctx)
-                        .await
-                    {
-                        error!(task_log, "failed to run bootstore sync: {e}");
-                    }
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");
@@ -517,6 +534,16 @@ impl Nexus {
         }
 
         Ok(nexus)
+    }
+
+    /// Return the ID for this Nexus instance.
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    /// Return the rack ID for this Nexus instance.
+    pub fn rack_id(&self) -> Uuid {
+        self.rack_id
     }
 
     /// Return the tunable configuration parameters, e.g. for use in tests.
@@ -576,6 +603,7 @@ impl Nexus {
         external_server: DropshotServer,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
+        producer_server: ProducerServer,
     ) {
         // If any servers already exist, close them.
         let _ = self.close_servers().await;
@@ -587,9 +615,13 @@ impl Nexus {
             .unwrap()
             .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
+        self.producer_server.lock().unwrap().replace(producer_server);
     }
 
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
+        // NOTE: All these take the lock and swap out of the option immediately,
+        // because they are synchronous mutexes, which cannot be held across the
+        // await point these `close()` methods expose.
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
             server.close().await?;
@@ -602,6 +634,10 @@ impl Nexus {
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
             server.close().await?;
+        }
+        let producer_server = self.producer_server.lock().unwrap().take();
+        if let Some(server) = producer_server {
+            server.close().await.map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -627,6 +663,16 @@ impl Nexus {
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
+    pub(crate) async fn get_techport_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.techport_external_server
             .lock()
             .unwrap()
             .as_ref()
@@ -881,33 +927,16 @@ impl Nexus {
     pub(crate) async fn dpd_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-        let mappings = self.switch_zone_address_mappings().await?;
-        let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
-            .iter()
-            .map(|(location, addr)| {
-                let port = DENDRITE_PORT;
-
-                let client_state = dpd_client::ClientState {
-                    tag: String::from("nexus"),
-                    log: self.log.new(o!(
-                        "component" => "DpdClient"
-                    )),
-                };
-
-                let dpd_client = dpd_client::Client::new(
-                    &format!("http://[{addr}]:{port}"),
-                    client_state,
-                );
-                (*location, dpd_client)
-            })
-            .collect();
-        Ok(clients)
+        let resolver = self.resolver().await;
+        dpd_clients(&resolver, &self.log).await
     }
 
     pub(crate) async fn mg_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
-        let mappings = self.switch_zone_address_mappings().await?;
+        let resolver = self.resolver().await;
+        let mappings =
+            switch_zone_address_mappings(&resolver, &self.log).await?;
         let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
             vec![];
         for (location, addr) in &mappings {
@@ -921,24 +950,6 @@ impl Nexus {
             clients.push((*location, client));
         }
         Ok(clients.into_iter().collect::<HashMap<_, _>>())
-    }
-
-    async fn switch_zone_address_mappings(
-        &self,
-    ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-        let switch_zone_addresses = match self
-            .resolver()
-            .await
-            .lookup_all_ipv6(ServiceName::Dendrite)
-            .await
-        {
-            Ok(addrs) => addrs,
-            Err(e) => {
-                error!(self.log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                return Err(e.to_string());
-            }
-        };
-        Ok(map_switch_zone_addrs(&self.log, switch_zone_addresses).await)
     }
 }
 
@@ -956,6 +967,50 @@ pub enum Unimpl {
     #[allow(unused)]
     Public,
     ProtectedLookup(Error),
+}
+
+pub(crate) async fn dpd_clients(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+    let mappings = switch_zone_address_mappings(resolver, log).await?;
+    let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
+        .iter()
+        .map(|(location, addr)| {
+            let port = DENDRITE_PORT;
+
+            let client_state = dpd_client::ClientState {
+                tag: String::from("nexus"),
+                log: log.new(o!(
+                    "component" => "DpdClient"
+                )),
+            };
+
+            let dpd_client = dpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                client_state,
+            );
+            (*location, dpd_client)
+        })
+        .collect();
+    Ok(clients)
+}
+
+async fn switch_zone_address_mappings(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+    let switch_zone_addresses = match resolver
+        .lookup_all_ipv6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`

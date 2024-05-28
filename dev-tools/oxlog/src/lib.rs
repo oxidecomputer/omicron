@@ -98,6 +98,10 @@ impl LogFile {
             }
         }
     }
+
+    pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.path.file_name().cmp(&other.path.file_name())
+    }
 }
 
 impl PartialEq for LogFile {
@@ -140,6 +144,22 @@ pub struct SvcLogs {
     /// standard paths or don't follow the naming conventions of SMF service
     /// files. e.g. `/pool/ext/e12f29b8-1ab8-431e-bc96-1c1298947980/crypt/zone/oxz_cockroachdb_8bbea076-ff60-4330-8302-383e18140ef3/root/data/logs/cockroach.log`
     pub extra: Vec<LogFile>,
+}
+
+impl SvcLogs {
+    /// Sort the archived and extra log files by filename.
+    ///
+    /// readdir traverses over directories in indeterminate order, so sort by
+    /// filename (which is enough to sort by service name and timestamp in most
+    /// cases).
+    ///
+    /// Generally we don't want to sort by full path, because log files may be
+    /// scattered across several different directories -- and we care more
+    /// about filename than which directory they are in.
+    pub fn sort_by_file_name(&mut self) {
+        self.archived.sort_unstable_by(LogFile::file_name_cmp);
+        self.extra.sort_unstable_by(LogFile::file_name_cmp);
+    }
 }
 
 // These probably don't warrant newtypes. They are just to make the
@@ -284,7 +304,16 @@ impl Zones {
                 load_extra_logs(dir, svc_name, &mut output, filter.show_empty);
             }
         }
+
+        sort_logs(&mut output);
+
         output
+    }
+}
+
+fn sort_logs(output: &mut BTreeMap<String, SvcLogs>) {
+    for svc_logs in output.values_mut() {
+        svc_logs.sort_by_file_name();
     }
 }
 
@@ -463,5 +492,61 @@ mod tests {
             "system-blah:default.log"
         )
         .is_none());
+    }
+
+    #[test]
+    fn test_sort_logs() {
+        use super::{LogFile, SvcLogs};
+        use std::collections::BTreeMap;
+
+        let mut logs = BTreeMap::new();
+        logs.insert(
+            "blah".to_string(),
+            SvcLogs {
+                current: None,
+                archived: vec![
+                    // "foo" comes after "bar", but the sorted order should
+                    // have 1600000000 before 1700000000.
+                    LogFile {
+                        path: "/bar/blah:default.log.1700000000".into(),
+                        size: None,
+                        modified: None,
+                    },
+                    LogFile {
+                        path: "/foo/blah:default.log.1600000000".into(),
+                        size: None,
+                        modified: None,
+                    },
+                ],
+                extra: vec![
+                    // "foo" comes after "bar", but the sorted order should
+                    // have log1 before log2.
+                    LogFile {
+                        path: "/foo/blah/sub.default.log1".into(),
+                        size: None,
+                        modified: None,
+                    },
+                    LogFile {
+                        path: "/bar/blah/sub.default.log2".into(),
+                        size: None,
+                        modified: None,
+                    },
+                ],
+            },
+        );
+
+        super::sort_logs(&mut logs);
+
+        let svc_logs = logs.get("blah").unwrap();
+        assert_eq!(
+            svc_logs.archived[0].path,
+            "/foo/blah:default.log.1600000000"
+        );
+        assert_eq!(
+            svc_logs.archived[1].path,
+            "/bar/blah:default.log.1700000000"
+        );
+        assert_eq!(svc_logs.extra[0].path, "/foo/blah/sub.default.log1");
+        assert_eq!(svc_logs.extra[1].path, "/bar/blah/sub.default.log2");
     }
 }

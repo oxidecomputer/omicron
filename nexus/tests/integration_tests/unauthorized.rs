@@ -20,6 +20,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use omicron_uuid_kinds::ZpoolUuid;
 use once_cell::sync::Lazy;
 
 type ControlPlaneTestContext =
@@ -54,7 +55,17 @@ type ControlPlaneTestContext =
 //   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    DiskTest::new(cptestctx).await;
+    let mut disk_test = DiskTest::new(cptestctx).await;
+    disk_test
+        .add_zpool_with_dataset_ext(
+            cptestctx,
+            nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
+            ZpoolUuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await;
+
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
     let mut setup_results = std::collections::BTreeMap::new();

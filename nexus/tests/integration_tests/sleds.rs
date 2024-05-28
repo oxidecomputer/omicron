@@ -6,17 +6,17 @@
 
 use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
+use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
+use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
+use nexus_db_queries::context::OpContext;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_physical_disk;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::delete_physical_disk;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
@@ -95,7 +95,6 @@ async fn test_physical_disk_create_list_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let external_client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
 
     // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
@@ -106,17 +105,26 @@ async fn test_physical_disk_create_list_delete(
         format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
     let disks_initial = physical_disks_list(&external_client, &disks_url).await;
 
-    // Insert a new disk using the internal API, observe it in the external API
+    // Inject a disk into the database, observe it in the external API
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
     let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
-    create_physical_disk(
-        &internal_client,
-        "v",
-        "s",
-        "m",
-        PhysicalDiskKind::U2,
+    let physical_disk = DbPhysicalDisk::new(
+        Uuid::new_v4(),
+        "v".into(),
+        "s".into(),
+        "m".into(),
+        DbPhysicalDiskKind::U2,
         sled_id,
-    )
-    .await;
+    );
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let _disk_id = datastore
+        .physical_disk_insert(&opctx, physical_disk.clone())
+        .await
+        .expect("Failed to upsert physical disk");
+
     let disks = physical_disks_list(&external_client, &disks_url).await;
     assert_eq!(disks.len(), disks_initial.len() + 1);
     let _new_disk = disks
@@ -129,11 +137,19 @@ async fn test_physical_disk_create_list_delete(
         .expect("did not find the new disk");
 
     // Delete that disk using the internal API, observe it in the external API
-    delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;
-    assert_eq!(
-        physical_disks_list(&external_client, &disks_url).await,
-        disks_initial
-    );
+    datastore
+        .physical_disk_delete(
+            &opctx,
+            "v".into(),
+            "s".into(),
+            "m".into(),
+            sled_id,
+        )
+        .await
+        .expect("Failed to upsert physical disk");
+
+    let list = physical_disks_list(&external_client, &disks_url).await;
+    assert_eq!(list, disks_initial, "{:#?}", list,);
 }
 
 #[nexus_test]

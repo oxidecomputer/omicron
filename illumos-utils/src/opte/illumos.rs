@@ -92,7 +92,7 @@ pub fn initialize_xde_driver(
         const MESSAGE: &str = concat!(
             "There must be at least two underlay NICs for the xde ",
             "driver to operate. These are currently created by ",
-            "`./tools/create_virtual_hardware.sh`. Please ensure that ",
+            "`cargo xtask virtual-hardware create`. Please ensure that ",
             "script has been run, and that two VNICs named `net{0,1}` ",
             "exist on the system."
         );

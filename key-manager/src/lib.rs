@@ -102,7 +102,7 @@ enum StorageKeyRequest {
 /// the sled-agent starts. The `HardwareMonitor` gets the StorageKeyRequester
 /// from the bootstrap agent. If this changes, we should remove the `Clone` to
 /// limit who has access to the storage keys.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StorageKeyRequester {
     tx: mpsc::Sender<StorageKeyRequest>,
 }
