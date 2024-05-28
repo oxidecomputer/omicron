@@ -62,7 +62,6 @@ mod v2p_mapping;
 mod deployment;
 mod ipv4_nat_entry;
 mod omicron_zone_config;
-pub mod queries;
 mod quota;
 mod rack;
 mod region;
