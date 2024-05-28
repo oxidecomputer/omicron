@@ -1703,37 +1703,29 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let crdb_listen_addr = *underlay_address;
-                let crdb_listen_port = COCKROACH_ADMIN_PORT;
+                let crdb_listen_ip = *underlay_address;
                 let crdb_address = SocketAddr::new(
-                    IpAddr::V6(crdb_listen_addr),
+                    IpAddr::V6(crdb_listen_ip),
                     COCKROACH_PORT,
-                );
+                )
+                .to_string();
                 let admin_address = SocketAddr::new(
-                    IpAddr::V6(crdb_listen_addr),
+                    IpAddr::V6(crdb_listen_ip),
                     COCKROACH_ADMIN_PORT,
-                );
+                )
+                .to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &crdb_listen_addr,
+                    &crdb_listen_ip,
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
-                    .add_property(
-                        "listen_addr",
-                        "astring",
-                        crdb_listen_addr.to_string(),
-                    )
-                    .add_property(
-                        "listen_port",
-                        "astring",
-                        crdb_listen_port.to_string(),
-                    )
+                    .add_property("listen_addr", "astring", &crdb_address)
                     .add_property("store", "astring", "/data");
                 let cockroachdb_service =
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(
@@ -1747,13 +1739,9 @@ impl ServiceManager {
                         .add_property(
                             "cockroach_address",
                             "astring",
-                            &crdb_address.to_string(),
+                            crdb_address,
                         )
-                        .add_property(
-                            "http_address",
-                            "astring",
-                            &admin_address.to_string(),
-                        );
+                        .add_property("http_address", "astring", admin_address);
                 let cockroach_admin_service =
                     ServiceBuilder::new("oxide/cockroach-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
