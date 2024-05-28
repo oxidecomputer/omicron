@@ -190,20 +190,6 @@ impl From<PublishedVmmState> for VmmState {
     }
 }
 
-/// The possible roles a VMM can have vis-a-vis an instance.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum PropolisRole {
-    /// The VMM is its instance's current active VMM.
-    Active,
-
-    /// The VMM is its instance's migration target VMM.
-    MigrationTarget,
-
-    /// The instance does not refer to this VMM (but it may have done so in the
-    /// past).
-    Retired,
-}
-
 /// Action to be taken on behalf of state transition.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {

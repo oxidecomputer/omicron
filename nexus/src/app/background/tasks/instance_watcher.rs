@@ -18,6 +18,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_uuid_kinds::GenericUuid;
@@ -187,7 +188,12 @@ impl InstanceWatcher {
                         "error updating instance";
                         "error" => ?e,
                     );
-                    Incomplete::UpdateFailed
+                    match e {
+                        Error::ObjectNotFound { .. } => {
+                            Incomplete::InstanceNotFound
+                        }
+                        _ => Incomplete::UpdateFailed,
+                    }
                 })
                 .map(|updated| {
                     slog::debug!(
