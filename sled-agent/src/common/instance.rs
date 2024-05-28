@@ -7,11 +7,10 @@
 use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState, VmmState,
+    SledInstanceState, VmmRuntimeState, VmmState,
 };
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
-    MigrationState,
 };
 use uuid::Uuid;
 
@@ -129,20 +128,6 @@ impl From<PublishedVmmState> for VmmState {
             PublishedVmmState::Rebooting => VmmState::Rebooting,
         }
     }
-}
-
-/// The possible roles a VMM can have vis-a-vis an instance.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum PropolisRole {
-    /// The VMM is its instance's current active VMM.
-    Active,
-
-    /// The VMM is its instance's migration target VMM.
-    MigrationTarget,
-
-    /// The instance does not refer to this VMM (but it may have done so in the
-    /// past).
-    Retired,
 }
 
 /// Action to be taken on behalf of state transition.

@@ -255,6 +255,7 @@ pub(crate) async fn boundary_switches(
 /// `Ok(())` if this routine completed all the operations it wanted to
 /// complete, or an appropriate `Err` otherwise.
 #[allow(clippy::too_many_arguments)] // Yeah, I know, I know, Clippy...
+#[allow(dead_code)] // TODO(eliza): this probably needs to be deleted eventually
 pub(crate) async fn ensure_updated_instance_network_config(
     datastore: &DataStore,
     log: &slog::Logger,
@@ -685,49 +686,6 @@ pub(crate) async fn probe_ensure_dpd_config(
     };
 
     Ok(())
-}
-
-/// Deletes an instance's OPTE V2P mappings and the boundary switch NAT
-/// entries for its external IPs.
-///
-/// This routine returns immediately upon encountering any errors (and will
-/// not try to destroy any more objects after the point of failure).
-async fn clear_instance_networking_state(
-    datastore: &DataStore,
-    log: &slog::Logger,
-    resolver: &internal_dns::resolver::Resolver,
-    opctx: &OpContext,
-    opctx_alloc: &OpContext,
-    authz_instance: &authz::Instance,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
-) -> Result<(), Error> {
-    if let Err(e) = v2p_notification_tx.send(()) {
-        error!(
-            log,
-            "error notifying background task of v2p change";
-            "error" => ?e
-        )
-    };
-
-    instance_delete_dpd_config(
-        datastore,
-        log,
-        resolver,
-        opctx,
-        opctx_alloc,
-        authz_instance,
-    )
-    .await?;
-
-    notify_dendrite_nat_state(
-        datastore,
-        log,
-        resolver,
-        opctx_alloc,
-        Some(authz_instance.id()),
-        true,
-    )
-    .await
 }
 
 /// Attempts to delete all of the Dendrite NAT configuration for the
