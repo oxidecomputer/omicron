@@ -590,9 +590,10 @@ mod test {
 
     // Explain the possible forms of the SQL query to ensure that it
     // creates a valid SQL string.
+
     #[tokio::test]
-    async fn explainable() {
-        let logctx = dev::test_setup_log("explainable");
+    async fn explain_insert_storage() {
+        let logctx = dev::test_setup_log("explain_insert_storage");
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
@@ -600,10 +601,7 @@ mod test {
         let conn = pool.pool().get().await.unwrap();
 
         let id = Uuid::nil();
-        let max_instance_gen = 0;
         let project_id = Uuid::nil();
-        let cpus_diff = 16.try_into().unwrap();
-        let ram_diff = 2048.try_into().unwrap();
         let disk_byte_diff = 2048.try_into().unwrap();
         let storage_type = crate::db::datastore::StorageType::Disk;
 
@@ -618,6 +616,23 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_delete_storage() {
+        let logctx = dev::test_setup_log("explain_delete_storage");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+
         let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
             id,
             disk_byte_diff,
@@ -628,6 +643,24 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_insert_instance() {
+        let logctx = dev::test_setup_log("explain_insert_instance");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let cpus_diff = 16.try_into().unwrap();
+        let ram_diff = 2048.try_into().unwrap();
+
         let query = VirtualProvisioningCollectionUpdate::new_insert_instance(
             id, cpus_diff, ram_diff, project_id,
         );
@@ -635,6 +668,25 @@ mod test {
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_delete_instance() {
+        let logctx = dev::test_setup_log("explain_delete_instance");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let id = Uuid::nil();
+        let max_instance_gen = 0;
+        let project_id = Uuid::nil();
+        let cpus_diff = 16.try_into().unwrap();
+        let ram_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
             id,
