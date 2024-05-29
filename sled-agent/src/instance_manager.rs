@@ -641,7 +641,6 @@ impl InstanceManagerRunner {
 
                 let state = crate::instance::InstanceInitialState {
                     hardware,
-                    instance_runtime,
                     vmm_runtime,
                     propolis_addr,
                 };

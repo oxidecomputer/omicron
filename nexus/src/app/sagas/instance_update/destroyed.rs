@@ -17,7 +17,6 @@ use nexus_db_model::VmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::db::datastore::InstanceSnapshot;
-use nexus_db_queries::db::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
@@ -155,15 +154,14 @@ async fn siud_release_sled_resources(
 async fn siud_release_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let Some((instance, vmm)) = get_destroyed_vmm(&sagactx)? else {
-        // if the update we are handling is not an active VMM destroyed update,
-        // bail --- there's nothing to do here.
-        return Ok(());
-    };
-
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref authz_instance, vmm_id, .. } =
-        sagactx.saga_params::<Params>()?;
+    let Params {
+        ref serialized_authn,
+        ref authz_instance,
+        vmm_id,
+        instance,
+        ..
+    } = sagactx.saga_params::<Params>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);

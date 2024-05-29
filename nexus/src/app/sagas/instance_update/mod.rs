@@ -186,7 +186,7 @@ async fn siu_lock_instance(
     );
     osagactx
         .datastore()
-        .instance_updater_lock(&opctx, authz_instance, &lock_id)
+        .instance_updater_lock(&opctx, authz_instance, lock_id)
         .await
         .map_err(ActionError::action_failed)
         .map(|_| ())
@@ -203,7 +203,7 @@ async fn siu_fetch_state_and_start_real_saga(
 
     let state = osagactx
         .datastore()
-        .instance_fetch_with_vmms(&opctx, &authz_instance)
+        .instance_fetch_all(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
     osagactx
