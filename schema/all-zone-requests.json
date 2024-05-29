@@ -255,6 +255,15 @@
         "subnet": {
           "$ref": "#/definitions/IpNet"
         },
+        "transit_ips": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/IpNet"
+          }
+        },
         "vni": {
           "$ref": "#/definitions/Vni"
         }

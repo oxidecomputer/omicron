@@ -81,7 +81,8 @@
             "subnet": "172.30.1.0/24",
             "vni": 100,
             "primary": true,
-            "slot": 0
+            "slot": 0,
+            "transit_ips": null
           }
         }
       },

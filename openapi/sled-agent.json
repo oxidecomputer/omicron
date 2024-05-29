@@ -3595,6 +3595,7 @@
             "$ref": "#/components/schemas/IpNet"
           },
           "transit_ips": {
+            "nullable": true,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"
@@ -3613,7 +3614,6 @@
           "primary",
           "slot",
           "subnet",
-          "transit_ips",
           "vni"
         ]
       },

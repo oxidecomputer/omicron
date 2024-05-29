@@ -208,6 +208,7 @@ ERRORS:
             ),
             primary: true,
             slot: 0,
+            transit_ips: None,
         },
         external_tls: false,
         external_dns_servers: [],

@@ -50,7 +50,8 @@
             "subnet": "172.30.2.0/24",
             "vni": 100,
             "primary": true,
-            "slot": 0
+            "slot": 0,
+            "transit_ips": null
           },
           "external_tls": true,
           "external_dns_servers": [

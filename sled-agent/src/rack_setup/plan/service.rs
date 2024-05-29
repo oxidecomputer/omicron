@@ -1055,7 +1055,7 @@ impl ServicePortBuilder {
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
+            transit_ips: None,
         };
 
         Some((nic, external_ip))
@@ -1096,7 +1096,7 @@ impl ServicePortBuilder {
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
+            transit_ips: None,
         };
 
         Ok((nic, external_ip))
@@ -1154,7 +1154,7 @@ impl ServicePortBuilder {
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
+            transit_ips: None,
         };
 
         Ok((nic, snat_cfg))

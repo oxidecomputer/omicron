@@ -169,7 +169,8 @@
             "subnet": "172.30.3.0/24",
             "vni": 100,
             "primary": true,
-            "slot": 0
+            "slot": 0,
+            "transit_ips": null
           },
           "snat_cfg": {
             "ip": "45.154.216.38",

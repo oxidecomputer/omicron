@@ -57,7 +57,7 @@ pub struct NetworkInterface {
     pub vni: external::Vni,
     pub primary: bool,
     pub slot: u8,
-    pub transit_ips: Vec<external::IpNet>,
+    pub transit_ips: Option<Vec<external::IpNet>>,
 }
 
 /// An IP address and port range used for source NAT, i.e., making
