@@ -447,7 +447,7 @@ impl PortManager {
         if let Some(blocks) = &nic.transit_ips {
             for block in blocks {
                 #[cfg(target_os = "illumos")]
-                hdl.allow_cidr(&port_name, super::net_to_cidr(*block));
+                hdl.allow_cidr(&port_name, super::net_to_cidr(*block))?;
 
                 debug!(
                     self.inner.log,
