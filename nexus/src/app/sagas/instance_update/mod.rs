@@ -9,7 +9,6 @@ use super::{
 use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz};
-use nexus_types::identity::Resource;
 use omicron_common::api::external::InstanceState;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node, SagaName};
@@ -38,7 +37,6 @@ struct RealParams {
 }
 
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
-const STATE: &str = "state";
 
 // instance update saga: actions
 
@@ -63,7 +61,7 @@ declare_saga_actions! {
     // Become the instance updater
     BECOME_UPDATER -> "generation" {
         + siu_become_updater
-        - siu_lock_instance_undo
+        - siu_unbecome_updater
     }
 
     UNLOCK_INSTANCE -> "unlocked" {
@@ -84,7 +82,7 @@ impl NexusSaga for SagaInstanceUpdate {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(Node::action(
@@ -214,7 +212,7 @@ async fn siu_fetch_state_and_start_real_saga(
             state,
         })
         .await
-        .map_err(ActionError::action_failed);
+        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }
