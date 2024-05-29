@@ -37,9 +37,9 @@ WITH
           WHERE
             virtual_provisioning_resource.id = $4
           LIMIT
-            $5
+            1
         )
-        = $6
+        = 1
           AS update
     ),
   unused_cte_arm
@@ -47,7 +47,7 @@ WITH
       DELETE FROM
         virtual_provisioning_resource
       WHERE
-        virtual_provisioning_resource.id = $7
+        virtual_provisioning_resource.id = $5
         AND virtual_provisioning_resource.id
           = (
               SELECT
@@ -55,9 +55,9 @@ WITH
               FROM
                 instance
               WHERE
-                instance.id = $8 AND instance.state_generation < $9
+                instance.id = $6 AND instance.state_generation < $7
               LIMIT
-                $10
+                1
             )
       RETURNING
         virtual_provisioning_resource.id,
@@ -73,11 +73,11 @@ WITH
         virtual_provisioning_collection
       SET
         time_modified = current_timestamp(),
-        cpus_provisioned = virtual_provisioning_collection.cpus_provisioned - $11,
-        ram_provisioned = virtual_provisioning_collection.ram_provisioned - $12
+        cpus_provisioned = virtual_provisioning_collection.cpus_provisioned - $8,
+        ram_provisioned = virtual_provisioning_collection.ram_provisioned - $9
       WHERE
         virtual_provisioning_collection.id = ANY (SELECT all_collections.id FROM all_collections)
-        AND (SELECT do_update.update FROM do_update LIMIT $13)
+        AND (SELECT do_update.update FROM do_update LIMIT 1)
       RETURNING
         virtual_provisioning_collection.id,
         virtual_provisioning_collection.time_modified,
