@@ -508,11 +508,12 @@ mod test {
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
-    // This test is a bit of a "change detector", but it's here to help with
-    // debugging too. If you change this query, it can be useful to see exactly
-    // how the output SQL has been altered.
+    // These tests are a bit of a "change detector", but they're here to help
+    // with debugging too. If you change this query, it can be useful to see
+    // exactly how the output SQL has been altered.
+
     #[tokio::test]
-    async fn expectorate_query() {
+    async fn expectorate_query_insert_storage() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
         let disk_byte_diff = 2048.try_into().unwrap();
@@ -524,11 +525,17 @@ mod test {
             project_id,
             storage_type,
         );
-
         expectorate_query_contents(
             &query,
             "tests/output/virtual_provisioning_collection_update_insert_storage.sql",
         ).await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_delete_storage() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
             id,
@@ -540,7 +547,12 @@ mod test {
             &query,
             "tests/output/virtual_provisioning_collection_update_delete_storage.sql",
         ).await;
+    }
 
+    #[tokio::test]
+    async fn expectorate_query_insert_instance() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
 
@@ -552,7 +564,14 @@ mod test {
             &query,
             "tests/output/virtual_provisioning_collection_update_insert_instance.sql",
         ).await;
+    }
 
+    #[tokio::test]
+    async fn expectorate_query_delete_instance() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let cpus_diff = 4;
+        let ram_diff = 2048.try_into().unwrap();
         let max_instance_gen = 0;
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
