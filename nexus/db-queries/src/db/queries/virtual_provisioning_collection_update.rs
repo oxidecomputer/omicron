@@ -501,11 +501,12 @@ mod test {
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
-    // This test is a bit of a "change detector", but it's here to help with
-    // debugging too. If you change this query, it can be useful to see exactly
-    // how the output SQL has been altered.
+    // These tests are a bit of a "change detector", but they're here to help
+    // with debugging too. If you change this query, it can be useful to see
+    // exactly how the output SQL has been altered.
+
     #[tokio::test]
-    async fn expectorate_query() {
+    async fn expectorate_query_insert_storage() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
         let disk_byte_diff = 2048.try_into().unwrap();
@@ -517,11 +518,17 @@ mod test {
             project_id,
             storage_type,
         );
-
         expectorate_query_contents(
             &query,
             "tests/output/virtual_provisioning_collection_update_insert_storage.sql",
         ).await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_delete_storage() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
             id,
@@ -533,7 +540,12 @@ mod test {
             &query,
             "tests/output/virtual_provisioning_collection_update_delete_storage.sql",
         ).await;
+    }
 
+    #[tokio::test]
+    async fn expectorate_query_insert_instance() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
 
@@ -545,7 +557,14 @@ mod test {
             &query,
             "tests/output/virtual_provisioning_collection_update_insert_instance.sql",
         ).await;
+    }
 
+    #[tokio::test]
+    async fn expectorate_query_delete_instance() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let cpus_diff = 4;
+        let ram_diff = 2048.try_into().unwrap();
         let max_instance_gen = 0;
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
@@ -564,9 +583,10 @@ mod test {
 
     // Explain the possible forms of the SQL query to ensure that it
     // creates a valid SQL string.
+
     #[tokio::test]
-    async fn explainable() {
-        let logctx = dev::test_setup_log("explainable");
+    async fn explain_insert_storage() {
+        let logctx = dev::test_setup_log("explain_insert_storage");
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
@@ -574,10 +594,7 @@ mod test {
         let conn = pool.pool().get().await.unwrap();
 
         let id = Uuid::nil();
-        let max_instance_gen = 0;
         let project_id = Uuid::nil();
-        let cpus_diff = 16.try_into().unwrap();
-        let ram_diff = 2048.try_into().unwrap();
         let disk_byte_diff = 2048.try_into().unwrap();
         let storage_type = crate::db::datastore::StorageType::Disk;
 
@@ -592,6 +609,23 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_delete_storage() {
+        let logctx = dev::test_setup_log("explain_delete_storage");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+
         let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
             id,
             disk_byte_diff,
@@ -602,6 +636,24 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_insert_instance() {
+        let logctx = dev::test_setup_log("explain_insert_instance");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let cpus_diff = 16.try_into().unwrap();
+        let ram_diff = 2048.try_into().unwrap();
+
         let query = VirtualProvisioningCollectionUpdate::new_insert_instance(
             id, cpus_diff, ram_diff, project_id,
         );
@@ -609,6 +661,25 @@ mod test {
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_delete_instance() {
+        let logctx = dev::test_setup_log("explain_delete_instance");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let id = Uuid::nil();
+        let max_instance_gen = 0;
+        let project_id = Uuid::nil();
+        let cpus_diff = 16.try_into().unwrap();
+        let ram_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
             id,
