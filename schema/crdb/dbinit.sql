@@ -1014,7 +1014,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     updater_id UUID,
 
     /* Generation of the instance updater lock */
-    updater_gen INT NOT NULL
+    updater_gen INT NOT NULL DEFAULT 0
 
 );
 
