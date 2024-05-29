@@ -46,11 +46,14 @@ async fn test_omdb_usage_errors() {
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
+        &["db", "sleds", "--help"],
         &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
         &["nexus"],
         &["nexus", "background-tasks"],
+        &["nexus", "blueprints"],
+        &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
         &["sled-agent", "zpools"],
@@ -90,9 +93,17 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "instances"],
         &["db", "reconfigurator-save", tmppath.as_str()],
         &["db", "sleds"],
+        &["db", "sleds", "-F", "discretionary"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        &[
+            "--destructive",
+            "nexus",
+            "background-tasks",
+            "activate",
+            "inventory_collection",
+        ],
         &["nexus", "blueprints", "list"],
         &["nexus", "blueprints", "show", &initial_blueprint_id],
         &["nexus", "blueprints", "show", "current-target"],
@@ -154,7 +165,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // collection?
     assert!(parsed
         .planning_input
-        .all_sled_ids(SledFilter::All)
+        .all_sled_ids(SledFilter::Commissioned)
         .next()
         .is_some());
     assert!(!parsed.collections.is_empty());

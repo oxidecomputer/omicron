@@ -14,6 +14,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::Ipv6NetExt;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -83,22 +84,20 @@ impl IncompleteVpc {
         params: params::VpcCreate,
     ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        let ipv6_prefix = IpNetwork::from(
-            match params.ipv6_prefix {
-                None => defaults::random_vpc_ipv6_prefix(),
-                Some(prefix) => {
-                    if prefix.is_vpc_prefix() {
-                        Ok(prefix)
-                    } else {
-                        Err(external::Error::invalid_request(
-                            "VPC IPv6 address prefixes must be in the \
+        let ipv6_prefix = oxnet::IpNet::from(match params.ipv6_prefix {
+            None => defaults::random_vpc_ipv6_prefix(),
+            Some(prefix) => {
+                if prefix.is_vpc_prefix() {
+                    Ok(prefix)
+                } else {
+                    Err(external::Error::invalid_request(
+                        "VPC IPv6 address prefixes must be in the \
                             Unique Local Address range `fd00::/48` (RFD 4193)",
-                        ))
-                    }
+                    ))
                 }
-            }?
-            .0,
-        );
+            }
+        }?)
+        .into();
         Ok(Self {
             identity,
             project_id,

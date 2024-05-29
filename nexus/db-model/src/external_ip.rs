@@ -17,8 +17,9 @@ use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
+use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
@@ -146,6 +147,10 @@ pub enum OmicronZoneExternalIpError {
     #[error("invalid SNAT configuration")]
     InvalidSnatConfig(#[from] SourceNatConfigError),
     #[error(
+        "Omicron zone has a range of IPs ({0}); only a single IP is supported"
+    )]
+    NotSingleIp(IpNetwork),
+    #[error(
         "database IP is ephemeral; currently unsupported for Omicron zones"
     )]
     EphemeralIp,
@@ -158,24 +163,31 @@ impl TryFrom<&'_ ExternalIp> for OmicronZoneExternalIp {
         if !row.is_service {
             return Err(OmicronZoneExternalIpError::IpIsForInstance);
         }
+        let size = match row.ip.size() {
+            ipnetwork::NetworkSize::V4(n) => u128::from(n),
+            ipnetwork::NetworkSize::V6(n) => n,
+        };
+        if size != 1 {
+            return Err(OmicronZoneExternalIpError::NotSingleIp(row.ip));
+        }
 
-        let kind = match row.kind {
-            IpKind::SNat => {
-                OmicronZoneExternalIpKind::Snat(SourceNatConfig::new(
+        match row.kind {
+            IpKind::SNat => Ok(Self::Snat(OmicronZoneExternalSnatIp {
+                id: ExternalIpUuid::from_untyped_uuid(row.id),
+                snat_cfg: SourceNatConfig::new(
                     row.ip.ip(),
                     row.first_port.0,
                     row.last_port.0,
-                )?)
-            }
+                )?,
+            })),
             IpKind::Floating => {
-                OmicronZoneExternalIpKind::Floating(row.ip.ip())
+                Ok(Self::Floating(OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::from_untyped_uuid(row.id),
+                    ip: row.ip.ip(),
+                }))
             }
-            IpKind::Ephemeral => {
-                return Err(OmicronZoneExternalIpError::EphemeralIp)
-            }
-        };
-
-        Ok(Self { id: ExternalIpUuid::from_untyped_uuid(row.id), kind })
+            IpKind::Ephemeral => Err(OmicronZoneExternalIpError::EphemeralIp),
+        }
     }
 }
 
@@ -355,10 +367,8 @@ impl IncompleteExternalIp {
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> Self {
-        let (kind, ip, port_range, name, description, state) = match external_ip
-            .kind
-        {
-            OmicronZoneExternalIpKind::Floating(ip) => {
+        let (kind, port_range, name, description, state) = match external_ip {
+            OmicronZoneExternalIp::Floating(_) => {
                 // We'll name this external IP the same as we'll name the NIC
                 // associated with this zone.
                 let name = ServiceNetworkInterface::name(zone_id, zone_kind);
@@ -371,19 +381,20 @@ impl IncompleteExternalIp {
 
                 (
                     IpKind::Floating,
-                    ip,
                     None,
                     Some(name),
                     Some(zone_kind.to_string()),
                     state,
                 )
             }
-            OmicronZoneExternalIpKind::Snat(snat_cfg) => {
+            OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                snat_cfg,
+                ..
+            }) => {
                 let (first_port, last_port) = snat_cfg.port_range_raw();
                 let kind = IpKind::SNat;
                 (
                     kind,
-                    snat_cfg.ip,
                     Some((first_port.into(), last_port.into())),
                     // Only floating IPs are allowed to have names and
                     // descriptions.
@@ -395,7 +406,7 @@ impl IncompleteExternalIp {
         };
 
         Self {
-            id: external_ip.id.into_untyped_uuid(),
+            id: external_ip.id().into_untyped_uuid(),
             name,
             description,
             time_created: Utc::now(),
@@ -405,7 +416,7 @@ impl IncompleteExternalIp {
             parent_id: Some(zone_id.into_untyped_uuid()),
             pool_id,
             project_id: None,
-            explicit_ip: Some(IpNetwork::from(ip)),
+            explicit_ip: Some(IpNetwork::from(external_ip.ip())),
             explicit_port_range: port_range,
             state,
         }
@@ -579,6 +590,7 @@ impl From<FloatingIp> for views::FloatingIp {
 
         views::FloatingIp {
             ip: ip.ip.ip(),
+            ip_pool_id: ip.ip_pool_id,
             identity,
             project_id: ip.project_id,
             instance_id: ip.parent_id,

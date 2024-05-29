@@ -9,13 +9,14 @@ use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_target,
+    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
+    bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    impl_enum_type, ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8,
+    impl_enum_type, ipv6, Generation, MacAddr, Name, SledState, SqlU16, SqlU32,
+    SqlU8,
 };
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -24,12 +25,13 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{ExternalIpKind, SledKind};
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -40,6 +42,8 @@ pub struct Blueprint {
     pub parent_blueprint_id: Option<Uuid>,
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
+    pub cockroachdb_fingerprint: String,
+    pub cockroachdb_setting_preserve_downgrade: Option<String>,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -52,6 +56,10 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             parent_blueprint_id: bp.parent_blueprint_id,
             internal_dns_version: Generation(bp.internal_dns_version),
             external_dns_version: Generation(bp.external_dns_version),
+            cockroachdb_fingerprint: bp.cockroachdb_fingerprint.clone(),
+            cockroachdb_setting_preserve_downgrade: bp
+                .cockroachdb_setting_preserve_downgrade
+                .to_optional_string(),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -66,6 +74,12 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             parent_blueprint_id: value.parent_blueprint_id,
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
+            cockroachdb_fingerprint: value.cockroachdb_fingerprint,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::from_optional_string(
+                    &value.cockroachdb_setting_preserve_downgrade,
+                )
+                .ok(),
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
@@ -102,6 +116,15 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
             time_made_target: value.time_made_target,
         }
     }
+}
+
+/// See [`nexus_types::deployment::Blueprint::sled_state`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_sled_state)]
+pub struct BpSledState {
+    pub blueprint_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub sled_state: SledState,
 }
 
 /// See [`nexus_types::deployment::BlueprintPhysicalDisksConfig`].
@@ -223,6 +246,8 @@ pub struct BpOmicronZone {
     pub snat_last_port: Option<SqlU16>,
 
     disposition: DbBpZoneDisposition,
+
+    pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
 }
 
 impl BpOmicronZone {
@@ -231,11 +256,16 @@ impl BpOmicronZone {
         sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
+        let external_ip_id = blueprint_zone
+            .zone_type
+            .external_networking()
+            .map(|(ip, _)| ip.id());
         let zone = OmicronZone::new(
             sled_id,
             blueprint_zone.id.into_untyped_uuid(),
             blueprint_zone.underlay_address,
             &blueprint_zone.zone_type.clone().into(),
+            external_ip_id,
         )?;
         Ok(Self {
             blueprint_id,
@@ -260,6 +290,7 @@ impl BpOmicronZone {
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
             disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
+            external_ip_id: zone.external_ip_id.map(From::from),
         })
     }
 
@@ -288,14 +319,12 @@ impl BpOmicronZone {
             snat_ip: self.snat_ip,
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
+            external_ip_id: self.external_ip_id.map(From::from),
         };
-        let config =
-            zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
-        BlueprintZoneConfig::from_omicron_zone_config(
-            config,
+        zone.into_blueprint_zone_config(
             self.disposition.into(),
+            nic_row.map(OmicronZoneNic::from),
         )
-        .context("failed to convert OmicronZoneConfig")
     }
 }
 
@@ -378,7 +407,7 @@ impl BpOmicronZoneNic {
         blueprint_id: Uuid,
         zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let Some(nic) = zone.zone_type.opte_vnic() else {
+        let Some((_, nic)) = zone.zone_type.external_networking() else {
             return Ok(None);
         };
         let nic = OmicronZoneNic::new(zone.id.into_untyped_uuid(), nic)?;

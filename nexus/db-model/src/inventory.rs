@@ -882,11 +882,14 @@ impl InvOmicronZone {
         sled_id: SledUuid,
         zone: &nexus_types::inventory::OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
+        // Inventory zones do not know the external IP ID.
+        let external_ip_id = None;
         let zone = OmicronZone::new(
             sled_id,
             zone.id,
             zone.underlay_address,
             &zone.zone_type,
+            external_ip_id,
         )?;
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
@@ -938,6 +941,9 @@ impl InvOmicronZone {
             snat_ip: self.snat_ip,
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
+            // Inventory zones don't know an external IP ID, and Omicron zone
+            // configs don't need it.
+            external_ip_id: None,
         };
         zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
     }

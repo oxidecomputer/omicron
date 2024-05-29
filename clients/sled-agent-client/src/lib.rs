@@ -12,14 +12,11 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use types::{
-    BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig,
-};
 use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema, PartialEq ],
+    derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -31,23 +28,32 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
-    //TODO trade the manual transformations later in this file for the
-    //     replace directives below?
+    patch = {
+        BfdPeerConfig = { derives = [Eq, Hash] },
+        BgpConfig = { derives = [Eq, Hash] },
+        BgpPeerConfig = { derives = [Eq, Hash] },
+        OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        PortConfigV1 = { derives = [Eq, Hash] },
+        RouteConfig = { derives = [Eq, Hash] },
+        VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
+    },
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
         ByteCount = omicron_common::api::external::ByteCount,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         Generation = omicron_common::api::external::Generation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        SwitchLocation = omicron_common::api::external::SwitchLocation,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
-        Vni = omicron_common::api::external::Vni,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
+        Vni = omicron_common::api::external::Vni,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
@@ -56,7 +62,6 @@ progenitor::generate_api!(
 // We cannot easily configure progenitor to derive `Eq` on all the client-
 // generated types because some have floats and other types that can't impl
 // `Eq`.  We impl it explicitly for a few types on which we need it.
-impl Eq for types::OmicronPhysicalDiskConfig {}
 impl Eq for types::OmicronPhysicalDisksConfig {}
 impl Eq for types::OmicronZonesConfig {}
 impl Eq for types::OmicronZoneConfig {}
@@ -406,100 +411,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
-    fn from(n: omicron_common::api::external::Ipv4Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
-    fn from(n: omicron_common::api::external::Ipv6Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<omicron_common::api::external::IpNet> for types::IpNet {
-    fn from(s: omicron_common::api::external::IpNet) -> Self {
-        use omicron_common::api::external::IpNet;
-        match s {
-            IpNet::V4(v4) => Self::V4(v4.into()),
-            IpNet::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
-    fn from(n: types::Ipv4Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
-    fn from(n: ipnetwork::Ipv6Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<types::Ipv6Net> for ipnetwork::Ipv6Network {
-    fn from(n: types::Ipv6Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<ipnetwork::IpNetwork> for types::IpNet {
-    fn from(n: ipnetwork::IpNetwork) -> Self {
-        use ipnetwork::IpNetwork;
-        match n {
-            IpNetwork::V4(v4) => Self::V4(v4.into()),
-            IpNetwork::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
-impl From<types::IpNet> for ipnetwork::IpNetwork {
-    fn from(n: types::IpNet) -> Self {
-        match n {
-            types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
-            types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
-        }
-    }
-}
-
-impl From<std::net::Ipv4Addr> for types::Ipv4Net {
-    fn from(n: std::net::Ipv4Addr) -> Self {
-        Self::try_from(format!("{n}/32"))
-            .unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<std::net::Ipv6Addr> for types::Ipv6Net {
-    fn from(n: std::net::Ipv6Addr) -> Self {
-        Self::try_from(format!("{n}/128"))
-            .unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<std::net::IpAddr> for types::IpNet {
-    fn from(s: std::net::IpAddr) -> Self {
-        match s {
-            IpAddr::V4(v4) => Self::V4(v4.into()),
-            IpAddr::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
 impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     fn from(s: omicron_common::api::external::L4PortRange) -> Self {
         Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
@@ -560,7 +471,7 @@ impl From<omicron_common::api::internal::nexus::HostIdentifier>
     fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
         use omicron_common::api::internal::nexus::HostIdentifier::*;
         match s {
-            Ip(net) => Self::Ip(net.into()),
+            Ip(net) => Self::Ip(net),
             Vpc(vni) => Self::Vpc(vni),
         }
     }
@@ -662,62 +573,5 @@ impl TestInterfaces for Client {
             .send()
             .await
             .expect("disk_finish_transition() failed unexpectedly");
-    }
-}
-
-impl Eq for BgpConfig {}
-
-impl Hash for BgpConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.asn.hash(state);
-        self.originate.hash(state);
-    }
-}
-
-impl Hash for BgpPeerConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.addr.hash(state);
-        self.asn.hash(state);
-        self.port.hash(state);
-        self.hold_time.hash(state);
-        self.connect_retry.hash(state);
-        self.delay_open.hash(state);
-        self.idle_hold_time.hash(state);
-        self.keepalive.hash(state);
-    }
-}
-
-impl Hash for RouteConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.destination.hash(state);
-        self.nexthop.hash(state);
-    }
-}
-
-impl Eq for PortConfigV1 {}
-
-impl Hash for PortConfigV1 {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.addresses.hash(state);
-        self.autoneg.hash(state);
-        self.bgp_peers.hash(state);
-        self.port.hash(state);
-        self.routes.hash(state);
-        self.switch.hash(state);
-        self.uplink_port_fec.hash(state);
-        self.uplink_port_speed.hash(state);
-    }
-}
-
-impl Eq for BfdPeerConfig {}
-
-impl Hash for BfdPeerConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.local.hash(state);
-        self.remote.hash(state);
-        self.detection_threshold.hash(state);
-        self.required_rx.hash(state);
-        self.mode.hash(state);
-        self.switch.hash(state);
     }
 }

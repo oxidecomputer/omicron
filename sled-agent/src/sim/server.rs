@@ -34,7 +34,9 @@ use omicron_common::backoff::{
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -400,7 +402,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "nexus".parse().unwrap(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -443,7 +445,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "external-dns".parse().unwrap(),
                     ip: DNS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -502,7 +504,10 @@ pub async fn run_standalone_server(
 
     let disks = server.sled_agent.omicron_physical_disks_list().await?;
     let mut sled_configs = BTreeMap::new();
-    sled_configs.insert(config.id, SledConfig { disks, zones });
+    sled_configs.insert(
+        SledUuid::from_untyped_uuid(config.id),
+        SledConfig { disks, zones },
+    );
 
     let rack_init_request = NexusTypes::RackInitializationRequest {
         blueprint: build_initial_blueprint_from_sled_configs(
@@ -523,13 +528,14 @@ pub async fn run_standalone_server(
             HashMap::new(),
         ),
         rack_network_config: NexusTypes::RackNetworkConfigV1 {
-            rack_subnet: Ipv6Addr::LOCALHOST.into(),
+            rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,
             ports: Vec::new(),
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
+        allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

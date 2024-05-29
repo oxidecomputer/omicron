@@ -53,6 +53,7 @@ impl_typed_uuid_kind! {
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
     ExternalIp => "external_ip",
+    Instance => "instance",
     LoopbackAddress => "loopback_address",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
@@ -61,5 +62,6 @@ impl_typed_uuid_kind! {
     Upstairs => "upstairs",
     UpstairsRepair => "upstairs_repair",
     UpstairsSession => "upstairs_session",
+    Vnic => "vnic",
     Zpool => "zpool",
 }

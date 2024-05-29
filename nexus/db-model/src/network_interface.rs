@@ -17,7 +17,9 @@ use ipnetwork::NetworkSize;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::VnicUuid;
 use sled_agent_client::ZoneKind;
 use uuid::Uuid;
 
@@ -71,7 +73,7 @@ pub struct NetworkInterface {
 impl NetworkInterface {
     pub fn into_internal(
         self,
-        subnet: external::IpNet,
+        subnet: oxnet::IpNet,
     ) -> internal::shared::NetworkInterface {
         internal::shared::NetworkInterface {
             id: self.id(),
@@ -207,7 +209,7 @@ impl TryFrom<&'_ ServiceNetworkInterface>
             });
         }
         Ok(Self {
-            id: nic.id(),
+            id: VnicUuid::from_untyped_uuid(nic.id()),
             mac: *nic.mac,
             ip: nic.ip.ip(),
             slot: *nic.slot,

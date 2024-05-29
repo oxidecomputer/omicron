@@ -188,7 +188,9 @@ mod test {
     use crate::app::background::common::BackgroundTask;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::{Blueprint, BlueprintTarget};
+    use nexus_types::deployment::{
+        Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
+    };
     use omicron_common::api::external::Generation;
     use serde::Deserialize;
     use std::collections::BTreeMap;
@@ -211,9 +213,13 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks: BTreeMap::new(),
+                sled_state: BTreeMap::new(),
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: Some(parent_blueprint_id),
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
+                cockroachdb_fingerprint: String::new(),
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -232,7 +238,7 @@ mod test {
 
     #[nexus_test(server = crate::Server)]
     async fn test_load_blueprints(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),

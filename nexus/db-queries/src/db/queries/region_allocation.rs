@@ -369,6 +369,7 @@ mod test {
     use super::*;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -395,15 +396,11 @@ mod test {
             },
             REGION_REDUNDANCY_THRESHOLD,
         );
-        let s = dev::db::format_sql(
-            &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
-        )
-        .await
-        .unwrap();
-        expectorate::assert_contents(
+        expectorate_query_contents(
+            &region_allocate,
             "tests/output/region_allocate_distinct_sleds.sql",
-            &s,
-        );
+        )
+        .await;
 
         // Second structure: "Random"
 
@@ -415,15 +412,11 @@ mod test {
             &RegionAllocationStrategy::Random { seed: Some(1) },
             REGION_REDUNDANCY_THRESHOLD,
         );
-        let s = dev::db::format_sql(
-            &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
-        )
-        .await
-        .unwrap();
-        expectorate::assert_contents(
+        expectorate_query_contents(
+            &region_allocate,
             "tests/output/region_allocate_random_sleds.sql",
-            &s,
-        );
+        )
+        .await;
     }
 
     // Explain the possible forms of the SQL query to ensure that it

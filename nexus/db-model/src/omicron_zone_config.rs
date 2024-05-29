@@ -11,17 +11,22 @@
 //! collecting extra metadata like uptime). This module provides conversion
 //! helpers for the parts of those tables that are common between the two.
 
-use std::net::{Ipv6Addr, SocketAddrV6};
-
 use crate::inventory::ZoneType;
 use crate::{ipv6, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use anyhow::{anyhow, bail, ensure, Context};
 use ipnetwork::IpNetwork;
-use nexus_types::inventory::OmicronZoneType;
-use omicron_common::api::internal::shared::{
-    NetworkInterface, NetworkInterfaceKind,
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::{
+    blueprint_zone_type, OmicronZoneExternalFloatingAddr,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp,
 };
-use omicron_uuid_kinds::SledUuid;
+use nexus_types::inventory::{NetworkInterface, OmicronZoneType};
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::{
+    ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid,
+};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -46,6 +51,8 @@ pub(crate) struct OmicronZone {
     pub(crate) snat_ip: Option<IpNetwork>,
     pub(crate) snat_first_port: Option<SqlU16>,
     pub(crate) snat_last_port: Option<SqlU16>,
+    // Only present for BlueprintZoneConfig; always `None` for OmicronZoneConfig
+    pub(crate) external_ip_id: Option<ExternalIpUuid>,
 }
 
 impl OmicronZone {
@@ -54,6 +61,7 @@ impl OmicronZone {
         zone_id: Uuid,
         zone_underlay_address: Ipv6Addr,
         zone_type: &nexus_types::inventory::OmicronZoneType,
+        external_ip_id: Option<ExternalIpUuid>,
     ) -> anyhow::Result<Self> {
         let id = zone_id;
         let underlay_address = ipv6::Ipv6Addr::from(zone_underlay_address);
@@ -84,7 +92,7 @@ impl OmicronZone {
                 let (first_port, last_port) = snat_cfg.port_range_raw();
                 ntp_ntp_servers = Some(ntp_servers.clone());
                 ntp_dns_servers = Some(dns_servers.clone());
-                ntp_ntp_domain = domain.clone();
+                ntp_ntp_domain.clone_from(domain);
                 snat_ip = Some(IpNetwork::from(snat_cfg.ip));
                 snat_first_port = Some(SqlU16::from(first_port));
                 snat_last_port = Some(SqlU16::from(last_port));
@@ -154,7 +162,7 @@ impl OmicronZone {
             } => {
                 ntp_ntp_servers = Some(ntp_servers.clone());
                 ntp_dns_servers = Some(dns_servers.clone());
-                ntp_ntp_domain = domain.clone();
+                ntp_ntp_domain.clone_from(domain);
                 (ZoneType::InternalNtp, address, None)
             }
             OmicronZoneType::Nexus {
@@ -212,6 +220,152 @@ impl OmicronZone {
             snat_ip,
             snat_first_port,
             snat_last_port,
+            external_ip_id,
+        })
+    }
+
+    pub(crate) fn into_blueprint_zone_config(
+        self,
+        disposition: BlueprintZoneDisposition,
+        nic_row: Option<OmicronZoneNic>,
+    ) -> anyhow::Result<nexus_types::deployment::BlueprintZoneConfig> {
+        let common = self.into_zone_config_common(nic_row)?;
+        let address = common.primary_service_address;
+        let zone_type = match common.zone_type {
+            ZoneType::BoundaryNtp => {
+                let snat_cfg = match (
+                    common.snat_ip,
+                    common.snat_first_port,
+                    common.snat_last_port,
+                ) {
+                    (Some(ip), Some(first_port), Some(last_port)) => {
+                        nexus_types::inventory::SourceNatConfig::new(
+                            ip.ip(),
+                            *first_port,
+                            *last_port,
+                        )
+                        .context("bad SNAT config for boundary NTP")?
+                    }
+                    _ => bail!(
+                        "expected non-NULL snat properties, \
+                         found at least one NULL"
+                    ),
+                };
+                BlueprintZoneType::BoundaryNtp(
+                    blueprint_zone_type::BoundaryNtp {
+                        address,
+                        dns_servers: common.ntp_dns_servers?,
+                        domain: common.ntp_domain,
+                        nic: common.nic?,
+                        ntp_servers: common.ntp_ntp_servers?,
+                        external_ip: OmicronZoneExternalSnatIp {
+                            id: common.external_ip_id?,
+                            snat_cfg,
+                        },
+                    },
+                )
+            }
+            ZoneType::Clickhouse => {
+                BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                    address,
+                    dataset: common.dataset?,
+                })
+            }
+            ZoneType::ClickhouseKeeper => BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper {
+                    address,
+                    dataset: common.dataset?,
+                },
+            ),
+            ZoneType::CockroachDb => BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb {
+                    address,
+                    dataset: common.dataset?,
+                },
+            ),
+            ZoneType::Crucible => {
+                BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                    address,
+                    dataset: common.dataset?,
+                })
+            }
+            ZoneType::CruciblePantry => BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            ),
+            ZoneType::ExternalDns => BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    dataset: common.dataset?,
+                    dns_address: OmicronZoneExternalFloatingAddr {
+                        id: common.external_ip_id?,
+                        addr: common.dns_address?,
+                    },
+                    http_address: address,
+                    nic: common.nic?,
+                },
+            ),
+            ZoneType::InternalDns => BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset: common.dataset?,
+                    dns_address: match common.dns_address? {
+                        SocketAddr::V4(addr) => {
+                            bail!("expected V6 address; got {addr}")
+                        }
+                        SocketAddr::V6(addr) => addr,
+                    },
+                    http_address: address,
+                    gz_address: *common.dns_gz_address.ok_or_else(|| {
+                        anyhow!("expected dns_gz_address, found none")
+                    })?,
+                    gz_address_index: *common.dns_gz_address_index.ok_or_else(
+                        || anyhow!("expected dns_gz_address_index, found none"),
+                    )?,
+                },
+            ),
+            ZoneType::InternalNtp => BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp {
+                    address,
+                    dns_servers: common.ntp_dns_servers?,
+                    domain: common.ntp_domain,
+                    ntp_servers: common.ntp_ntp_servers?,
+                },
+            ),
+            ZoneType::Nexus => {
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    internal_address: address,
+                    nic: common.nic?,
+                    external_tls: common
+                        .nexus_external_tls
+                        .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                    external_ip: OmicronZoneExternalFloatingIp {
+                        id: common.external_ip_id?,
+                        ip: common
+                            .second_service_ip
+                            .ok_or_else(|| {
+                                anyhow!("expected second service IP")
+                            })?
+                            .ip(),
+                    },
+                    external_dns_servers: common
+                        .nexus_external_dns_servers
+                        .ok_or_else(|| {
+                            anyhow!("expected 'external_dns_servers'")
+                        })?
+                        .into_iter()
+                        .map(|i| i.ip())
+                        .collect(),
+                })
+            }
+            ZoneType::Oximeter => {
+                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                    address,
+                })
+            }
+        };
+        Ok(nexus_types::deployment::BlueprintZoneConfig {
+            disposition,
+            id: OmicronZoneUuid::from_untyped_uuid(common.id),
+            underlay_address: std::net::Ipv6Addr::from(common.underlay_address),
+            zone_type,
         })
     }
 
@@ -219,13 +373,115 @@ impl OmicronZone {
         self,
         nic_row: Option<OmicronZoneNic>,
     ) -> anyhow::Result<nexus_types::inventory::OmicronZoneConfig> {
-        let address = SocketAddrV6::new(
+        let common = self.into_zone_config_common(nic_row)?;
+        let address = common.primary_service_address.to_string();
+
+        let zone_type = match common.zone_type {
+            ZoneType::BoundaryNtp => {
+                let snat_cfg = match (
+                    common.snat_ip,
+                    common.snat_first_port,
+                    common.snat_last_port,
+                ) {
+                    (Some(ip), Some(first_port), Some(last_port)) => {
+                        nexus_types::inventory::SourceNatConfig::new(
+                            ip.ip(),
+                            *first_port,
+                            *last_port,
+                        )
+                        .context("bad SNAT config for boundary NTP")?
+                    }
+                    _ => bail!(
+                        "expected non-NULL snat properties, \
+                        found at least one NULL"
+                    ),
+                };
+                OmicronZoneType::BoundaryNtp {
+                    address,
+                    dns_servers: common.ntp_dns_servers?,
+                    domain: common.ntp_domain,
+                    nic: common.nic?,
+                    ntp_servers: common.ntp_ntp_servers?,
+                    snat_cfg,
+                }
+            }
+            ZoneType::Clickhouse => OmicronZoneType::Clickhouse {
+                address,
+                dataset: common.dataset?,
+            },
+            ZoneType::ClickhouseKeeper => OmicronZoneType::ClickhouseKeeper {
+                address,
+                dataset: common.dataset?,
+            },
+            ZoneType::CockroachDb => OmicronZoneType::CockroachDb {
+                address,
+                dataset: common.dataset?,
+            },
+            ZoneType::Crucible => {
+                OmicronZoneType::Crucible { address, dataset: common.dataset? }
+            }
+            ZoneType::CruciblePantry => {
+                OmicronZoneType::CruciblePantry { address }
+            }
+            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
+                dataset: common.dataset?,
+                dns_address: common.dns_address?.to_string(),
+                http_address: address,
+                nic: common.nic?,
+            },
+            ZoneType::InternalDns => OmicronZoneType::InternalDns {
+                dataset: common.dataset?,
+                dns_address: common.dns_address?.to_string(),
+                http_address: address,
+                gz_address: *common.dns_gz_address.ok_or_else(|| {
+                    anyhow!("expected dns_gz_address, found none")
+                })?,
+                gz_address_index: *common.dns_gz_address_index.ok_or_else(
+                    || anyhow!("expected dns_gz_address_index, found none"),
+                )?,
+            },
+            ZoneType::InternalNtp => OmicronZoneType::InternalNtp {
+                address,
+                dns_servers: common.ntp_dns_servers?,
+                domain: common.ntp_domain,
+                ntp_servers: common.ntp_ntp_servers?,
+            },
+            ZoneType::Nexus => OmicronZoneType::Nexus {
+                internal_address: address,
+                nic: common.nic?,
+                external_tls: common
+                    .nexus_external_tls
+                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                external_ip: common
+                    .second_service_ip
+                    .ok_or_else(|| anyhow!("expected second service IP"))?
+                    .ip(),
+                external_dns_servers: common
+                    .nexus_external_dns_servers
+                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
+                    .into_iter()
+                    .map(|i| i.ip())
+                    .collect(),
+            },
+            ZoneType::Oximeter => OmicronZoneType::Oximeter { address },
+        };
+        Ok(nexus_types::inventory::OmicronZoneConfig {
+            id: common.id,
+            underlay_address: std::net::Ipv6Addr::from(common.underlay_address),
+            zone_type,
+        })
+    }
+
+    fn into_zone_config_common(
+        self,
+        nic_row: Option<OmicronZoneNic>,
+    ) -> anyhow::Result<ZoneConfigCommon> {
+        let primary_service_address = SocketAddrV6::new(
             std::net::Ipv6Addr::from(self.primary_service_ip),
             *self.primary_service_port,
             0,
             0,
-        )
-        .to_string();
+        );
 
         // Assemble a value that we can use to extract the NIC _if necessary_
         // and report an error if it was needed but not found.
@@ -277,8 +533,7 @@ impl OmicronZone {
         let dns_address =
             match (self.second_service_ip, self.second_service_port) {
                 (Some(dns_ip), Some(dns_port)) => {
-                    Ok(std::net::SocketAddr::new(dns_ip.ip(), *dns_port)
-                        .to_string())
+                    Ok(std::net::SocketAddr::new(dns_ip.ip(), *dns_port))
                 }
                 _ => Err(anyhow!(
                     "expected second service IP and port, \
@@ -296,98 +551,56 @@ impl OmicronZone {
         let ntp_ntp_servers =
             self.ntp_ntp_servers.ok_or_else(|| anyhow!("expected ntp_servers"));
 
-        let zone_type = match self.zone_type {
-            ZoneType::BoundaryNtp => {
-                let snat_cfg = match (
-                    self.snat_ip,
-                    self.snat_first_port,
-                    self.snat_last_port,
-                ) {
-                    (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfig::new(
-                            ip.ip(),
-                            *first_port,
-                            *last_port,
-                        )
-                        .context("bad SNAT config for boundary NTP")?
-                    }
-                    _ => bail!(
-                        "expected non-NULL snat properties, \
-                        found at least one NULL"
-                    ),
-                };
-                OmicronZoneType::BoundaryNtp {
-                    address,
-                    dns_servers: ntp_dns_servers?,
-                    domain: self.ntp_domain,
-                    nic: nic?,
-                    ntp_servers: ntp_ntp_servers?,
-                    snat_cfg,
-                }
-            }
-            ZoneType::Clickhouse => {
-                OmicronZoneType::Clickhouse { address, dataset: dataset? }
-            }
-            ZoneType::ClickhouseKeeper => {
-                OmicronZoneType::ClickhouseKeeper { address, dataset: dataset? }
-            }
-            ZoneType::CockroachDb => {
-                OmicronZoneType::CockroachDb { address, dataset: dataset? }
-            }
-            ZoneType::Crucible => {
-                OmicronZoneType::Crucible { address, dataset: dataset? }
-            }
-            ZoneType::CruciblePantry => {
-                OmicronZoneType::CruciblePantry { address }
-            }
-            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
-                dataset: dataset?,
-                dns_address: dns_address?,
-                http_address: address,
-                nic: nic?,
-            },
-            ZoneType::InternalDns => OmicronZoneType::InternalDns {
-                dataset: dataset?,
-                dns_address: dns_address?,
-                http_address: address,
-                gz_address: *self.dns_gz_address.ok_or_else(|| {
-                    anyhow!("expected dns_gz_address, found none")
-                })?,
-                gz_address_index: *self.dns_gz_address_index.ok_or_else(
-                    || anyhow!("expected dns_gz_address_index, found none"),
-                )?,
-            },
-            ZoneType::InternalNtp => OmicronZoneType::InternalNtp {
-                address,
-                dns_servers: ntp_dns_servers?,
-                domain: self.ntp_domain,
-                ntp_servers: ntp_ntp_servers?,
-            },
-            ZoneType::Nexus => OmicronZoneType::Nexus {
-                internal_address: address,
-                nic: nic?,
-                external_tls: self
-                    .nexus_external_tls
-                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
-                external_ip: self
-                    .second_service_ip
-                    .ok_or_else(|| anyhow!("expected second service IP"))?
-                    .ip(),
-                external_dns_servers: self
-                    .nexus_external_dns_servers
-                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
-                    .into_iter()
-                    .map(|i| i.ip())
-                    .collect(),
-            },
-            ZoneType::Oximeter => OmicronZoneType::Oximeter { address },
-        };
-        Ok(nexus_types::inventory::OmicronZoneConfig {
+        // Do the same for the external IP ID.
+        let external_ip_id =
+            self.external_ip_id.context("expected an external IP ID");
+
+        Ok(ZoneConfigCommon {
             id: self.id,
-            underlay_address: std::net::Ipv6Addr::from(self.underlay_address),
-            zone_type,
+            underlay_address: self.underlay_address,
+            zone_type: self.zone_type,
+            primary_service_address,
+            snat_ip: self.snat_ip,
+            snat_first_port: self.snat_first_port,
+            snat_last_port: self.snat_last_port,
+            ntp_domain: self.ntp_domain,
+            dns_gz_address: self.dns_gz_address,
+            dns_gz_address_index: self.dns_gz_address_index,
+            nexus_external_tls: self.nexus_external_tls,
+            nexus_external_dns_servers: self.nexus_external_dns_servers,
+            second_service_ip: self.second_service_ip,
+            nic,
+            dataset,
+            dns_address,
+            ntp_dns_servers,
+            ntp_ntp_servers,
+            external_ip_id,
         })
     }
+}
+
+struct ZoneConfigCommon {
+    id: Uuid,
+    underlay_address: ipv6::Ipv6Addr,
+    zone_type: ZoneType,
+    primary_service_address: SocketAddrV6,
+    snat_ip: Option<IpNetwork>,
+    snat_first_port: Option<SqlU16>,
+    snat_last_port: Option<SqlU16>,
+    ntp_domain: Option<String>,
+    dns_gz_address: Option<ipv6::Ipv6Addr>,
+    dns_gz_address_index: Option<SqlU32>,
+    nexus_external_tls: Option<bool>,
+    nexus_external_dns_servers: Option<Vec<IpNetwork>>,
+    second_service_ip: Option<IpNetwork>,
+    // These properties may or may not be needed, depending on the zone type. We
+    // store results here that can be unpacked once we determine our zone type.
+    nic: anyhow::Result<NetworkInterface>,
+    dataset: anyhow::Result<nexus_types::inventory::OmicronZoneDataset>,
+    dns_address: anyhow::Result<SocketAddr>,
+    ntp_dns_servers: anyhow::Result<Vec<IpAddr>>,
+    ntp_ntp_servers: anyhow::Result<Vec<String>>,
+    external_ip_id: anyhow::Result<ExternalIpUuid>,
 }
 
 #[derive(Debug)]

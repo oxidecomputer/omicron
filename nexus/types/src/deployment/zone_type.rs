@@ -8,13 +8,13 @@
 //! internal API, but include additional information needed by Reconfigurator
 //! that is not needed by sled-agent.
 
+use super::OmicronZoneExternalIp;
 use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::OmicronZoneType;
 use sled_agent_client::ZoneKind;
-use std::net::IpAddr;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -63,27 +63,21 @@ impl BlueprintZoneType {
         }
     }
 
-    pub fn external_ip(&self) -> Option<IpAddr> {
+    pub fn external_networking(
+        &self,
+    ) -> Option<(OmicronZoneExternalIp, &NetworkInterface)> {
         match self {
-            BlueprintZoneType::Nexus(nexus) => Some(nexus.external_ip),
-            BlueprintZoneType::ExternalDns(dns) => Some(dns.dns_address.ip()),
-            BlueprintZoneType::BoundaryNtp(ntp) => Some(ntp.snat_cfg.ip),
-            BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::CockroachDb(_)
-            | BlueprintZoneType::Crucible(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::InternalDns(_)
-            | BlueprintZoneType::InternalNtp(_)
-            | BlueprintZoneType::Oximeter(_) => None,
-        }
-    }
-
-    pub fn opte_vnic(&self) -> Option<&NetworkInterface> {
-        match self {
-            BlueprintZoneType::Nexus(nexus) => Some(&nexus.nic),
-            BlueprintZoneType::ExternalDns(dns) => Some(&dns.nic),
-            BlueprintZoneType::BoundaryNtp(ntp) => Some(&ntp.nic),
+            BlueprintZoneType::Nexus(nexus) => Some((
+                OmicronZoneExternalIp::Floating(nexus.external_ip),
+                &nexus.nic,
+            )),
+            BlueprintZoneType::ExternalDns(dns) => Some((
+                OmicronZoneExternalIp::Floating(dns.dns_address.into_ip()),
+                &dns.nic,
+            )),
+            BlueprintZoneType::BoundaryNtp(ntp) => {
+                Some((OmicronZoneExternalIp::Snat(ntp.external_ip), &ntp.nic))
+            }
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
             | BlueprintZoneType::CockroachDb(_)
@@ -156,7 +150,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                 dns_servers: zone.dns_servers,
                 domain: zone.domain,
                 nic: zone.nic,
-                snat_cfg: zone.snat_cfg,
+                snat_cfg: zone.external_ip.snat_cfg,
             },
             BlueprintZoneType::Clickhouse(zone) => Self::Clickhouse {
                 address: zone.address.to_string(),
@@ -182,7 +176,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::ExternalDns(zone) => Self::ExternalDns {
                 dataset: zone.dataset,
                 http_address: zone.http_address.to_string(),
-                dns_address: zone.dns_address.to_string(),
+                dns_address: zone.dns_address.addr.to_string(),
                 nic: zone.nic,
             },
             BlueprintZoneType::InternalDns(zone) => Self::InternalDns {
@@ -200,7 +194,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             },
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address.to_string(),
-                external_ip: zone.external_ip,
+                external_ip: zone.external_ip.ip,
                 nic: zone.nic,
                 external_tls: zone.external_tls,
                 external_dns_servers: zone.external_dns_servers,
@@ -232,15 +226,16 @@ impl BlueprintZoneType {
 }
 
 pub mod blueprint_zone_type {
+    use crate::deployment::OmicronZoneExternalFloatingAddr;
+    use crate::deployment::OmicronZoneExternalFloatingIp;
+    use crate::deployment::OmicronZoneExternalSnatIp;
     use crate::inventory::OmicronZoneDataset;
     use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::SourceNatConfig;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
-    use std::net::SocketAddr;
     use std::net::SocketAddrV6;
 
     #[derive(
@@ -253,8 +248,7 @@ pub mod blueprint_zone_type {
         pub domain: Option<String>,
         /// The service vNIC providing outbound connectivity using OPTE.
         pub nic: NetworkInterface,
-        /// The SNAT configuration for outbound connections.
-        pub snat_cfg: SourceNatConfig,
+        pub external_ip: OmicronZoneExternalSnatIp,
     }
 
     #[derive(
@@ -304,7 +298,7 @@ pub mod blueprint_zone_type {
         /// The address at which the external DNS server API is reachable.
         pub http_address: SocketAddrV6,
         /// The address at which the external DNS server is reachable.
-        pub dns_address: SocketAddr,
+        pub dns_address: OmicronZoneExternalFloatingAddr,
         /// The service vNIC providing external connectivity using OPTE.
         pub nic: NetworkInterface,
     }
@@ -346,7 +340,7 @@ pub mod blueprint_zone_type {
         /// The address at which the internal nexus server is reachable.
         pub internal_address: SocketAddrV6,
         /// The address at which the external nexus server is reachable.
-        pub external_ip: IpAddr,
+        pub external_ip: OmicronZoneExternalFloatingIp,
         /// The service vNIC providing external connectivity using OPTE.
         pub nic: NetworkInterface,
         /// Whether Nexus's external endpoint should use TLS

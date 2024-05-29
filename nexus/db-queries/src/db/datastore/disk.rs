@@ -811,6 +811,22 @@ impl DataStore {
             .map(|(disk, _, _)| disk)
             .collect())
     }
+
+    pub async fn disk_for_volume_id(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Disk>> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        use db::schema::disk::dsl;
+        dsl::disk
+            .filter(dsl::volume_id.eq(volume_id))
+            .select(Disk::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]

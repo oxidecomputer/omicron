@@ -10,6 +10,8 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -74,6 +76,7 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
+    target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -121,6 +124,8 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        let target_cockroachdb_cluster_version =
+            CockroachDbClusterVersion::POLICY;
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -135,6 +140,7 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_nexus_zone_count,
+            target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -301,11 +307,14 @@ impl SystemDescription {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_cluster_version: self
+                .target_cockroachdb_cluster_version,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version,
             self.external_dns_version,
+            CockroachDbSettings::empty(),
         );
 
         for sled in self.sleds.values() {
@@ -440,13 +449,16 @@ impl Sled {
         hardware_slot: u16,
         nzpools: u8,
     ) -> Sled {
+        use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
+        let mut zpool_rng =
+            TypedUuidRng::from_seed("SystemSimultatedSled", "ZpoolUuid");
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
-                let zpool = ZpoolUuid::new_v4();
+                let zpool = ZpoolUuid::from(zpool_rng.next());
                 let disk = SledDisk {
                     disk_identity: DiskIdentity {
                         vendor: String::from("fake-vendor"),

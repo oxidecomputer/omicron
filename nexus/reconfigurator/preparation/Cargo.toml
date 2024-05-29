@@ -3,6 +3,9 @@ name = "nexus-reconfigurator-preparation"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 futures.workspace = true
@@ -12,5 +15,6 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 
 omicron-workspace-hack.workspace = true

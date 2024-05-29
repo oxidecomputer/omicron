@@ -52,8 +52,8 @@ pub enum NodeRequestError {
     Send,
 
     #[error(
-        "Network config update failed because it is out of date. Attempted
-        update generation: {attempted_update_generation}, current generation: 
+        "Network config update failed because it is out of date. Attempted \
+        update generation: {attempted_update_generation}, current generation: \
         {current_generation}"
     )]
     StaleNetworkConfig {
