@@ -129,81 +129,18 @@ async fn siu_lock_instance(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let datastore = osagactx.datastore();
     let log = osagactx.log();
-    let instance_id = authz_instance.id();
     slog::info!(
-        log,
+        osagactx.log(),
         "instance update: attempting to lock instance";
-        "instance_id" => %instance_id,
+        "instance_id" => %instance.id(),
         "saga_id" => %lock_id,
     );
-
-    loop {
-        let instance = datastore
-            .instance_refetch(&opctx, &authz_instance)
-            .await
-            .map_err(ActionError::action_failed)?;
-        // Look at the current lock state of the instance and determine whether
-        // we can lock it.
-        match instance.runtime_state.updater_id {
-            Some(ref id) if id == &lock_id => {
-                slog::info!(
-                    log,
-                    "instance update: instance already locked by this saga";
-                    "instance_id" => %instance_id,
-                    "saga_id" => %lock_id,
-                );
-                return Ok(instance.runtime_state.updater_gen);
-            }
-            Some(ref id) => {
-                slog::info!(
-                    log,
-                    "instance update: instance locked by another saga";
-                    "instance_id" => %instance_id,
-                    "saga_id" => %lock_id,
-                    "locked_by" => %lock_id,
-                );
-                return Err(ActionError::action_failed(serde_json::json!({
-                    "error": "instance locked by another saga",
-                    "saga_id": lock_id,
-                    "locked_by": id,
-                })));
-            }
-            None => {}
-        };
-        let gen = instance.runtime_state.updater_gen;
-        slog::debug!(
-            log,
-            "instance update: trying to acquire updater lock...";
-            "instance_id" => %instance_id,
-            "saga_id" => %lock_id,
-            "updater_gen" => ?gen,
-        );
-        let lock = datastore
-            .instance_updater_lock(&opctx, &authz_instance, gen, &lock_id)
-            .await
-            .map_err(ActionError::action_failed)?;
-        match lock {
-            Some(lock_gen) => {
-                slog::info!(
-                    log,
-                    "instance update: acquired updater lock";
-                    "instance_id" => %instance_id,
-                    "saga_id" => %lock_id,
-                    "updater_gen" => ?gen,
-                );
-                return Ok(lock_gen);
-            }
-            None => {
-                slog::debug!(
-                    log,
-                    "instance update: generation has advanced, retrying...";
-                    "instance_id" => %instance_id,
-                    "saga_id" => %lock_id,
-                    "updater_gen" => ?gen,
-                );
-            }
-        }
-    }
+    osagactx
+        .datastore()
+        .instance_updater_lock(&opctx, authz_instance, &lock_id)
+        .await
+        .map_err(ActionError::action_failed)
+        .map(|_| ())
 }
 
 async fn siu_fetch_state(
