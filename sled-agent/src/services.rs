@@ -1704,11 +1704,9 @@ impl ServiceManager {
                 };
 
                 let crdb_listen_ip = *underlay_address;
-                let crdb_address = SocketAddr::new(
-                    IpAddr::V6(crdb_listen_ip),
-                    COCKROACH_PORT,
-                )
-                .to_string();
+                let crdb_address =
+                    SocketAddr::new(IpAddr::V6(crdb_listen_ip), COCKROACH_PORT)
+                        .to_string();
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(crdb_listen_ip),
                     COCKROACH_ADMIN_PORT,
