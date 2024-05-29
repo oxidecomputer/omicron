@@ -2213,6 +2213,7 @@ async fn test_instance_update_network_interfaces(
             description: Some(new_description.clone()),
         },
         primary: false,
+        transit_ips: vec![],
     };
 
     // Verify we fail to update the NIC when the instance is running
@@ -2289,6 +2290,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
+        transit_ips: vec![],
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
@@ -2383,6 +2385,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
+        transit_ips: vec![],
     };
     let new_primary_iface = NexusRequest::object_put(
         client,

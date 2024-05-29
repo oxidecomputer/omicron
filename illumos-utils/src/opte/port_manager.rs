@@ -440,6 +440,22 @@ impl PortManager {
             }
         }
 
+        // If there are any transit IPs set, allow them through.
+        // TODO: Currently set only in initial state.
+        //       This, external IPs, and cfg'able state
+        //       (DHCP?) are probably worth being managed by an RPW.
+        for block in &nic.transit_ips {
+            #[cfg(target_os = "illumos")]
+            hdl.allow_cidr(&port_name, super::net_to_cidr(*block));
+
+            debug!(
+                self.inner.log,
+                "Added CIDR to in/out allowlist";
+                "port_name" => &port_name,
+                "cidr" => ?block,
+            );
+        }
+
         info!(
             self.inner.log,
             "Created OPTE port";

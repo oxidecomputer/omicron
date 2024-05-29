@@ -463,6 +463,7 @@ pub static DEMO_INSTANCE_NIC_PUT: Lazy<params::InstanceNetworkInterfaceUpdate> =
             description: Some(String::from("an updated description")),
         },
         primary: false,
+        transit_ips: vec![],
     });
 
 pub static DEMO_CERTIFICATE_NAME: Lazy<Name> =

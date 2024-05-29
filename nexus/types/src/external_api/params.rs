@@ -807,6 +807,9 @@ pub struct InstanceNetworkInterfaceUpdate {
     // for the instance, though not the name.
     #[serde(default)]
     pub primary: bool,
+
+    /// TODO: describe
+    pub transit_ips: Vec<IpNet>,
 }
 
 // CERTIFICATES

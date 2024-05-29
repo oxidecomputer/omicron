@@ -13,6 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
+use ipnetwork::IpNetwork;
 use ipnetwork::NetworkSize;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
@@ -63,11 +64,13 @@ pub struct NetworkInterface {
     //
     // If user requests an address of either kind, give exactly that and not the other.
     // If neither is specified, auto-assign one of each?
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: IpNetwork,
 
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 impl NetworkInterface {
@@ -101,6 +104,7 @@ impl NetworkInterface {
             vni: external::Vni::try_from(0).unwrap(),
             primary: self.primary,
             slot: *self.slot,
+            transit_ips: self.transit_ips.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -121,11 +125,13 @@ pub struct InstanceNetworkInterface {
     pub subnet_id: Uuid,
 
     pub mac: MacAddr,
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: IpNetwork,
 
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 /// Service Network Interface DB model.
@@ -144,7 +150,7 @@ pub struct ServiceNetworkInterface {
     pub subnet_id: Uuid,
 
     pub mac: MacAddr,
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: IpNetwork,
 
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
@@ -241,6 +247,7 @@ impl NetworkInterface {
             ip: self.ip,
             slot: self.slot,
             primary: self.primary,
+            transit_ips: self.transit_ips,
         }
     }
 
@@ -289,6 +296,7 @@ impl From<InstanceNetworkInterface> for NetworkInterface {
             ip: iface.ip,
             slot: iface.slot,
             primary: iface.primary,
+            transit_ips: iface.transit_ips,
         }
     }
 }
@@ -312,6 +320,7 @@ impl From<ServiceNetworkInterface> for NetworkInterface {
             ip: iface.ip,
             slot: iface.slot,
             primary: iface.primary,
+            transit_ips: vec![],
         }
     }
 }
@@ -459,6 +468,7 @@ pub struct NetworkInterfaceUpdate {
     pub time_modified: DateTime<Utc>,
     #[diesel(column_name = is_primary)]
     pub primary: Option<bool>,
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
@@ -471,6 +481,11 @@ impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
             ip: iface.ip.ip(),
             mac: *iface.mac,
             primary: iface.primary,
+            transit_ips: iface
+                .transit_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }
@@ -483,6 +498,11 @@ impl From<params::InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
             description: params.identity.description,
             time_modified: Utc::now(),
             primary,
+            transit_ips: params
+                .transit_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }

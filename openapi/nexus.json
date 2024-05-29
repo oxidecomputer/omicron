@@ -14649,6 +14649,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vpc_id": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
@@ -14666,6 +14673,7 @@
           "subnet_id",
           "time_created",
           "time_modified",
+          "transit_ips",
           "vpc_id"
         ]
       },
@@ -14807,8 +14815,18 @@
             "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
             "default": false,
             "type": "boolean"
+          },
+          "transit_ips": {
+            "description": "TODO: describe",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           }
-        }
+        },
+        "required": [
+          "transit_ips"
+        ]
       },
       "InstanceResultsPage": {
         "description": "A single page of results",
@@ -15766,6 +15784,12 @@
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "transit_ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }
@@ -15779,6 +15803,7 @@
           "primary",
           "slot",
           "subnet",
+          "transit_ips",
           "vni"
         ]
       },

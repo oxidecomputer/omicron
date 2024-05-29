@@ -61,6 +61,7 @@ struct NicInfo {
     vni: db::model::Vni,
     primary: bool,
     slot: i16,
+    transit_ips: Vec<ipnetwork::IpNetwork>,
 }
 
 impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
@@ -93,6 +94,7 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
+            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
         }
     }
 }
@@ -503,6 +505,7 @@ impl DataStore {
                 vpc::vni,
                 network_interface::is_primary,
                 network_interface::slot,
+                network_interface::transit_ips,
             ))
             .get_results_async::<NicInfo>(
                 &*self.pool_connection_authorized(opctx).await?,

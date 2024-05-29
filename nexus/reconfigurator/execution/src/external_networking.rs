@@ -500,6 +500,7 @@ mod tests {
                 vni: Vni::SERVICES_VNI,
                 primary: true,
                 slot: 0,
+                transit_ips: vec![],
             };
 
             let dns_id = OmicronZoneUuid::new_v4();
@@ -526,6 +527,7 @@ mod tests {
                 vni: Vni::SERVICES_VNI,
                 primary: true,
                 slot: 0,
+                transit_ips: vec![],
             };
 
             // Boundary NTP:
@@ -555,6 +557,7 @@ mod tests {
                 vni: Vni::SERVICES_VNI,
                 primary: true,
                 slot: 0,
+                transit_ips: vec![],
             };
 
             Self {

@@ -2328,6 +2328,10 @@ pub struct InstanceNetworkInterface {
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
+
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on.
+    pub transit_ips: Vec<IpNet>,
 }
 
 #[derive(
