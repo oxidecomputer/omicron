@@ -179,6 +179,18 @@ pub struct InstanceRuntimeState {
     /// This field is guarded by the instance's `gen`.
     #[diesel(column_name = migration_id)]
     pub migration_id: Option<Uuid>,
+
+    /// The UUID of the saga currently holding the update lock on this instance.
+    /// If this is [`None`] the instance is not locked. Otherwise, if this is
+    /// [`Some`], this contains the UUID of the saga holding the lock.
+    ///
+    /// This field is guarded by the instance's `updater_gen`
+    #[diesel(column_name = updater_id)]
+    pub updater_id: Option<Uuid>,
+
+    /// The generation number for the updater lock.
+    #[diesel(column_name = updater_gen)]
+    pub updater_gen: Generation,
 }
 
 impl InstanceRuntimeState {
@@ -190,6 +202,8 @@ impl InstanceRuntimeState {
             dst_propolis_id: None,
             migration_id: None,
             gen: Generation::new(),
+            updater_gen: Generation::new(),
+            updater_id: None,
         }
     }
 }
@@ -213,6 +227,8 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             propolis_id: state.propolis_id,
             dst_propolis_id: state.dst_propolis_id,
             migration_id: state.migration_id,
+            updater_gen: Generation::new(),
+            updater_id: None,
         }
     }
 }
