@@ -265,7 +265,7 @@ impl SledAgent {
         instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
         hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
+        _instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {

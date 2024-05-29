@@ -422,7 +422,6 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_common::api::internal::nexus::SledInstanceState;
     use omicron_common::api::internal::nexus::VmmRuntimeState;
     use omicron_common::api::internal::nexus::VmmState;
@@ -432,15 +431,7 @@ mod test {
     fn make_instance(
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
-        let propolis_id = PropolisUuid::new_v4();
-        let instance_vmm = InstanceRuntimeState {
-            propolis_id: Some(propolis_id),
-            dst_propolis_id: None,
-            migration_id: None,
-            gen: Generation::new(),
-            time_updated: Utc::now(),
-        };
-
+        let propolis_id = Uuid::new_v4();
         let vmm_state = VmmRuntimeState {
             state: VmmState::Starting,
             gen: Generation::new(),
