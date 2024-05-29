@@ -110,4 +110,6 @@ impl DatastoreAttachTargetConfig<VpcSubnet> for VpcRouter {
     type ResourceIdColumn = vpc_subnet::dsl::id;
     type ResourceCollectionIdColumn = vpc_subnet::dsl::custom_router_id;
     type ResourceTimeDeletedColumn = vpc_subnet::dsl::time_deleted;
+
+    const ALLOW_FROM_ATTACHED: bool = true;
 }

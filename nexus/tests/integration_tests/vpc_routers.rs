@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -23,6 +24,9 @@ use nexus_types::external_api::views::VpcSubnet;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::NameOrId;
+
+const PROJECT_NAME: &str = "os-cartographers";
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -32,15 +36,14 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let project_name = "springfield-squidport";
-    let _ = create_project(&client, project_name).await;
+    let _ = create_project(&client, PROJECT_NAME).await;
 
     // Create a VPC.
     let vpc_name = "vpc1";
-    let vpc = create_vpc(&client, project_name, vpc_name).await;
+    let vpc = create_vpc(&client, PROJECT_NAME, vpc_name).await;
 
     let routers_url =
-        format!("/v1/vpc-routers?project={}&vpc={}", project_name, vpc_name);
+        format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
 
     // get routers should have only the system router created w/ the VPC
     let routers =
@@ -51,7 +54,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let router_name = "router1";
     let router_url = format!(
         "/v1/vpc-routers/{}?project={}&vpc={}",
-        router_name, project_name, vpc_name
+        router_name, PROJECT_NAME, vpc_name
     );
 
     // fetching a particular router should 404
@@ -71,7 +74,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     // Create a VPC Router.
     let router =
-        create_router(&client, project_name, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
     assert_eq!(router.identity.name, router_name);
     assert_eq!(router.identity.description, "router description");
     assert_eq!(router.vpc_id, vpc.identity.id);
@@ -114,7 +117,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let router2_name = "router2";
     let router2_url = format!(
         "/v1/vpc-routers/{}?project={}&vpc={}",
-        router2_name, project_name, vpc_name
+        router2_name, PROJECT_NAME, vpc_name
     );
 
     // second router 404s before it's created
@@ -134,7 +137,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     // create second custom router
     let router2 =
-        create_router(client, project_name, vpc_name, router2_name).await;
+        create_router(client, PROJECT_NAME, vpc_name, router2_name).await;
     assert_eq!(router2.identity.name, router2_name);
     assert_eq!(router2.vpc_id, vpc.identity.id);
     assert_eq!(router2.kind, VpcRouterKind::Custom);
@@ -185,7 +188,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     let router_url = format!(
         "/v1/vpc-routers/new-name?project={}&vpc={}",
-        project_name, vpc_name
+        PROJECT_NAME, vpc_name
     );
 
     // fetching by new name works
@@ -251,10 +254,10 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     // Creating a router with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
-    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
+    let vpc2 = create_vpc(&client, PROJECT_NAME, vpc2_name).await;
 
     let router_same_name =
-        create_router(&client, project_name, vpc2_name, router2_name).await;
+        create_router(&client, PROJECT_NAME, vpc2_name, router2_name).await;
     assert_eq!(router_same_name.identity.name, router2_name);
     assert_eq!(router_same_name.vpc_id, vpc2.identity.id);
 }
@@ -272,14 +275,14 @@ async fn test_vpc_routers_attach_to_subnet(
 
     // Create a project that we'll use for testing.
     // This includes the vpc 'default'.
-    let project_name = "springfield-squidport";
-    let _ = create_project(&client, project_name).await;
+    let _ = create_project(&client, PROJECT_NAME).await;
     let vpc_name = "default";
+    let subnet_name = "default";
 
     let routers_url =
-        format!("/v1/vpc-routers?project={}&vpc={}", project_name, vpc_name);
+        format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
     let subnets_url =
-        format!("/v1/vpc-subnets?project={}&vpc={}", project_name, vpc_name);
+        format!("/v1/vpc-subnets?project={}&vpc={}", PROJECT_NAME, vpc_name);
 
     // get routers should have only the system router created w/ the VPC
     let routers =
@@ -293,14 +296,14 @@ async fn test_vpc_routers_attach_to_subnet(
     // Create a custom router for later use.
     let router_name = "routy";
     let router =
-        create_router(&client, project_name, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
     assert_eq!(router.kind, VpcRouterKind::Custom);
 
     // Attaching a system router should fail.
     let err = object_put_error(
         client,
         &format!(
-            "/v1/vpc-subnets/default?project={project_name}&vpc={vpc_name}"
+            "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
         ),
         &VpcSubnetUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -315,30 +318,23 @@ async fn test_vpc_routers_attach_to_subnet(
     assert_eq!(err.message, "cannot attach a system router to a VPC subnet");
 
     // Attaching a new custom router should succeed.
-    let default_subnet: VpcSubnet = object_put(
+    let default_subnet = set_custom_router(
         client,
-        &format!(
-            "/v1/vpc-subnets/default?project={project_name}&vpc={vpc_name}"
-        ),
-        &VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-            custom_router: Some(router.identity.id.into()),
-        },
+        "default",
+        vpc_name,
+        Some(router.identity.id.into()),
     )
     .await;
     assert_eq!(default_subnet.custom_router_id, Some(router.identity.id));
 
     // Attaching a custom router to another subnet (same VPC) should succeed:
     // ... at create time.
-    let subnet_name = "subnetty";
+    let subnet2_name = "subnetty";
     let subnet2 = create_vpc_subnet(
         &client,
-        &project_name,
+        &PROJECT_NAME,
         &vpc_name,
-        &subnet_name,
+        &subnet2_name,
         Ipv4Net("192.168.0.0/24".parse().unwrap()),
         None,
         Some(router_name),
@@ -347,40 +343,32 @@ async fn test_vpc_routers_attach_to_subnet(
     assert_eq!(subnet2.custom_router_id, Some(router.identity.id));
 
     // ... and via update.
-    let subnet_name = "subnettier";
+    let subnet3_name = "subnettier";
     let _ = create_vpc_subnet(
         &client,
-        &project_name,
+        &PROJECT_NAME,
         &vpc_name,
-        &subnet_name,
+        &subnet3_name,
         Ipv4Net("192.168.1.0/24".parse().unwrap()),
         None,
         None,
     )
     .await;
 
-    let subnet3: VpcSubnet = object_put(
+    let subnet3 = set_custom_router(
         client,
-        &format!(
-            "/v1/vpc-subnets/{subnet_name}?project={project_name}&vpc={vpc_name}",
-        ),
-        &VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-            custom_router: Some(router.identity.id.into()),
-        },
+        subnet3_name,
+        vpc_name,
+        Some(router.identity.id.into()),
     )
     .await;
-
     assert_eq!(subnet3.custom_router_id, Some(router.identity.id));
 
     // Attaching a custom router to another VPC's subnet should fail.
-    create_vpc(&client, project_name, "vpc1").await;
+    create_vpc(&client, PROJECT_NAME, "vpc1").await;
     let err = object_put_error(
         client,
-        &format!("/v1/vpc-subnets/default?project={project_name}&vpc=vpc1"),
+        &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
         &VpcSubnetUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -393,11 +381,40 @@ async fn test_vpc_routers_attach_to_subnet(
     .await;
     assert_eq!(err.message, "router and subnet must belong to the same VPC");
 
-    // Deleting a custom router should detach from all these subnets.
+    // Detach (and double detach) should succeed without issue.
+    let subnet3 = set_custom_router(client, subnet3_name, vpc_name, None).await;
+    assert_eq!(subnet3.custom_router_id, None);
+    let subnet3 = set_custom_router(client, subnet3_name, vpc_name, None).await;
+    assert_eq!(subnet3.custom_router_id, None);
+
+    // Assigning a new router should not require that we first detach the old one.
+    let router2_name = "routier";
+    let router2 =
+        create_router(&client, PROJECT_NAME, vpc_name, router2_name).await;
+    let subnet2 = set_custom_router(
+        client,
+        subnet2_name,
+        vpc_name,
+        Some(router2.identity.id.into()),
+    )
+    .await;
+    assert_eq!(subnet2.custom_router_id, Some(router2.identity.id));
+
+    // Reset subnet2 back to our first router.
+    let subnet2 = set_custom_router(
+        client,
+        subnet2_name,
+        vpc_name,
+        Some(router.identity.id.into()),
+    )
+    .await;
+    assert_eq!(subnet2.custom_router_id, Some(router.identity.id));
+
+    // Deleting a custom router should detach from remaining subnets.
     object_delete(
         &client,
         &format!(
-            "/v1/vpc-routers/{router_name}?vpc={}&project={project_name}",
+            "/v1/vpc-routers/{router_name}?vpc={}&project={PROJECT_NAME}",
             "default"
         ),
     )
@@ -406,7 +423,7 @@ async fn test_vpc_routers_attach_to_subnet(
     for subnet in
         objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items
     {
-        assert!(subnet.custom_router_id.is_none());
+        assert!(subnet.custom_router_id.is_none(), "{subnet:?}");
     }
 }
 
@@ -468,6 +485,28 @@ async fn test_vpc_routers_disallowed_custom_targets(
     // in custom routers.
 
     todo!()
+}
+
+async fn set_custom_router(
+    client: &ClientTestContext,
+    subnet_name: &str,
+    vpc_name: &str,
+    custom_router: Option<NameOrId>,
+) -> VpcSubnet {
+    object_put(
+        client,
+        &format!(
+            "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
+        ),
+        &VpcSubnetUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+            custom_router,
+        },
+    )
+    .await
 }
 
 fn routers_eq(sn1: &VpcRouter, sn2: &VpcRouter) {

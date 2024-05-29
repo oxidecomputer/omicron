@@ -808,7 +808,8 @@ pub struct InstanceNetworkInterfaceUpdate {
     #[serde(default)]
     pub primary: bool,
 
-    /// TODO: describe
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on.
     pub transit_ips: Vec<IpNet>,
 }
 
@@ -1237,7 +1238,11 @@ pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 
-    /// XXX
+    /// An optional router, used to direct packets sent from hosts in this subnet
+    /// to any destination address.
+    ///
+    /// Custom routers apply in addition to the VPC-wide *system* router, and have
+    /// higher priority than
     pub custom_router: Option<NameOrId>,
 }
 
