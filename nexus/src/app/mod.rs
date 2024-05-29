@@ -203,6 +203,8 @@ pub struct Nexus {
     default_region_allocation_strategy: RegionAllocationStrategy,
 
     /// Channel for notifying background task of change to opte v2p state
+    #[allow(dead_code)]
+    // XXX(eliza) do we need this or can we just activate the background task?
     v2p_notification_tx: tokio::sync::watch::Sender<()>,
 }
 

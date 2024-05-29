@@ -5,19 +5,15 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use super::STATE;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::ActionError;
 use nexus_db_model::Generation;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
-use nexus_db_model::Vmm;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
-use nexus_db_queries::db::datastore::InstanceAndVmms;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState;
 use serde::{Deserialize, Serialize};
 use slog::info;
 use uuid::Uuid;
@@ -81,7 +77,7 @@ pub(super) struct Params {
 }
 
 #[derive(Debug)]
-pub(crate) struct SagaVmmDestroyed;
+pub(super) struct SagaVmmDestroyed;
 impl NexusSaga for SagaVmmDestroyed {
     const NAME: &'static str = "instance-update-vmm-destroyed";
     type Params = Params;
@@ -103,18 +99,6 @@ impl NexusSaga for SagaVmmDestroyed {
         builder.append(mark_vmm_deleted_action());
 
         Ok(builder.build()?)
-    }
-}
-
-fn get_destroyed_vmm(
-    sagactx: &NexusActionContext,
-) -> Result<Option<(Instance, Vmm)>, ActionError> {
-    let state = sagactx.lookup::<InstanceAndVmms>(STATE)?;
-    match state.active_vmm {
-        Some(vmm) if vmm.runtime.state.state() == &InstanceState::Destroyed => {
-            Ok(Some((state.instance, vmm)))
-        }
-        _ => Ok(None),
     }
 }
 
