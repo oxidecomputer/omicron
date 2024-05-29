@@ -61,7 +61,6 @@ use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::COCKROACH_PORT;
@@ -78,6 +77,7 @@ use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
+use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
@@ -1406,7 +1406,7 @@ impl ServiceManager {
         match domain {
             Some(d) => {
                 dns_config_builder =
-                    dns_config_builder.add_property("domain", "astring", &d)
+                    dns_config_builder.add_property("domain", "astring", d)
             }
             None => (),
         }
@@ -1423,10 +1423,11 @@ impl ServiceManager {
     fn zone_network_setup_install(
         gw_addr: &Ipv6Addr,
         zone: &InstalledZone,
-        static_addr: &String,
+        static_addr: &Ipv6Addr,
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
         let gateway = &gw_addr.to_string();
+        let static_addr = &static_addr.to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1593,7 +1594,7 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = &underlay_address.to_string();
+                let listen_addr = underlay_address;
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
@@ -1605,7 +1606,11 @@ impl ServiceManager {
                 let dns_service = Self::dns_install(info, None, &None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property(
+                        "listen_addr",
+                        "astring",
+                        listen_addr.to_string(),
+                    )
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
                 let clickhouse_service =
@@ -1642,7 +1647,7 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = &underlay_address.to_string();
+                let listen_addr = underlay_address;
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
@@ -1654,7 +1659,11 @@ impl ServiceManager {
                 let dns_service = Self::dns_install(info, None, &None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property(
+                        "listen_addr",
+                        "astring",
+                        listen_addr.to_string(),
+                    )
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
                 let clickhouse_keeper_service =
@@ -1694,25 +1703,27 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let address = SocketAddr::new(
-                    IpAddr::V6(*underlay_address),
-                    COCKROACH_PORT,
-                );
-                let listen_addr = &address.ip().to_string();
-                let listen_port = &address.port().to_string();
+                let crdb_listen_ip = *underlay_address;
+                let crdb_address =
+                    SocketAddr::new(IpAddr::V6(crdb_listen_ip), COCKROACH_PORT)
+                        .to_string();
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(crdb_listen_ip),
+                    COCKROACH_ADMIN_PORT,
+                )
+                .to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    &crdb_listen_ip,
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
-                    .add_property("listen_addr", "astring", listen_addr)
-                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("listen_addr", "astring", &crdb_address)
                     .add_property("store", "astring", "/data");
                 let cockroachdb_service =
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(
@@ -1720,10 +1731,26 @@ impl ServiceManager {
                             .add_property_group(cockroachdb_config),
                     );
 
+                // Configure the Omicron cockroach-admin service.
+                let cockroach_admin_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "cockroach_address",
+                            "astring",
+                            crdb_address,
+                        )
+                        .add_property("http_address", "astring", admin_address);
+                let cockroach_admin_service =
+                    ServiceBuilder::new("oxide/cockroach-admin").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(cockroach_admin_config),
+                    );
+
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
+                    .add_service(cockroach_admin_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
                 profile
@@ -1747,7 +1774,7 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
-                let listen_addr = &underlay_address.to_string();
+                let listen_addr = &underlay_address;
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
@@ -1764,7 +1791,11 @@ impl ServiceManager {
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("dataset", "astring", &dataset_name)
-                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property(
+                        "listen_addr",
+                        "astring",
+                        listen_addr.to_string(),
+                    )
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("uuid", "astring", uuid)
                     .add_property("store", "astring", "/data");
@@ -1802,7 +1833,7 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = &underlay_address.to_string();
+                let listen_addr = &underlay_address;
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
@@ -1812,7 +1843,11 @@ impl ServiceManager {
                 )?;
 
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property(
+                        "listen_addr",
+                        "astring",
+                        listen_addr.to_string(),
+                    )
                     .add_property("listen_port", "astring", listen_port);
 
                 let profile = ProfileBuilder::new("omicron")
@@ -1853,12 +1888,10 @@ impl ServiceManager {
                     OXIMETER_PORT,
                 );
 
-                let listen_addr = &address.ip().to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    listen_addr,
+                    underlay_address,
                 )?;
 
                 let oximeter_config = PropertyGroupBuilder::new("config")
@@ -1896,12 +1929,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let static_addr = underlay_address.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &static_addr.clone(),
+                    underlay_address,
                 )?;
 
                 // Like Nexus, we need to be reachable externally via
@@ -1925,7 +1956,8 @@ impl ServiceManager {
                     })?;
                 let opte_ip = port.ip();
 
-                let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
+                let http_addr =
+                    format!("[{}]:{}", underlay_address, DNS_HTTP_PORT);
                 let dns_addr = format!("{}:{}", opte_ip, DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
@@ -1985,12 +2017,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let static_addr = underlay_address.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &static_addr.clone(),
+                    underlay_address,
                 )?;
 
                 let is_boundary = matches!(
@@ -2083,7 +2113,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     gz_address,
                     &installed_zone,
-                    &underlay_address.to_string(),
+                    underlay_address,
                 )?;
 
                 // Internal DNS zones require a special route through
@@ -2163,12 +2193,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let static_addr = underlay_address.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &static_addr.clone(),
+                    underlay_address,
                 )?;
 
                 // While Nexus will be reachable via `external_ip`, it
