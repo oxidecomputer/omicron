@@ -26,13 +26,13 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::NameOrId;
 
-const PROJECT_NAME: &str = "os-cartographers";
+pub const PROJECT_NAME: &str = "os-cartographers";
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
-async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
+async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
@@ -46,8 +46,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
         format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
 
     // get routers should have only the system router created w/ the VPC
-    let routers =
-        objects_list_page_authz::<VpcRouter>(client, &routers_url).await.items;
+    let routers = list_routers(client, &vpc_name).await;
     assert_eq!(routers.len(), 1);
     assert_eq!(routers[0].kind, VpcRouterKind::System);
 
@@ -91,7 +90,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     routers_eq(&router, &same_router);
 
     // routers list should now have the one in it
-    let routers = objects_list_page_authz(client, &routers_url).await.items;
+    let routers = list_routers(client, &vpc_name).await;
     assert_eq!(routers.len(), 2);
     routers_eq(&routers[0], &router);
 
@@ -143,8 +142,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(router2.kind, VpcRouterKind::Custom);
 
     // routers list should now have two custom and one system
-    let routers =
-        objects_list_page_authz::<VpcRouter>(client, &routers_url).await.items;
+    let routers = list_routers(client, &vpc_name).await;
     assert_eq!(routers.len(), 3);
     routers_eq(&routers[0], &router);
     routers_eq(&routers[1], &router2);
@@ -204,8 +202,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(&updated_router.identity.description, "another description");
 
     // fetching list should show updated one
-    let routers =
-        objects_list_page_authz::<VpcRouter>(client, &routers_url).await.items;
+    let routers = list_routers(client, &vpc_name).await;
     assert_eq!(routers.len(), 3);
     routers_eq(&routers[0], &updated_router);
 
@@ -217,8 +214,7 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // routers list should now have two again, one system and one custom
-    let routers =
-        objects_list_page_authz::<VpcRouter>(client, &routers_url).await.items;
+    let routers = list_routers(client, &vpc_name).await;
     assert_eq!(routers.len(), 2);
     routers_eq(&routers[0], &router2);
 
@@ -266,32 +262,22 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 async fn test_vpc_routers_attach_to_subnet(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // XXX: really clean this up.
     let client = &cptestctx.external_client;
-
-    // ---
-    // XX: copied from above
-    //
 
     // Create a project that we'll use for testing.
     // This includes the vpc 'default'.
     let _ = create_project(&client, PROJECT_NAME).await;
+
     let vpc_name = "default";
     let subnet_name = "default";
 
-    let routers_url =
-        format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc={}", PROJECT_NAME, vpc_name);
 
     // get routers should have only the system router created w/ the VPC
-    let routers =
-        objects_list_page_authz::<VpcRouter>(client, &routers_url).await.items;
+    let routers = list_routers(client, vpc_name).await;
     assert_eq!(routers.len(), 1);
     assert_eq!(routers[0].kind, VpcRouterKind::System);
-    //
-    // XX: copied from above
-    // ---
 
     // Create a custom router for later use.
     let router_name = "routy";
@@ -433,13 +419,12 @@ async fn test_vpc_routers_custom_route_at_instance(
 ) {
     let _client = &cptestctx.external_client;
 
-    // Attempting to delete a system router should fail.
+    // Installing a custom router onto a subnet with a live instance
+    // should install routes at that sled.
 
-    // Attempting to add a new route to a system router should fail.
+    // Swapping router should change the installed routes at that sled.
 
-    // Attempting to modify/delete a VPC subnet route should fail.
-
-    // Modifying the target of a Default (gateway) route should succeed.
+    // Unsetting a router should remove affected non-system routes.
 
     todo!()
 }
@@ -476,7 +461,7 @@ async fn test_vpc_routers_internet_gateway_target(
 }
 
 #[nexus_test]
-async fn test_vpc_routers_disallowed_custom_targets(
+async fn test_vpc_routers_disallow_custom_targets(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let _client = &cptestctx.external_client;
@@ -507,6 +492,16 @@ async fn set_custom_router(
         },
     )
     .await
+}
+
+async fn list_routers(
+    client: &ClientTestContext,
+    vpc_name: &str,
+) -> Vec<VpcRouter> {
+    let routers_url =
+        format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
+    let out = objects_list_page_authz::<VpcRouter>(client, &routers_url).await;
+    out.items
 }
 
 fn routers_eq(sn1: &VpcRouter, sn2: &VpcRouter) {

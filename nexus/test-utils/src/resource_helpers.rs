@@ -39,6 +39,9 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRoute;
 use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -604,6 +607,78 @@ pub async fn create_router(
                 description: String::from("router description"),
             },
         },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn create_route(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+) -> RouterRoute {
+    NexusRequest::objects_post(
+        &client,
+        format!(
+            "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+            &project_name, &vpc_name, &router_name
+        )
+        .as_str(),
+        &params::RouterRouteCreate {
+            identity: IdentityMetadataCreateParams {
+                name: route_name.parse().unwrap(),
+                description: String::from("route description"),
+            },
+            target,
+            destination,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_route_with_error(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            format!(
+                "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+                &project_name, &vpc_name, &router_name
+            )
+            .as_str(),
+        )
+        .body(Some(&params::RouterRouteCreate {
+            identity: IdentityMetadataCreateParams {
+                name: route_name.parse().unwrap(),
+                description: String::from("route description"),
+            },
+            target,
+            destination,
+        }))
+        .expect_status(Some(status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

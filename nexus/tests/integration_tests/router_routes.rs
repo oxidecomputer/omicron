@@ -4,9 +4,12 @@
 
 use dropshot::Method;
 use http::StatusCode;
+use itertools::Itertools;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_route;
+use nexus_test_utils::resource_helpers::create_route_with_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -23,11 +26,15 @@ use nexus_test_utils::resource_helpers::{
     create_project, create_router, create_vpc,
 };
 
+use crate::integration_tests::vpc_routers::PROJECT_NAME;
+
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
-async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
+async fn test_router_routes_crud_operations(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
 
     let project_name = "springfield-squidport";
@@ -211,4 +218,86 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+}
+
+#[nexus_test]
+async fn test_router_routes_disallow_mixed_v4_v6(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    let vpc_name = "default";
+    let router_name = "routy";
+    let _router =
+        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+
+    // Some targets/strings refer to a mixed v4/v6 entity, e.g.,
+    // subnet or instance. Others refer to one kind only (ipnet, ip).
+    // Users should not be able to mix v4 and v6 in these latter routes
+    // -- route resolution will ignore them, but a helpful error message
+    // is more useful.
+    let dest_set: [RouteDestination; 5] = [
+        "ip:4.4.4.4".parse().unwrap(),
+        "ipnet:4.4.4.0/24".parse().unwrap(),
+        "ip:2001:4860:4860::8888".parse().unwrap(),
+        "ipnet:2001:4860:4860::/64".parse().unwrap(),
+        "subnet:named-subnet".parse().unwrap(),
+    ];
+
+    let target_set: [RouteTarget; 5] = [
+        "ip:172.30.0.5".parse().unwrap(),
+        "ip:fd37:faf4:cc25::5".parse().unwrap(),
+        "instance:named-instance".parse().unwrap(),
+        "inetgw:outbound".parse().unwrap(),
+        "drop".parse().unwrap(),
+    ];
+
+    for (i, (dest, target)) in dest_set
+        .into_iter()
+        .cartesian_product(target_set.into_iter())
+        .enumerate()
+    {
+        use RouteDestination as Rd;
+        use RouteTarget as Rt;
+        let allowed = match (&dest, &target) {
+            (Rd::Ip(IpAddr::V4(_)), Rt::Ip(IpAddr::V4(_)))
+            | (Rd::Ip(IpAddr::V6(_)), Rt::Ip(IpAddr::V6(_)))
+            | (Rd::IpNet(IpNet::V4(_)), Rt::Ip(IpAddr::V4(_)))
+            | (Rd::IpNet(IpNet::V6(_)), Rt::Ip(IpAddr::V6(_))) => true,
+            (Rd::Ip(_), Rt::Ip(_)) | (Rd::IpNet(_), Rt::Ip(_)) => false,
+            _ => true,
+        };
+
+        let route_name = format!("test-route-{i}");
+
+        if allowed {
+            create_route(
+                client,
+                PROJECT_NAME,
+                vpc_name,
+                router_name,
+                &route_name,
+                dest,
+                target,
+            )
+            .await;
+        } else {
+            let err = create_route_with_error(
+                client,
+                PROJECT_NAME,
+                vpc_name,
+                router_name,
+                &route_name,
+                dest,
+                target,
+                StatusCode::BAD_REQUEST,
+            )
+            .await;
+            assert_eq!(
+                err.message,
+                "cannot mix explicit IPv4 and IPv6 addresses between destination and target"
+            );
+        }
+    }
 }

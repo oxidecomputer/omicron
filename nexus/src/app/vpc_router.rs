@@ -17,11 +17,15 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -191,8 +195,47 @@ impl super::Nexus {
         kind: &RouterRouteKind,
         params: &params::RouterRouteCreate,
     ) -> CreateResult<db::model::RouterRoute> {
-        let (.., authz_router) =
-            router_lookup.lookup_for(authz::Action::CreateChild).await?;
+        let (.., authz_router, db_router) =
+            router_lookup.fetch_for(authz::Action::CreateChild).await?;
+
+        if db_router.kind == VpcRouterKind::System {
+            return Err(Error::invalid_request(
+                "user-provided routes cannot be added to a system router",
+            ));
+        }
+
+        // Validate route destinations/targets at this stage:
+        // - mixed explicit v4 and v6 are disallowed.
+        // - users cannot specify 'Vpc' as a custom router dest/target.
+        // - users cannot specify 'Subnet' as a custom router target.
+        // - the only internet gateway we support today is 'outbound'.
+        match (&params.destination, &params.target) {
+            (RouteDestination::Ip(IpAddr::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
+            | (RouteDestination::Ip(IpAddr::V6(_)), RouteTarget::Ip(IpAddr::V6(_)))
+            | (RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
+            | (RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::Ip(IpAddr::V6(_))) => {},
+
+            (RouteDestination::Ip(_), RouteTarget::Ip(_))
+            | (RouteDestination::IpNet(_), RouteTarget::Ip(_))
+                => return Err(Error::invalid_request(
+                    "cannot mix explicit IPv4 and IPv6 addresses between destination and target"
+                )),
+
+            (RouteDestination::Vpc(_), _) | (_, RouteTarget::Vpc(_)) => return Err(Error::invalid_request(
+                "VPCs cannot be used as a destination or target in custom routers"
+                )),
+
+            (_, RouteTarget::Subnet(_)) => return Err(Error::invalid_request(
+                "subnets cannot be used as a target in custom routers"
+                )),
+
+            (_, RouteTarget::InternetGateway(n)) if n.as_str() != "outbound" => return Err(Error::invalid_request(
+                "'outbound' is currently the only valid internet gateway"
+                )),
+
+            _ => {},
+        };
+
         let id = Uuid::new_v4();
         let route = db::model::RouterRoute::new(
             id,
