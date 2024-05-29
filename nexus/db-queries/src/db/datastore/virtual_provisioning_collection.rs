@@ -333,6 +333,7 @@ mod test {
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::fixed_data;
     use crate::db::lookup::LookupPath;
+    use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;
     use nexus_test_utils::db::test_setup_database;
@@ -365,6 +366,44 @@ mod test {
         );
     }
 
+    async fn create_instance_record(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        authz_project: &crate::authz::Project,
+        instance_id: Uuid,
+        project_id: Uuid,
+        cpus: i64,
+        memory: ByteCount,
+    ) {
+        datastore
+            .project_create_instance(
+                &opctx,
+                &authz_project,
+                Instance::new(
+                    instance_id,
+                    project_id,
+                    &params::InstanceCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myinstance".parse().unwrap(),
+                            description: "It's an instance".into(),
+                        },
+                        ncpus: cpus.try_into().unwrap(),
+                        memory: memory.try_into().unwrap(),
+                        hostname: "myhostname".try_into().unwrap(),
+                        user_data: Vec::new(),
+                        network_interfaces:
+                            params::InstanceNetworkInterfaceAttachment::None,
+                        external_ips: Vec::new(),
+                        disks: Vec::new(),
+                        ssh_public_keys: None,
+                        start: false,
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn test_instance_create_and_delete() {
         let logctx = dev::test_setup_log("test_instance_create_and_delete");
@@ -379,7 +418,7 @@ mod test {
 
         let ids = [fleet_id, silo_id, project_id];
 
-        let (_authz_project, _project) = datastore
+        let (authz_project, _project) = datastore
             .project_create(
                 &opctx,
                 Project::new_with_id(
@@ -428,6 +467,17 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
+        create_instance_record(
+            &datastore,
+            &opctx,
+            &authz_project,
+            instance_id,
+            project_id,
+            cpus,
+            ram,
+        )
+        .await;
+
         datastore
             .virtual_provisioning_collection_insert_instance(
                 &opctx,
@@ -446,7 +496,8 @@ mod test {
 
         // Delete the instance
 
-        let max_instance_gen = 0;
+        // Make this value outrageously high, so that as a "max" it is ignored.
+        let max_instance_gen: i64 = 1000;
         datastore
             .virtual_provisioning_collection_delete_instance(
                 &opctx,
@@ -482,7 +533,7 @@ mod test {
 
         let ids = [fleet_id, silo_id, project_id];
 
-        let (_authz_project, _project) = datastore
+        let (authz_project, _project) = datastore
             .project_create(
                 &opctx,
                 Project::new_with_id(
@@ -530,6 +581,17 @@ mod test {
         for id in ids {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
+
+        create_instance_record(
+            &datastore,
+            &opctx,
+            &authz_project,
+            instance_id,
+            project_id,
+            cpus,
+            ram,
+        )
+        .await;
 
         datastore
             .virtual_provisioning_collection_insert_instance(
@@ -571,7 +633,29 @@ mod test {
         }
 
         // Delete the instance
+
+        // If the "instance gen" is too low, the delete operation should be
+        // dropped. This mimics circumstances where an instance update arrives
+        // late to the query.
         let max_instance_gen = 0;
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+                max_instance_gen,
+            )
+            .await
+            .unwrap();
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Make this value outrageously high, so that as a "max" it is ignored.
+        let max_instance_gen = 1000;
         datastore
             .virtual_provisioning_collection_delete_instance(
                 &opctx,
@@ -601,6 +685,245 @@ mod test {
                 cpus,
                 ram,
                 max_instance_gen,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_storage_create_and_delete() {
+        let logctx = dev::test_setup_log("test_storage_create_and_delete");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Use the default fleet and silo, but create a new project.
+
+        let fleet_id = *fixed_data::FLEET_ID;
+        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+
+        let ids = [fleet_id, silo_id, project_id];
+
+        let (_authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myproject".parse().unwrap(),
+                            description: "It's a project".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the silo has a quota that can fit our requested storage.
+        //
+        // This also acts as a guard against a change in the default silo quota
+        // -- we overwrite it for the test unconditionally.
+
+        let quotas_update = SiloQuotasUpdate {
+            cpus: Some(24),
+            memory: Some(1 << 40),
+            storage: Some(1 << 50),
+            time_modified: chrono::Utc::now(),
+        };
+        let authz_silo = LookupPath::new(&opctx, &datastore)
+            .silo_id(silo_id)
+            .lookup_for(crate::authz::Action::Modify)
+            .await
+            .unwrap()
+            .0;
+        datastore
+            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .await
+            .unwrap();
+
+        // Actually provision storage
+
+        let disk_id = Uuid::new_v4();
+        let disk_byte_diff = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        datastore
+            .virtual_provisioning_collection_insert_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+                StorageType::Disk,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
+                .await;
+        }
+
+        // Delete the disk
+
+        datastore
+            .virtual_provisioning_collection_delete_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_storage_create_and_delete_twice() {
+        let logctx =
+            dev::test_setup_log("test_storage_create_and_delete_twice");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Use the default fleet and silo, but create a new project.
+
+        let fleet_id = *fixed_data::FLEET_ID;
+        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+
+        let ids = [fleet_id, silo_id, project_id];
+
+        let (_authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myproject".parse().unwrap(),
+                            description: "It's a project".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the silo has a quota that can fit our requested disk.
+        //
+        // This also acts as a guard against a change in the default silo quota
+        // -- we overwrite it for the test unconditionally.
+
+        let quotas_update = SiloQuotasUpdate {
+            cpus: Some(24),
+            memory: Some(1 << 40),
+            storage: Some(1 << 50),
+            time_modified: chrono::Utc::now(),
+        };
+        let authz_silo = LookupPath::new(&opctx, &datastore)
+            .silo_id(silo_id)
+            .lookup_for(crate::authz::Action::Modify)
+            .await
+            .unwrap()
+            .0;
+        datastore
+            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .await
+            .unwrap();
+
+        // Actually provision the disk
+
+        let disk_id = Uuid::new_v4();
+        let disk_byte_diff = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        datastore
+            .virtual_provisioning_collection_insert_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+                StorageType::Disk,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
+                .await;
+        }
+
+        // Attempt to provision that same disk once more.
+        //
+        // The "virtual_provisioning_collection_insert" call should succeed for
+        // idempotency reasons, but we should not be double-dipping on the
+        // disk object's provisioning accounting.
+
+        datastore
+            .virtual_provisioning_collection_insert_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+                StorageType::Disk,
+            )
+            .await
+            .unwrap();
+
+        // Verify that the usage is the same as before the call
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
+                .await;
+        }
+
+        // Delete the disk
+
+        datastore
+            .virtual_provisioning_collection_delete_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        // Attempt to delete the same disk once more.
+        //
+        // Just like "double-adding", double deletion should be an idempotent
+        // operation.
+
+        datastore
+            .virtual_provisioning_collection_delete_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
             )
             .await
             .unwrap();

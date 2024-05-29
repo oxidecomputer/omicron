@@ -225,7 +225,7 @@ WITH
                 .bind::<sql_types::BigInt, _>(resource.virtual_disk_bytes_provisioned)
                 .bind::<sql_types::BigInt, _>(resource.virtual_disk_bytes_provisioned)
             },
-            UpdateKind::DeleteInstance { id, .. } | UpdateKind::DeleteStorage { id, .. } => {
+            UpdateKind::DeleteStorage { id, .. } => {
                 query.sql("
   do_update
     AS (
@@ -239,11 +239,52 @@ WITH
             virtual_provisioning_resource.id = ").param().sql("
           LIMIT
             1
-        )
-        = 1
+        ) = 1
           AS update
     ),")
                 .bind::<sql_types::Uuid, _>(id)
+            },
+            UpdateKind::DeleteInstance { id, max_instance_gen, .. } => {
+                // The filter condition here ensures that the provisioning record is
+                // only deleted if the corresponding instance has a generation
+                // number less than the supplied `max_instance_gen`. This allows a
+                // caller that is about to apply an instance update that will stop
+                // the instance and that bears generation G to avoid deleting
+                // resources if the instance generation was already advanced to or
+                // past G.
+                //
+                // If the relevant instance ID is not in the database, then some
+                // other operation must have ensured the instance was previously
+                // stopped (because that's the only way it could have been deleted),
+                // and that operation should have cleaned up the resources already,
+                // in which case there's nothing to do here.
+                query.sql("
+  do_update
+    AS (
+      SELECT
+        (
+          SELECT
+            count(*)
+          FROM
+            virtual_provisioning_resource
+          WHERE
+            virtual_provisioning_resource.id = ").param().sql("
+          LIMIT
+            1
+        ) = 1 AND
+        EXISTS (
+          SELECT 1
+          FROM
+            instance
+          WHERE
+            instance.id = ").param().sql(" AND instance.state_generation < ").param().sql("
+          LIMIT 1
+        )
+          AS update
+    ),")
+                .bind::<sql_types::Uuid, _>(id)
+                .bind::<sql_types::Uuid, _>(id)
+                .bind::<sql_types::BigInt, _>(max_instance_gen)
             },
         };
 
@@ -295,57 +336,8 @@ WITH
                 )
                 .bind::<sql_types::BigInt, _>(resource.cpus_provisioned)
                 .bind::<sql_types::BigInt, _>(resource.ram_provisioned),
-            UpdateKind::DeleteInstance { id, max_instance_gen, .. } => {
-                // The filter condition here ensures that the provisioning record is
-                // only deleted if the corresponding instance has a generation
-                // number less than the supplied `max_instance_gen`. This allows a
-                // caller that is about to apply an instance update that will stop
-                // the instance and that bears generation G to avoid deleting
-                // resources if the instance generation was already advanced to or
-                // past G.
-                //
-                // If the relevant instance ID is not in the database, then some
-                // other operation must have ensured the instance was previously
-                // stopped (because that's the only way it could have been deleted),
-                // and that operation should have cleaned up the resources already,
-                // in which case there's nothing to do here.
-                query
-                    .sql(
-                        "
-  unused_cte_arm
-    AS (
-      DELETE FROM
-        virtual_provisioning_resource
-      WHERE
-        virtual_provisioning_resource.id = ",
-                    )
-                    .param()
-                    .sql(
-                        "
-        AND
-        virtual_provisioning_resource.id = (
-            SELECT instance.id FROM instance WHERE
-                instance.id = ",
-                    )
-                    .param()
-                    .sql(
-                        " AND
-                instance.state_generation < ",
-                    )
-                    .param()
-                    .sql(
-                        " LIMIT 1)
-      RETURNING ",
-                    )
-                    .sql(AllColumnsOfVirtualResource::with_prefix(
-                        "virtual_provisioning_resource",
-                    ))
-                    .sql("),")
-                    .bind::<sql_types::Uuid, _>(id)
-                    .bind::<sql_types::Uuid, _>(id)
-                    .bind::<sql_types::BigInt, _>(max_instance_gen)
-            }
-            UpdateKind::DeleteStorage { id, .. } => query
+            UpdateKind::DeleteInstance { id, .. }
+            | UpdateKind::DeleteStorage { id, .. } => query
                 .sql(
                     "
   unused_cte_arm
@@ -358,6 +350,7 @@ WITH
                 .param()
                 .sql(
                     "
+        AND (SELECT do_update.update FROM do_update LIMIT 1)
       RETURNING ",
                 )
                 .sql(AllColumnsOfVirtualResource::with_prefix(
