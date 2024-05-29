@@ -522,6 +522,24 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Return all steps for a region replacement request
+    pub async fn region_replacement_request_steps(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> Result<Vec<RegionReplacementStep>, Error> {
+        use db::schema::region_replacement_step::dsl;
+
+        dsl::region_replacement_step
+            .filter(dsl::replacement_id.eq(id))
+            .order_by(dsl::step_time.desc())
+            .get_results_async::<RegionReplacementStep>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Record a step taken to drive a region replacement forward
     pub async fn add_region_replacement_request_step(
         &self,
