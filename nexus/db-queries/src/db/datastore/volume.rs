@@ -45,6 +45,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
+use std::collections::VecDeque;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -690,78 +691,56 @@ impl DataStore {
     pub fn randomize_ids(
         vcr: &VolumeConstructionRequest,
     ) -> anyhow::Result<VolumeConstructionRequest> {
-        match vcr {
-            VolumeConstructionRequest::Volume {
-                id: _,
-                block_size,
-                sub_volumes,
-                read_only_parent,
-            } => Ok(VolumeConstructionRequest::Volume {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                sub_volumes: sub_volumes
-                    .iter()
-                    .map(
-                        |subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                            Self::randomize_ids(&subvol)
-                        },
-                    )
-                    .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>(
-                    )?,
-                read_only_parent: if let Some(read_only_parent) =
-                    read_only_parent
-                {
-                    Some(Box::new(Self::randomize_ids(read_only_parent)?))
-                } else {
-                    None
-                },
-            }),
+        let mut new_vcr = vcr.clone();
 
-            VolumeConstructionRequest::Url { id: _, block_size, url } => {
-                Ok(VolumeConstructionRequest::Url {
-                    id: Uuid::new_v4(),
-                    block_size: *block_size,
-                    url: url.clone(),
-                })
-            }
+        let mut parts: VecDeque<&mut VolumeConstructionRequest> =
+            VecDeque::new();
+        parts.push_back(&mut new_vcr);
 
-            VolumeConstructionRequest::Region {
-                block_size,
-                blocks_per_extent,
-                extent_count,
-                opts,
-                gen,
-            } => {
-                if !opts.read_only {
-                    // Only one volume can "own" a Region, and that volume's
-                    // UUID is recorded in the region table accordingly. It is
-                    // an error to make a copy of a volume construction request
-                    // that references non-read-only Regions.
-                    bail!(
-                        "only one Volume can reference a Region non-read-only!"
-                    );
+        while let Some(vcr_part) = parts.pop_front() {
+            match vcr_part {
+                VolumeConstructionRequest::Volume {
+                    id,
+                    sub_volumes,
+                    read_only_parent,
+                    ..
+                } => {
+                    *id = Uuid::new_v4();
+
+                    for sub_volume in sub_volumes {
+                        parts.push_back(sub_volume);
+                    }
+
+                    if let Some(read_only_parent) = read_only_parent {
+                        parts.push_back(read_only_parent);
+                    }
                 }
 
-                let mut opts = opts.clone();
-                opts.id = Uuid::new_v4();
+                VolumeConstructionRequest::Url { id, .. } => {
+                    *id = Uuid::new_v4();
+                }
 
-                Ok(VolumeConstructionRequest::Region {
-                    block_size: *block_size,
-                    blocks_per_extent: *blocks_per_extent,
-                    extent_count: *extent_count,
-                    opts,
-                    gen: *gen,
-                })
-            }
+                VolumeConstructionRequest::Region { opts, .. } => {
+                    if !opts.read_only {
+                        // Only one volume can "own" a Region, and that volume's
+                        // UUID is recorded in the region table accordingly. It is
+                        // an error to make a copy of a volume construction request
+                        // that references non-read-only Regions.
+                        bail!(
+                            "only one Volume can reference a Region non-read-only!"
+                        );
+                    }
 
-            VolumeConstructionRequest::File { id: _, block_size, path } => {
-                Ok(VolumeConstructionRequest::File {
-                    id: Uuid::new_v4(),
-                    block_size: *block_size,
-                    path: path.clone(),
-                })
+                    opts.id = Uuid::new_v4();
+                }
+
+                VolumeConstructionRequest::File { id, .. } => {
+                    *id = Uuid::new_v4();
+                }
             }
         }
+
+        Ok(new_vcr)
     }
 
     /// Checkout a copy of the Volume from the database using `volume_checkout`,
@@ -1901,48 +1880,40 @@ pub fn read_only_resources_associated_with_volume(
     vcr: &VolumeConstructionRequest,
     crucible_targets: &mut CrucibleTargets,
 ) {
-    match vcr {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size: _,
-            sub_volumes,
-            read_only_parent,
-        } => {
-            for sub_volume in sub_volumes {
-                read_only_resources_associated_with_volume(
-                    sub_volume,
-                    crucible_targets,
-                );
-            }
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(&vcr);
 
-            if let Some(read_only_parent) = read_only_parent {
-                read_only_resources_associated_with_volume(
-                    read_only_parent,
-                    crucible_targets,
-                );
-            }
-        }
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
 
-        VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } => {
-            // no action required
-        }
-
-        VolumeConstructionRequest::Region {
-            block_size: _,
-            blocks_per_extent: _,
-            extent_count: _,
-            opts,
-            gen: _,
-        } => {
-            for target in &opts.target {
-                if opts.read_only {
-                    crucible_targets.read_only_targets.push(target.clone());
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
                 }
             }
-        }
 
-        VolumeConstructionRequest::File { id: _, block_size: _, path: _ } => {
-            // no action required
+            VolumeConstructionRequest::Url { .. } => {
+                // no action required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    if opts.read_only {
+                        crucible_targets.read_only_targets.push(target.clone());
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // no action required
+            }
         }
     }
 }
@@ -2005,67 +1976,52 @@ fn replace_region_in_vcr(
     old_region: SocketAddrV6,
     new_region: SocketAddrV6,
 ) -> anyhow::Result<VolumeConstructionRequest> {
-    match vcr {
-        VolumeConstructionRequest::Volume {
-            id,
-            block_size,
-            sub_volumes,
-            read_only_parent,
-        } => Ok(VolumeConstructionRequest::Volume {
-            id: *id,
-            block_size: *block_size,
-            sub_volumes: sub_volumes
-                .iter()
-                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                    replace_region_in_vcr(&subvol, old_region, new_region)
-                })
-                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
+    let mut new_vcr = vcr.clone();
 
-            // Only replacing R/W regions
-            read_only_parent: read_only_parent.clone(),
-        }),
+    let mut parts: VecDeque<&mut VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(&mut new_vcr);
 
-        VolumeConstructionRequest::Url { id, block_size, url } => {
-            Ok(VolumeConstructionRequest::Url {
-                id: *id,
-                block_size: *block_size,
-                url: url.clone(),
-            })
-        }
+    let mut old_region_found = false;
 
-        VolumeConstructionRequest::Region {
-            block_size,
-            blocks_per_extent,
-            extent_count,
-            opts,
-            gen,
-        } => {
-            let mut opts = opts.clone();
-
-            for target in &mut opts.target {
-                let parsed_target: SocketAddrV6 = target.parse()?;
-                if parsed_target == old_region {
-                    *target = new_region.to_string();
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
                 }
+
+                // Skip looking at read-only parent, this function only replaces
+                // R/W regions
             }
 
-            Ok(VolumeConstructionRequest::Region {
-                block_size: *block_size,
-                blocks_per_extent: *blocks_per_extent,
-                extent_count: *extent_count,
-                opts,
-                gen: *gen + 1,
-            })
-        }
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
 
-        VolumeConstructionRequest::File { id, block_size, path } => {
-            Ok(VolumeConstructionRequest::File {
-                id: *id,
-                block_size: *block_size,
-                path: path.clone(),
-            })
+            VolumeConstructionRequest::Region { opts, gen, .. } => {
+                for target in &mut opts.target {
+                    let parsed_target: SocketAddrV6 = target.parse()?;
+                    if parsed_target == old_region {
+                        *target = new_region.to_string();
+                        old_region_found = true;
+                    }
+                }
+
+                // Bump generation number, otherwise update will be rejected
+                *gen = *gen + 1;
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
         }
     }
+
+    if !old_region_found {
+        bail!("old region {old_region} not found!");
+    }
+
+    Ok(new_vcr)
 }
 
 /// Find Regions in a Volume's subvolumes list whose target match the argument
@@ -2075,31 +2031,36 @@ fn find_matching_rw_regions_in_volume(
     ip: &std::net::Ipv6Addr,
     matched_targets: &mut Vec<SocketAddrV6>,
 ) -> anyhow::Result<()> {
-    match vcr {
-        VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-            for sub_volume in sub_volumes {
-                find_matching_rw_regions_in_volume(
-                    sub_volume,
-                    ip,
-                    matched_targets,
-                )?;
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
             }
-        }
 
-        VolumeConstructionRequest::Url { .. } => {}
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
 
-        VolumeConstructionRequest::Region { opts, .. } => {
-            if !opts.read_only {
-                for target in &opts.target {
-                    let parsed_target: SocketAddrV6 = target.parse()?;
-                    if parsed_target.ip() == ip {
-                        matched_targets.push(parsed_target);
+            VolumeConstructionRequest::Region { opts, .. } => {
+                if !opts.read_only {
+                    for target in &opts.target {
+                        let parsed_target: SocketAddrV6 = target.parse()?;
+                        if parsed_target.ip() == ip {
+                            matched_targets.push(parsed_target);
+                        }
                     }
                 }
             }
-        }
 
-        VolumeConstructionRequest::File { .. } => {}
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
     }
 
     Ok(())

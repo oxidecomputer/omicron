@@ -667,7 +667,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     ) -> impl IntoIterator<Item = KvListWithHeading> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
-                diff_row!($member, $label, |value| value)
+                diff_row!($member, $label, std::convert::identity)
             };
 
             ($member:ident, $label:expr, $display:expr) => {

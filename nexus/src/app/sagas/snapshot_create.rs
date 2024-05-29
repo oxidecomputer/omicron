@@ -117,6 +117,7 @@ use sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody;
 use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -1419,7 +1420,7 @@ async fn ssc_create_volume_record(
     let snapshot_volume_construction_request: VolumeConstructionRequest =
         create_snapshot_from_disk(
             &disk_volume_construction_request,
-            Some(&replace_sockets_map),
+            &replace_sockets_map,
         )
         .map_err(|e| {
             ActionError::action_failed(Error::internal_error(&e.to_string()))
@@ -1518,7 +1519,7 @@ async fn ssc_finalize_snapshot_record(
 /// VolumeConstructionRequest and modifying it accordingly.
 fn create_snapshot_from_disk(
     disk: &VolumeConstructionRequest,
-    socket_map: Option<&BTreeMap<String, String>>,
+    socket_map: &BTreeMap<String, String>,
 ) -> anyhow::Result<VolumeConstructionRequest> {
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
@@ -1527,78 +1528,73 @@ fn create_snapshot_from_disk(
     // - set read-only
     // - remove any control sockets
 
-    match disk {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size,
-            sub_volumes,
-            read_only_parent,
-        } => Ok(VolumeConstructionRequest::Volume {
-            id: Uuid::new_v4(),
-            block_size: *block_size,
-            sub_volumes: sub_volumes
-                .iter()
-                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                    create_snapshot_from_disk(&subvol, socket_map)
-                })
-                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
-            read_only_parent: if let Some(read_only_parent) = read_only_parent {
-                Some(Box::new(create_snapshot_from_disk(
-                    read_only_parent,
-                    // no socket modification required for read-only parents
-                    None,
-                )?))
-            } else {
-                None
-            },
-        }),
+    let mut new_vcr = disk.clone();
 
-        VolumeConstructionRequest::Url { id: _, block_size, url } => {
-            Ok(VolumeConstructionRequest::Url {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                url: url.clone(),
-            })
-        }
+    struct Work<'a> {
+        vcr_part: &'a mut VolumeConstructionRequest,
+        socket_modification_required: bool,
+    }
 
-        VolumeConstructionRequest::Region {
-            block_size,
-            blocks_per_extent,
-            extent_count,
-            opts,
-            gen,
-        } => {
-            let mut opts = opts.clone();
+    let mut parts: VecDeque<Work> = VecDeque::new();
+    parts.push_back(Work {
+        vcr_part: &mut new_vcr,
+        socket_modification_required: true,
+    });
 
-            if let Some(socket_map) = socket_map {
-                for target in &mut opts.target {
-                    target.clone_from(socket_map.get(target).ok_or_else(
-                        || anyhow!("target {} not found in map!", target),
-                    )?);
+    while let Some(work) = parts.pop_front() {
+        match work.vcr_part {
+            VolumeConstructionRequest::Volume {
+                id,
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                *id = Uuid::new_v4();
+
+                for sub_volume in sub_volumes {
+                    parts.push_back(Work {
+                        vcr_part: sub_volume,
+                        // Inherit if socket modification is required from the
+                        // parent layer
+                        socket_modification_required: work
+                            .socket_modification_required,
+                    });
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(Work {
+                        vcr_part: read_only_parent,
+                        // no socket modification required for read-only parents
+                        socket_modification_required: false,
+                    });
                 }
             }
 
-            opts.id = Uuid::new_v4();
-            opts.read_only = true;
-            opts.control = None;
+            VolumeConstructionRequest::Url { id, .. } => {
+                *id = Uuid::new_v4();
+            }
 
-            Ok(VolumeConstructionRequest::Region {
-                block_size: *block_size,
-                blocks_per_extent: *blocks_per_extent,
-                extent_count: *extent_count,
-                opts,
-                gen: *gen,
-            })
-        }
+            VolumeConstructionRequest::Region { opts, .. } => {
+                opts.id = Uuid::new_v4();
+                opts.read_only = true;
+                opts.control = None;
 
-        VolumeConstructionRequest::File { id: _, block_size, path } => {
-            Ok(VolumeConstructionRequest::File {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                path: path.clone(),
-            })
+                if work.socket_modification_required {
+                    for target in &mut opts.target {
+                        target.clone_from(socket_map.get(target).ok_or_else(
+                            || anyhow!("target {} not found in map!", target),
+                        )?);
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { id, .. } => {
+                *id = Uuid::new_v4();
+            }
         }
     }
+
+    Ok(new_vcr)
 }
 
 #[cfg(test)]
@@ -1718,7 +1714,7 @@ mod test {
         );
 
         let snapshot =
-            create_snapshot_from_disk(&disk, Some(&replace_sockets)).unwrap();
+            create_snapshot_from_disk(&disk, &replace_sockets).unwrap();
 
         eprintln!("{:?}", serde_json::to_string(&snapshot).unwrap());
 
