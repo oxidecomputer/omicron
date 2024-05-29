@@ -552,6 +552,9 @@ impl DataStore {
     /// acquires the lock must call [`DataStore::instance_updater_unlock`] to
     /// ensure that the lock is always released if the saga unwinds.
     ///
+    /// This method is idempotent: if the instance is already locked by the same
+    /// saga, it will succeed, as though the lock was acquired.
+    ///
     /// # Arguments
     ///
     /// - `authz_instance`: the instance to attempt to lock to lock
@@ -637,12 +640,13 @@ impl DataStore {
                 .filter(dsl::id.eq(instance_id))
                 // If the generation is the same as the captured generation when we
                 // read the instance record to check if it was not locked, we can
-                // lock this instance, since changing the `updater_id` field
-                // always increments the generation number. Otherwise, if the
-                // generation has changed since we fetched the instance, this
-                // update will fail. This query is equivalent to an atomic
-                // compare-and-swap instruction in a non-distributed
-                // single-process mutex.
+                // lock this instance. This is because changing the `updater_id`
+                // field always increments the generation number. Therefore, we
+                // want the update query to succeed if and only if the
+                // generation number remains the same as the generation when we
+                // last fetched the instance. This query is used equivalently to
+                // an atomic compare-and-swap instruction in the implementation
+                // of a non-distributed, single-process mutex.
                 .filter(dsl::updater_gen.eq(current_gen))
                 .set((
                     dsl::updater_gen.eq(dsl::updater_gen + 1),
@@ -676,7 +680,18 @@ impl DataStore {
     }
 
     /// Release the instance-updater lock acquired by
-    /// [`DataStore::instance_updater_try_lock`].
+    /// [`DataStore::instance_updater_lock`].
+    ///
+    /// This method will unlock the instance if (and only if) the lock is
+    /// currently held by the provided `saga_lock_id`. If the lock is held by a
+    /// different saga UUID, the instance will remain locked. If the instance
+    /// has already been unlocked, this method will return `false`.
+    ///
+    /// # Arguments
+    ///
+    /// - `authz_instance`: the instance to attempt to unlock
+    /// - `saga_lock_id`: the UUID of the saga that's releasing the lock on this
+    ///   instance
     pub async fn instance_updater_unlock(
         &self,
         opctx: &OpContext,
