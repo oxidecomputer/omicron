@@ -134,7 +134,7 @@ impl super::Nexus {
         // router kind cannot be changed, but it might be able to save us a
         // database round-trip.
         if db_router.kind == VpcRouterKind::System {
-            return Err(Error::invalid_request("Cannot delete system router"));
+            return Err(Error::invalid_request("cannot delete system router"));
         }
         let out =
             self.db_datastore.vpc_delete_router(opctx, &authz_router).await?;
@@ -272,21 +272,31 @@ impl super::Nexus {
         route_lookup: &lookup::RouterRoute<'_>,
         params: &params::RouterRouteUpdate,
     ) -> UpdateResult<RouterRoute> {
-        let (.., vpc, authz_router, authz_route, db_route) =
+        let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;
-        // TODO: Write a test for this once there's a way to test it (i.e.
-        // subnets automatically register to the system router table)
+
         match db_route.kind.0 {
-            RouterRouteKind::Custom | RouterRouteKind::Default => (),
+            // Default routes allow a constrained form of modification:
+            // only the target may change.
+            RouterRouteKind::Default if
+                    params.identity.name.is_some()
+                    || params.identity.description.is_some()
+                    || params.destination != db_route.destination.0 => {
+                return Err(Error::invalid_request(
+                    "the destination and metadata of a Default route cannot be changed",
+                ))},
+
+            RouterRouteKind::Custom | RouterRouteKind::Default => {},
+
             _ => {
                 return Err(Error::invalid_request(format!(
-                    "routes of type {} from the system table of VPC {:?} \
+                    "routes of type {} within the system router \
                         are not modifiable",
                     db_route.kind.0,
-                    vpc.id()
                 )));
             }
         }
+
         let out = self
             .db_datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())

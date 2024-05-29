@@ -1141,9 +1141,10 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         // Unlink all subnets from this router.
-        // XXX: We might this want to error out before the delete fires.
-        // XXX: This will temporarily leave some hanging subnet attachments. We need to be sure
-        //      these are safely handled (no unwrap, or remove via join here.)
+        // This will temporarily leave some hanging subnet attachments.
+        // `vpc_get_active_custom_routers` will join and then filter,
+        // so such rows will be treated as though they have no custom router
+        // by the RPW.
         use db::schema::vpc_subnet::dsl as vpc;
         diesel::update(vpc::vpc_subnet)
             .filter(vpc::time_deleted.is_null())

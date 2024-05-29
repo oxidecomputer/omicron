@@ -1228,7 +1228,8 @@ pub struct VpcSubnetCreate {
     /// to any destination address.
     ///
     /// Custom routers apply in addition to the VPC-wide *system* router, and have
-    /// higher priority than
+    /// higher priority than the system router for an otherwise
+    /// equal-prefix-length match.
     pub custom_router: Option<NameOrId>,
 }
 
@@ -1240,9 +1241,6 @@ pub struct VpcSubnetUpdate {
 
     /// An optional router, used to direct packets sent from hosts in this subnet
     /// to any destination address.
-    ///
-    /// Custom routers apply in addition to the VPC-wide *system* router, and have
-    /// higher priority than
     pub custom_router: Option<NameOrId>,
 }
 

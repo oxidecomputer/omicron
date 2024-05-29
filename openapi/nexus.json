@@ -14817,7 +14817,7 @@
             "type": "boolean"
           },
           "transit_ips": {
-            "description": "TODO: describe",
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"
@@ -20172,7 +20172,7 @@
         "properties": {
           "custom_router": {
             "nullable": true,
-            "description": "An optional router, used to direct packets sent from hosts in this subnet to any destination address.\n\nCustom routers apply in addition to the VPC-wide *system* router, and have higher priority than",
+            "description": "An optional router, used to direct packets sent from hosts in this subnet to any destination address.\n\nCustom routers apply in addition to the VPC-wide *system* router, and have higher priority than the system router for an otherwise equal-prefix-length match.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
@@ -20236,7 +20236,7 @@
         "properties": {
           "custom_router": {
             "nullable": true,
-            "description": "XXX",
+            "description": "An optional router, used to direct packets sent from hosts in this subnet to any destination address.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"

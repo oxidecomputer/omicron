@@ -25,6 +25,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::SimpleIdentity;
 
 pub const PROJECT_NAME: &str = "os-cartographers";
 
@@ -49,6 +50,22 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     let routers = list_routers(client, &vpc_name).await;
     assert_eq!(routers.len(), 1);
     assert_eq!(routers[0].kind, VpcRouterKind::System);
+
+    // This router should not be deletable.
+    let system_router_url = format!("/v1/vpc-routers/{}", routers[0].id());
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &system_router_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "cannot delete system router");
 
     let router_name = "router1";
     let router_url = format!(
@@ -414,7 +431,7 @@ async fn test_vpc_routers_attach_to_subnet(
 }
 
 #[nexus_test]
-async fn test_vpc_routers_custom_route_at_instance(
+async fn test_vpc_routers_custom_delivered_to_instance(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let _client = &cptestctx.external_client;
@@ -425,49 +442,6 @@ async fn test_vpc_routers_custom_route_at_instance(
     // Swapping router should change the installed routes at that sled.
 
     // Unsetting a router should remove affected non-system routes.
-
-    todo!()
-}
-
-#[nexus_test]
-async fn test_vpc_routers_modify_system_routes(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let _client = &cptestctx.external_client;
-
-    // Attempting to delete a system router should fail.
-
-    // Attempting to add a new route to a system router should fail.
-
-    // Attempting to modify/delete a VPC subnet route should fail.
-
-    // Modifying the target of a Default (gateway) route should succeed.
-
-    todo!()
-}
-
-#[nexus_test]
-async fn test_vpc_routers_internet_gateway_target(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let _client = &cptestctx.external_client;
-
-    // Internet gateways are not fully supported: only 'inetgw:outbound'
-    // is a valid choice.
-
-    // This can be used in both system and custom routers.
-
-    todo!()
-}
-
-#[nexus_test]
-async fn test_vpc_routers_disallow_custom_targets(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let _client = &cptestctx.external_client;
-
-    // Neither 'vpc:xxx' nor 'subnet:xxx' can be specified as route targets
-    // in custom routers.
 
     todo!()
 }

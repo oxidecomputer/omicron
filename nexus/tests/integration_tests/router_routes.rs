@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::test_util::ClientTestContext;
 use dropshot::Method;
 use http::StatusCode;
 use itertools::Itertools;
@@ -10,9 +11,12 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_route;
 use nexus_test_utils::resource_helpers::create_route_with_error;
+use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::RouterRouteUpdate;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::external::{
@@ -31,39 +35,32 @@ use crate::integration_tests::vpc_routers::PROJECT_NAME;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-#[nexus_test]
-async fn test_router_routes_crud_operations(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
+fn get_routes_url(vpc_name: &str, router_name: &str) -> String {
+    format!(
+        "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+        PROJECT_NAME, vpc_name, router_name
+    )
+}
 
-    let project_name = "springfield-squidport";
-    let vpc_name = "vpc1";
-    let router_name = "router1";
+fn get_route_url(
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+) -> String {
+    format!(
+        "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
+        route_name, PROJECT_NAME, vpc_name, router_name
+    )
+}
 
-    let get_routes_url = |router_name: &str| -> String {
-        format!(
-            "/v1/vpc-router-routes?project={}&vpc={}&router={}",
-            project_name, vpc_name, router_name
-        )
-    };
-
-    let get_route_url = |router_name: &str, route_name: &str| -> String {
-        format!(
-            "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
-            route_name, project_name, vpc_name, router_name
-        )
-    };
-
-    let _ = create_project(&client, project_name).await;
-
-    // Create a vpc
-    create_vpc(&client, project_name, vpc_name).await;
-
+async fn get_system_routes(
+    client: &ClientTestContext,
+    vpc_name: &str,
+) -> [RouterRoute; 3] {
     // Get the system router's routes
     let system_router_routes = objects_list_page_authz::<RouterRoute>(
         client,
-        get_routes_url("system").as_str(),
+        get_routes_url(vpc_name, "system").as_str(),
     )
     .await
     .items;
@@ -93,6 +90,27 @@ async fn test_router_routes_crud_operations(
     let subnet_route =
         subnet_route.expect("no default subnet route found in system router");
 
+    [v4_route, v6_route, subnet_route]
+}
+
+#[nexus_test]
+async fn test_router_routes_crud_operations(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let vpc_name = "vpc1";
+    let router_name = "router1";
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // Create a vpc
+    create_vpc(&client, PROJECT_NAME, vpc_name).await;
+
+    // Get the system router's routes
+    let [v4_route, v6_route, subnet_route] =
+        get_system_routes(client, vpc_name).await;
+
     // Deleting any default system route is disallowed.
     for route in &[&v4_route, &v6_route, &subnet_route] {
         let error: dropshot::HttpErrorResponseBody =
@@ -100,7 +118,8 @@ async fn test_router_routes_crud_operations(
                 client,
                 StatusCode::BAD_REQUEST,
                 Method::DELETE,
-                get_route_url("system", route.name().as_str()).as_str(),
+                get_route_url(vpc_name, "system", route.name().as_str())
+                    .as_str(),
             )
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -112,12 +131,12 @@ async fn test_router_routes_crud_operations(
     }
 
     // Create a custom router
-    create_router(&client, project_name, vpc_name, router_name).await;
+    create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
 
     // Get routes list for custom router
     let routes = objects_list_page_authz::<RouterRoute>(
         client,
-        get_routes_url(router_name).as_str(),
+        get_routes_url(vpc_name, router_name).as_str(),
     )
     .await
     .items;
@@ -125,12 +144,12 @@ async fn test_router_routes_crud_operations(
     assert_eq!(routes.len(), 0);
 
     let route_name = "custom-route";
-    let route_url = get_route_url(router_name, route_name);
+    let route_url = get_route_url(vpc_name, router_name, route_name);
 
     // Create a new custom route
     let route_created: RouterRoute = NexusRequest::objects_post(
         client,
-        get_routes_url(router_name).as_str(),
+        get_routes_url(vpc_name, router_name).as_str(),
         &params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: route_name.parse().unwrap(),
@@ -212,7 +231,7 @@ async fn test_router_routes_crud_operations(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        get_route_url(router_name, route_name).as_str(),
+        get_route_url(vpc_name, router_name, route_name).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -300,4 +319,220 @@ async fn test_router_routes_disallow_mixed_v4_v6(
             );
         }
     }
+}
+
+#[nexus_test]
+async fn test_router_routes_modify_system_routes(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    let vpc_name = "default";
+
+    // Attempting to add a new route to a system router should fail.
+    let err = create_route_with_error(
+        client,
+        PROJECT_NAME,
+        vpc_name,
+        "system",
+        "bad-route",
+        "ipnet:240.0.0.0/8".parse().unwrap(),
+        "inetgw:outbound".parse().unwrap(),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "user-provided routes cannot be added to a system router"
+    );
+
+    // Get the system router's routes
+    let [v4_route, v6_route, subnet_route] =
+        get_system_routes(client, vpc_name).await;
+
+    // Attempting to modify a VPC subnet route should fail.
+    // Deletes are tested above.
+    let err = object_put_error(
+        client,
+        &get_route_url(vpc_name, "system", subnet_route.name().as_str())
+            .as_str(),
+        &RouterRouteUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+            target: "drop".parse().unwrap(),
+            destination: "subnet:default".parse().unwrap(),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "routes of type VpcSubnet within the system router are not modifiable"
+    );
+
+    // Modifying the target of a Default (gateway) route should succeed.
+    let v4_route: RouterRoute = object_put(
+        client,
+        &get_route_url(vpc_name, "system", v4_route.name().as_str()).as_str(),
+        &RouterRouteUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+            destination: v4_route.destination,
+            target: "drop".parse().unwrap(),
+        },
+    )
+    .await;
+    assert_eq!(v4_route.target, RouteTarget::Drop);
+
+    let v6_route: RouterRoute = object_put(
+        client,
+        &get_route_url(vpc_name, "system", v6_route.name().as_str()).as_str(),
+        &RouterRouteUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+            destination: v6_route.destination,
+            target: "drop".parse().unwrap(),
+        },
+    )
+    .await;
+    assert_eq!(v6_route.target, RouteTarget::Drop);
+
+    // Modifying the *destination* should not.
+    let err = object_put_error(
+        client,
+        &get_route_url(vpc_name, "system", v4_route.name().as_str()).as_str(),
+        &RouterRouteUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+            destination: "ipnet:10.0.0.0/8".parse().unwrap(),
+            target: "drop".parse().unwrap(),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "the destination and metadata of a Default route cannot be changed",
+    );
+}
+
+#[nexus_test]
+async fn test_router_routes_internet_gateway_target(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _ = create_project(&client, PROJECT_NAME).await;
+    let vpc_name = "default";
+    let router_name = "routy";
+    let _router =
+        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+
+    // Internet gateways are not fully supported: only 'inetgw:outbound'
+    // is a valid choice.
+    let dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
+
+    let err = create_route_with_error(
+        client,
+        PROJECT_NAME,
+        vpc_name,
+        &router_name,
+        "bad-route",
+        dest.clone(),
+        "inetgw:not-a-real-gw".parse().unwrap(),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "'outbound' is currently the only valid internet gateway"
+    );
+
+    // This can be used in a custom router, in addition
+    // to its default system spot.
+    let target: RouteTarget = "inetgw:outbound".parse().unwrap();
+    let route = create_route(
+        client,
+        PROJECT_NAME,
+        vpc_name,
+        router_name,
+        "good-route",
+        dest.clone(),
+        target.clone(),
+    )
+    .await;
+    assert_eq!(route.destination, dest);
+    assert_eq!(route.target, target);
+}
+
+#[nexus_test]
+async fn test_router_routes_disallow_custom_targets(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _ = create_project(&client, PROJECT_NAME).await;
+    let vpc_name = "default";
+    let router_name = "routy";
+    let _router =
+        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+
+    // Neither 'vpc:xxx' nor 'subnet:xxx' can be specified as route targets
+    // in custom routers.
+    let dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
+
+    let err = create_route_with_error(
+        client,
+        PROJECT_NAME,
+        vpc_name,
+        &router_name,
+        "bad-route",
+        dest.clone(),
+        "vpc:a-vpc-name-unknown".parse().unwrap(),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "VPCs cannot be used as a destination or target in custom routers"
+    );
+
+    let err = create_route_with_error(
+        client,
+        PROJECT_NAME,
+        vpc_name,
+        &router_name,
+        "bad-route",
+        "vpc:a-vpc-name-unknown".parse().unwrap(),
+        "drop".parse().unwrap(),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "VPCs cannot be used as a destination or target in custom routers"
+    );
+
+    let err = create_route_with_error(
+        client,
+        PROJECT_NAME,
+        vpc_name,
+        &router_name,
+        "bad-route",
+        dest.clone(),
+        "subnet:a-vpc-name-unknown".parse().unwrap(),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "subnets cannot be used as a target in custom routers"
+    );
 }
