@@ -15,9 +15,7 @@ use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmState,
-};
+use omicron_common::api::internal::nexus::{SledInstanceState, VmmState};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateStatus,
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,

@@ -253,20 +253,12 @@ mod test {
 
     use chrono::Utc;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use propolis_client::types::InstanceState as Observed;
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {
         let propolis_id = Uuid::new_v4();
         let now = Utc::now();
-        let instance = InstanceRuntimeState {
-            propolis_id: Some(propolis_id),
-            dst_propolis_id: None,
-            migration_id: None,
-            gen: Generation::new(),
-            time_updated: now,
-        };
 
         let vmm = VmmRuntimeState {
             state: VmmState::Starting,
@@ -315,7 +307,6 @@ mod test {
     fn propolis_terminal_states_request_destroy_action() {
         for state in [Observed::Destroyed, Observed::Failed] {
             let mut instance_state = make_instance();
-            let original_instance_state = instance_state.clone();
             let requested_action = instance_state
                 .apply_propolis_observation(&make_observed_state(state.into()));
 

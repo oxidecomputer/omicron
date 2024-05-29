@@ -906,7 +906,6 @@ pub struct Instance {
 #[derive(Debug)]
 pub(crate) struct InstanceInitialState {
     pub hardware: InstanceHardware,
-    pub instance_runtime: InstanceRuntimeState,
     pub vmm_runtime: VmmRuntimeState,
     pub propolis_addr: SocketAddr,
 }
@@ -939,10 +938,7 @@ impl Instance {
               "state" => ?state);
 
         let InstanceInitialState {
-            hardware,
-            instance_runtime,
-            vmm_runtime,
-            propolis_addr,
+            hardware, vmm_runtime, propolis_addr, ..
         } = state;
 
         let InstanceManagerServices {
