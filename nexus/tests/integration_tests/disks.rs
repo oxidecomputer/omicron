@@ -11,6 +11,7 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
@@ -39,11 +40,13 @@ use omicron_common::api::external::NameOrId;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_uuid_kinds::GenericUuid;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -2455,6 +2458,87 @@ async fn test_region_allocation_after_delete(
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+}
+
+#[nexus_test]
+async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create the regular three 10 GiB zpools, each with one dataset.
+    let disk_test = DiskTest::new(&cptestctx).await;
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Grab the db record now, before the delete
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    // Choose one of the datasets, and drop the simulated Crucible agent
+    let zpool = &disk_test.zpools[0];
+    let dataset = &zpool.datasets[0];
+
+    cptestctx.sled_agent.sled_agent.drop_dataset(zpool.id, dataset.id).await;
+
+    // Spawn a task that tries to delete the disk
+    let disk_url = get_disk_url(DISK_NAME);
+    let client = client.clone();
+
+    let (task_started_tx, task_started_rx) = oneshot::channel();
+
+    let jh = tokio::spawn(async move {
+        task_started_tx.send(()).unwrap();
+
+        NexusRequest::object_delete(&client, &disk_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to delete disk");
+    });
+
+    // Wait until the task starts
+    task_started_rx.await.unwrap();
+
+    // It won't finish until the dataset is expunged.
+    assert!(!jh.is_finished());
+
+    // Expunge the physical disk
+    let (_, db_zpool) = LookupPath::new(&opctx, datastore)
+        .zpool_id(zpool.id.into_untyped_uuid())
+        .fetch()
+        .await
+        .unwrap();
+
+    datastore
+        .physical_disk_update_policy(
+            &opctx,
+            db_zpool.physical_disk_id,
+            PhysicalDiskPolicy::Expunged,
+        )
+        .await
+        .unwrap();
+
+    // Now, the delete call will finish Ok
+    jh.await.unwrap();
+
+    // Ensure that the disk was properly deleted and all the regions are gone -
+    // Nexus should hard delete the region records in this case.
+
+    let datasets_and_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert!(datasets_and_regions.is_empty());
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

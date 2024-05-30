@@ -854,4 +854,8 @@ impl SledAgent {
     ) {
         *self.fake_zones.lock().await = requested_zones;
     }
+
+    pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+        self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
+    }
 }
