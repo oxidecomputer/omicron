@@ -1428,6 +1428,73 @@ impl DataStore {
 
         Ok(())
     }
+
+    /// For a downstairs being repaired, find the most recent repair
+    /// notification
+    pub async fn most_recent_started_repair_notification(
+        &self,
+        opctx: &OpContext,
+        region_id: Uuid,
+    ) -> Result<Option<UpstairsRepairNotification>, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::upstairs_repair_notification::dsl;
+
+        dsl::upstairs_repair_notification
+            .filter(dsl::region_id.eq(region_id))
+            .filter(
+                dsl::notification_type
+                    .eq(UpstairsRepairNotificationType::Started),
+            )
+            .order_by(dsl::time.desc())
+            .limit(1)
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// For a downstairs being repaired, return all related repair notifications
+    /// in order of notification time.
+    pub async fn repair_notifications_for_region(
+        &self,
+        opctx: &OpContext,
+        region_id: Uuid,
+    ) -> Result<Vec<UpstairsRepairNotification>, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::upstairs_repair_notification::dsl;
+
+        dsl::upstairs_repair_notification
+            .filter(dsl::region_id.eq(region_id))
+            .order_by(dsl::time.asc())
+            .select(UpstairsRepairNotification::as_select())
+            .get_results_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// For a repair ID, find the most recent progress notification
+    pub async fn most_recent_repair_progress(
+        &self,
+        opctx: &OpContext,
+        repair_id: TypedUuid<UpstairsRepairKind>,
+    ) -> Result<Option<UpstairsRepairProgress>, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::upstairs_repair_progress::dsl;
+
+        dsl::upstairs_repair_progress
+            .filter(
+                dsl::repair_id.eq(nexus_db_model::to_db_typed_uuid(repair_id)),
+            )
+            .order_by(dsl::time.desc())
+            .limit(1)
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
