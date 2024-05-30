@@ -53,7 +53,9 @@ impl steno::SecStore for CockroachDbSecStore {
         self.datastore
             .saga_create(&db::saga_types::Saga::new(self.sec_id, create_params))
             .await
-            .context("creating saga record")
+            .context("creating saga record")?;
+
+        Ok(())
     }
 
     async fn record_event(&self, event: steno::SagaNodeEvent) {
@@ -128,18 +130,57 @@ impl steno::SecStore for CockroachDbSecStore {
     }
 
     async fn saga_update(&self, id: SagaId, update: steno::SagaCachedState) {
-        // TODO-robustness We should track the current generation of the saga
-        // and use it.  We'll know this either from when it was created or when
-        // it was recovered.
         info!(&self.log, "updating state";
             "saga_id" => id.to_string(),
             "new_state" => update.to_string()
         );
 
+        // TODO(AJS): (Note to add to PR and remove before merge) - Steno has
+        // no notion of generation numbers, and so we'd need a side channel
+        // mechanism in order to keep track of the current generation numbers
+        // per SagaId in memory. We'd then garbage collect them when this method
+        // is called with `steno::SagaCachedState::Done`. However, while that
+        // method shouldn't be called more than once if this function succeeds,
+        // it may do to code changes. Furthermore, we have to maintain this
+        // table of SagaId -> Generation mappings correctly and make a decision
+        // about what to do if we fail a lookup? Do we panic? Do we use the
+        // default of `Generation::new()`? Do we just read from the DB and get
+        // the current value? I actually wrote this lookup map started to use
+        // it and started to do the lookup from the DB if it wasn't in the cache
+        // map. However, that made me wonder what in fact was being protected by
+        // the generation here. What we really want to ensure is that this SEC
+        // owns the saga. It doesn't matter when it became the owner, just that
+        // it currently is. We already have that information and we filter on it
+        // in `datastore.saga_update_state`.  This seems to buy us nothing.
+        //
+        // Furthermore, we also already need to add such a filter for the
+        // `SecId` in `datastore.saga_create_event`, and we don't have a
+        // generation number being used there. We'd have the same issue of
+        // keeping the cache up to date with the DB, which which is why we've
+        // generally eschewed using caches in the first place.
+        //
+        // Lastly, the generation in the saga is called `adopt_generation`. It's
+        // most useful in ensuring that only a single entity can migrate from
+        // one sec to another. That's where the conditional is actually used for
+        // optimisitic concurrency control
+        //
+        // All this being said, we shouldn't use the generation number for
+        // `steno::SecStore` operations at all IMO. We should ensure that we
+        // only have one SEC running that owns the saga, and to prevent errant
+        // logging, we do an extra safety check on the DB. It should be noted
+        // that even with the extra safety check on the DB, having two SECs
+        // attempt to run the same saga can cause an immense amount of damage.
+        // We protect that via our expunge mechanism. In the short term the
+        // expunge mechanism is to have the operator pull the sled before
+        // expungement. In the longer term case we'll remove the sled from trust
+        // quorum and reboot it so that it cannot even boot to get to the point
+        // where it could possibly run sagas.
+        //
+
         // TODO-robustness This should be wrapped with a retry loop rather than
         // unwrapping the result.  See omicron#2416.
         self.datastore
-            .saga_update_state(id, update, self.sec_id, Generation::new())
+            .saga_update_state(id, update, self.sec_id)
             .await
             .unwrap();
     }
