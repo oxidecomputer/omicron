@@ -594,6 +594,8 @@ impl<'a> BlueprintBuilder<'a> {
         if additions.is_empty() && removals.is_empty() {
             return Ok(EnsureMultiple::NotNeeded);
         }
+        let added = additions.len();
+        let removed = removals.len();
 
         let disks = &mut self.disks.change_sled_disks(sled_id).disks;
 
@@ -602,10 +604,7 @@ impl<'a> BlueprintBuilder<'a> {
             !removals.contains(&PhysicalDiskUuid::from_untyped_uuid(config.id))
         });
 
-        Ok(EnsureMultiple::Changed {
-            added: additions.len(),
-            removed: removals.len(),
-        })
+        Ok(EnsureMultiple::Changed { added, removed })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -1511,7 +1510,7 @@ pub mod test {
                     builder
                         .sled_ensure_disks(sled_id, &sled_resources)
                         .unwrap(),
-                    Ensure::Added,
+                    EnsureMultiple::Changed { added: 10, removed: 0 },
                 );
             }
 
@@ -1659,7 +1658,7 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 1)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Added(1));
+            assert_eq!(added, EnsureMultiple::Changed { added: 1, removed: 0 });
         }
 
         {
@@ -1677,7 +1676,7 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 3)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Added(3));
+            assert_eq!(added, EnsureMultiple::Changed { added: 3, removed: 0 });
         }
 
         {
