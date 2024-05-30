@@ -140,7 +140,9 @@ pub struct UpdaterLock {
 }
 
 /// Errors returned by [`DataStore::instance_updater_lock`].
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(
+    Debug, thiserror::Error, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 pub enum UpdaterLockError {
     /// The instance was already locked by another saga.
     #[error("instance already locked by another saga")]
