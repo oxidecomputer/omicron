@@ -22,7 +22,7 @@ enum Commands {
 
     /// List logs for a given service
     Logs {
-        // The name of the zone
+        /// The name of the zone
         zone: String,
 
         /// The name of the service to list logs for
@@ -36,10 +36,13 @@ enum Commands {
         filter: FilterArgs,
     },
 
-    /// List the names of all services on the system, from the perspective of
-    /// oxlog. Use these names with `oxlog logs` to filter output to logs from a
+    /// List the names of all services in a zone, from the perspective of oxlog.
+    /// Use these names with `oxlog logs` to filter output to logs from a
     /// specific service.
-    Services,
+    Services {
+        /// The name of the zone
+        zone: String,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -130,7 +133,7 @@ fn main() -> Result<(), anyhow::Error> {
             }
             Ok(())
         }
-        Commands::Services => {
+        Commands::Services { zone } => {
             let zones = Zones::load()?;
 
             // We want all logs that exist, anywhere, so we can find their
@@ -142,13 +145,10 @@ fn main() -> Result<(), anyhow::Error> {
                 show_empty: true,
             };
 
-            // Collect a unique set of services, based on the logs in all zones
-            let services: BTreeSet<String> = zones
-                .zones
-                .keys()
-                .flat_map(|zone| zones.zone_logs(&zone, filter).into_iter())
-                .map(|(name, _)| name)
-                .collect();
+            // Collect a unique set of services, based on the logs in the
+            // specified zone
+            let services: BTreeSet<String> =
+                zones.zone_logs(&zone, filter).into_keys().collect();
 
             for svc in services {
                 println!("{}", svc);
