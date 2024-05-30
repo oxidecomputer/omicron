@@ -589,6 +589,7 @@ pub struct SpComponentCaboose {
     pub board: String,
     pub name: String,
     pub version: String,
+    pub sign: Option<String>,
 }
 
 /// Identity of a host phase2 recovery image.
@@ -837,6 +838,7 @@ async fn sp_component_caboose_get(
     const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
     const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
     const CABOOSE_KEY_VERSION: [u8; 4] = *b"VERS";
+    const CABOOSE_KEY_SIGN: [u8; 4] = *b"SIGN";
 
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
@@ -890,13 +892,23 @@ async fn sp_component_caboose_get(
             sp: sp_id,
             err,
         })?;
+    // Not all images include the SIGN in the caboose, if it's not present
+    // don't treat it as an error
+    let sign = match sp
+        .read_component_caboose(component, firmware_slot, CABOOSE_KEY_SIGN)
+        .await
+        .ok()
+    {
+        None => None,
+        Some(v) => Some(from_utf8(&CABOOSE_KEY_SIGN, v)?),
+    };
 
     let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
     let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
     let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
     let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
 
-    let caboose = SpComponentCaboose { git_commit, board, name, version };
+    let caboose = SpComponentCaboose { git_commit, board, name, version, sign };
 
     Ok(HttpResponseOk(caboose))
 }

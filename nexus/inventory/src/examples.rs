@@ -489,6 +489,7 @@ pub fn caboose(unique: &str) -> SpComponentCaboose {
         git_commit: format!("git_commit_{}", unique),
         name: format!("name_{}", unique),
         version: format!("version_{}", unique),
+        sign: None,
     }
 }
 

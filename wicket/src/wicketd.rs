@@ -449,7 +449,9 @@ impl WicketdManager {
                         let artifacts = rsp
                             .artifacts
                             .into_iter()
-                            .map(|artifact| artifact.artifact_id)
+                            .map(|artifact| {
+                                (artifact.artifact_id, artifact.sign)
+                            })
                             .collect();
                         let system_version = rsp.system_version;
                         let event_reports: EventReportMap = rsp.event_reports;
