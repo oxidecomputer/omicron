@@ -366,6 +366,70 @@ mod test {
         );
     }
 
+    struct TestData {
+        project_id: Uuid,
+        silo_id: Uuid,
+        fleet_id: Uuid,
+        authz_project: crate::authz::Project,
+    }
+
+    impl TestData {
+        fn ids(&self) -> [Uuid; 3] {
+            [self.project_id, self.silo_id, self.fleet_id]
+        }
+    }
+
+    // Use the default fleet and silo, but create a new project.
+    async fn setup_collections(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> TestData {
+        let fleet_id = *fixed_data::FLEET_ID;
+        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+
+        let (authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myproject".parse().unwrap(),
+                            description: "It's a project".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the silo has a quota that can fit our requested instance.
+        //
+        // This also acts as a guard against a change in the default silo quota
+        // -- we overwrite it for the test unconditionally.
+
+        let quotas_update = SiloQuotasUpdate {
+            cpus: Some(24),
+            memory: Some(1 << 40),
+            storage: Some(1 << 50),
+            time_modified: chrono::Utc::now(),
+        };
+        let authz_silo = LookupPath::new(&opctx, &datastore)
+            .silo_id(silo_id)
+            .lookup_for(crate::authz::Action::Modify)
+            .await
+            .unwrap()
+            .0;
+        datastore
+            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .await
+            .unwrap();
+
+        TestData { fleet_id, silo_id, project_id, authz_project }
+    }
+
     async fn create_instance_record(
         datastore: &DataStore,
         opctx: &OpContext,
@@ -410,52 +474,10 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Use the default fleet and silo, but create a new project.
-
-        let fleet_id = *fixed_data::FLEET_ID;
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
-
-        let ids = [fleet_id, silo_id, project_id];
-
-        let (authz_project, _project) = datastore
-            .project_create(
-                &opctx,
-                Project::new_with_id(
-                    project_id,
-                    silo_id,
-                    params::ProjectCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: "myproject".parse().unwrap(),
-                            description: "It's a project".into(),
-                        },
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-
-        // Ensure the silo has a quota that can fit our requested instance.
-        //
-        // This also acts as a guard against a change in the default silo quota
-        // -- we overwrite it for the test unconditionally.
-
-        let quotas_update = SiloQuotasUpdate {
-            cpus: Some(24),
-            memory: Some(1 << 40),
-            storage: Some(1 << 50),
-            time_modified: chrono::Utc::now(),
-        };
-        let authz_silo = LookupPath::new(&opctx, &datastore)
-            .silo_id(silo_id)
-            .lookup_for(crate::authz::Action::Modify)
-            .await
-            .unwrap()
-            .0;
-        datastore
-            .silo_update_quota(&opctx, &authz_silo, quotas_update)
-            .await
-            .unwrap();
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
+        let authz_project = test_data.authz_project;
 
         // Actually provision the instance
 
@@ -525,52 +547,10 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Use the default fleet and silo, but create a new project.
-
-        let fleet_id = *fixed_data::FLEET_ID;
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
-
-        let ids = [fleet_id, silo_id, project_id];
-
-        let (authz_project, _project) = datastore
-            .project_create(
-                &opctx,
-                Project::new_with_id(
-                    project_id,
-                    silo_id,
-                    params::ProjectCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: "myproject".parse().unwrap(),
-                            description: "It's a project".into(),
-                        },
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-
-        // Ensure the silo has a quota that can fit our requested instance.
-        //
-        // This also acts as a guard against a change in the default silo quota
-        // -- we overwrite it for the test unconditionally.
-
-        let quotas_update = SiloQuotasUpdate {
-            cpus: Some(24),
-            memory: Some(1 << 40),
-            storage: Some(1 << 50),
-            time_modified: chrono::Utc::now(),
-        };
-        let authz_silo = LookupPath::new(&opctx, &datastore)
-            .silo_id(silo_id)
-            .lookup_for(crate::authz::Action::Modify)
-            .await
-            .unwrap()
-            .0;
-        datastore
-            .silo_update_quota(&opctx, &authz_silo, quotas_update)
-            .await
-            .unwrap();
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
+        let authz_project = test_data.authz_project;
 
         // Actually provision the instance
 
@@ -703,52 +683,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Use the default fleet and silo, but create a new project.
-
-        let fleet_id = *fixed_data::FLEET_ID;
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
-
-        let ids = [fleet_id, silo_id, project_id];
-
-        let (_authz_project, _project) = datastore
-            .project_create(
-                &opctx,
-                Project::new_with_id(
-                    project_id,
-                    silo_id,
-                    params::ProjectCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: "myproject".parse().unwrap(),
-                            description: "It's a project".into(),
-                        },
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-
-        // Ensure the silo has a quota that can fit our requested storage.
-        //
-        // This also acts as a guard against a change in the default silo quota
-        // -- we overwrite it for the test unconditionally.
-
-        let quotas_update = SiloQuotasUpdate {
-            cpus: Some(24),
-            memory: Some(1 << 40),
-            storage: Some(1 << 50),
-            time_modified: chrono::Utc::now(),
-        };
-        let authz_silo = LookupPath::new(&opctx, &datastore)
-            .silo_id(silo_id)
-            .lookup_for(crate::authz::Action::Modify)
-            .await
-            .unwrap()
-            .0;
-        datastore
-            .silo_update_quota(&opctx, &authz_silo, quotas_update)
-            .await
-            .unwrap();
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
 
         // Actually provision storage
 
@@ -802,52 +739,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Use the default fleet and silo, but create a new project.
-
-        let fleet_id = *fixed_data::FLEET_ID;
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
-        let project_id = Uuid::new_v4();
-
-        let ids = [fleet_id, silo_id, project_id];
-
-        let (_authz_project, _project) = datastore
-            .project_create(
-                &opctx,
-                Project::new_with_id(
-                    project_id,
-                    silo_id,
-                    params::ProjectCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: "myproject".parse().unwrap(),
-                            description: "It's a project".into(),
-                        },
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-
-        // Ensure the silo has a quota that can fit our requested disk.
-        //
-        // This also acts as a guard against a change in the default silo quota
-        // -- we overwrite it for the test unconditionally.
-
-        let quotas_update = SiloQuotasUpdate {
-            cpus: Some(24),
-            memory: Some(1 << 40),
-            storage: Some(1 << 50),
-            time_modified: chrono::Utc::now(),
-        };
-        let authz_silo = LookupPath::new(&opctx, &datastore)
-            .silo_id(silo_id)
-            .lookup_for(crate::authz::Action::Modify)
-            .await
-            .unwrap()
-            .0;
-        datastore
-            .silo_update_quota(&opctx, &authz_silo, quotas_update)
-            .await
-            .unwrap();
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
 
         // Actually provision the disk
 
