@@ -198,7 +198,6 @@ retry cargo xtask download \
     dendrite-openapi \
     dendrite-stub \
     maghemite-mgd \
-    maghemite-openapi \
     thundermuffin \
     transceiver-control
 
