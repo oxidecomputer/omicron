@@ -306,7 +306,7 @@ ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
-libc = "0.2.153"
+libc = "0.2.155"
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe" }
 linear-map = "1.2.0"
