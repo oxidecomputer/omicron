@@ -47,7 +47,7 @@ WITH
       DELETE FROM
         virtual_provisioning_resource
       WHERE
-        virtual_provisioning_resource.id = $5
+        virtual_provisioning_resource.id = $5 AND (SELECT do_update.update FROM do_update LIMIT 1)
       RETURNING
         virtual_provisioning_resource.id,
         virtual_provisioning_resource.time_modified,
