@@ -193,7 +193,8 @@ pub struct InstanceRuntimeState {
 
     /// The generation number for the updater lock. This is updated whenever the
     /// lock is acquired or released, and is used in attempts to set the
-    /// `updater_id` field to
+    /// `updater_id` field to ensure that the snapshot which indicated that the
+    /// lock was not held is still valid when setting the lock ID.
     #[diesel(column_name = updater_gen)]
     pub updater_gen: Generation,
 }
