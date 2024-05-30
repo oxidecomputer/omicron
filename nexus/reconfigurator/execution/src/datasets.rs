@@ -5,20 +5,19 @@
 //! Ensures dataset records required by a given blueprint
 
 use anyhow::Context;
-use illumos_utils::zpool::ZpoolName;
 use nexus_db_model::Dataset;
 use nexus_db_model::DatasetKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::OmicronZoneConfig;
-use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use slog::warn;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::net::SocketAddrV6;
 
 /// For each crucible zone in `all_omicron_zones`, ensure that a corresponding
 /// dataset record exists in `datastore`
@@ -28,7 +27,7 @@ use std::net::SocketAddrV6;
 pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
+    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
 ) -> anyhow::Result<usize> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
@@ -45,14 +44,17 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         .await
         .context("failed to list all datasets")?
         .into_iter()
-        .map(|dataset| dataset.id())
+        .map(|dataset| OmicronZoneUuid::from_untyped_uuid(dataset.id()))
         .collect::<BTreeSet<_>>();
 
     let mut num_inserted = 0;
     let mut num_already_exist = 0;
 
     for zone in all_omicron_zones {
-        let OmicronZoneType::Crucible { address, dataset } = &zone.zone_type
+        let BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+            address,
+            dataset,
+        }) = &zone.zone_type
         else {
             continue;
         };
@@ -65,36 +67,11 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
             continue;
         }
 
-        // Map progenitor client strings into the types we need. We never
-        // expect these to fail.
-        let addr: SocketAddrV6 = match address.parse() {
-            Ok(addr) => addr,
-            Err(err) => {
-                warn!(
-                    opctx.log, "failed to parse crucible zone address";
-                    "address" => address,
-                    "err" => InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
-        let zpool_name: ZpoolName = match dataset.pool_name.parse() {
-            Ok(name) => name,
-            Err(err) => {
-                warn!(
-                    opctx.log, "failed to parse crucible zone pool name";
-                    "pool_name" => &*dataset.pool_name,
-                    "err" => err,
-                );
-                continue;
-            }
-        };
-
-        let pool_id = zpool_name.id();
+        let pool_id = dataset.pool_name.id();
         let dataset = Dataset::new(
-            id,
+            id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
-            addr,
+            *address,
             DatasetKind::Crucible,
         );
         let maybe_inserted = datastore
@@ -149,9 +126,15 @@ mod tests {
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneFilter;
+    use omicron_common::zpool_name::ZpoolName;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::types::OmicronZoneDataset;
+    use sled_agent_client::types::OmicronZoneType;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -161,8 +144,10 @@ mod tests {
     async fn test_ensure_crucible_dataset_records_exist(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        const TEST_NAME: &str = "test_ensure_crucible_dataset_records_exist";
+
         // Set up.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
@@ -170,15 +155,14 @@ mod tests {
         );
         let opctx = &opctx;
 
-        // Use the standard representative inventory collection.
-        let representative = nexus_inventory::examples::representative();
-        let collection = representative.builder.build();
+        // Use the standard example system.
+        let (collection, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
 
         // Record the sleds and zpools contained in this collection.
         let rack_id = Uuid::new_v4();
         for (&sled_id, config) in &collection.omicron_zones {
             let sled = SledUpdate::new(
-                sled_id,
+                sled_id.into_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
                 SledBaseboard {
                     serial_number: format!("test-{sled_id}"),
@@ -201,15 +185,13 @@ mod tests {
                 else {
                     continue;
                 };
-                let zpool_name: ZpoolName =
-                    dataset.pool_name.parse().expect("invalid zpool name");
                 let zpool = Zpool::new(
-                    zpool_name.id().into_untyped_uuid(),
-                    sled_id,
+                    dataset.pool_name.id().into_untyped_uuid(),
+                    sled_id.into_untyped_uuid(),
                     Uuid::new_v4(), // physical_disk_id
                 );
                 datastore
-                    .zpool_upsert(opctx, zpool)
+                    .zpool_insert(opctx, zpool)
                     .await
                     .expect("failed to upsert zpool");
             }
@@ -230,10 +212,17 @@ mod tests {
                 .len(),
             0
         );
+
+        // Collect all the blueprint zones.
+        let all_omicron_zones = blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .map(|(_, zone)| zone)
+            .collect::<Vec<_>>();
+
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            collection.all_omicron_zones(),
+            all_omicron_zones.iter().copied(),
         )
         .await
         .expect("failed to ensure crucible datasets");
@@ -254,7 +243,7 @@ mod tests {
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            collection.all_omicron_zones(),
+            all_omicron_zones.iter().copied(),
         )
         .await
         .expect("failed to ensure crucible datasets");
@@ -274,34 +263,34 @@ mod tests {
         for &sled_id in collection.omicron_zones.keys().take(1) {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
-                sled_id,
+                sled_id.into_untyped_uuid(),
                 Uuid::new_v4(), // physical_disk_id
             );
             datastore
-                .zpool_upsert(opctx, zpool)
+                .zpool_insert(opctx, zpool)
                 .await
                 .expect("failed to upsert zpool");
         }
 
         // Call `ensure_crucible_dataset_records_exist` again, adding a new
         // crucible zone. It should insert only this new zone.
-        let new_zone = OmicronZoneConfig {
-            id: Uuid::new_v4(),
+        let new_zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::new_v4(),
             underlay_address: "::1".parse().unwrap(),
-            zone_type: OmicronZoneType::Crucible {
-                address: "[::1]:0".to_string(),
-                dataset: OmicronZoneDataset {
-                    pool_name: ZpoolName::new_external(new_zpool_id)
-                        .to_string()
-                        .parse()
-                        .unwrap(),
+            zone_type: BlueprintZoneType::Crucible(
+                blueprint_zone_type::Crucible {
+                    address: "[::1]:0".parse().unwrap(),
+                    dataset: OmicronZoneDataset {
+                        pool_name: ZpoolName::new_external(new_zpool_id),
+                    },
                 },
-            },
+            ),
         };
         let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
-            collection.all_omicron_zones().chain(std::iter::once(&new_zone)),
+            all_omicron_zones.iter().copied().chain(std::iter::once(&new_zone)),
         )
         .await
         .expect("failed to ensure crucible datasets");

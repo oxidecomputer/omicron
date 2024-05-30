@@ -8,9 +8,9 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::SLED_PREFIX;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
-use uuid::Uuid;
 
 /// Override values used during blueprint execution
 ///
@@ -23,59 +23,59 @@ use uuid::Uuid;
 #[derive(Debug, Default)]
 pub struct Overridables {
     /// map: sled id -> TCP port on which that sled's Dendrite is listening
-    pub dendrite_ports: BTreeMap<Uuid, u16>,
+    pub dendrite_ports: BTreeMap<SledUuid, u16>,
     /// map: sled id -> TCP port on which that sled's MGS is listening
-    pub mgs_ports: BTreeMap<Uuid, u16>,
+    pub mgs_ports: BTreeMap<SledUuid, u16>,
     /// map: sled id -> TCP port on which that sled's MGD is listening
-    pub mgd_ports: BTreeMap<Uuid, u16>,
+    pub mgd_ports: BTreeMap<SledUuid, u16>,
     /// map: sled id -> IP address of the sled's switch zone
-    pub switch_zone_ips: BTreeMap<Uuid, Ipv6Addr>,
+    pub switch_zone_ips: BTreeMap<SledUuid, Ipv6Addr>,
 }
 
 impl Overridables {
     /// Specify the TCP port on which this sled's Dendrite is listening
     #[cfg(test)]
-    fn override_dendrite_port(&mut self, sled_id: Uuid, port: u16) {
+    fn override_dendrite_port(&mut self, sled_id: SledUuid, port: u16) {
         self.dendrite_ports.insert(sled_id, port);
     }
 
     /// Returns the TCP port on which this sled's Dendrite is listening
-    pub fn dendrite_port(&self, sled_id: Uuid) -> u16 {
+    pub fn dendrite_port(&self, sled_id: SledUuid) -> u16 {
         self.dendrite_ports.get(&sled_id).copied().unwrap_or(DENDRITE_PORT)
     }
 
     /// Specify the TCP port on which this sled's MGS is listening
     #[cfg(test)]
-    fn override_mgs_port(&mut self, sled_id: Uuid, port: u16) {
+    fn override_mgs_port(&mut self, sled_id: SledUuid, port: u16) {
         self.mgs_ports.insert(sled_id, port);
     }
 
     /// Returns the TCP port on which this sled's MGS is listening
-    pub fn mgs_port(&self, sled_id: Uuid) -> u16 {
+    pub fn mgs_port(&self, sled_id: SledUuid) -> u16 {
         self.mgs_ports.get(&sled_id).copied().unwrap_or(MGS_PORT)
     }
 
     /// Specify the TCP port on which this sled's MGD is listening
     #[cfg(test)]
-    fn override_mgd_port(&mut self, sled_id: Uuid, port: u16) {
+    fn override_mgd_port(&mut self, sled_id: SledUuid, port: u16) {
         self.mgd_ports.insert(sled_id, port);
     }
 
     /// Returns the TCP port on which this sled's MGD is listening
-    pub fn mgd_port(&self, sled_id: Uuid) -> u16 {
+    pub fn mgd_port(&self, sled_id: SledUuid) -> u16 {
         self.mgd_ports.get(&sled_id).copied().unwrap_or(MGD_PORT)
     }
 
     /// Specify the IP address of this switch zone
     #[cfg(test)]
-    fn override_switch_zone_ip(&mut self, sled_id: Uuid, addr: Ipv6Addr) {
+    fn override_switch_zone_ip(&mut self, sled_id: SledUuid, addr: Ipv6Addr) {
         self.switch_zone_ips.insert(sled_id, addr);
     }
 
     /// Returns the IP address of this sled's switch zone
     pub fn switch_zone_ip(
         &self,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     ) -> Ipv6Addr {
         self.switch_zone_ips

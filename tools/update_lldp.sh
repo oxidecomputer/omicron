@@ -8,7 +8,8 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
     echo
-    echo "  -c COMMIT   Ask to update Lldp to a specific commit."
+    echo "  -b COMMIT   Ask to update lldp to HEAD on the named branch."
+    echo "  -c COMMIT   Ask to update lldp to a specific commit."
     echo "              If this is unset, Github is queried."
     echo "  -n          Dry-run"
     exit 1
@@ -29,8 +30,11 @@ REPO="oxidecomputer/lldp"
 function main {
     TARGET_COMMIT=""
     DRY_RUN=""
-    while getopts "c:n" o; do
+    while getopts "b:c:n" o; do
       case "${o}" in
+        b)
+          TARGET_BRANCH="$OPTARG"
+          ;;
         c)
           TARGET_COMMIT="$OPTARG"
           ;;

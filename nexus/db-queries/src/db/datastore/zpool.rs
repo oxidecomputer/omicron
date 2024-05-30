@@ -14,10 +14,12 @@ use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
+use crate::db::model::PhysicalDisk;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::TransactionError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -32,27 +34,29 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn zpool_upsert(
+    pub async fn zpool_insert(
         &self,
         opctx: &OpContext,
         zpool: Zpool,
     ) -> CreateResult<Zpool> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        Self::zpool_upsert_on_connection(&conn, opctx, zpool).await
+        let zpool =
+            Self::zpool_insert_on_connection(&conn, opctx, zpool).await?;
+        Ok(zpool)
     }
 
     /// Stores a new zpool in the database.
-    pub async fn zpool_upsert_on_connection(
+    pub async fn zpool_insert_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         zpool: Zpool,
-    ) -> CreateResult<Zpool> {
+    ) -> Result<Zpool, TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         use db::schema::zpool::dsl;
 
         let sled_id = zpool.sled_id;
-        Sled::insert_resource(
+        let pool = Sled::insert_resource(
             sled_id,
             diesel::insert_into(dsl::zpool)
                 .values(zpool.clone())
@@ -77,7 +81,9 @@ impl DataStore {
                     &zpool.id().to_string(),
                 ),
             ),
-        })
+        })?;
+
+        Ok(pool)
     }
 
     /// Fetches a page of the list of all zpools on U.2 disks in all sleds
@@ -85,7 +91,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Zpool> {
+    ) -> ListResultVec<(Zpool, PhysicalDisk)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::physical_disk::dsl as dsl_physical_disk;
@@ -99,7 +105,7 @@ impl DataStore {
                     ),
                 ),
             )
-            .select(Zpool::as_select())
+            .select((Zpool::as_select(), PhysicalDisk::as_select()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -114,7 +120,7 @@ impl DataStore {
     pub async fn zpool_list_all_external_batched(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<Zpool> {
+    ) -> ListResultVec<(Zpool, PhysicalDisk)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
         let mut zpools = Vec::new();
@@ -123,8 +129,7 @@ impl DataStore {
             let batch = self
                 .zpool_list_all_external(opctx, &p.current_pagparams())
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
+            paginator = p.found_batch(&batch, &|(z, _)| z.id());
             zpools.extend(batch);
         }
 

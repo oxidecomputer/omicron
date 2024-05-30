@@ -26,6 +26,8 @@ peg::parser! {
         use crate::oxql::ast::table_ops::BasicTableOp;
         use crate::oxql::ast::table_ops::TableOp;
         use crate::oxql::ast::table_ops::group_by::Reducer;
+        use crate::oxql::ast::table_ops::limit::Limit;
+        use crate::oxql::ast::table_ops::limit::LimitKind;
         use crate::oxql::ast::literal::duration_consts;
         use oximeter::TimeseriesName;
         use std::time::Duration;
@@ -531,12 +533,29 @@ peg::parser! {
             Align { method, period }
         }
 
+        /// Parse a limit kind
+        pub rule limit_kind() -> LimitKind
+            = "first" { LimitKind::First }
+            / "last" { LimitKind::Last }
+
+        /// Parse a limit table operation
+        pub rule limit() -> Limit
+            = kind:limit_kind() _ count:integer_literal_impl()
+        {?
+            if count <= 0 || count > usize::MAX as i128 {
+                return Err("limit count must be a nonzero usize")
+            };
+            let count = std::num::NonZeroUsize::new(count.try_into().unwrap()).unwrap();
+            Ok(Limit { kind, count })
+        }
+
         pub(super) rule basic_table_op() -> TableOp
             = g:"get" _ t:timeseries_name() { TableOp::Basic(BasicTableOp::Get(t)) }
             / f:filter() { TableOp::Basic(BasicTableOp::Filter(f)) }
             / g:group_by() { TableOp::Basic(BasicTableOp::GroupBy(g)) }
             / join() { TableOp::Basic(BasicTableOp::Join(Join)) }
             / a:align() { TableOp::Basic(BasicTableOp::Align(a)) }
+            / l:limit() { TableOp::Basic(BasicTableOp::Limit(l)) }
 
         pub(super) rule grouped_table_op() -> TableOp
             = "{" _? ops:(query() ++ grouped_table_op_delim()) _? "}"
@@ -649,6 +668,8 @@ mod tests {
     use crate::oxql::ast::table_ops::filter::FilterExpr;
     use crate::oxql::ast::table_ops::filter::SimpleFilter;
     use crate::oxql::ast::table_ops::group_by::Reducer;
+    use crate::oxql::ast::table_ops::limit::Limit;
+    use crate::oxql::ast::table_ops::limit::LimitKind;
     use chrono::NaiveDate;
     use chrono::NaiveDateTime;
     use chrono::NaiveTime;
@@ -687,7 +708,7 @@ mod tests {
         }
 
         assert!(query_parser::duration_literal_impl("-1m").is_err());
-        let too_big: i64 = u32::MAX as i64 + 1;
+        let too_big: i64 = i64::from(u32::MAX) + 1;
         assert!(query_parser::duration_literal_impl(&format!("{too_big}s"))
             .is_err());
     }
@@ -1304,5 +1325,26 @@ mod tests {
             query_parser::filter_expr("(a == 0) || !(a == 0 && a == 0)")
                 .unwrap();
         assert_eq!(negated, expected, "Failed to handle multiple negations");
+    }
+
+    #[test]
+    fn test_limiting_table_ops() {
+        assert_eq!(
+            query_parser::limit("first 100").unwrap(),
+            Limit { kind: LimitKind::First, count: 100.try_into().unwrap() },
+        );
+        assert_eq!(
+            query_parser::limit("last 100").unwrap(),
+            Limit { kind: LimitKind::Last, count: 100.try_into().unwrap() },
+        );
+
+        assert!(query_parser::limit(&format!(
+            "first {}",
+            usize::MAX as i128 + 1
+        ))
+        .is_err());
+        assert!(query_parser::limit("first 0").is_err());
+        assert!(query_parser::limit("first -1").is_err());
+        assert!(query_parser::limit("first \"foo\"").is_err());
     }
 }

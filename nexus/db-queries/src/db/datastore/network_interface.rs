@@ -68,9 +68,9 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
         nic: NicInfo,
     ) -> omicron_common::api::internal::shared::NetworkInterface {
         let ip_subnet = if nic.ip.is_ipv4() {
-            external::IpNet::V4(nic.ipv4_block.0)
+            oxnet::IpNet::V4(nic.ipv4_block.0)
         } else {
-            external::IpNet::V6(nic.ipv6_block.0)
+            oxnet::IpNet::V6(nic.ipv6_block.0)
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
@@ -371,12 +371,19 @@ impl DataStore {
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean. The meaning of return values are:
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_interface: &authz::InstanceNetworkInterface,
-    ) -> Result<(), network_interface::DeleteError> {
+    ) -> Result<bool, network_interface::DeleteError> {
         opctx
             .authorize(authz::Action::Delete, authz_interface)
             .await
@@ -388,26 +395,30 @@ impl DataStore {
         );
         query
             .clone()
-            .execute_async(
+            .execute_and_check(
                 &*self
                     .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
-            .map_err(|e| {
-                network_interface::DeleteError::from_diesel(e, &query)
-            })?;
-        Ok(())
+            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Delete a `ServiceNetworkInterface` attached to a provided service.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean. The meaning of return values are:
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
     pub async fn service_delete_network_interface(
         &self,
         opctx: &OpContext,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<(), network_interface::DeleteError> {
+    ) -> Result<bool, network_interface::DeleteError> {
         // See the comment in `service_create_network_interface`. There's no
         // obvious parent for a service network interface (as opposed to
         // instance network interfaces, which require permissions on the
@@ -429,17 +440,14 @@ impl DataStore {
         );
         query
             .clone()
-            .execute_async(
+            .execute_and_check(
                 &*self
                     .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
-            .map_err(|e| {
-                network_interface::DeleteError::from_diesel(e, &query)
-            })?;
-        Ok(())
+            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Return information about network interfaces required for the sled
@@ -784,6 +792,62 @@ impl DataStore {
             public_error_from_diesel(e, ErrorHandler::Server)
         })
     }
+
+    /// List all network interfaces associated with all instances, making as
+    /// many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    ///
+    /// This particular method was added for propagating v2p mappings via RPWs
+    pub async fn instance_network_interfaces_all_list_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_interfaces = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .instance_network_interfaces_all_list(
+                    opctx,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|nic: &InstanceNetworkInterface| {
+                    nic.id()
+                });
+            all_interfaces.extend(batch);
+        }
+        Ok(all_interfaces)
+    }
+
+    /// List one page of all network interfaces associated with instances
+    pub async fn instance_network_interfaces_all_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        use db::schema::instance_network_interface::dsl;
+
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+
+        paginated(dsl::instance_network_interface, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(InstanceNetworkInterface::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
@@ -830,8 +894,7 @@ mod tests {
 
         // Insert 10 Nexus NICs
         let ip_range = NEXUS_OPTE_IPV4_SUBNET
-            .0
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
         let mut macs = external::MacAddr::iter_system();

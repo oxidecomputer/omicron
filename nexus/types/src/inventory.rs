@@ -21,6 +21,9 @@ use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -29,13 +32,11 @@ pub use sled_agent_client::types::OmicronZoneDataset;
 pub use sled_agent_client::types::OmicronZoneType;
 pub use sled_agent_client::types::OmicronZonesConfig;
 pub use sled_agent_client::types::SledRole;
-pub use sled_agent_client::types::ZpoolName;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
-use uuid::Uuid;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
@@ -56,7 +57,7 @@ use uuid::Uuid;
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Collection {
     /// unique identifier for this collection
-    pub id: Uuid,
+    pub id: CollectionUuid,
     /// errors encountered during collection
     pub errors: Vec<String>,
     /// time the collection started
@@ -110,10 +111,10 @@ pub struct Collection {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
     /// Sled Agent information, by *sled* id
-    pub sled_agents: BTreeMap<Uuid, SledAgent>,
+    pub sled_agents: BTreeMap<SledUuid, SledAgent>,
 
     /// Omicron zones found, by *sled* id
-    pub omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
+    pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
 }
 
 impl Collection {
@@ -145,7 +146,7 @@ impl Collection {
     }
 
     /// Iterate over the sled ids of sleds identified as Scrimlets
-    pub fn scrimlets(&self) -> impl Iterator<Item = Uuid> + '_ {
+    pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
         self.sled_agents
             .iter()
             .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
@@ -395,7 +396,7 @@ impl Zpool {
 pub struct SledAgent {
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub baseboard_id: Option<Arc<BaseboardId>>,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
@@ -410,6 +411,6 @@ pub struct SledAgent {
 pub struct OmicronZonesFound {
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub zones: OmicronZonesConfig,
 }

@@ -136,7 +136,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // cannot snapshot attached disk for instance in state starting
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Issue snapshot request
@@ -362,7 +362,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
     let project_id = create_project_and_pool(client).await;
@@ -521,7 +521,7 @@ async fn test_reject_creating_disk_from_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_project_and_pool(&client).await;
@@ -674,7 +674,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_project_and_pool(&client).await;
@@ -770,7 +770,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_project_and_pool(&client).await;
@@ -857,7 +857,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Create a disk at just over half the capacity of what DiskTest allocates
-    let gibibytes: u64 = DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 / 2 + 1;
+    let gibibytes: u64 = u64::from(DiskTest::DEFAULT_ZPOOL_SIZE_GIB) / 2 + 1;
     let disk_size =
         ByteCount::try_from(gibibytes * 1024 * 1024 * 1024).unwrap();
     let base_disk_name: Name = "base-disk".parse().unwrap();
@@ -1002,7 +1002,7 @@ async fn test_create_snapshot_record_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_project_and_pool(&client).await;
@@ -1194,7 +1194,7 @@ async fn test_create_snapshot_record_idempotent(
 async fn test_region_snapshot_create_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let region_snapshot = db::model::RegionSnapshot {
@@ -1218,7 +1218,7 @@ async fn test_region_snapshot_create_idempotent(
 #[nexus_test]
 async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
     let _project_id = create_project_and_pool(client).await;

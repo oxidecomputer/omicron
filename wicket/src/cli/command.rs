@@ -45,7 +45,9 @@ impl ShellApp {
             ShellCommand::RackUpdate(args) => {
                 args.exec(log, wicketd_addr, self.global_opts, output).await
             }
-            ShellCommand::Setup(args) => args.exec(log, wicketd_addr).await,
+            ShellCommand::Setup(args) => {
+                args.exec(log, wicketd_addr, self.global_opts).await
+            }
             ShellCommand::Preflight(args) => args.exec(log, wicketd_addr).await,
         }
     }

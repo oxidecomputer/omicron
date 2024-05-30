@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
@@ -16,9 +17,11 @@ use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
+use futures::future::try_join;
 use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
+use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::SledSelector;
@@ -26,12 +29,16 @@ use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::BaseboardId;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -39,7 +46,12 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct NexusArgs {
     /// URL of the Nexus internal API
-    #[clap(long, env("OMDB_NEXUS_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_NEXUS_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     nexus_internal_url: Option<String>,
 
     #[command(subcommand)]
@@ -72,6 +84,15 @@ enum BackgroundTasksCommands {
     List,
     /// Print human-readable summary of the status of each background task
     Show,
+    /// Activate one or more background tasks
+    Activate(BackgroundTasksActivateArgs),
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksActivateArgs {
+    /// Name of the background tasks to activate
+    #[clap(value_name = "TASK_NAME", required = true)]
+    tasks: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -86,38 +107,90 @@ enum BlueprintsCommands {
     List,
     /// Show a blueprint
     Show(BlueprintIdArgs),
-    /// Diff two blueprint
+    /// Diff two blueprints
     Diff(BlueprintIdsArgs),
     /// Delete a blueprint
     Delete(BlueprintIdArgs),
     /// Interact with the current target blueprint
     Target(BlueprintsTargetArgs),
-    /// Generate an initial blueprint from a specific inventory collection
-    GenerateFromCollection(CollectionIdArgs),
     /// Generate a new blueprint
     Regenerate,
     /// Import a blueprint
     Import(BlueprintImportArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Copy)]
+enum BlueprintIdOrCurrentTarget {
+    CurrentTarget,
+    BlueprintId(Uuid),
+}
+
+impl FromStr for BlueprintIdOrCurrentTarget {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if matches!(s, "current-target" | "current" | "target") {
+            Ok(Self::CurrentTarget)
+        } else {
+            let id = s.parse()?;
+            Ok(Self::BlueprintId(id))
+        }
+    }
+}
+
+impl BlueprintIdOrCurrentTarget {
+    async fn resolve_to_id(
+        &self,
+        client: &nexus_client::Client,
+    ) -> anyhow::Result<Uuid> {
+        match self {
+            Self::CurrentTarget => {
+                let target = client
+                    .blueprint_target_view()
+                    .await
+                    .context("getting current blueprint target")?;
+                Ok(target.target_id)
+            }
+            Self::BlueprintId(id) => Ok(*id),
+        }
+    }
+
+    async fn resolve_to_blueprint(
+        &self,
+        client: &nexus_client::Client,
+    ) -> anyhow::Result<Blueprint> {
+        let id = self.resolve_to_id(client).await?;
+        let response = client.blueprint_view(&id).await.with_context(|| {
+            let suffix = match self {
+                BlueprintIdOrCurrentTarget::CurrentTarget => {
+                    " (current target)"
+                }
+                BlueprintIdOrCurrentTarget::BlueprintId(_) => "",
+            };
+            format!("fetching blueprint {id}{suffix}")
+        })?;
+        Ok(response.into_inner())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Args)]
 struct BlueprintIdArgs {
-    /// id of a blueprint
-    blueprint_id: Uuid,
+    /// id of blueprint (or `target` for the current target)
+    blueprint_id: BlueprintIdOrCurrentTarget,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintIdsArgs {
-    /// id of first blueprint
-    blueprint1_id: Uuid,
-    /// id of second blueprint
-    blueprint2_id: Uuid,
+    /// id of first blueprint (or `target` for the current target)
+    blueprint1_id: BlueprintIdOrCurrentTarget,
+    /// id of second blueprint (or `target` for the current target)
+    blueprint2_id: BlueprintIdOrCurrentTarget,
 }
 
 #[derive(Debug, Args)]
 struct CollectionIdArgs {
     /// id of an inventory collection
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
 }
 
 #[derive(Debug, Args)]
@@ -199,7 +272,7 @@ struct SledExpungeArgs {
     db_url_opts: DbUrlOptions,
 
     /// sled ID
-    sled_id: Uuid,
+    sled_id: SledUuid,
 }
 
 impl NexusArgs {
@@ -215,16 +288,12 @@ impl NexusArgs {
                 eprintln!(
                     "note: Nexus URL not specified.  Will pick one from DNS."
                 );
-                let addrs = omdb
-                    .dns_lookup_all(
+                let addr = omdb
+                    .dns_lookup_one(
                         log.clone(),
                         internal_dns::ServiceName::Nexus,
                     )
                     .await?;
-                let addr = addrs.into_iter().next().expect(
-                    "expected at least one Nexus address from \
-                    successful DNS lookup",
-                );
                 format!("http://{}", addr)
             }
         };
@@ -241,6 +310,12 @@ impl NexusArgs {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show,
             }) => cmd_nexus_background_tasks_show(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::Activate(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_background_tasks_activate(&client, args, token).await
+            }
 
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::List,
@@ -301,15 +376,6 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_regenerate(&client, token).await
-            }
-            NexusCommands::Blueprints(BlueprintsArgs {
-                command: BlueprintsCommands::GenerateFromCollection(args),
-            }) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_generate_from_collection(
-                    &client, args, token,
-                )
-                .await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Import(args),
@@ -414,6 +480,26 @@ async fn cmd_nexus_background_tasks_show(
         print_task(bgtask);
     }
 
+    Ok(())
+}
+
+/// Runs `omdb nexus background-tasks activate`
+async fn cmd_nexus_background_tasks_activate(
+    client: &nexus_client::Client,
+    args: &BackgroundTasksActivateArgs,
+    // This isn't quite "destructive" in the sense that of it being potentially
+    // dangerous, but it does modify the system rather than being a read-only
+    // view on it.
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let body =
+        BackgroundTasksActivateRequest { bgtask_names: args.tasks.clone() };
+    client
+        .bgtask_activate(&body)
+        .await
+        .context("error activating background tasks")?;
+
+    eprintln!("activated background tasks: {}", args.tasks.join(", "));
     Ok(())
 }
 
@@ -809,6 +895,160 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "instance_watcher" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// total number of instances checked
+            total_instances: usize,
+
+            /// number of stale instance metrics that were deleted
+            pruned_instances: usize,
+
+            /// instance states from completed checks.
+            ///
+            /// this is a mapping of stringified instance states to the number
+            /// of instances in that state. these stringified states correspond
+            /// to the `state` field recorded by the instance watcher's
+            /// `virtual_machine:check` timeseries with the `healthy` field set
+            /// to `true`. any changes to the instance state type which cause it
+            /// to print differently will be counted as a distinct state.
+            instance_states: BTreeMap<String, usize>,
+
+            /// instance check failures.
+            ///
+            /// this is a mapping of stringified instance check failure reasons
+            /// to the number of instances with checks that failed for that
+            /// reason. these stringified  failure reasons correspond to the
+            /// `state` field recorded by the instance watcher's
+            /// `virtual_machine:check` timeseries with the `healthy` field set
+            /// to `false`. any changes to the instance state type which cause
+            /// it to print differently will be counted as a distinct failure
+            /// reason.
+            failed_checks: BTreeMap<String, usize>,
+
+            /// instance checks that could not be completed successfully.
+            ///
+            /// this is a mapping of stringified instance check errors
+            /// to the number of instance checks that were not completed due to
+            /// that error. these stringified errors correspond to the `reason `
+            /// field recorded by the instance watcher's
+            /// `virtual_machine:incomplete_check` timeseries. any changes to
+            /// the check error type which cause it to print
+            /// differently will be counted as a distinct check error.
+            incomplete_checks: BTreeMap<String, usize>,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(TaskSuccess {
+                total_instances,
+                pruned_instances,
+                instance_states,
+                failed_checks,
+                incomplete_checks,
+            }) => {
+                let total_successes: usize = instance_states.values().sum();
+                let total_failures: usize = failed_checks.values().sum();
+                let total_incomplete: usize = incomplete_checks.values().sum();
+                println!("    total instances checked: {total_instances}",);
+                println!(
+                    "    checks completed: {}",
+                    total_successes + total_failures
+                );
+                println!("       successful checks: {total_successes}",);
+                for (state, count) in &instance_states {
+                    println!("       -> {count} instances {state}")
+                }
+
+                println!("       failed checks: {total_failures}");
+                for (failure, count) in &failed_checks {
+                    println!("       -> {count} {failure}")
+                }
+                println!(
+                    "    checks that could not be completed: {total_incomplete}",
+                );
+                for (error, count) in &incomplete_checks {
+                    println!("       -> {count} {error} errors")
+                }
+                println!(
+                    "    stale instance metrics pruned: {pruned_instances}"
+                );
+            }
+        };
+    } else if name == "service_firewall_rule_propagation" {
+        match serde_json::from_value::<serde_json::Value>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(serde_json::Value::Object(map)) => {
+                if !map.is_empty() {
+                    eprintln!(
+                        "    unexpected return value from task: {:?}",
+                        map
+                    )
+                }
+            }
+            Ok(val) => {
+                eprintln!("    unexpected return value from task: {:?}", val)
+            }
+        };
+    } else if name == "abandoned_vmm_reaper" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// total number of abandoned VMMs found
+            found: usize,
+
+            /// number of abandoned VMM records that were deleted
+            vmms_deleted: usize,
+
+            /// number of abandoned VMM records that were already deleted when
+            /// we tried to delete them.
+            vmms_already_deleted: usize,
+
+            /// sled resource reservations that were released
+            sled_reservations_deleted: usize,
+
+            /// number of errors that occurred during the activation
+            error_count: usize,
+
+            /// the last error that occurred during execution.
+            error: Option<String>,
+        }
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(TaskSuccess {
+                found,
+                vmms_deleted,
+                vmms_already_deleted,
+                sled_reservations_deleted,
+                error_count,
+                error,
+            }) => {
+                if let Some(error) = error {
+                    println!("    task did not complete successfully!");
+                    println!("      total errors: {error_count}");
+                    println!("      most recent error: {error}");
+                }
+
+                println!("    total abandoned VMMs found: {found}");
+                println!("      VMM records deleted: {vmms_deleted}");
+                println!(
+                    "      VMM records already deleted by another Nexus: {}",
+                    vmms_already_deleted,
+                );
+                println!(
+                    "    sled resource reservations deleted: {}",
+                    sled_reservations_deleted,
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -970,10 +1210,7 @@ async fn cmd_nexus_blueprints_show(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
 ) -> Result<(), anyhow::Error> {
-    let blueprint = client
-        .blueprint_view(&args.blueprint_id)
-        .await
-        .with_context(|| format!("fetching blueprint {}", args.blueprint_id))?;
+    let blueprint = args.blueprint_id.resolve_to_blueprint(client).await?;
     println!("{}", blueprint.display());
     Ok(())
 }
@@ -982,13 +1219,12 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintIdsArgs,
 ) -> Result<(), anyhow::Error> {
-    let b1 = client.blueprint_view(&args.blueprint1_id).await.with_context(
-        || format!("fetching blueprint {}", args.blueprint1_id),
-    )?;
-    let b2 = client.blueprint_view(&args.blueprint2_id).await.with_context(
-        || format!("fetching blueprint {}", args.blueprint2_id),
-    )?;
-    let diff = b2.diff_since_blueprint(&b1).context("diffing blueprints")?;
+    let (b1, b2) = try_join(
+        args.blueprint1_id.resolve_to_blueprint(client),
+        args.blueprint2_id.resolve_to_blueprint(client),
+    )
+    .await?;
+    let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     Ok(())
 }
@@ -998,11 +1234,12 @@ async fn cmd_nexus_blueprints_delete(
     args: &BlueprintIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
     let _ = client
-        .blueprint_delete(&args.blueprint_id)
+        .blueprint_delete(&blueprint_id)
         .await
-        .with_context(|| format!("deleting blueprint {}", args.blueprint_id))?;
-    println!("blueprint {} deleted", args.blueprint_id);
+        .with_context(|| format!("deleting blueprint {blueprint_id}"))?;
+    println!("blueprint {blueprint_id} deleted");
     Ok(())
 }
 
@@ -1061,39 +1298,20 @@ async fn cmd_nexus_blueprints_target_set_enabled(
     enabled: bool,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
     let description = if enabled { "enabled" } else { "disabled" };
     client
         .blueprint_target_set_enabled(
             &nexus_client::types::BlueprintTargetSet {
-                target_id: args.blueprint_id,
+                target_id: blueprint_id,
                 enabled,
             },
         )
         .await
         .with_context(|| {
-            format!("setting blueprint {} to {description}", args.blueprint_id)
+            format!("setting blueprint {blueprint_id} to {description}")
         })?;
-    eprintln!("set target blueprint {} to {description}", args.blueprint_id);
-    Ok(())
-}
-
-async fn cmd_nexus_blueprints_generate_from_collection(
-    client: &nexus_client::Client,
-    args: &CollectionIdArgs,
-    _destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let blueprint = client
-        .blueprint_generate_from_collection(
-            &nexus_client::types::CollectionId {
-                collection_id: args.collection_id,
-            },
-        )
-        .await
-        .context("creating blueprint from collection id")?;
-    eprintln!(
-        "created blueprint {} from collection id {}",
-        blueprint.id, args.collection_id
-    );
+    eprintln!("set target blueprint {blueprint_id} to {description}");
     Ok(())
 }
 
@@ -1173,14 +1391,16 @@ async fn cmd_nexus_sled_add(
     args: &SledAddArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    client
+    let sled_id = client
         .sled_add(&UninitializedSledId {
             part: args.part.clone(),
             serial: args.serial.clone(),
         })
         .await
-        .context("adding sled")?;
-    eprintln!("added sled {} ({})", args.serial, args.part);
+        .context("adding sled")?
+        .into_inner()
+        .id;
+    eprintln!("added sled {} ({}): {sled_id}", args.serial, args.part);
     Ok(())
 }
 
@@ -1207,7 +1427,7 @@ async fn cmd_nexus_sled_expunge(
 
     // First, we need to look up the sled so we know its serial number.
     let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
-        .sled_id(args.sled_id)
+        .sled_id(args.sled_id.into_untyped_uuid())
         .fetch()
         .await
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;
@@ -1285,7 +1505,7 @@ async fn cmd_nexus_sled_expunge(
     }
 
     let old_policy = client
-        .sled_expunge(&SledSelector { sled: args.sled_id })
+        .sled_expunge(&SledSelector { sled: args.sled_id.into_untyped_uuid() })
         .await
         .context("expunging sled")?
         .into_inner();

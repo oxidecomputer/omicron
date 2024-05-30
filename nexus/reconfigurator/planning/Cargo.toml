@@ -3,19 +3,23 @@ name = "nexus-reconfigurator-planning"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+debug-ignore.workspace = true
 gateway-client.workspace = true
 indexmap.workspace = true
 internal-dns.workspace = true
 ipnet.workspace = true
-ipnetwork.workspace = true
 nexus-config.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+oxnet.workspace = true
 rand.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
@@ -27,4 +31,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+maplit.workspace = true
 omicron-test-utils.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true

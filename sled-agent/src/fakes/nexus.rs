@@ -18,6 +18,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, UpdateArtifactId,
 };
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -178,7 +179,7 @@ pub async fn start_dns_server(
     };
 
     let nexus_zone = dns_config_builder
-        .host_zone(uuid::Uuid::new_v4(), *nexus_addr.ip())
+        .host_zone(OmicronZoneUuid::new_v4(), *nexus_addr.ip())
         .expect("failed to set up DNS");
     dns_config_builder
         .service_backend_zone(

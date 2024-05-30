@@ -22,33 +22,14 @@ use std::time::Duration;
 pub struct MetricProducerGc {
     datastore: Arc<DataStore>,
     lease_duration: Duration,
-    disabled: bool,
 }
 
 impl MetricProducerGc {
     pub fn new(datastore: Arc<DataStore>, lease_duration: Duration) -> Self {
-        Self {
-            datastore,
-            lease_duration,
-            // TODO We should turn this task on as a part of landing the rest of
-            // the move to metric producer leases. For now, we leave it disabled
-            // to avoid pruning producers that don't know to renew leases, but
-            // make this a boolean so our unit test can enable it.
-            disabled: true,
-        }
+        Self { datastore, lease_duration }
     }
 
     async fn activate(&mut self, opctx: &OpContext) -> serde_json::Value {
-        if self.disabled {
-            warn!(
-                opctx.log,
-                "Metric producer GC: statically disabled pending omicron#5284"
-            );
-            return json!({
-                "error": "metric producer gc disabled (omicron#5284)",
-            });
-        }
-
         let Some(expiration) = TimeDelta::from_std(self.lease_duration)
             .ok()
             .and_then(|delta| Utc::now().checked_sub_signed(delta))
@@ -123,6 +104,8 @@ impl BackgroundTask for MetricProducerGc {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::oximeter::PRODUCER_LEASE_DURATION;
+
     use super::*;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::DateTime;
@@ -138,6 +121,7 @@ mod tests {
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params;
     use omicron_common::api::internal::nexus;
+    use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -167,7 +151,7 @@ mod tests {
 
     #[nexus_test(server = crate::Server)]
     async fn test_pruning(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
@@ -186,13 +170,26 @@ mod tests {
             .await
             .expect("failed to insert collector");
 
+        // There are several producers which automatically register themselves
+        // during tests, from Nexus and the simulated sled-agent for example. We
+        // don't particularly care about these registrations, so ignore any such
+        // requests to our simulated collector server.
+        let body = serde_json::to_string(&ProducerRegistrationResponse {
+            lease_duration: PRODUCER_LEASE_DURATION,
+        })
+        .unwrap();
+        collector.expect(
+            Expectation::matching(request::method_path("POST", "/producers"))
+                .times(0..)
+                .respond_with(status_code(201).body(body)),
+        );
+
         // Insert a producer.
         let producer = ProducerEndpoint::new(
             &nexus::ProducerEndpoint {
                 id: Uuid::new_v4(),
                 kind: nexus::ProducerKind::Service,
                 address: "[::1]:0".parse().unwrap(), // unused
-                base_route: "/".to_string(),         // unused
                 interval: Duration::from_secs(0),    // unused
             },
             collector_info.id,
@@ -202,24 +199,12 @@ mod tests {
             .await
             .expect("failed to insert producer");
 
-        // Activate the task. It should immediately return because our GC is
-        // currently statically disabled (remove this check once that is no
-        // longer true!).
+        // Create the task and activate it. Technically this is racy in that it
+        // could prune the producer we just added, but if it's been an hour
+        // since then, we have bigger problems. This should _not_ prune the
+        // producer, since it's been active within the last hour.
         let mut gc =
             MetricProducerGc::new(datastore.clone(), Duration::from_secs(3600));
-        let value = gc.activate(&opctx).await;
-        assert_eq!(
-            value,
-            json!({
-                "error": "metric producer gc disabled (omicron#5284)",
-            })
-        );
-
-        // Enable the task and activate it. Technically this is racy, but if
-        // it's been an hour since we inserted the producer in the previous
-        // statement, we have bigger problems. This should _not_ prune the
-        // producer, since it's been active within the last hour.
-        gc.disabled = false;
         let value = gc.activate(&opctx).await;
         let value = value.as_object().expect("non-object");
         assert!(!value.contains_key("failures"));

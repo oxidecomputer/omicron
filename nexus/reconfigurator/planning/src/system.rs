@@ -10,10 +10,15 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
+use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::external_api::views::SledState;
@@ -22,7 +27,6 @@ use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SledRole;
 use nexus_types::inventory::SpType;
-use nexus_types::inventory::ZpoolName;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
@@ -31,14 +35,16 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use uuid::Uuid;
 
 trait SubnetIterator: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug {}
 impl<T> SubnetIterator for T where
@@ -70,6 +76,7 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
+    target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -117,6 +124,8 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        let target_cockroachdb_cluster_version =
+            CockroachDbClusterVersion::POLICY;
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -131,6 +140,7 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_nexus_zone_count,
+            target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -181,7 +191,7 @@ impl SystemDescription {
 
     /// Add a sled to the system, as described by a SledBuilder
     pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
-        let sled_id = sled.id.unwrap_or_else(TypedUuid::new_v4);
+        let sled_id = sled.id.unwrap_or_else(SledUuid::new_v4);
         ensure!(
             !self.sleds.contains_key(&sled_id),
             "attempted to add sled with the same id as an existing one: {}",
@@ -297,11 +307,14 @@ impl SystemDescription {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_cluster_version: self
+                .target_cockroachdb_cluster_version,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version,
             self.external_dns_version,
+            CockroachDbSettings::empty(),
         );
 
         for sled in self.sleds.values() {
@@ -309,7 +322,7 @@ impl SystemDescription {
                 policy: sled.policy,
                 state: SledState::Active,
                 resources: SledResources {
-                    zpools: sled.zpools.iter().cloned().collect(),
+                    zpools: sled.zpools.clone(),
                     subnet: sled.sled_subnet,
                 },
             };
@@ -421,7 +434,7 @@ struct Sled {
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
-    zpools: Vec<ZpoolName>,
+    zpools: BTreeMap<ZpoolUuid, SledDisk>,
     policy: SledPolicy,
 }
 
@@ -436,12 +449,28 @@ impl Sled {
         hardware_slot: u16,
         nzpools: u8,
     ) -> Sled {
+        use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
-        let zpools = (0..nzpools)
-            .map(|_| format!("oxp_{}", Uuid::new_v4()).parse().unwrap())
+        let mut zpool_rng =
+            TypedUuidRng::from_seed("SystemSimultatedSled", "ZpoolUuid");
+        let zpools: BTreeMap<_, _> = (0..nzpools)
+            .map(|_| {
+                let zpool = ZpoolUuid::from(zpool_rng.next());
+                let disk = SledDisk {
+                    disk_identity: DiskIdentity {
+                        vendor: String::from("fake-vendor"),
+                        serial: format!("serial-{zpool}"),
+                        model: String::from("fake-model"),
+                    },
+                    disk_id: PhysicalDiskUuid::new_v4(),
+                    policy: PhysicalDiskPolicy::InService,
+                    state: PhysicalDiskState::Active,
+                };
+                (zpool, disk)
+            })
             .collect();
         let inventory_sp = match hardware {
             SledHardware::Empty => None,
@@ -498,7 +527,18 @@ impl Sled {
                 sled_id: sled_id.into_untyped_uuid(),
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
-                disks: vec![],
+                // Populate disks, appearing like a real device.
+                disks: zpools
+                    .values()
+                    .enumerate()
+                    .map(|(i, d)| sled_agent_client::types::InventoryDisk {
+                        identity: d.disk_identity.clone(),
+                        variant: sled_agent_client::types::DiskVariant::U2,
+                        slot: i64::try_from(i).unwrap(),
+                    })
+                    .collect(),
+                // Zpools won't necessarily show up until our first request
+                // to provision storage, so we omit them.
                 zpools: vec![],
             }
         };

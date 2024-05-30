@@ -88,11 +88,11 @@ impl Drop for StorageManagerTestHarness {
 
             let pools = [
                 (
-                    illumos_utils::zpool::ZPOOL_INTERNAL_PREFIX,
+                    omicron_common::zpool_name::ZPOOL_INTERNAL_PREFIX,
                     vdev_dir.path().join("pool/int"),
                 ),
                 (
-                    illumos_utils::zpool::ZPOOL_EXTERNAL_PREFIX,
+                    omicron_common::zpool_name::ZPOOL_EXTERNAL_PREFIX,
                     vdev_dir.path().join("pool/ext"),
                 ),
             ];

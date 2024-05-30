@@ -49,14 +49,19 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
+    Collection => "collection",
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
+    ExternalIp => "external_ip",
+    Instance => "instance",
     LoopbackAddress => "loopback_address",
     OmicronZone => "service",
+    PhysicalDisk => "physical_disk",
     Sled => "sled",
     TufRepo => "tuf_repo",
     Upstairs => "upstairs",
     UpstairsRepair => "upstairs_repair",
     UpstairsSession => "upstairs_session",
+    Vnic => "vnic",
     Zpool => "zpool",
 }

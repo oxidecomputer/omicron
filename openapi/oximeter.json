@@ -200,10 +200,6 @@
             "description": "The IP address and port at which `oximeter` can collect metrics from the producer.",
             "type": "string"
           },
-          "base_route": {
-            "description": "The API base route from which `oximeter` can collect metrics.\n\nThe full route is `{base_route}/{id}`.",
-            "type": "string"
-          },
           "id": {
             "description": "A unique ID for this producer.",
             "type": "string",
@@ -228,7 +224,6 @@
         },
         "required": [
           "address",
-          "base_route",
           "id",
           "interval",
           "kind"

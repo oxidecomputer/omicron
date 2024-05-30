@@ -291,15 +291,13 @@ async fn svc_create_subnet(
 
     // Allocate the first /64 sub-range from the requested or created
     // prefix.
-    let ipv6_block = external::Ipv6Net(
-        ipnetwork::Ipv6Network::new(db_vpc.ipv6_prefix.network(), 64)
-            .map_err(|_| {
-                external::Error::internal_error(
-                    "Failed to allocate default IPv6 subnet",
-                )
-            })
-            .map_err(ActionError::action_failed)?,
-    );
+    let ipv6_block = oxnet::Ipv6Net::new(db_vpc.ipv6_prefix.prefix(), 64)
+        .map_err(|_| {
+            external::Error::internal_error(
+                "Failed to allocate default IPv6 subnet",
+            )
+        })
+        .map_err(ActionError::action_failed)?;
 
     let subnet = db::model::VpcSubnet::new(
         default_subnet_id,
@@ -496,7 +494,7 @@ pub(crate) mod test {
     fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -505,7 +503,7 @@ pub(crate) mod test {
         project_id: Uuid,
         action: authz::Action,
     ) -> authz::Project {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_selector =
             params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
@@ -523,7 +521,7 @@ pub(crate) mod test {
         project_id: Uuid,
     ) {
         let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
         let default_name = Name::try_from("default".to_string()).unwrap();
         let system_name = Name::try_from("system".to_string()).unwrap();
 
@@ -710,7 +708,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 
@@ -740,7 +738,7 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 

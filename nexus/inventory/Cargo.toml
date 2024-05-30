@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
@@ -13,6 +16,7 @@ gateway-client.workspace = true
 gateway-messages.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true

@@ -4,23 +4,31 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+clap.workspace = true
 base64.workspace = true
+derive-where.workspace = true
+derive_more.workspace = true
 futures.workspace = true
 humantime.workspace = true
 ipnetwork.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
+oxnet.workspace = true
 parse-display.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
-tabled.workspace = true
 thiserror.workspace = true
 newtype-uuid.workspace = true
 uuid.workspace = true
@@ -32,3 +40,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 sled-agent-client.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true

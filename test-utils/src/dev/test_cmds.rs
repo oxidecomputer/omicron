@@ -160,10 +160,27 @@ pub fn redact_variable(input: &str) -> String {
         .replace_all(&s, "<REDACTED_TIMESTAMP>")
         .to_string();
 
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
-        .unwrap()
-        .replace_all(&s, "<REDACTED     TIMESTAMP>")
-        .to_string();
+    let s = {
+        let mut new_s = String::with_capacity(s.len());
+        let mut last_match = 0;
+        for m in regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z")
+            .unwrap()
+            .find_iter(&s)
+        {
+            new_s.push_str(&s[last_match..m.start()]);
+            new_s.push_str("<REDACTED");
+            // We know from our regex that `m.len()` is at least 2 greater than
+            // the length of "<REDACTEDTIMESTAMP>", so this subtraction can't
+            // underflow. Insert spaces to match widths.
+            for _ in 0..(m.len() - "<REDACTEDTIMESTAMP>".len()) {
+                new_s.push(' ');
+            }
+            new_s.push_str("TIMESTAMP>");
+            last_match = m.end();
+        }
+        new_s.push_str(&s[last_match..]);
+        new_s
+    };
 
     // Replace formatted durations.  These are pretty specific to the background
     // task output.
@@ -187,6 +204,11 @@ pub fn redact_variable(input: &str) -> String {
         (<redacted database version>)",
     )
     .to_string();
+
+    let s = regex::Regex::new(r"iter \d+,")
+        .unwrap()
+        .replace_all(&s, "<REDACTED ITERATIONS>,")
+        .to_string();
 
     s
 }

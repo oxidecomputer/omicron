@@ -26,7 +26,7 @@ use std::hash::Hasher;
 ///
 /// This includes the typed key-value pairs that uniquely identify it, and the
 /// set of timestamps and data values from it.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct Timeseries {
     pub fields: BTreeMap<String, FieldValue>,
     pub points: Points,
@@ -140,7 +140,7 @@ impl Timeseries {
 /// A table is the result of an OxQL query. It contains a name, usually the name
 /// of the timeseries schema from which the data is derived, and any number of
 /// timeseries, which contain the actual data.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct Table {
     // The name of the table.
     //

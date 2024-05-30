@@ -69,52 +69,25 @@ note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
 wrote <TMP_PATH_REDACTED>
 =============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-SERVICE        INSTANCE_ID                          ADDR                     SLED_SERIAL  
-CruciblePantry ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
-ExternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
-InternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
-Nexus          ..........<REDACTED_UUID>........... [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
-Mgd            ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-039be560 
-Mgd            ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              sim-b6d65341 
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-sled: sim-039be560 (id ..........<REDACTED_UUID>...........)
-
-  SERVICE INSTANCE_ID                          ADDR        
-  Mgd     ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT 
-
-sled: sim-b6d65341 (id ..........<REDACTED_UUID>...........)
-
-  SERVICE        INSTANCE_ID                          ADDR                     
-  CruciblePantry ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-  ExternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-  InternalDns    ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-  Nexus          ..........<REDACTED_UUID>........... [::ffff:127.0.0.1]:REDACTED_PORT 
-  Mgd            ..........<REDACTED_UUID>........... [::1]:REDACTED_PORT              
-
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-SERIAL       IP          ROLE     ID                                   
-sim-039be560 [::1]:REDACTED_PORT scrimlet ..........<REDACTED_UUID>........... 
-sim-b6d65341 [::1]:REDACTED_PORT scrimlet ..........<REDACTED_UUID>........... 
+ SERIAL        IP           ROLE      POLICY             STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  not provisionable  active  ..........<REDACTED_UUID>........... 
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service         active  ..........<REDACTED_UUID>........... 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+note: listing all commissioned sleds (use -F to filter, e.g. -F in-service)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -229,6 +202,11 @@ EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+task: "abandoned_vmm_reaper"
+    deletes sled reservations for VMMs that have been abandoned by their
+    instances
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -276,6 +254,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_watcher"
+    periodically checks instance states
+
+
 task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
@@ -293,8 +275,17 @@ task: "phantom_disks"
     detects and un-deletes phantom disks
 
 
+task: "physical_disk_adoption"
+    ensure new physical disks are automatically marked in-service
+
+
 task: "region_replacement"
     detects if a region requires replacing and begins the process
+
+
+task: "service_firewall_rule_propagation"
+    propagates VPC firewall rules for Omicron services with external network
+    connectivity
 
 
 task: "service_zone_nat_tracker"
@@ -303,6 +294,10 @@ task: "service_zone_nat_tracker"
 
 task: "switch_port_config_manager"
     manages switch port settings for rack switches
+
+
+task: "v2p_manager"
+    manages opte v2p mappings for vpc networking
 
 
 ---------------------------------------------
@@ -316,14 +311,14 @@ stdout:
 task: "dns_config_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -333,7 +328,7 @@ task: "dns_servers_internal"
 task: "dns_propagation_internal"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 4, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
@@ -344,14 +339,14 @@ task: "dns_propagation_internal"
 task: "dns_config_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
@@ -361,7 +356,7 @@ task: "dns_servers_external"
 task: "dns_propagation_external"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 4, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
@@ -372,35 +367,45 @@ task: "dns_propagation_external"
 task: "nat_v4_garbage_collector"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every 1m 40s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "blueprint_loader" (don't know how to interpret details: Object {"status": String("no target blueprint")})
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
+
+task: "abandoned_vmm_reaper"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total abandoned VMMs found: 0
+      VMM records deleted: 0
+      VMM records already deleted by another Nexus: 0
+    sled resource reservations deleted: 0
 
 task: "bfd_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "external_endpoints"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
@@ -414,10 +419,22 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_watcher"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances checked: 0
+    checks completed: 0
+       successful checks: 0
+       failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
+
 task: "inventory_collection"
   configured period: every 10m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
@@ -426,43 +443,72 @@ task: "inventory_collection"
 task: "metrics_producer_gc"
   configured period: every 1m
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: metric producer gc disabled (omicron#5284)
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
 
+task: "physical_disk_adoption"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
+
 task: "region_replacement"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
 
+task: "service_firewall_rule_propagation"
+  configured period: every 5m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
 task: "service_zone_nat_tracker"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "switch_port_config_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "v2p_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "nexus", "background-tasks", "activate", "inventory_collection"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+activated background tasks: inventory_collection
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "blueprints", "list"]
 termination: Exited(0)
@@ -481,27 +527,108 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  -----------------------------------------------------------------------------------------
-    zone type         zone ID                                disposition  underlay IP      
-  -----------------------------------------------------------------------------------------
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
-   (no zones)                                                                              
-                                                                                           
-  sled ..........<REDACTED_UUID>...........: zones at generation 2                         
-    clickhouse        ..........<REDACTED_UUID>...........   in service   ::1              
-    cockroach_db      ..........<REDACTED_UUID>...........   in service   ::1              
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service   ::1              
-    external_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    internal_dns      ..........<REDACTED_UUID>...........   in service   ::1              
-    nexus             ..........<REDACTED_UUID>...........   in service   ::ffff:127.0.0.1 
+!..........<REDACTED_UUID>...........
+WARNING: Zones exist without physical disks!
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
-METADATA:
-  created by:            nexus-test-utils        
-  created at:            <REDACTED     TIMESTAMP>
-  comment:               initial test blueprint  
-  internal DNS version:  1                       
-  external DNS version:  2                       
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED     TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+blueprint  ......<REDACTED_BLUEPRINT_ID>.......
+parent:    <none>
+
+!..........<REDACTED_UUID>...........
+WARNING: Zones exist without physical disks!
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED     TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "diff", "......<REDACTED_BLUEPRINT_ID>.......", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
+to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
+
+ UNCHANGED SLEDS:
+
+  sled ..........<REDACTED_UUID>...........:
+
+  sled ..........<REDACTED_UUID>...........:
+
+    omicron zones at generation 2:
+    ---------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP     
+    ---------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
+    cluster.preserve_downgrade_option:   "22.1" (unchanged)
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   2 (unchanged)
+
 
 ---------------------------------------------
 stderr:

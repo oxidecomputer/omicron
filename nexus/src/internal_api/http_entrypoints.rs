@@ -4,13 +4,13 @@
 
 //! Handler functions (entrypoints) for HTTP APIs internal to the control plane
 
-use crate::ServerContext;
-
 use super::params::{OximeterInfo, RackInitializationRequest};
+use crate::context::ApiContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -40,29 +40,29 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
-use oximeter::types::ProducerResults;
-use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
-type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
+type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the internal nexus API
 pub(crate) fn internal_api() -> NexusApiDescription {
@@ -79,7 +79,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_producers_post)?;
         api.register(cpapi_assigned_producers_list)?;
         api.register(cpapi_collectors_post)?;
-        api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
 
         api.register(cpapi_upstairs_repair_start)?;
@@ -95,6 +94,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
+        api.register(bgtask_activate)?;
 
         api.register(blueprint_list)?;
         api.register(blueprint_view)?;
@@ -102,7 +102,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
         api.register(blueprint_target_set_enabled)?;
-        api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
         api.register(blueprint_import)?;
 
@@ -134,10 +133,10 @@ struct SledAgentPathParam {
      path = "/sled-agents/{sled_id}",
  }]
 async fn sled_agent_get(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<SledAgentPathParam>,
 ) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let path = path_params.into_inner();
@@ -155,11 +154,11 @@ async fn sled_agent_get(
      path = "/sled-agents/{sled_id}",
  }]
 async fn sled_agent_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let path = path_params.into_inner();
@@ -182,10 +181,10 @@ async fn sled_agent_put(
      path = "/sled-agents/{sled_id}/firewall-rules-update",
  }]
 async fn sled_firewall_rules_request(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<SledAgentPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let path = path_params.into_inner();
@@ -211,11 +210,11 @@ struct RackPathParam {
      path = "/racks/{rack_id}/initialization-complete",
  }]
 async fn rack_initialization_complete(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<RackPathParam>,
     info: TypedBody<RackInitializationRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let request = info.into_inner();
@@ -237,11 +236,11 @@ struct SwitchPathParam {
     path = "/switch/{switch_id}",
 }]
 async fn switch_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<SwitchPathParam>,
     body: TypedBody<SwitchPutRequest>,
 ) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
@@ -264,11 +263,11 @@ struct InstancePathParam {
      path = "/instances/{instance_id}",
  }]
 async fn cpapi_instances_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<InstancePathParam>,
     new_runtime_state: TypedBody<SledInstanceState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
@@ -294,11 +293,11 @@ struct DiskPathParam {
      path = "/disks/{disk_id}",
  }]
 async fn cpapi_disks_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<DiskPathParam>,
     new_runtime_state: TypedBody<DiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
@@ -329,10 +328,10 @@ struct VolumePathParam {
      path = "/volume/{volume_id}/remove-read-only-parent",
  }]
 async fn cpapi_volume_remove_read_only_parent(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<VolumePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -354,10 +353,10 @@ async fn cpapi_volume_remove_read_only_parent(
      path = "/disk/{disk_id}/remove-read-only-parent",
  }]
 async fn cpapi_disk_remove_read_only_parent(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -375,17 +374,25 @@ async fn cpapi_disk_remove_read_only_parent(
      path = "/metrics/producers",
  }]
 async fn cpapi_producers_post(
-    request_context: RequestContext<Arc<ServerContext>>,
+    request_context: RequestContext<ApiContext>,
     producer_info: TypedBody<ProducerEndpoint>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let context = request_context.context();
+) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError> {
+    let context = &request_context.context().context;
     let handler = async {
         let nexus = &context.nexus;
         let producer_info = producer_info.into_inner();
         let opctx =
             crate::context::op_context_for_internal_api(&request_context).await;
-        nexus.assign_producer(&opctx, producer_info).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        nexus
+            .assign_producer(&opctx, producer_info)
+            .await
+            .map_err(HttpError::from)
+            .map(|_| {
+                HttpResponseCreated(ProducerRegistrationResponse {
+                    lease_duration:
+                        crate::app::oximeter::PRODUCER_LEASE_DURATION,
+                })
+            })
     };
     context
         .internal_latencies
@@ -393,14 +400,7 @@ async fn cpapi_producers_post(
         .await
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    serde::Deserialize,
-    schemars::JsonSchema,
-    serde::Serialize,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct CollectorIdPathParams {
     /// The ID of the oximeter collector.
     pub collector_id: Uuid,
@@ -412,11 +412,11 @@ pub struct CollectorIdPathParams {
      path = "/metrics/collectors/{collector_id}/producers",
  }]
 async fn cpapi_assigned_producers_list(
-    request_context: RequestContext<Arc<ServerContext>>,
+    request_context: RequestContext<ApiContext>,
     path_params: Path<CollectorIdPathParams>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
-    let context = request_context.context();
+    let context = &request_context.context().context;
     let handler = async {
         let nexus = &context.nexus;
         let collector_id = path_params.into_inner().collector_id;
@@ -445,10 +445,10 @@ async fn cpapi_assigned_producers_list(
      path = "/metrics/collectors",
  }]
 async fn cpapi_collectors_post(
-    request_context: RequestContext<Arc<ServerContext>>,
+    request_context: RequestContext<ApiContext>,
     oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let context = request_context.context();
+    let context = &request_context.context().context;
     let handler = async {
         let nexus = &context.nexus;
         let oximeter_info = oximeter_info.into_inner();
@@ -463,35 +463,16 @@ async fn cpapi_collectors_post(
         .await
 }
 
-/// Endpoint for oximeter to collect nexus server metrics.
-#[endpoint {
-    method = GET,
-    path = "/metrics/collect/{producer_id}",
-}]
-async fn cpapi_metrics_collect(
-    request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let context = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    let handler =
-        async { collect(&context.producer_registry, producer_id).await };
-    context
-        .internal_latencies
-        .instrument_dropshot_handler(&request_context, handler)
-        .await
-}
-
 /// Endpoint used by Sled Agents to download cached artifacts.
 #[endpoint {
     method = GET,
     path = "/artifacts/{kind}/{name}/{version}",
 }]
 async fn cpapi_artifact_download(
-    request_context: RequestContext<Arc<ServerContext>>,
+    request_context: RequestContext<ApiContext>,
     path_params: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-    let context = request_context.context();
+    let context = &request_context.context().context;
     let nexus = &context.nexus;
     let opctx =
         crate::context::op_context_for_internal_api(&request_context).await;
@@ -515,11 +496,11 @@ struct UpstairsPathParam {
      path = "/crucible/0/upstairs/{upstairs_id}/repair-start",
  }]
 async fn cpapi_upstairs_repair_start(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<UpstairsPathParam>,
     repair_start_info: TypedBody<RepairStartInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -543,11 +524,11 @@ async fn cpapi_upstairs_repair_start(
      path = "/crucible/0/upstairs/{upstairs_id}/repair-finish",
  }]
 async fn cpapi_upstairs_repair_finish(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<UpstairsPathParam>,
     repair_finish_info: TypedBody<RepairFinishInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -578,11 +559,11 @@ struct UpstairsRepairPathParam {
      path = "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress",
  }]
 async fn cpapi_upstairs_repair_progress(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<UpstairsRepairPathParam>,
     repair_progress: TypedBody<RepairProgress>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -615,11 +596,11 @@ struct UpstairsDownstairsPathParam {
      path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request",
  }]
 async fn cpapi_downstairs_client_stop_request(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<UpstairsDownstairsPathParam>,
     downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -645,11 +626,11 @@ async fn cpapi_downstairs_client_stop_request(
      path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped",
  }]
 async fn cpapi_downstairs_client_stopped(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<UpstairsDownstairsPathParam>,
     downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
 
@@ -676,10 +657,10 @@ async fn cpapi_downstairs_client_stopped(
     path = "/sagas",
 }]
 async fn saga_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
@@ -708,10 +689,10 @@ struct SagaPathParam {
     path = "/sagas/{saga_id}",
 }]
 async fn saga_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<SagaPathParam>,
 ) -> Result<HttpResponseOk<Saga>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -733,9 +714,9 @@ async fn saga_view(
     path = "/bgtasks",
 }]
 async fn bgtask_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<HttpResponseOk<BTreeMap<String, BackgroundTask>>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
@@ -751,24 +732,51 @@ struct BackgroundTaskPathParam {
     bgtask_name: String,
 }
 
+/// Query parameters for Background Task activation requests.
+#[derive(Deserialize, JsonSchema)]
+struct BackgroundTasksActivateRequest {
+    bgtask_names: BTreeSet<String>,
+}
+
 /// Fetch status of one background task
 ///
 /// This is exposed for support and debugging.
 #[endpoint {
     method = GET,
-    path = "/bgtasks/{bgtask_name}",
+    path = "/bgtasks/view/{bgtask_name}",
 }]
 async fn bgtask_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<BackgroundTaskPathParam>,
 ) -> Result<HttpResponseOk<BackgroundTask>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let bgtask = nexus.bgtask_status(&opctx, &path.bgtask_name).await?;
         Ok(HttpResponseOk(bgtask))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Activates one or more background tasks, causing them to be run immediately
+/// if idle, or scheduled to run again as soon as possible if already running.
+#[endpoint {
+    method = POST,
+    path = "/bgtasks/activate",
+}]
+async fn bgtask_activate(
+    rqctx: RequestContext<ApiContext>,
+    body: TypedBody<BackgroundTasksActivateRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = &rqctx.context().context;
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let body = body.into_inner();
+        nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -801,11 +809,11 @@ struct RpwNatQueryParam {
     path = "/nat/ipv4/changeset/{from_gen}"
 }]
 async fn ipv4_nat_changeset(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<RpwNatPathParam>,
     query_params: Query<RpwNatQueryParam>,
 ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -834,10 +842,10 @@ async fn ipv4_nat_changeset(
     path = "/deployment/blueprints/all",
 }]
 async fn blueprint_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
@@ -860,10 +868,10 @@ async fn blueprint_list(
     path = "/deployment/blueprints/all/{blueprint_id}",
 }]
 async fn blueprint_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<nexus_types::external_api::params::BlueprintPath>,
 ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -880,10 +888,10 @@ async fn blueprint_view(
     path = "/deployment/blueprints/all/{blueprint_id}",
 }]
 async fn blueprint_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<nexus_types::external_api::params::BlueprintPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -902,16 +910,13 @@ async fn blueprint_delete(
     path = "/deployment/blueprints/target",
 }]
 async fn blueprint_target_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
-        let target =
-            nexus.blueprint_target_view(&opctx).await?.ok_or_else(|| {
-                Error::conflict("no target blueprint has been configured")
-            })?;
+        let target = nexus.blueprint_target_view(&opctx).await?;
         Ok(HttpResponseOk(target))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -923,10 +928,10 @@ async fn blueprint_target_view(
     path = "/deployment/blueprints/target",
 }]
 async fn blueprint_target_set(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     target: TypedBody<BlueprintTargetSet>,
 ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -943,10 +948,10 @@ async fn blueprint_target_set(
     path = "/deployment/blueprints/target/enabled",
 }]
 async fn blueprint_target_set_enabled(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     target: TypedBody<BlueprintTargetSet>,
 ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -959,33 +964,6 @@ async fn blueprint_target_set_enabled(
 
 // Generating blueprints
 
-#[derive(Debug, Deserialize, JsonSchema)]
-struct CollectionId {
-    collection_id: Uuid,
-}
-
-/// Generates a new blueprint matching the specified inventory collection
-#[endpoint {
-    method = POST,
-    path = "/deployment/blueprints/generate-from-collection",
-}]
-async fn blueprint_generate_from_collection(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    params: TypedBody<CollectionId>,
-) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let nexus = &apictx.nexus;
-        let collection_id = params.into_inner().collection_id;
-        let result = nexus
-            .blueprint_generate_from_collection(&opctx, collection_id)
-            .await?;
-        Ok(HttpResponseOk(result))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Generates a new blueprint for the current system, re-evaluating anything
 /// that's changed since the last one was generated
 #[endpoint {
@@ -993,9 +971,9 @@ async fn blueprint_generate_from_collection(
     path = "/deployment/blueprints/regenerate",
 }]
 async fn blueprint_regenerate(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -1013,10 +991,10 @@ async fn blueprint_regenerate(
     path = "/deployment/blueprints/import",
 }]
 async fn blueprint_import(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     blueprint: TypedBody<Blueprint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
@@ -1033,9 +1011,9 @@ async fn blueprint_import(
     path = "/sleds/uninitialized",
 }]
 async fn sled_list_uninitialized(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
@@ -1043,6 +1021,11 @@ async fn sled_list_uninitialized(
         Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct SledId {
+    pub id: SledUuid,
 }
 
 /// Add sled to initialized rack
@@ -1056,15 +1039,15 @@ async fn sled_list_uninitialized(
     path = "/sleds/add",
 }]
 async fn sled_add(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     sled: TypedBody<UninitializedSledId>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
+) -> Result<HttpResponseCreated<SledId>, HttpError> {
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.sled_add(&opctx, sled.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
+        Ok(HttpResponseCreated(SledId { id }))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1080,10 +1063,10 @@ async fn sled_add(
     path = "/sleds/expunge",
 }]
 async fn sled_expunge(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     sled: TypedBody<SledSelector>,
 ) -> Result<HttpResponseOk<SledPolicy>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
@@ -1106,11 +1089,11 @@ struct ProbePathParam {
     path = "/probes/{sled}"
 }]
 async fn probes_get(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     path_params: Path<ProbePathParam>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context().context;
     let handler = async {
         let query = query_params.into_inner();
         let path = path_params.into_inner();

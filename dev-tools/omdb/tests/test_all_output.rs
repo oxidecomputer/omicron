@@ -46,12 +46,14 @@ async fn test_omdb_usage_errors() {
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
-        &["db", "services"],
+        &["db", "sleds", "--help"],
         &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
         &["nexus"],
         &["nexus", "background-tasks"],
+        &["nexus", "blueprints"],
+        &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
         &["sled-agent", "zpools"],
@@ -90,14 +92,28 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
         &["db", "reconfigurator-save", tmppath.as_str()],
-        &["db", "services", "list-instances"],
-        &["db", "services", "list-by-sled"],
         &["db", "sleds"],
+        &["db", "sleds", "-F", "discretionary"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        &[
+            "--destructive",
+            "nexus",
+            "background-tasks",
+            "activate",
+            "inventory_collection",
+        ],
         &["nexus", "blueprints", "list"],
         &["nexus", "blueprints", "show", &initial_blueprint_id],
+        &["nexus", "blueprints", "show", "current-target"],
+        &[
+            "nexus",
+            "blueprints",
+            "diff",
+            &initial_blueprint_id,
+            "current-target",
+        ],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
@@ -149,7 +165,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // collection?
     assert!(parsed
         .planning_input
-        .all_sled_ids(SledFilter::All)
+        .all_sled_ids(SledFilter::Commissioned)
         .next()
         .is_some());
     assert!(!parsed.collections.is_empty());

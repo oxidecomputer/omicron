@@ -12,31 +12,40 @@ use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
-use uuid::Uuid;
 
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
 pub(crate) async fn deploy_zones(
     opctx: &OpContext,
-    sleds_by_id: &BTreeMap<Uuid, Sled>,
-    zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
             let db_sled = match sleds_by_id.get(sled_id) {
                 Some(sled) => sled,
                 None => {
-                    let err = anyhow!("sled not found in db list: {}", sled_id);
+                    if config.are_all_zones_expunged() {
+                        info!(
+                            opctx.log,
+                            "Skipping zone deployment to expunged sled";
+                            "sled_id" => %sled_id
+                        );
+                        return None;
+                    }
+                    let err = anyhow!("sled not found in db list: {sled_id}");
                     warn!(opctx.log, "{err:#}");
                     return Some(err);
                 }
             };
 
             let client = nexus_networking::sled_client_from_address(
-                *sled_id,
+                sled_id.into_untyped_uuid(),
                 db_sled.sled_agent_address,
                 &opctx.log,
             );
@@ -85,15 +94,18 @@ mod test {
     use httptest::Expectation;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::OmicronZonesConfig;
+    use nexus_types::deployment::{
+        blueprint_zone_type, BlueprintZoneType, CockroachDbPreserveDowngrade,
+        OmicronZonesConfig,
+    };
     use nexus_types::deployment::{
         Blueprint, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZonesConfig,
     };
-    use nexus_types::inventory::{
-        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-    };
+    use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -102,7 +114,7 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn create_blueprint(
-        blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -114,9 +126,14 @@ mod test {
             Blueprint {
                 id,
                 blueprint_zones,
+                blueprint_disks: BTreeMap::new(),
+                sled_state: BTreeMap::new(),
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
+                cockroachdb_fingerprint: String::new(),
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -126,7 +143,7 @@ mod test {
 
     #[nexus_test]
     async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
@@ -137,9 +154,9 @@ mod test {
         // sleds to CRDB.
         let mut s1 = httptest::Server::run();
         let mut s2 = httptest::Server::run();
-        let sled_id1 = Uuid::new_v4();
-        let sled_id2 = Uuid::new_v4();
-        let sleds_by_id: BTreeMap<Uuid, Sled> =
+        let sled_id1 = SledUuid::new_v4();
+        let sled_id2 = SledUuid::new_v4();
+        let sleds_by_id: BTreeMap<SledUuid, Sled> =
             [(sled_id1, &s1), (sled_id2, &s2)]
                 .into_iter()
                 .map(|(sled_id, server)| {
@@ -169,22 +186,22 @@ mod test {
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
-                    config: OmicronZoneConfig {
-                        id: Uuid::new_v4(),
-                        underlay_address: "::1".parse().unwrap(),
-                        zone_type: OmicronZoneType::InternalDns {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: OmicronZoneUuid::new_v4(),
+                    underlay_address: "::1".parse().unwrap(),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset {
                                 pool_name: format!("oxp_{}", Uuid::new_v4())
                                     .parse()
                                     .unwrap(),
                             },
-                            dns_address: "oh-hello-internal-dns".into(),
+                            dns_address: "[::1]:0".parse().unwrap(),
                             gz_address: "::1".parse().unwrap(),
                             gz_address_index: 0,
-                            http_address: "some-ipv6-address".into(),
+                            http_address: "[::1]:0".parse().unwrap(),
                         },
-                    },
-                    disposition: BlueprintZoneDisposition::InService,
+                    ),
                 }],
             }
         }
@@ -275,17 +292,17 @@ mod test {
             disposition: BlueprintZoneDisposition,
         ) {
             zones.zones.push(BlueprintZoneConfig {
-                config: OmicronZoneConfig {
-                    id: Uuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::InternalNtp {
-                        address: "::1".into(),
+                disposition,
+                id: OmicronZoneUuid::new_v4(),
+                underlay_address: "::1".parse().unwrap(),
+                zone_type: BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp {
+                        address: "[::1]:0".parse().unwrap(),
                         dns_servers: vec!["::1".parse().unwrap()],
                         domain: None,
                         ntp_servers: vec!["some-ntp-server-addr".into()],
                     },
-                },
-                disposition,
+                ),
             });
         }
 

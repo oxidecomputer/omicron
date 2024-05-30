@@ -62,9 +62,6 @@ enum Target {
     /// SoftNPU, an admin program (scadm) and a pre-compiled P4 program.
     Softnpu,
 
-    /// Thundermuffin binary, for sending non-stop buffers between devices.
-    Thundermuffin,
-
     /// Transceiver Control binary
     TransceiverControl,
 }
@@ -133,9 +130,6 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
-                    Target::Thundermuffin => {
-                        downloader.download_thundermuffin().await
-                    }
                     Target::TransceiverControl => {
                         downloader.download_transceiver_control().await
                     }
@@ -798,7 +792,7 @@ impl<'a> Downloader<'a> {
         // TODO: This should probably live in a separate file, but
         // at the moment we're just building parity with
         // "ci_download_softnpu_machinery".
-        let commit = "dbab082dfa89da5db5ca2325c257089d2f130092";
+        let commit = "3203c51cf4473d30991b522062ac0df2e045c2f2";
 
         let filename = "npuzone";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
@@ -817,62 +811,6 @@ impl<'a> Downloader<'a> {
         )
         .await?;
         set_permissions(&path, 0o755).await?;
-
-        Ok(())
-    }
-
-    async fn download_thundermuffin(&self) -> Result<()> {
-        let destination_dir = self.output_dir.join("thundermuffin");
-        tokio::fs::create_dir_all(&destination_dir).await?;
-        let download_dir = self.output_dir.join("downloads");
-
-        let [sha2] = get_values_from_file(
-            ["CIDL_SHA256"],
-            &self.versions_dir.join("thundermuffin_checksums"),
-        )
-        .await?;
-        let [commit] = get_values_from_file(
-            ["COMMIT"],
-            &self.versions_dir.join("thundermuffin_version"),
-        )
-        .await?;
-
-        let repo = "oxidecomputer/thundermuffin";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-
-        let filename = "thundermuffin.tar.gz";
-        let path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
-
-        let _ = tokio::fs::remove_dir_all(download_dir.join("root")).await;
-        tokio::fs::create_dir_all(&download_dir).await?;
-        unpack_tarball(&self.log, &path, &download_dir).await?;
-        copy_dir_all(
-            &download_dir.join("root"),
-            &destination_dir.join("root"),
-        )?;
-
-        match os_name()? {
-            Os::Illumos => (),
-            _ => {
-                let binary_dir =
-                    destination_dir.join("root/opt/oxide/thundermuffin/bin");
-                tokio::fs::create_dir_all(&binary_dir).await?;
-
-                let path = binary_dir.join("thundermuffin");
-                warn!(self.log, "Unsupported OS for thundermuffin - Creating stub"; "path" => %path);
-                tokio::fs::write(&path, "echo 'unsupported os' && exit 1")
-                    .await?;
-                set_permissions(&path, 0o755).await?;
-            }
-        }
 
         Ok(())
     }

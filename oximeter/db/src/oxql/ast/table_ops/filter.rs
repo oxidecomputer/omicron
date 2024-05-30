@@ -10,6 +10,8 @@ use crate::oxql::ast::cmp::Comparison;
 use crate::oxql::ast::ident::Ident;
 use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::logical_op::LogicalOp;
+use crate::oxql::ast::table_ops::limit::Limit;
+use crate::oxql::ast::table_ops::limit::LimitKind;
 use crate::oxql::point::DataType;
 use crate::oxql::point::MetricType;
 use crate::oxql::point::Points;
@@ -424,6 +426,59 @@ impl Filter {
 
     fn is_simple(&self) -> bool {
         matches!(self.expr, FilterExpr::Simple(_))
+    }
+
+    /// Return true if this filtering expression can be reordered around a
+    /// `limit` table operation.
+    ///
+    /// We attempt to push filtering expressions down to the database as much as
+    /// possible. This involves moving filters "through" an OxQL pipeline, so
+    /// that we can run them as early as possible, before other operations like
+    /// a `group_by`.
+    ///
+    /// In some cases, but not all, filters interact with limiting table
+    /// operations, which take the first or last k points from a timeseries.
+    /// Specifically, we can move a filter around a limit if:
+    ///
+    /// - The filter does not refer to timestamps at all
+    /// - The filter's comparison against timestamps restricts them in the same
+    /// "direction" as the limit operation. A timestamp filter which takes later
+    /// values, e.g., `timestamp > t0` can be moved around a `last k` operation;
+    /// a filter which takes earlier values, e.g., `timestamp < t0` can be moved
+    /// around a `first k` operation.
+    ///
+    /// All other situations return false. Consider a query with `filter
+    /// timestamp < t0` and `last k`. Those return different results depending
+    /// on which is run first:
+    ///
+    /// - Running the filter then the limit returns the last values before `t0`,
+    /// so the "end" of that chunk of time.
+    /// - Running the limit then filter returns the values in the last `k` of
+    /// the entire timeseries where the timestamp is before `t0`. That set can
+    /// be empty, if all the last `k` samples have a timestamp _after_ `t0`,
+    /// whereas the reverse is may well _not_ be empty.
+    pub(crate) fn can_reorder_around(&self, limit: &Limit) -> bool {
+        match &self.expr {
+            FilterExpr::Simple(SimpleFilter { ident, cmp, .. }) => {
+                if ident.as_str() != special_idents::TIMESTAMP {
+                    return true;
+                }
+                let is_compatible = match limit.kind {
+                    LimitKind::First => {
+                        matches!(cmp, Comparison::Lt | Comparison::Le)
+                    }
+                    LimitKind::Last => {
+                        matches!(cmp, Comparison::Gt | Comparison::Ge)
+                    }
+                };
+                self.negated ^ is_compatible
+            }
+            FilterExpr::Compound(CompoundFilter { left, right, .. }) => {
+                let left = left.can_reorder_around(limit);
+                let right = right.can_reorder_around(limit);
+                self.negated ^ (left && right)
+            }
+        }
     }
 }
 

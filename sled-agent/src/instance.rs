@@ -405,7 +405,7 @@ impl InstanceRunner {
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(CurrentState{ tx }) => {
-                            tx.send(self.current_state().await)
+                            tx.send(self.current_state())
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(PutState{ state, tx }) => {
@@ -1176,7 +1176,7 @@ impl InstanceRunner {
         }
     }
 
-    async fn current_state(&self) -> SledInstanceState {
+    fn current_state(&self) -> SledInstanceState {
         self.state.sled_instance_state()
     }
 
@@ -1753,11 +1753,12 @@ mod tests {
                 hostname: Hostname::from_str("bert").unwrap(),
             },
             nics: vec![],
-            source_nat: SourceNatConfig {
-                ip: IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                first_port: 0,
-                last_port: 0,
-            },
+            source_nat: SourceNatConfig::new(
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                0,
+                16383,
+            )
+            .unwrap(),
             ephemeral_ip: None,
             floating_ips: vec![],
             firewall_rules: vec![],

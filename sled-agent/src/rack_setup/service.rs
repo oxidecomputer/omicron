@@ -92,9 +92,11 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneConfig, BlueprintZoneDisposition,
-    BlueprintZonesConfig,
+    Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
 };
+use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
@@ -103,7 +105,8 @@ use omicron_common::backoff::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -530,7 +533,7 @@ impl ServiceInner {
                             }
                         })
                         .collect();
-                    if dns_addrs.len() > 0 {
+                    if !dns_addrs.is_empty() {
                         Some(dns_addrs)
                     } else {
                         None
@@ -677,11 +680,16 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        // Build a Blueprint describing our service plan. This should never
-        // fail, unless we've set up an invalid plan.
-        let blueprint =
-            build_initial_blueprint_from_plan(sled_plan, service_plan)
+        // Remap our plan into an easier-to-use type...
+        let sled_configs_by_id =
+            build_sled_configs_by_id(sled_plan, service_plan)
                 .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        // ... and use that to derive the initial blueprint from our plan.
+        let blueprint = build_initial_blueprint_from_plan(
+            &sled_configs_by_id,
+            service_plan,
+        )
+        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -698,30 +706,10 @@ impl ServiceInner {
             self.log.new(o!("component" => "NexusClient")),
         );
 
-        // Ensure we can quickly look up "Sled Agent Address" -> "UUID of sled".
-        //
-        // We need the ID when passing info to Nexus.
-        let mut id_map = HashMap::new();
-        for (_, sled_request) in sled_plan.sleds.iter() {
-            id_map.insert(
-                get_sled_address(sled_request.body.subnet),
-                sled_request.body.id,
-            );
-        }
-
-        // Convert all the information we have about services and datasets into
-        // a format which can be processed by Nexus.
-        let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
+        // Convert all the information we have about datasets into a format
+        // which can be processed by Nexus.
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
-        for (addr, sled_config) in service_plan.services.iter() {
-            let sled_id = *id_map
-                .get(addr)
-                .expect("Sled address in service plan, but not sled plan");
-
-            for zone in &sled_config.zones {
-                services.push(zone.to_nexus_service_req(sled_id));
-            }
-
+        for sled_config in service_plan.services.values() {
             for zone in &sled_config.zones {
                 if let Some((dataset_name, dataset_address)) =
                     zone.dataset_name_and_address()
@@ -761,9 +749,10 @@ impl ServiceInner {
                             .map(|r| NexusTypes::RouteConfig {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
+                                vlan_id: r.vlan_id,
                             })
                             .collect(),
-                        addresses: config.addresses.clone(),
+                        addresses: config.addresses.iter().cloned().map(Into::into).collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
@@ -780,6 +769,16 @@ impl ServiceInner {
                                 delay_open: b.delay_open,
                                 idle_hold_time: b.idle_hold_time,
                                 keepalive: b.keepalive,
+                                remote_asn: b.remote_asn,
+                                min_ttl: b.min_ttl,
+                                md5_auth_key: b.md5_auth_key.clone(),
+                                multi_exit_discriminator: b.multi_exit_discriminator,
+                                local_pref: b.local_pref,
+                                enforce_first_as: b.enforce_first_as,
+                                communities: b.communities.clone(),
+                                allowed_export: b.allowed_export.clone(),
+                                allowed_import: b.allowed_import.clone(),
+                                vlan_id: b.vlan_id,
                             })
                             .collect(),
                     })
@@ -789,7 +788,9 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config.originate.clone(),
+                        originate: config.originate.iter().cloned().map(Into::into).collect(),
+                        shaper: config.shaper.clone(),
+                        checker: config.checker.clone(),
                     })
                     .collect(),
                 bfd: config
@@ -816,11 +817,9 @@ impl ServiceInner {
 
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
-        let physical_disks: Vec<_> = service_plan
-            .services
+        let physical_disks: Vec<_> = sled_configs_by_id
             .iter()
-            .flat_map(|(addr, config)| {
-                let sled_id = id_map.get(addr).expect("Missing sled");
+            .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
                         id: config.id,
@@ -828,30 +827,36 @@ impl ServiceInner {
                         serial: config.identity.serial.clone(),
                         model: config.identity.model.clone(),
                         variant: NexusTypes::PhysicalDiskKind::U2,
-                        sled_id: *sled_id,
+                        sled_id: sled_id.into_untyped_uuid(),
                     }
                 })
             })
             .collect();
 
-        let zpools = service_plan
-            .services
+        let zpools = sled_configs_by_id
             .iter()
-            .flat_map(|(addr, config)| {
-                let sled_id = id_map.get(addr).expect("Missing sled");
+            .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::ZpoolPutRequest {
                         id: config.pool_id.into_untyped_uuid(),
                         physical_disk_id: config.id,
-                        sled_id: *sled_id,
+                        sled_id: sled_id.into_untyped_uuid(),
                     }
                 })
             })
             .collect();
 
+        // Convert the IP allowlist into the Nexus types.
+        //
+        // This is really infallible. We have a list of IpNet's here, which
+        // we're converting to Nexus client types through their string
+        // representation.
+        let allowed_source_ips =
+            NexusTypes::AllowedSourceIps::try_from(&config.allowed_source_ips)
+                .expect("Expected valid Nexus IP networks");
+
         let request = NexusTypes::RackInitializationRequest {
             blueprint,
-            services,
             physical_disks,
             zpools,
             datasets,
@@ -862,6 +867,7 @@ impl ServiceInner {
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
             external_port_count: port_discovery_mode.into(),
+            allowed_source_ips,
         };
 
         let notify_nexus = || async {
@@ -1289,18 +1295,18 @@ impl DeployStepVersion {
     const V5_EVERYTHING: Generation = Self::V4_COCKROACHDB.next();
 }
 
-fn build_initial_blueprint_from_plan(
+// Build a map of sled ID to `SledConfig` based on the two plan types we
+// generate. This is a bit of a code smell (why doesn't the plan generate this
+// on its own if we need it?); we should be able to get rid of it when
+// we get to https://github.com/oxidecomputer/omicron/issues/5272.
+fn build_sled_configs_by_id(
     sled_plan: &SledPlan,
     service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    let internal_dns_version =
-        Generation::try_from(service_plan.dns_config.generation)
-            .context("invalid internal dns version")?;
-
+) -> anyhow::Result<BTreeMap<SledUuid, SledConfig>> {
     let mut sled_configs = BTreeMap::new();
     for sled_request in sled_plan.sleds.values() {
         let sled_addr = get_sled_address(sled_request.body.subnet);
-        let sled_id = sled_request.body.id;
+        let sled_id = SledUuid::from_untyped_uuid(sled_request.body.id);
         let entry = match sled_configs.entry(sled_id) {
             btree_map::Entry::Vacant(entry) => entry,
             btree_map::Entry::Occupied(_) => {
@@ -1319,18 +1325,83 @@ fn build_initial_blueprint_from_plan(
         entry.insert(sled_config.clone());
     }
 
-    Ok(build_initial_blueprint_from_sled_configs(
-        sled_configs,
+    if sled_configs.len() != service_plan.services.len() {
+        bail!(
+            "error mapping service plan to sled IDs; converted {} sled \
+             addresses into {} sled configs",
+            service_plan.services.len(),
+            sled_configs.len(),
+        );
+    }
+
+    Ok(sled_configs)
+}
+
+// Build an initial blueprint
+fn build_initial_blueprint_from_plan(
+    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
+    service_plan: &ServicePlan,
+) -> anyhow::Result<Blueprint> {
+    let internal_dns_version =
+        Generation::try_from(service_plan.dns_config.generation)
+            .context("invalid internal dns version")?;
+
+    let blueprint = build_initial_blueprint_from_sled_configs(
+        sled_configs_by_id,
         internal_dns_version,
-    ))
+    )?;
+
+    Ok(blueprint)
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
-    sled_configs: BTreeMap<Uuid, SledConfig>,
+    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
-) -> Blueprint {
+) -> Result<Blueprint, InvalidOmicronZoneType> {
+    // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
+    // This is separate primarily so rustfmt doesn't lose its mind.
+    let to_bp_zone_config = |z: &crate::params::OmicronZoneConfig| {
+        // All initial zones are in-service.
+        let disposition = BlueprintZoneDisposition::InService;
+        BlueprintZoneConfig::from_omicron_zone_config(
+            z.clone().into(),
+            disposition,
+            // This is pretty weird: IP IDs don't exist yet, so it's fine for us
+            // to make them up (Nexus will record them as a part of the
+            // handoff). We could pass `None` here for some zone types, but it's
+            // a little simpler to just always pass a new ID, which will only be
+            // used if the zone type has an external IP.
+            //
+            // This should all go away once RSS starts using blueprints more
+            // directly (instead of this conversion after the fact):
+            // https://github.com/oxidecomputer/omicron/issues/5272
+            Some(ExternalIpUuid::new_v4()),
+        )
+    };
+
+    let mut blueprint_disks = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
+        blueprint_disks.insert(
+            *sled_id,
+            BlueprintPhysicalDisksConfig {
+                generation: sled_config.disks.generation,
+                disks: sled_config
+                    .disks
+                    .disks
+                    .iter()
+                    .map(|d| SledAgentTypes::OmicronPhysicalDiskConfig {
+                        identity: d.identity.clone(),
+                        id: d.id,
+                        pool_id: d.pool_id,
+                    })
+                    .collect(),
+            },
+        );
+    }
+
     let mut blueprint_zones = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs {
+    let mut sled_state = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
         let zones_config = BlueprintZonesConfig {
             // This is a bit of a hack. We only construct a blueprint after
             // completing RSS, so we need to know the final generation value
@@ -1345,31 +1416,34 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             generation: DeployStepVersion::V5_EVERYTHING,
             zones: sled_config
                 .zones
-                .into_iter()
-                .map(|z| BlueprintZoneConfig {
-                    config: z.into(),
-                    // All initial zones are in-service.
-                    disposition: BlueprintZoneDisposition::InService,
-                })
-                .collect(),
+                .iter()
+                .map(to_bp_zone_config)
+                .collect::<Result<_, _>>()?,
         };
 
-        blueprint_zones.insert(sled_id, zones_config);
+        blueprint_zones.insert(*sled_id, zones_config);
+        sled_state.insert(*sled_id, SledState::Active);
     }
 
-    Blueprint {
+    Ok(Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
+        blueprint_disks,
+        sled_state,
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
         // generation of 1. Nexus will bump this up when it updates external DNS
         // (including creating the recovery silo).
         external_dns_version: Generation::new(),
+        // Nexus will fill in the CockroachDB values during initialization.
+        cockroachdb_fingerprint: String::new(),
+        cockroachdb_setting_preserve_downgrade:
+            CockroachDbPreserveDowngrade::DoNotModify,
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-    }
+    })
 }
 
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
@@ -1474,11 +1548,11 @@ mod test {
         api::external::{ByteCount, Generation},
         disk::DiskIdentity,
     };
+    use omicron_uuid_kinds::{GenericUuid, SledUuid};
     use sled_agent_client::types as SledAgentTypes;
-    use uuid::Uuid;
 
     fn make_sled_info(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1488,7 +1562,7 @@ mod test {
             subnet,
             sled_agent_address,
             SledAgentTypes::Inventory {
-                sled_id,
+                sled_id: sled_id.into_untyped_uuid(),
                 sled_agent_address: sled_agent_address.to_string(),
                 sled_role: SledAgentTypes::SledRole::Scrimlet,
                 baseboard: SledAgentTypes::Baseboard::Unknown,
@@ -1516,14 +1590,14 @@ mod test {
         let rss_config = crate::bootstrap::params::test_config();
         let fake_sleds = vec![
             make_sled_info(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
-                Uuid::new_v4(),
+                SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),

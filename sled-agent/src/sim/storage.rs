@@ -21,6 +21,7 @@ use dropshot::HttpError;
 use futures::lock::Mutex;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use sled_hardware::DiskVariant;
@@ -96,6 +97,8 @@ impl CrucibleDataInner {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
+            source: None,
+            read_only: false,
         };
 
         let old = self.regions.insert(id, region.clone());
@@ -540,6 +543,10 @@ impl Zpool {
 
         None
     }
+
+    pub fn drop_dataset(&mut self, id: Uuid) {
+        let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
+    }
 }
 
 /// Simulated representation of all storage on a sled.
@@ -639,6 +646,7 @@ impl Storage {
     pub fn zpools(&self) -> &HashMap<ZpoolUuid, Zpool> {
         &self.zpools
     }
+
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,
@@ -754,11 +762,18 @@ impl Storage {
 
         None
     }
+
+    pub fn drop_dataset(&mut self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+        self.zpools
+            .get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .drop_dataset(dataset_id)
+    }
 }
 
 /// Simulated crucible pantry
 pub struct Pantry {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
     sled_agent: Arc<SledAgent>,
     jobs: Mutex<HashSet<String>>,
@@ -767,7 +782,7 @@ pub struct Pantry {
 impl Pantry {
     pub fn new(sled_agent: Arc<SledAgent>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: OmicronZoneUuid::new_v4(),
             vcrs: Mutex::new(HashMap::default()),
             sled_agent,
             jobs: Mutex::new(HashSet::default()),
@@ -881,7 +896,9 @@ impl Pantry {
                         ..
                     } => (
                         block_size,
-                        block_size * blocks_per_extent * (extent_count as u64),
+                        block_size
+                            * blocks_per_extent
+                            * u64::from(extent_count),
                     ),
 
                     _ => {

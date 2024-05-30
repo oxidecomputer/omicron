@@ -123,7 +123,7 @@ impl ToSql<sql_types::BigInt, Pg> for SagaNodeId {
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         // Diesel newtype -> steno type -> u32 -> i64 -> SQL
-        let id = u32::from(self.0) as i64;
+        let id = i64::from(u32::from(self.0));
         <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(&id, &mut out.reborrow())
     }
 }
