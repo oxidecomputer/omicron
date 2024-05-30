@@ -85,6 +85,35 @@ pub(crate) async fn deploy_zones(
     }
 }
 
+/// Attempt to migrate any sagas owned by expunged nexus zones  to the local
+/// saga execution coordinator for this nexus. Any of the DB updates may fail, and we
+/// should just skip failures. This means that another concurrent executor already
+/// performed the update. In case of any transient failures, a later executor
+/// run should succeed on the db update.
+///
+///
+/// Note that once we migrate the sagas in the DB, we need to recover the saga
+/// in the current executor via `saga_recovery::recover_saga`. This method may
+/// fail because the SEC can't resume or start the saga. At this point, all we can
+/// really do is log the error. We'll require manual intervention of the DB to clean up
+/// such failures, although this isn't really any different from a failure to recover
+/// any saga after a nexus restart. The big difference is that in the case of restart
+/// nexus will try forever. I don't think we should do that here.
+///
+/// We could have a separate background task that goes through and ensures
+/// any sagas that are supposed to be running are known to the correct SEC. We
+/// probably should have something like this and a mechanism for getting alerts
+/// out in case of problems. Hell any way to actually record an alert and get
+/// them via the external API or OMDB would be great. This alert recording/
+/// reporting path should work similarly to (and build upon) whatever we end up
+/// using with regards to PSU outages.
+pub(crate) async fn migrate_sagas(
+    opctx: &OpContext,
+    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+) -> Result<(), Vec<anyhow::Error>> {
+    todo!()
+}
+
 #[cfg(test)]
 mod test {
     use super::deploy_zones;

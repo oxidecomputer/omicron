@@ -164,6 +164,8 @@ where
     )
     .await?;
 
+    omicron_zones::migrate_sagas(&opctx, &blueprint.blueprint_zones).await?;
+
     // After deploying omicron zones, we may need to refresh OPTE service
     // firewall rules. This is an idempotent operation, so we don't attempt
     // to optimize out calling it in unnecessary cases, although it is only
