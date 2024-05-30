@@ -64,7 +64,7 @@ mod dns;
 mod external_ip;
 mod identity_provider;
 mod image;
-mod instance;
+pub mod instance;
 mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
