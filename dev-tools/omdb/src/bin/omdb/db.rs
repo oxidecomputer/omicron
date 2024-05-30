@@ -1654,8 +1654,6 @@ async fn cmd_db_region_replacement_status(
         println!();
 
         if let Some(new_region_id) = request.new_region_id {
-            println!();
-
             // Find the most recent upstairs repair notification where the
             // downstairs being repaired is a "new" region id. This will give us
             // the most recent repair id.
@@ -1708,6 +1706,8 @@ async fn cmd_db_region_replacement_status(
                     .with_position(repair_progress.current_item as u64);
 
                     bar.abandon();
+
+                    println!();
                 }
             }
         }
