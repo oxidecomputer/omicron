@@ -6,6 +6,7 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
+use crate::app::db::datastore::instance;
 use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz};
@@ -39,9 +40,12 @@ struct RealParams {
     authz_instance: authz::Instance,
 
     state: InstanceSnapshot,
+
+    orig_lock: instance::UpdaterLock,
 }
 
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
+const INSTANCE_LOCK: &str = "updater_lock";
 
 // instance update saga: actions
 
@@ -49,7 +53,7 @@ declare_saga_actions! {
     instance_update;
 
     // Become the instance updater
-    BECOME_UPDATER -> "generation" {
+    BECOME_UPDATER -> "updater_lock" {
         + siu_become_updater
         - siu_unbecome_updater
     }
@@ -130,26 +134,31 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
 
 async fn siu_become_updater(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<instance::UpdaterLock, ActionError> {
     let RealParams {
-        ref serialized_authn, ref authz_instance, ref state, ..
+        ref serialized_authn, ref authz_instance, orig_lock, ..
     } = sagactx.saga_params::<RealParams>()?;
-
-    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
+    let saga_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let osagactx = sagactx.user_data();
+
     slog::debug!(
         osagactx.log(),
         "instance update: trying to become instance updater...";
         "instance_id" => %authz_instance.id(),
-        "saga_id" => %lock_id,
-        "parent_id" => ?state.instance.runtime_state.updater_id,
+        "saga_id" => %saga_id,
+        "parent_lock" => ?orig_lock,
     );
 
-    osagactx
+    let lock = osagactx
         .datastore()
-        .instance_updater_inherit_lock(&opctx, &state.instance, &lock_id)
+        .instance_updater_inherit_lock(
+            &opctx,
+            &authz_instance,
+            orig_lock,
+            saga_id,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -157,11 +166,10 @@ async fn siu_become_updater(
         osagactx.log(),
         "Now, I am become Updater, the destroyer of VMMs.";
         "instance_id" => %authz_instance.id(),
-        "saga_id" => %lock_id,
-        "parent_id" => ?state.instance.runtime_state.updater_id,
+        "saga_id" => %saga_id,
     );
 
-    Ok(())
+    Ok(lock)
 }
 
 async fn siu_unbecome_updater(
@@ -187,7 +195,7 @@ async fn unlock_instance_inner(
     authz_instance: &authz::Instance,
     sagactx: &NexusActionContext,
 ) -> Result<(), ActionError> {
-    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
+    let lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let osagactx = sagactx.user_data();
@@ -195,12 +203,12 @@ async fn unlock_instance_inner(
         osagactx.log(),
         "instance update: unlocking instance";
         "instance_id" => %authz_instance.id(),
-        "saga_id" => %lock_id,
+        "lock" => ?lock,
     );
 
     osagactx
         .datastore()
-        .instance_updater_unlock(&opctx, authz_instance, &lock_id)
+        .instance_updater_unlock(&opctx, authz_instance, lock)
         .await
         .map_err(ActionError::action_failed)?;
 
