@@ -40,6 +40,9 @@ WITH
             1
         )
         = 1
+        AND EXISTS(
+            SELECT 1 FROM instance WHERE instance.id = $5 AND instance.state_generation < $6 LIMIT 1
+          )
           AS update
     ),
   unused_cte_arm
@@ -47,18 +50,7 @@ WITH
       DELETE FROM
         virtual_provisioning_resource
       WHERE
-        virtual_provisioning_resource.id = $5
-        AND virtual_provisioning_resource.id
-          = (
-              SELECT
-                instance.id
-              FROM
-                instance
-              WHERE
-                instance.id = $6 AND instance.state_generation < $7
-              LIMIT
-                1
-            )
+        virtual_provisioning_resource.id = $7 AND (SELECT do_update.update FROM do_update LIMIT 1)
       RETURNING
         virtual_provisioning_resource.id,
         virtual_provisioning_resource.time_modified,
