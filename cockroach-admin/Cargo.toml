@@ -34,8 +34,13 @@ toml.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+expectorate.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
+openapi-lint.workspace = true
+openapiv3.workspace = true
+serde_json.workspace = true
+subprocess.workspace = true
 url.workspace = true
 
 [lints]

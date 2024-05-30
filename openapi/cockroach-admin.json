@@ -1,0 +1,168 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide CockroachDb Cluster Admin API",
+    "description": "API for interacting with the Oxide control plane's CockroachDb cluster",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/node/id": {
+      "get": {
+        "summary": "Get the CockroachDB node ID of the local cockroach instance.",
+        "operationId": "node_id",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/node/status": {
+      "get": {
+        "summary": "Get the status of all nodes in the CRDB cluster",
+        "operationId": "node_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterNodeStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClusterNodeStatus": {
+        "type": "object",
+        "properties": {
+          "all_nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeStatus"
+            }
+          }
+        },
+        "required": [
+          "all_nodes"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "NodeId": {
+        "description": "CockroachDB Node ID",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "NodeStatus": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "build": {
+            "type": "string"
+          },
+          "is_available": {
+            "type": "boolean"
+          },
+          "is_live": {
+            "type": "boolean"
+          },
+          "locality": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "sql_address": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "address",
+          "build",
+          "is_available",
+          "is_live",
+          "locality",
+          "node_id",
+          "sql_address",
+          "started_at",
+          "updated_at"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}
