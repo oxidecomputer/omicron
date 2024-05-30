@@ -13,9 +13,14 @@ use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
+use ipnetwork::NetworkSize;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::VnicUuid;
+use sled_agent_client::ZoneKind;
 use uuid::Uuid;
 
 /// The max number of interfaces that may be associated with a resource,
@@ -68,7 +73,7 @@ pub struct NetworkInterface {
 impl NetworkInterface {
     pub fn into_internal(
         self,
-        subnet: external::IpNet,
+        subnet: oxnet::IpNet,
     ) -> internal::shared::NetworkInterface {
         internal::shared::NetworkInterface {
             id: self.id(),
@@ -146,17 +151,70 @@ pub struct ServiceNetworkInterface {
     pub primary: bool,
 }
 
-impl From<ServiceNetworkInterface>
-    for nexus_types::deployment::ServiceNetworkInterface
+impl ServiceNetworkInterface {
+    /// Generate a suitable [`Name`] for the given Omicron zone ID and kind.
+    pub fn name(zone_id: OmicronZoneUuid, zone_kind: ZoneKind) -> Name {
+        // Ideally we'd use `zone_kind.to_string()` here, but that uses
+        // underscores as separators which aren't allowed in `Name`s. We also
+        // preserve some existing naming behavior where NTP external networking
+        // is just called "ntp", not "boundary-ntp".
+        //
+        // Most of these zone kinds do not get external networking and therefore
+        // we don't need to be able to generate names for them, but it's simpler
+        // to give them valid descriptions than worry about error handling here.
+        let prefix = match zone_kind {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
+            ZoneKind::CockroachDb => "cockroach",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible-pantry",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        };
+
+        // Now that we have a valid prefix, we know this format string
+        // always produces a valid `Name`, so we'll unwrap here.
+        let name = format!("{prefix}-{zone_id}")
+            .parse()
+            .expect("valid name failed to parse");
+
+        Name(name)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Service NIC {nic_id} has a range of IPs ({ip}); only a single IP is supported")]
+pub struct ServiceNicNotSingleIpError {
+    pub nic_id: Uuid,
+    pub ip: ipnetwork::IpNetwork,
+}
+
+impl TryFrom<&'_ ServiceNetworkInterface>
+    for nexus_types::deployment::OmicronZoneNic
 {
-    fn from(nic: ServiceNetworkInterface) -> Self {
-        Self {
-            id: nic.id(),
+    type Error = ServiceNicNotSingleIpError;
+
+    fn try_from(nic: &ServiceNetworkInterface) -> Result<Self, Self::Error> {
+        let size = match nic.ip.size() {
+            NetworkSize::V4(n) => u128::from(n),
+            NetworkSize::V6(n) => n,
+        };
+        if size != 1 {
+            return Err(ServiceNicNotSingleIpError {
+                nic_id: nic.id(),
+                ip: nic.ip,
+            });
+        }
+        Ok(Self {
+            id: VnicUuid::from_untyped_uuid(nic.id()),
             mac: *nic.mac,
-            ip: nic.ip,
+            ip: nic.ip.ip(),
             slot: *nic.slot,
             primary: nic.primary,
-        }
+        })
     }
 }
 

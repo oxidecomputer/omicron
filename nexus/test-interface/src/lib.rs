@@ -57,7 +57,6 @@ pub trait NexusServer: Send + Sync + 'static {
         internal_server: Self::InternalServer,
         config: &NexusConfig,
         blueprint: Blueprint,
-        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         physical_disks: Vec<PhysicalDiskPutRequest>,
         zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
@@ -69,6 +68,7 @@ pub trait NexusServer: Send + Sync + 'static {
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
+    async fn get_http_server_techport_address(&self) -> SocketAddr;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),

@@ -15,6 +15,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::o;
 use slog::{debug, error};
 use std::sync::Arc;
@@ -347,7 +349,7 @@ impl<'a> Collector<'a> {
             }
         };
 
-        let sled_id = inventory.sled_id;
+        let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)?;
 
         let maybe_config =

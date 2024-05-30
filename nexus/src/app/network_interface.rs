@@ -167,7 +167,8 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Delete).await?;
-        self.db_datastore
+        let interface_was_deleted = self
+            .db_datastore
             .instance_delete_network_interface(
                 opctx,
                 &authz_instance,
@@ -194,6 +195,19 @@ impl super::Nexus {
                     // Convert other errors into an appropriate client error
                     network_interface::DeleteError::into_external(e)
                 }
-            })
+            })?;
+
+        // If the interface was already deleted, in general we'd expect to
+        // return an error on the `lookup_for(Delete)` above. However, we have a
+        // TOCTOU race here; if multiple simultaneous calls to delete the same
+        // interface arrive, all will pass the `lookup_for`, then one will get
+        // `interface_was_deleted=true` and the rest will get
+        // `interface_was_deleted=false`. Convert those falses into 404s to
+        // match what subsequent delete requests will see.
+        if interface_was_deleted {
+            Ok(())
+        } else {
+            Err(authz_interface.not_found())
+        }
     }
 }

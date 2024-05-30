@@ -59,14 +59,8 @@ enum Target {
     /// Maghemite mgd binary
     MaghemiteMgd,
 
-    /// Maghemite OpenAPI spec
-    MaghemiteOpenapi,
-
     /// SoftNPU, an admin program (scadm) and a pre-compiled P4 program.
     Softnpu,
-
-    /// Thundermuffin binary, for sending non-stop buffers between devices.
-    Thundermuffin,
 
     /// Transceiver Control binary
     TransceiverControl,
@@ -109,16 +103,16 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
     let log = Logger::root(drain, o!());
 
     let mut all_downloads = targets
-        .iter()
+        .into_iter()
         .map(|target| {
-            let log = log.clone();
+            let log = log.new(o!("target" => format!("{target:?}")));
             let output_dir = args.output_dir.clone();
             let versions_dir = args.versions_dir.clone();
-            async move {
-                info!(&log, "Download target: {target:?}");
+            tokio::task::spawn(async move {
+                info!(&log, "Starting download");
 
                 let downloader = Downloader::new(
-                    log.new(o!("target" => format!("{target:?}"))),
+                    log.clone(),
                     &output_dir,
                     &versions_dir,
                 );
@@ -135,24 +129,20 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     }
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
-                    Target::MaghemiteOpenapi => {
-                        downloader.download_maghemite_openapi().await
-                    }
                     Target::Softnpu => downloader.download_softnpu().await,
-                    Target::Thundermuffin => {
-                        downloader.download_thundermuffin().await
-                    }
                     Target::TransceiverControl => {
                         downloader.download_transceiver_control().await
                     }
                 }.context("Failed to download {target:?}")?;
+
+                info!(&log, "Download complete");
                 Ok(())
-            }
+            })
         })
         .collect::<futures::stream::FuturesUnordered<_>>();
 
     while let Some(result) = all_downloads.next().await {
-        result?;
+        result??;
     }
 
     Ok(())
@@ -256,7 +246,7 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
 
 /// Returns the hex, lowercase md5 checksum of a file at `path`.
 async fn md5_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = [0u8; 65536];
+    let mut buf = vec![0u8; 65536];
     let mut file = tokio::fs::File::open(path).await?;
     let mut ctx = md5::Context::new();
     loop {
@@ -273,7 +263,7 @@ async fn md5_checksum(path: &Utf8Path) -> Result<String> {
 
 /// Returns the hex, lowercase sha2 checksum of a file at `path`.
 async fn sha2_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = [0u8; 65536];
+    let mut buf = vec![0u8; 65536];
     let mut file = tokio::fs::File::open(path).await?;
     let mut ctx = sha2::Sha256::new();
     loop {
@@ -420,7 +410,7 @@ async fn download_file_and_verify(
     };
 
     if do_download {
-        info!(log, "Downloading...");
+        info!(log, "Downloading {path}");
         streaming_download(&url, &path).await?;
     }
 
@@ -793,49 +783,6 @@ impl<'a> Downloader<'a> {
         Ok(())
     }
 
-    async fn download_maghemite_openapi(&self) -> Result<()> {
-        let download_dir = self.output_dir.join("downloads");
-        tokio::fs::create_dir_all(&download_dir).await?;
-
-        let [commit, sha2] = get_values_from_file(
-            ["COMMIT", "SHA2"],
-            &self.versions_dir.join("maghemite_ddm_openapi_version"),
-        )
-        .await?;
-        let base_url =
-            format!("{BUILDOMAT_URL}/oxidecomputer/maghemite/openapi/{commit}");
-        let filename = "ddm-admin.json";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
-
-        let [commit, sha2] = get_values_from_file(
-            ["COMMIT", "SHA2"],
-            &self.versions_dir.join("maghemite_mg_openapi_version"),
-        )
-        .await?;
-        let base_url =
-            format!("{BUILDOMAT_URL}/oxidecomputer/maghemite/openapi/{commit}");
-        let filename = "mg-admin.json";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
-
-        Ok(())
-    }
-
     async fn download_softnpu(&self) -> Result<()> {
         let destination_dir = self.output_dir.join("npuzone");
         tokio::fs::create_dir_all(&destination_dir).await?;
@@ -845,7 +792,7 @@ impl<'a> Downloader<'a> {
         // TODO: This should probably live in a separate file, but
         // at the moment we're just building parity with
         // the old download scripts.
-        let commit = "dbab082dfa89da5db5ca2325c257089d2f130092";
+        let commit = "3203c51cf4473d30991b522062ac0df2e045c2f2";
 
         let filename = "npuzone";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
@@ -864,62 +811,6 @@ impl<'a> Downloader<'a> {
         )
         .await?;
         set_permissions(&path, 0o755).await?;
-
-        Ok(())
-    }
-
-    async fn download_thundermuffin(&self) -> Result<()> {
-        let destination_dir = self.output_dir.join("thundermuffin");
-        tokio::fs::create_dir_all(&destination_dir).await?;
-        let download_dir = self.output_dir.join("downloads");
-
-        let [sha2] = get_values_from_file(
-            ["CIDL_SHA256"],
-            &self.versions_dir.join("thundermuffin_checksums"),
-        )
-        .await?;
-        let [commit] = get_values_from_file(
-            ["COMMIT"],
-            &self.versions_dir.join("thundermuffin_version"),
-        )
-        .await?;
-
-        let repo = "oxidecomputer/thundermuffin";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-
-        let filename = "thundermuffin.tar.gz";
-        let path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &path,
-            &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
-
-        let _ = tokio::fs::remove_dir_all(download_dir.join("root")).await;
-        tokio::fs::create_dir_all(&download_dir).await?;
-        unpack_tarball(&self.log, &path, &download_dir).await?;
-        copy_dir_all(
-            &download_dir.join("root"),
-            &destination_dir.join("root"),
-        )?;
-
-        match os_name()? {
-            Os::Illumos => (),
-            _ => {
-                warn!(self.log, "Unsupported OS for thundermuffin");
-                let binary_dir =
-                    destination_dir.join("root/opt/oxide/thundermuffin/bin");
-                tokio::fs::create_dir_all(&binary_dir).await?;
-
-                let path = binary_dir.join("thundermuffin");
-                tokio::fs::write(&path, "echo 'unsupported os' && exit 1")
-                    .await?;
-                set_permissions(&path, 0o755).await?;
-            }
-        }
 
         Ok(())
     }
@@ -966,11 +857,11 @@ impl<'a> Downloader<'a> {
         match os_name()? {
             Os::Illumos => (),
             _ => {
-                warn!(self.log, "Unsupported OS for transceiver-control");
                 let binary_dir = destination_dir.join("opt/oxide/bin");
                 tokio::fs::create_dir_all(&binary_dir).await?;
 
                 let path = binary_dir.join(filename);
+                warn!(self.log, "Unsupported OS for transceiver-control - Creating stub"; "path" => %path);
                 tokio::fs::write(&path, "echo 'unsupported os' && exit 1")
                     .await?;
                 set_permissions(&path, 0o755).await?;

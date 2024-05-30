@@ -7,13 +7,13 @@
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
@@ -74,7 +74,7 @@ impl super::Nexus {
     pub async fn blueprint_target_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<BlueprintTarget>, Error> {
+    ) -> Result<BlueprintTarget, Error> {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
@@ -131,7 +131,9 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let sled_rows = datastore.sled_list_all_batched(opctx).await?;
+        let sled_rows = datastore
+            .sled_list_all_batched(opctx, SledFilter::Commissioned)
+            .await?;
         let zpool_rows =
             datastore.zpool_list_all_external_batched(opctx).await?;
         let ip_pool_range_rows = {
@@ -161,6 +163,10 @@ impl super::Nexus {
                 "fetching external DNS version for blueprint planning",
             )?
             .version;
+        let cockroachdb_settings =
+            datastore.cockroachdb_settings(opctx).await.internal_context(
+                "fetching cockroachdb settings for blueprint planning",
+            )?;
 
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
@@ -169,9 +175,12 @@ impl super::Nexus {
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_cockroachdb_cluster_version:
+                CockroachDbClusterVersion::POLICY,
             log: &opctx.log,
             internal_dns_version,
             external_dns_version,
+            cockroachdb_settings: &cockroachdb_settings,
         }
         .build()?;
 
@@ -204,46 +213,12 @@ impl super::Nexus {
         self.db_datastore.blueprint_insert(opctx, blueprint).await
     }
 
-    pub async fn blueprint_generate_from_collection(
-        &self,
-        opctx: &OpContext,
-        collection_id: Uuid,
-    ) -> CreateResult<Blueprint> {
-        let collection = self
-            .datastore()
-            .inventory_collection_read(opctx, collection_id)
-            .await?;
-        let planning_context = self.blueprint_planning_context(opctx).await?;
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            planning_context.planning_input.internal_dns_version(),
-            planning_context.planning_input.external_dns_version(),
-            planning_context.planning_input.all_sled_ids(SledFilter::All),
-            &planning_context.creator,
-        )
-        .map_err(|error| {
-            Error::internal_error(&format!(
-                "error generating initial blueprint from collection {}: {}",
-                collection_id,
-                InlineErrorChain::new(&error)
-            ))
-        })?;
-
-        self.blueprint_add(&opctx, &blueprint).await?;
-        Ok(blueprint)
-    }
-
     pub async fn blueprint_create_regenerate(
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let maybe_target =
+        let (_, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
-        let Some((_, parent_blueprint)) = maybe_target else {
-            return Err(Error::conflict(
-                "cannot regenerate blueprint without existing target",
-            ));
-        };
 
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {

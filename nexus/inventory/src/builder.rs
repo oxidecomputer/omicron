@@ -27,13 +27,15 @@ use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
+use omicron_uuid_kinds::CollectionKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
-use typed_rng::UuidRng;
-use uuid::Uuid;
+use typed_rng::TypedUuidRng;
 
 /// Describes an operational error encountered during the collection process
 ///
@@ -86,10 +88,10 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<Uuid, SledAgent>,
-    omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
+    sleds: BTreeMap<SledUuid, SledAgent>,
+    omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
     // We just generate one UUID for each collection.
-    id_rng: UuidRng,
+    id_rng: TypedUuidRng<CollectionKind>,
 }
 
 impl CollectionBuilder {
@@ -115,7 +117,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
-            id_rng: UuidRng::from_entropy(),
+            id_rng: TypedUuidRng::from_entropy(),
         }
     }
 
@@ -429,7 +431,7 @@ impl CollectionBuilder {
         source: &str,
         inventory: sled_agent_client::types::Inventory,
     ) -> Result<(), anyhow::Error> {
-        let sled_id = inventory.sled_id;
+        let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
 
         // Normalize the baseboard id, if any.
         use sled_agent_client::types::Baseboard;
@@ -446,8 +448,7 @@ impl CollectionBuilder {
             }
             Baseboard::Unknown => {
                 self.found_error(InventoryError::from(anyhow!(
-                    "sled {:?}: reported unknown baseboard",
-                    sled_id
+                    "sled {sled_id}: reported unknown baseboard",
                 )));
                 None
             }
@@ -461,8 +462,7 @@ impl CollectionBuilder {
             Ok(addr) => addr,
             Err(error) => {
                 self.found_error(InventoryError::from(anyhow!(
-                    "sled {:?}: bad sled agent address: {:?}: {:#}",
-                    sled_id,
+                    "sled {sled_id}: bad sled agent address: {:?}: {:#}",
                     inventory.sled_agent_address,
                     error,
                 )));
@@ -490,11 +490,8 @@ impl CollectionBuilder {
 
         if let Some(previous) = self.sleds.get(&sled_id) {
             Err(anyhow!(
-                "sled {:?}: reported sled multiple times \
-                (previously {:?}, now {:?})",
-                sled_id,
-                previous,
-                sled,
+                "sled {sled_id}: reported sled multiple times \
+                (previously {previous:?}, now {sled:?})",
             ))
         } else {
             self.sleds.insert(sled_id, sled);
@@ -506,13 +503,12 @@ impl CollectionBuilder {
     pub fn found_sled_omicron_zones(
         &mut self,
         source: &str,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zones: sled_agent_client::types::OmicronZonesConfig,
     ) -> Result<(), anyhow::Error> {
         if let Some(previous) = self.omicron_zones.get(&sled_id) {
             Err(anyhow!(
-                "sled {:?} omicron zones: reported previously: {:?}",
-                sled_id,
+                "sled {sled_id} omicron zones: reported previously: {:?}",
                 previous
             ))
         } else {

@@ -28,6 +28,18 @@ pub struct SpIdentifier {
     pub slot: u32,
 }
 
+impl From<SpIdentifier> for gateway_client::types::SpIdentifier {
+    fn from(value: SpIdentifier) -> Self {
+        Self { type_: value.type_.into(), slot: value.slot }
+    }
+}
+
+impl From<gateway_client::types::SpIdentifier> for SpIdentifier {
+    fn from(value: gateway_client::types::SpIdentifier) -> Self {
+        Self { type_: value.type_.into(), slot: value.slot }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -46,6 +58,26 @@ pub enum SpType {
     Switch,
     Sled,
     Power,
+}
+
+impl From<SpType> for gateway_client::types::SpType {
+    fn from(value: SpType) -> Self {
+        match value {
+            SpType::Switch => Self::Switch,
+            SpType::Sled => Self::Sled,
+            SpType::Power => Self::Power,
+        }
+    }
+}
+
+impl From<gateway_client::types::SpType> for SpType {
+    fn from(value: gateway_client::types::SpType) -> Self {
+        match value {
+            gateway_client::types::SpType::Switch => Self::Switch,
+            gateway_client::types::SpType::Sled => Self::Sled,
+            gateway_client::types::SpType::Power => Self::Power,
+        }
+    }
 }
 
 impl fmt::Display for SpType {

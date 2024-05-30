@@ -7,11 +7,12 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
-use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::ledger::Ledgerable;
+use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::{
@@ -24,12 +25,21 @@ use crate::config::MountConfig;
 use crate::dataset;
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: Uuid,
-    pub pool_id: Uuid,
+    pub pool_id: ZpoolUuid,
 }
 
 #[derive(
@@ -100,7 +110,7 @@ impl SyntheticDisk {
         log: &Logger,
         mount_config: &MountConfig,
         raw: RawSyntheticDisk,
-        zpool_id: Option<Uuid>,
+        zpool_id: Option<ZpoolUuid>,
     ) -> Self {
         let path = if raw.path.is_absolute() {
             raw.path.clone()
@@ -284,7 +294,7 @@ impl Disk {
         log: &Logger,
         mount_config: &MountConfig,
         raw_disk: RawDisk,
-        pool_id: Option<Uuid>,
+        pool_id: Option<ZpoolUuid>,
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let disk: Disk = match raw_disk {

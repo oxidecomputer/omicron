@@ -153,7 +153,7 @@ async fn sim_reserve_sled_resources(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         propolis_id,
-        params.instance.ncpus.0 .0 as u32,
+        u32::from(params.instance.ncpus.0 .0),
         params.instance.memory,
         constraints,
     )
@@ -614,7 +614,7 @@ mod tests {
     ) {
         let other_sleds = add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -658,7 +658,7 @@ mod tests {
         let log = &cptestctx.logctx.log;
         let other_sleds = add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);

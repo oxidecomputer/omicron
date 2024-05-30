@@ -91,8 +91,6 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, delete_crucible_running_snapshot,
-        delete_crucible_snapshot, ensure_all_datasets_and_regions,
         get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
@@ -117,6 +115,7 @@ use sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody;
 use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -380,13 +379,16 @@ async fn ssc_regions_ensure(
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
-    let datasets_and_regions = ensure_all_datasets_and_regions(
-        &log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    let datasets_and_regions = osagactx
+        .nexus()
+        .ensure_all_datasets_and_regions(
+            &log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -400,7 +402,7 @@ async fn ssc_regions_ensure(
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
             blocks_per_extent,
-            extent_count: extent_count.try_into().unwrap(),
+            extent_count,
             gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,
@@ -458,15 +460,18 @@ async fn ssc_regions_ensure(
 async fn ssc_regions_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
-    delete_crucible_regions(
-        log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    osagactx
+        .nexus()
+        .delete_crucible_regions(
+            log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await?;
     info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
     Ok(())
 }
@@ -764,10 +769,9 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+        osagactx
+            .nexus()
+            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
 
@@ -1090,10 +1094,9 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+        osagactx
+            .nexus()
+            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
     Ok(())
@@ -1350,16 +1353,15 @@ async fn ssc_start_running_snapshot_undo(
 
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_running_snapshot(
-            &log,
-            &client,
-            region.id(),
-            snapshot_id,
-        )
-        .await?;
+        osagactx
+            .nexus()
+            .delete_crucible_running_snapshot(
+                &log,
+                &dataset,
+                region.id(),
+                snapshot_id,
+            )
+            .await?;
 
         osagactx
             .datastore()
@@ -1419,7 +1421,7 @@ async fn ssc_create_volume_record(
     let snapshot_volume_construction_request: VolumeConstructionRequest =
         create_snapshot_from_disk(
             &disk_volume_construction_request,
-            Some(&replace_sockets_map),
+            &replace_sockets_map,
         )
         .map_err(|e| {
             ActionError::action_failed(Error::internal_error(&e.to_string()))
@@ -1518,7 +1520,7 @@ async fn ssc_finalize_snapshot_record(
 /// VolumeConstructionRequest and modifying it accordingly.
 fn create_snapshot_from_disk(
     disk: &VolumeConstructionRequest,
-    socket_map: Option<&BTreeMap<String, String>>,
+    socket_map: &BTreeMap<String, String>,
 ) -> anyhow::Result<VolumeConstructionRequest> {
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
@@ -1527,81 +1529,73 @@ fn create_snapshot_from_disk(
     // - set read-only
     // - remove any control sockets
 
-    match disk {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size,
-            sub_volumes,
-            read_only_parent,
-        } => Ok(VolumeConstructionRequest::Volume {
-            id: Uuid::new_v4(),
-            block_size: *block_size,
-            sub_volumes: sub_volumes
-                .iter()
-                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                    create_snapshot_from_disk(&subvol, socket_map)
-                })
-                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
-            read_only_parent: if let Some(read_only_parent) = read_only_parent {
-                Some(Box::new(create_snapshot_from_disk(
-                    read_only_parent,
-                    // no socket modification required for read-only parents
-                    None,
-                )?))
-            } else {
-                None
-            },
-        }),
+    let mut new_vcr = disk.clone();
 
-        VolumeConstructionRequest::Url { id: _, block_size, url } => {
-            Ok(VolumeConstructionRequest::Url {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                url: url.clone(),
-            })
-        }
+    struct Work<'a> {
+        vcr_part: &'a mut VolumeConstructionRequest,
+        socket_modification_required: bool,
+    }
 
-        VolumeConstructionRequest::Region {
-            block_size,
-            blocks_per_extent,
-            extent_count,
-            opts,
-            gen,
-        } => {
-            let mut opts = opts.clone();
+    let mut parts: VecDeque<Work> = VecDeque::new();
+    parts.push_back(Work {
+        vcr_part: &mut new_vcr,
+        socket_modification_required: true,
+    });
 
-            if let Some(socket_map) = socket_map {
-                for target in &mut opts.target {
-                    *target = socket_map
-                        .get(target)
-                        .ok_or_else(|| {
-                            anyhow!("target {} not found in map!", target)
-                        })?
-                        .clone();
+    while let Some(work) = parts.pop_front() {
+        match work.vcr_part {
+            VolumeConstructionRequest::Volume {
+                id,
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                *id = Uuid::new_v4();
+
+                for sub_volume in sub_volumes {
+                    parts.push_back(Work {
+                        vcr_part: sub_volume,
+                        // Inherit if socket modification is required from the
+                        // parent layer
+                        socket_modification_required: work
+                            .socket_modification_required,
+                    });
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(Work {
+                        vcr_part: read_only_parent,
+                        // no socket modification required for read-only parents
+                        socket_modification_required: false,
+                    });
                 }
             }
 
-            opts.id = Uuid::new_v4();
-            opts.read_only = true;
-            opts.control = None;
+            VolumeConstructionRequest::Url { id, .. } => {
+                *id = Uuid::new_v4();
+            }
 
-            Ok(VolumeConstructionRequest::Region {
-                block_size: *block_size,
-                blocks_per_extent: *blocks_per_extent,
-                extent_count: *extent_count,
-                opts,
-                gen: *gen,
-            })
-        }
+            VolumeConstructionRequest::Region { opts, .. } => {
+                opts.id = Uuid::new_v4();
+                opts.read_only = true;
+                opts.control = None;
 
-        VolumeConstructionRequest::File { id: _, block_size, path } => {
-            Ok(VolumeConstructionRequest::File {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                path: path.clone(),
-            })
+                if work.socket_modification_required {
+                    for target in &mut opts.target {
+                        target.clone_from(socket_map.get(target).ok_or_else(
+                            || anyhow!("target {} not found in map!", target),
+                        )?);
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { id, .. } => {
+                *id = Uuid::new_v4();
+            }
         }
     }
+
+    Ok(new_vcr)
 }
 
 #[cfg(test)]
@@ -1721,7 +1715,7 @@ mod test {
         );
 
         let snapshot =
-            create_snapshot_from_disk(&disk, Some(&replace_sockets)).unwrap();
+            create_snapshot_from_disk(&disk, &replace_sockets).unwrap();
 
         eprintln!("{:?}", serde_json::to_string(&snapshot).unwrap());
 
@@ -1876,7 +1870,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -1889,7 +1883,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1976,7 +1970,7 @@ mod test {
         // Verifies:
         // - No snapshot records exist
         // - No region snapshot records exist
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
         assert!(no_snapshot_records_exist(datastore).await);
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
@@ -2016,7 +2010,7 @@ mod test {
         // Read out the instance's assigned sled, then poke the instance to get
         // it from the Starting state to the Running state so the test disk can
         // be snapshotted.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
             .instance_id(instance.identity.id)
@@ -2080,7 +2074,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2219,7 +2213,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -2324,7 +2318,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters

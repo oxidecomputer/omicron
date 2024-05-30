@@ -25,8 +25,8 @@ impl Hardware {
             .context("failed to detect whether host is a gimlet")?;
         ensure!(is_gimlet, "hardware scan only supported on gimlets");
 
-        let hardware =
-            HardwareManager::new(log, SledMode::Auto).map_err(|err| {
+        let hardware = HardwareManager::new(log, SledMode::Auto, vec![])
+            .map_err(|err| {
                 anyhow!("failed to create HardwareManager: {err}")
             })?;
 

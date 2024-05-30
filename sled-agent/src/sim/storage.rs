@@ -20,6 +20,9 @@ use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use sled_hardware::DiskVariant;
 use sled_storage::resources::DiskManagementStatus;
@@ -94,6 +97,8 @@ impl CrucibleDataInner {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
+            source: None,
+            read_only: false,
         };
 
         let old = self.regions.insert(id, region.clone());
@@ -479,14 +484,14 @@ pub(crate) struct PhysicalDisk {
 }
 
 pub(crate) struct Zpool {
-    id: Uuid,
+    id: ZpoolUuid,
     physical_disk_id: Uuid,
     total_size: u64,
     datasets: HashMap<Uuid, CrucibleServer>,
 }
 
 impl Zpool {
-    fn new(id: Uuid, physical_disk_id: Uuid, total_size: u64) -> Self {
+    fn new(id: ZpoolUuid, physical_disk_id: Uuid, total_size: u64) -> Self {
         Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
     }
 
@@ -538,6 +543,10 @@ impl Zpool {
 
         None
     }
+
+    pub fn drop_dataset(&mut self, id: Uuid) {
+        let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
+    }
 }
 
 /// Simulated representation of all storage on a sled.
@@ -547,7 +556,7 @@ pub struct Storage {
     config: Option<OmicronPhysicalDisksConfig>,
     physical_disks: HashMap<Uuid, PhysicalDisk>,
     next_disk_slot: i64,
-    zpools: HashMap<Uuid, Zpool>,
+    zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
 }
@@ -625,7 +634,7 @@ impl Storage {
     /// Adds a Zpool to the sled's simulated storage.
     pub async fn insert_zpool(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         disk_id: Uuid,
         size: u64,
     ) {
@@ -634,13 +643,14 @@ impl Storage {
     }
 
     /// Returns an immutable reference to all zpools
-    pub fn zpools(&self) -> &HashMap<Uuid, Zpool> {
+    pub fn zpools(&self) -> &HashMap<ZpoolUuid, Zpool> {
         &self.zpools
     }
+
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         // Update our local data
@@ -691,14 +701,17 @@ impl Storage {
         self.zpools
             .values()
             .map(|pool| nexus_client::types::ZpoolPutRequest {
-                id: pool.id,
+                id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
                 physical_disk_id: pool.physical_disk_id,
             })
             .collect()
     }
 
-    pub fn get_all_datasets(&self, zpool_id: Uuid) -> Vec<(Uuid, SocketAddr)> {
+    pub fn get_all_datasets(
+        &self,
+        zpool_id: ZpoolUuid,
+    ) -> Vec<(Uuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
@@ -710,7 +723,7 @@ impl Storage {
 
     pub async fn get_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.zpools
@@ -749,11 +762,18 @@ impl Storage {
 
         None
     }
+
+    pub fn drop_dataset(&mut self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+        self.zpools
+            .get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .drop_dataset(dataset_id)
+    }
 }
 
 /// Simulated crucible pantry
 pub struct Pantry {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
     sled_agent: Arc<SledAgent>,
     jobs: Mutex<HashSet<String>>,
@@ -762,7 +782,7 @@ pub struct Pantry {
 impl Pantry {
     pub fn new(sled_agent: Arc<SledAgent>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: OmicronZoneUuid::new_v4(),
             vcrs: Mutex::new(HashMap::default()),
             sled_agent,
             jobs: Mutex::new(HashSet::default()),
@@ -876,7 +896,9 @@ impl Pantry {
                         ..
                     } => (
                         block_size,
-                        block_size * blocks_per_extent * (extent_count as u64),
+                        block_size
+                            * blocks_per_extent
+                            * u64::from(extent_count),
                     ),
 
                     _ => {

@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
-    InstanceState, IpNet, SemverVersion, Vni,
+    InstanceState, SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
@@ -110,19 +110,18 @@ pub struct ProducerEndpoint {
     /// The IP address and port at which `oximeter` can collect metrics from the
     /// producer.
     pub address: SocketAddr,
-    /// The API base route from which `oximeter` can collect metrics.
-    ///
-    /// The full route is `{base_route}/{id}`.
-    pub base_route: String,
     /// The interval on which `oximeter` should collect metrics.
     pub interval: Duration,
 }
 
-impl ProducerEndpoint {
-    /// Return the route that can be used to request metric data.
-    pub fn collection_route(&self) -> String {
-        format!("{}/{}", &self.base_route, &self.id)
-    }
+/// Response to a successful producer registration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ProducerRegistrationResponse {
+    /// Period within which producers must renew their lease.
+    ///
+    /// Producers are required to periodically re-register with Nexus, to ensure
+    /// that they are still collected from by `oximeter`.
+    pub lease_duration: Duration,
 }
 
 /// An identifier for a single update artifact.
@@ -252,7 +251,7 @@ mod tests {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum HostIdentifier {
-    Ip(IpNet),
+    Ip(oxnet::IpNet),
     Vpc(Vni),
 }
 

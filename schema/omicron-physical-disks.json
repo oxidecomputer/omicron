@@ -65,10 +65,13 @@
           "$ref": "#/definitions/DiskIdentity"
         },
         "pool_id": {
-          "type": "string",
-          "format": "uuid"
+          "$ref": "#/definitions/TypedUuidForZpoolKind"
         }
       }
+    },
+    "TypedUuidForZpoolKind": {
+      "type": "string",
+      "format": "uuid"
     }
   }
 }

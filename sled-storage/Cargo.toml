@@ -3,6 +3,9 @@ name = "sled-storage"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -16,6 +19,7 @@ futures.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 rand.workspace = true
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
 serde.workspace = true

@@ -11,6 +11,7 @@ use super::ast::logical_op::LogicalOp;
 use super::ast::table_ops::filter::CompoundFilter;
 use super::ast::table_ops::filter::FilterExpr;
 use super::ast::table_ops::group_by::GroupBy;
+use super::ast::table_ops::limit::Limit;
 use super::ast::table_ops::BasicTableOp;
 use super::ast::table_ops::TableOp;
 use super::ast::SplitQuery;
@@ -96,7 +97,7 @@ impl Query {
         self.parsed.transformations()
     }
 
-    /// Return the set of all predicates in the query, coalesced.
+    /// Return predicates which can be pushed down into the database, if any.
     ///
     /// Query optimization is a large topic. There are few rules, and many
     /// heuristics. However, one of those is extremely useful for our case:
@@ -132,6 +133,14 @@ impl Query {
     ///
     /// Note that this may return `None`, in the case where there are zero
     /// predicates of any kind.
+    ///
+    /// # Limit operations
+    ///
+    /// OxQL table operations which limit data, such as `first k` or `last k`,
+    /// can also be pushed down into the database in certain cases. Since they
+    /// change the number of points, but not the timeseries, they cannot be
+    /// pushed through an `align` operation. But they _can_ be pushed through
+    /// grouping or other filters.
     //
     // Pushing filters through a group by. Consider the following data:
     //
@@ -256,10 +265,11 @@ impl Query {
     // So that also works fine.
     pub(crate) fn coalesced_predicates(
         &self,
-        mut outer: Option<Filter>,
+        outer: Option<Filter>,
     ) -> Option<Filter> {
-        let maybe_filter = self.transformations().iter().rev().fold(
-            None,
+        self.transformations().iter().rev().fold(
+            // We'll start from the predicates passed from the outer query.
+            outer,
             |maybe_filter, next_tr| {
                 // Transformations only return basic ops, since all the
                 // subqueries must be at the prefix of the query.
@@ -269,13 +279,6 @@ impl Query {
 
                 match op {
                     BasicTableOp::GroupBy(GroupBy { identifiers, .. }) => {
-                        // We may have been passed predicates from an outer
-                        // query. Those also need to be restricted, if we're
-                        // trying to push them through a group_by operation.
-                        outer = outer.as_ref().and_then(|outer| {
-                            restrict_filter_idents(outer, identifiers)
-                        });
-
                         // Only push through columns referred to in the group by
                         // itself, which replaces the current filter.
                         maybe_filter.as_ref().and_then(|current| {
@@ -290,20 +293,84 @@ impl Query {
                             Some(filter.clone())
                         }
                     }
+                    BasicTableOp::Limit(limit) => {
+                        // A filter can be pushed through a limiting table
+                        // operation in a few cases, see `can_reorder_around`
+                        // for details.
+                        maybe_filter.and_then(|filter| {
+                            if filter.can_reorder_around(limit) {
+                                Some(filter)
+                            } else {
+                                None
+                            }
+                        })
+                    }
                     _ => maybe_filter,
                 }
             },
-        );
+        )
+    }
 
-        // Merge in any predicates passed from an outer query, which may have
-        // been restricted as we moved through group_by operations.
-        match (outer, maybe_filter) {
-            (None, any) => any,
-            (Some(outer), None) => Some(outer),
-            (Some(outer), Some(inner)) => {
-                Some(outer.merge(&inner, LogicalOp::And))
-            }
-        }
+    /// Coalesce any limiting table operations, if possible.
+    pub(crate) fn coalesced_limits(
+        &self,
+        maybe_limit: Option<Limit>,
+    ) -> Option<Limit> {
+        self.transformations().iter().rev().fold(
+            maybe_limit,
+            |maybe_limit, next_tr| {
+                // Transformations only return basic ops, since all the
+                // subqueries must be at the prefix of the query.
+                let TableOp::Basic(op) = next_tr else {
+                    unreachable!();
+                };
+
+                match op {
+                    BasicTableOp::Filter(filter) => {
+                        // A limit can be pushed through a filter operation, in
+                        // only a few cases, see `can_reorder_around` for
+                        // details.
+                        maybe_limit.and_then(|limit| {
+                            if filter.can_reorder_around(&limit) {
+                                Some(limit)
+                            } else {
+                                None
+                            }
+                        })
+                    }
+                    BasicTableOp::Limit(limit) => {
+                        // It is possible to "merge" limits if they're of the
+                        // same kind. To do so, we simply take the one with the
+                        // smaller count. For example
+                        //
+                        // ... | first 10 | first 5
+                        //
+                        // is equivalent to just
+                        //
+                        // ... | first 5
+                        let new_limit = if let Some(current_limit) = maybe_limit
+                        {
+                            if limit.kind == current_limit.kind {
+                                Limit {
+                                    kind: limit.kind,
+                                    count: limit.count.min(current_limit.count),
+                                }
+                            } else {
+                                // If the limits are of different kinds, we replace
+                                // the current one, i.e., drop it and start passing
+                                // through the inner one.
+                                *limit
+                            }
+                        } else {
+                            // No outer limit at all, simply take this one.
+                            *limit
+                        };
+                        Some(new_limit)
+                    }
+                    _ => maybe_limit,
+                }
+            },
+        )
     }
 
     pub(crate) fn split(&self) -> SplitQuery {
@@ -370,6 +437,8 @@ mod tests {
     use crate::oxql::ast::table_ops::filter::FilterExpr;
     use crate::oxql::ast::table_ops::filter::SimpleFilter;
     use crate::oxql::ast::table_ops::join::Join;
+    use crate::oxql::ast::table_ops::limit::Limit;
+    use crate::oxql::ast::table_ops::limit::LimitKind;
     use crate::oxql::ast::table_ops::BasicTableOp;
     use crate::oxql::ast::table_ops::TableOp;
     use crate::oxql::ast::SplitQuery;
@@ -833,5 +902,132 @@ mod tests {
                 "All subqueries should have the same end time."
             );
         }
+    }
+
+    #[test]
+    fn test_coalesce_limits() {
+        let query = Query::new("get a:b | last 5").unwrap();
+        let lim = query.coalesced_limits(None).expect("Should have a limit");
+        assert_eq!(
+            lim.kind,
+            LimitKind::Last,
+            "This limit op has the wrong kind"
+        );
+        assert_eq!(lim.count.get(), 5, "Limit has the wrong count");
+    }
+
+    #[test]
+    fn test_coalesce_limits_merge_same_kind_within_query() {
+        let qs = ["get a:b | last 10 | last 5", "get a:b | last 5 | last 10"];
+        for q in qs {
+            let query = Query::new(q).unwrap();
+            let lim =
+                query.coalesced_limits(None).expect("Should have a limit");
+            assert_eq!(
+                lim.kind,
+                LimitKind::Last,
+                "This limit op has the wrong kind"
+            );
+            assert_eq!(
+                lim.count.get(),
+                5,
+                "Should have merged two limits of the same kind, \
+                taking the one with the smaller count"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coalesce_limits_do_not_merge_different_kinds_within_query() {
+        let qs =
+            ["get a:b | first 10 | last 10", "get a:b | last 10 | first 10"];
+        let kinds = [LimitKind::First, LimitKind::Last];
+        for (q, kind) in qs.iter().zip(kinds) {
+            let query = Query::new(q).unwrap();
+            let lim =
+                query.coalesced_limits(None).expect("Should have a limit");
+            assert_eq!(lim.kind, kind, "This limit op has the wrong kind");
+            assert_eq!(lim.count.get(), 10);
+        }
+    }
+
+    #[test]
+    fn test_coalesce_limits_rearrange_around_timestamp_filters() {
+        let qs = [
+            "get a:b | filter timestamp < @now() | first 10",
+            "get a:b | filter timestamp > @now() | last 10",
+        ];
+        let kinds = [LimitKind::First, LimitKind::Last];
+        for (q, kind) in qs.iter().zip(kinds) {
+            let query = Query::new(q).unwrap();
+            let lim = query.coalesced_limits(None).expect(
+                "This limit op should have been re-arranged around \
+                    a compatible timestamp filter",
+            );
+            assert_eq!(lim.kind, kind, "This limit op has the wrong kind");
+            assert_eq!(lim.count.get(), 10);
+        }
+    }
+
+    #[test]
+    fn test_coalesce_limits_do_not_rearrange_around_incompatible_timestamp_filters(
+    ) {
+        let qs = [
+            "get a:b | filter timestamp < @now() | last 10",
+            "get a:b | filter timestamp > @now() | first 10",
+        ];
+        for q in qs {
+            let query = Query::new(q).unwrap();
+            assert!(
+                query.coalesced_limits(None).is_none(),
+                "This limit op should have be merged around an \
+                incompatible timestamp filter"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coalesce_limits_merge_from_outer_query() {
+        let query = Query::new("get a:b | last 10").unwrap();
+        let outer =
+            Limit { kind: LimitKind::Last, count: 5.try_into().unwrap() };
+        let lim = query
+            .coalesced_limits(Some(outer))
+            .expect("Should have a limit here");
+        assert_eq!(lim.kind, LimitKind::Last, "Limit has the wrong kind");
+        assert_eq!(
+            lim.count.get(),
+            5,
+            "Did not pass through outer limit correctly"
+        );
+    }
+
+    #[test]
+    fn test_coalesce_limits_do_not_merge_different_kind_from_outer_query() {
+        let query = Query::new("get a:b | last 10").unwrap();
+        let outer =
+            Limit { kind: LimitKind::First, count: 5.try_into().unwrap() };
+        let lim = query
+            .coalesced_limits(Some(outer))
+            .expect("Should have a limit here");
+        assert_eq!(lim.kind, LimitKind::Last, "Limit has the wrong kind");
+        assert_eq!(
+            lim.count.get(),
+            10,
+            "Inner limit of different kind should ignore the outer one"
+        );
+    }
+
+    #[test]
+    fn test_coalesce_limits_do_not_coalesce_incompatible_kind_from_outer_query()
+    {
+        let query = Query::new("get a:b | filter timestamp > @now()").unwrap();
+        let outer =
+            Limit { kind: LimitKind::First, count: 5.try_into().unwrap() };
+        assert!(
+            query.coalesced_limits(Some(outer)).is_none(),
+            "Should not coalesce a limit from the outer query, when the \
+            inner query contains an incompatible timestamp filter"
+        );
     }
 }

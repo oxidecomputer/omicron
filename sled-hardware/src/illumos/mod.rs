@@ -263,7 +263,7 @@ impl HardwareView {
             updates.push(DiskAdded(disk.clone()));
         }
 
-        self.disks = polled_hw.disks.clone();
+        self.disks.clone_from(&polled_hw.disks);
     }
 }
 
@@ -509,6 +509,7 @@ fn poll_blkdev_node(
 fn poll_device_tree(
     log: &Logger,
     inner: &Arc<Mutex<HardwareView>>,
+    nongimlet_observed_disks: &[UnparsedDisk],
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
@@ -517,28 +518,36 @@ fn poll_device_tree(
 
         Err(e) => {
             if let Error::NotAGimlet(root_node) = &e {
+                let mut inner = inner.lock().unwrap();
+
                 if root_node.as_str() == "i86pc" {
                     // If on i86pc, generate some baseboard information before
                     // returning this error. Each sled agent has to be uniquely
                     // identified for multiple non-gimlets to work.
-                    {
-                        let mut inner = inner.lock().unwrap();
+                    if inner.baseboard.is_none() {
+                        let pc_baseboard = Baseboard::new_pc(
+                            gethostname().into_string().unwrap_or_else(|_| {
+                                Uuid::new_v4().simple().to_string()
+                            }),
+                            root_node.clone(),
+                        );
 
-                        if inner.baseboard.is_none() {
-                            let pc_baseboard = Baseboard::new_pc(
-                                gethostname().into_string().unwrap_or_else(
-                                    |_| Uuid::new_v4().simple().to_string(),
-                                ),
-                                root_node.clone(),
-                            );
+                        info!(
+                            log,
+                            "Generated i86pc baseboard {:?}", pc_baseboard
+                        );
 
-                            info!(
-                                log,
-                                "Generated i86pc baseboard {:?}", pc_baseboard
-                            );
+                        inner.baseboard = Some(pc_baseboard);
+                    }
+                }
 
-                            inner.baseboard = Some(pc_baseboard);
-                        }
+                // For platforms that don't support the HardwareSnapshot
+                // functionality, sled-agent can be supplied a fixed list of
+                // UnparsedDisks. Add those to the HardwareSnapshot here if they
+                // are missing (which they will be for non-gimlets).
+                for observed_disk in nongimlet_observed_disks {
+                    if !inner.disks.contains(observed_disk) {
+                        inner.disks.insert(observed_disk.clone());
                     }
                 }
             }
@@ -572,10 +581,11 @@ fn poll_device_tree(
 async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
+    nongimlet_observed_disks: Vec<UnparsedDisk>,
     tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
-        match poll_device_tree(&log, &inner, &tx) {
+        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
             // We've already warned about `NotAGimlet` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAGimlet(_)) => (),
@@ -604,7 +614,13 @@ impl HardwareManager {
     ///
     /// Arguments:
     /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    pub fn new(log: &Logger, sled_mode: SledMode) -> Result<Self, String> {
+    /// - `nongimlet_observed_disks`: For non-gimlets, inject these disks into
+    ///    HardwareSnapshot objects.
+    pub fn new(
+        log: &Logger,
+        sled_mode: SledMode,
+        nongimlet_observed_disks: Vec<UnparsedDisk>,
+    ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
 
@@ -650,7 +666,7 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &inner, &tx) {
+        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
             Ok(_) => (),
             // Allow non-gimlet devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -666,7 +682,8 @@ impl HardwareManager {
         let inner2 = inner.clone();
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            hardware_tracking_task(log2, inner2, tx2).await
+            hardware_tracking_task(log2, inner2, nongimlet_observed_disks, tx2)
+                .await
         });
 
         Ok(Self { log, inner, tx })

@@ -870,6 +870,7 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -1305,7 +1306,7 @@ mod tests {
         // First, we format the U.2s to have a zpool. This should work, even
         // without looping in the StorageManager.
         let first_u2 = &raw_disks[0];
-        let first_pool_id = Uuid::new_v4();
+        let first_pool_id = ZpoolUuid::new_v4();
         let _disk = crate::disk::Disk::new(
             &logctx.log,
             &harness.mount_config(),
@@ -1317,7 +1318,7 @@ mod tests {
         .expect("Failed to format U.2");
 
         let second_u2 = &raw_disks[1];
-        let second_pool_id = Uuid::new_v4();
+        let second_pool_id = ZpoolUuid::new_v4();
         let _disk = crate::disk::Disk::new(
             &logctx.log,
             &harness.mount_config(),

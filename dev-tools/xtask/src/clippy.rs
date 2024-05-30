@@ -13,6 +13,9 @@ pub struct ClippyArgs {
     /// Automatically apply lint suggestions.
     #[clap(long)]
     fix: bool,
+    /// Error format passed to `cargo clippy`.
+    #[clap(long, value_name = "FMT")]
+    message_format: Option<String>,
 }
 
 pub fn run_cmd(args: ClippyArgs) -> Result<()> {
@@ -25,6 +28,17 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         command.arg("--fix");
     }
 
+    // Pass along the `--message-format` flag if it was provided.
+    //
+    // We don't really care about validating that it's a valid argument to
+    // `cargo check --message-format`, because `cargo check` will error out if
+    // it's unrecognized, and repeating the validation here just presents an
+    // opportunity to get out of sync with what Cargo actually accepts should a
+    // new message format be added.
+    if let Some(fmt) = args.message_format {
+        command.args(["--message-format", &fmt]);
+    }
+
     command
         // Make sure we check everything.
         .arg("--all-targets")
@@ -34,40 +48,7 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         //
         // We disallow warnings by default.
         .arg("--deny")
-        .arg("warnings")
-        // Clippy's style nits are useful, but not worth keeping in CI.  This
-        // override belongs in src/lib.rs, and it is there, but that doesn't
-        // reliably work due to rust-lang/rust-clippy#6610.
-        .arg("--allow")
-        .arg("clippy::style")
-        // But continue to warn on anything in the "disallowed_" namespace.
-        // (These will be turned into errors by `--deny warnings` above.)
-        .arg("--warn")
-        .arg("clippy::disallowed_macros")
-        .arg("--warn")
-        .arg("clippy::disallowed_methods")
-        .arg("--warn")
-        .arg("clippy::disallowed_names")
-        .arg("--warn")
-        .arg("clippy::disallowed_script_idents")
-        .arg("--warn")
-        .arg("clippy::disallowed_types")
-        // Warn on some more style lints that are relatively stable and make
-        // sense.
-        .arg("--warn")
-        .arg("clippy::iter_cloned_collect")
-        .arg("--warn")
-        .arg("clippy::iter_next_slice")
-        .arg("--warn")
-        .arg("clippy::iter_nth")
-        .arg("--warn")
-        .arg("clippy::iter_nth_zero")
-        .arg("--warn")
-        .arg("clippy::iter_skip_next")
-        .arg("--warn")
-        .arg("clippy::len_zero")
-        .arg("--warn")
-        .arg("clippy::redundant_field_names");
+        .arg("warnings");
 
     eprintln!(
         "running: {:?} {}",

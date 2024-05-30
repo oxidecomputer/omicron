@@ -40,6 +40,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::debug;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -696,7 +698,7 @@ pub struct TestDataset {
 }
 
 pub struct TestZpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub size: ByteCount,
     pub datasets: Vec<TestDataset>,
 }
@@ -741,7 +743,7 @@ impl DiskTest {
         self.add_zpool_with_dataset_ext(
             cptestctx,
             Uuid::new_v4(),
-            Uuid::new_v4(),
+            ZpoolUuid::new_v4(),
             Uuid::new_v4(),
             Self::DEFAULT_ZPOOL_SIZE_GIB,
         )
@@ -752,7 +754,7 @@ impl DiskTest {
         &mut self,
         cptestctx: &ControlPlaneTestContext<N>,
         physical_disk_id: Uuid,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
         gibibytes: u32,
     ) {
@@ -783,7 +785,7 @@ impl DiskTest {
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
-                id: zpool.id,
+                id: zpool.id.into_untyped_uuid(),
                 physical_disk_id,
                 sled_id: self.sled_agent.id,
             };
@@ -865,7 +867,7 @@ impl DiskTest {
                             .flat_map(|sled_agent| {
                                 sled_agent.zpools.iter().map(|z| z.id)
                             })
-                            .collect::<std::collections::HashSet<Uuid>>();
+                            .collect::<std::collections::HashSet<ZpoolUuid>>();
 
                         if all_zpools.contains(&zpool.id) {
                             Ok(())

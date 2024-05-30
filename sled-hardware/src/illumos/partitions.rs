@@ -12,9 +12,9 @@ use crate::{DiskPaths, DiskVariant, Partition, PooledDiskError};
 use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::Logger;
-use uuid::Uuid;
 
 #[cfg(test)]
 use illumos_utils::zpool::MockZpool as Zpool;
@@ -148,7 +148,7 @@ pub fn ensure_partition_layout(
     paths: &DiskPaths,
     variant: DiskVariant,
     identity: &DiskIdentity,
-    zpool_id: Option<Uuid>,
+    zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     internal_ensure_partition_layout::<libefi_illumos::Gpt>(
         log, paths, variant, identity, zpool_id,
@@ -162,7 +162,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     paths: &DiskPaths,
     variant: DiskVariant,
     identity: &DiskIdentity,
-    zpool_id: Option<Uuid>,
+    zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     // Open the "Whole Disk" as a raw device to be parsed by the
     // libefi-illumos library. This lets us peek at the GPT before
@@ -431,7 +431,7 @@ mod test {
             },
             DiskVariant::U2,
             &mock_disk_identity(),
-            Some(Uuid::new_v4()),
+            Some(ZpoolUuid::new_v4()),
         )
         .expect("Should have succeeded partitioning disk");
 

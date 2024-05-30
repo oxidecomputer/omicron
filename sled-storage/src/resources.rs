@@ -13,6 +13,7 @@ use cfg_if::cfg_if;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -20,7 +21,6 @@ use slog::{info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 // The directory within the debug dataset in which bundles are created.
 const BUNDLE_DIRECTORY: &str = "bundle";
@@ -35,7 +35,7 @@ pub enum DiskManagementError {
     NotFound,
 
     #[error("Expected zpool UUID of {expected}, but saw {observed}")]
-    ZpoolUuidMismatch { expected: Uuid, observed: Uuid },
+    ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
 
     #[error("Failed to access keys necessary to unlock storage. This error may be transient.")]
     KeyManager(String),
@@ -347,7 +347,7 @@ impl StorageResources {
                 // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
                 ManagedDisk::ExplicitlyManaged(disk) => {
-                    if self.control_plane_disks.get(identity).is_none() {
+                    if !self.control_plane_disks.contains_key(identity) {
                         *managed_disk =
                             ManagedDisk::Unmanaged(RawDisk::from(disk.clone()));
                         updated = true;
@@ -531,8 +531,10 @@ impl StorageResources {
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) {
         info!(self.log, "Removing disk"; "identity" => ?id);
         let Some(entry) = self.disks.values.get(id) else {
+            info!(self.log, "Disk not found by id, exiting"; "identity" => ?id);
             return;
         };
+
         let synthetic = match entry {
             ManagedDisk::ExplicitlyManaged(disk)
             | ManagedDisk::ImplicitlyManaged(disk) => disk.is_synthetic(),
@@ -548,6 +550,7 @@ impl StorageResources {
                 // In production, we disallow removal of synthetic disks as they
                 // are only added once.
                 if synthetic {
+                    info!(self.log, "Not removing synthetic disk"; "identity" => ?id);
                     return;
                 }
             }

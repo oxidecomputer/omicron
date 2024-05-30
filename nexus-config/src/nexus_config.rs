@@ -361,6 +361,8 @@ pub struct BackgroundTaskConfig {
     pub nat_cleanup: NatCleanupConfig,
     /// configuration for inventory tasks
     pub inventory: InventoryConfig,
+    /// configuration for physical disk adoption tasks
+    pub physical_disk_adoption: PhysicalDiskAdoptionConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
@@ -373,6 +375,14 @@ pub struct BackgroundTaskConfig {
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement task
     pub region_replacement: RegionReplacementConfig,
+    /// configuration for instance watcher task
+    pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for service VPC firewall propagation task
+    pub service_firewall_propagation: ServiceFirewallPropagationConfig,
+    /// configuration for v2p mapping propagation task
+    pub v2p_mapping_propagation: V2PMappingPropagationConfig,
+    /// configuration for abandoned VMM reaper task
+    pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
 }
 
 #[serde_as]
@@ -414,6 +424,20 @@ pub struct ExternalEndpointsConfig {
     pub period_secs: Duration,
     // Other policy around the TLS certificates could go here (e.g.,
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PhysicalDiskAdoptionConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// A toggle to disable automated disk adoption.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -498,6 +522,38 @@ pub struct BlueprintTasksConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RegionReplacementConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstanceWatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ServiceFirewallPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct V2PMappingPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AbandonedVmmReaperConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -732,12 +788,17 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
+            physical_disk_adoption.period_secs = 30
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
+            instance_watcher.period_secs = 30
+            service_firewall_propagation.period_secs = 300
+            v2p_mapping_propagation.period_secs = 30
+            abandoned_vmm_reaper.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -845,6 +906,10 @@ mod test {
                             nkeep: 11,
                             disable: false,
                         },
+                        physical_disk_adoption: PhysicalDiskAdoptionConfig {
+                            period_secs: Duration::from_secs(30),
+                            disable: false,
+                        },
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -862,6 +927,19 @@ mod test {
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        instance_watcher: InstanceWatcherConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
+                        service_firewall_propagation:
+                            ServiceFirewallPropagationConfig {
+                                period_secs: Duration::from_secs(300),
+                            },
+                        v2p_mapping_propagation: V2PMappingPropagationConfig {
+                            period_secs: Duration::from_secs(30)
+                        },
+                        abandoned_vmm_reaper: AbandonedVmmReaperConfig {
+                            period_secs: Duration::from_secs(60),
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -921,12 +999,17 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 3
             inventory.disable = false
+            physical_disk_adoption.period_secs = 30
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
+            instance_watcher.period_secs = 30
+            service_firewall_propagation.period_secs = 300
+            v2p_mapping_propagation.period_secs = 30
+            abandoned_vmm_reaper.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,

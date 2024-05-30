@@ -15,6 +15,8 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
+use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
@@ -180,6 +182,54 @@ impl DataStore {
 
         Ok(all_datasets)
     }
+
+    pub async fn dataset_physical_disk_in_service(
+        &self,
+        dataset_id: Uuid,
+    ) -> LookupResult<bool> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        let dataset = {
+            use db::schema::dataset::dsl;
+
+            dsl::dataset
+                .filter(dsl::id.eq(dataset_id))
+                .select(Dataset::as_select())
+                .first_async::<Dataset>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        let zpool = {
+            use db::schema::zpool::dsl;
+
+            dsl::zpool
+                .filter(dsl::id.eq(dataset.pool_id))
+                .select(Zpool::as_select())
+                .first_async::<Zpool>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        let physical_disk = {
+            use db::schema::physical_disk::dsl;
+
+            dsl::physical_disk
+                .filter(dsl::id.eq(zpool.physical_disk_id))
+                .select(PhysicalDisk::as_select())
+                .first_async::<PhysicalDisk>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        Ok(physical_disk.disk_policy == PhysicalDiskPolicy::InService)
+    }
 }
 
 #[cfg(test)]
@@ -231,7 +281,7 @@ mod test {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(zpool_id, sled_id, Uuid::new_v4());
         datastore
-            .zpool_upsert(opctx, zpool)
+            .zpool_insert(opctx, zpool)
             .await
             .expect("failed to upsert zpool");
 

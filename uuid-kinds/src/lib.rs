@@ -6,7 +6,7 @@
 
 //! A registry for UUID kinds used in Omicron and related projects.
 //!
-//! See this crate's `README.md` for more information.
+//! See this crate's `README.adoc` for more information.
 
 // Export these types so that other users don't have to pull in newtype-uuid.
 #[doc(no_inline)]
@@ -20,16 +20,20 @@ use schemars::JsonSchema;
 macro_rules! impl_typed_uuid_kind {
     ($($kind:ident => $tag:literal),* $(,)?) => {
         $(
-            #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
-            pub enum $kind {}
+            paste::paste! {
+                #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
+                pub enum [< $kind Kind>] {}
 
-            impl TypedUuidKind for $kind {
-                #[inline]
-                fn tag() -> TypedUuidTag {
-                    // `const` ensures that tags are validated at compile-time.
-                    const TAG: TypedUuidTag = TypedUuidTag::new($tag);
-                    TAG
+                impl TypedUuidKind for [< $kind Kind >] {
+                    #[inline]
+                    fn tag() -> TypedUuidTag {
+                        // `const` ensures that tags are validated at compile-time.
+                        const TAG: TypedUuidTag = TypedUuidTag::new($tag);
+                        TAG
+                    }
                 }
+
+                pub type [< $kind Uuid>] = TypedUuid::<[< $kind Kind >]>;
             }
         )*
     };
@@ -45,13 +49,19 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
-    DownstairsKind => "downstairs",
-    DownstairsRegionKind => "downstairs_region",
-    LoopbackAddressKind => "loopback_address",
-    OmicronZoneKind => "service",
-    SledKind => "sled",
-    TufRepoKind => "tuf_repo",
-    UpstairsKind => "upstairs",
-    UpstairsRepairKind => "upstairs_repair",
-    UpstairsSessionKind => "upstairs_session",
+    Collection => "collection",
+    Downstairs => "downstairs",
+    DownstairsRegion => "downstairs_region",
+    ExternalIp => "external_ip",
+    Instance => "instance",
+    LoopbackAddress => "loopback_address",
+    OmicronZone => "service",
+    PhysicalDisk => "physical_disk",
+    Sled => "sled",
+    TufRepo => "tuf_repo",
+    Upstairs => "upstairs",
+    UpstairsRepair => "upstairs_repair",
+    UpstairsSession => "upstairs_session",
+    Vnic => "vnic",
+    Zpool => "zpool",
 }

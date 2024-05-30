@@ -13,6 +13,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 impl Nexus {
     pub(crate) async fn bgtasks_list(
@@ -52,5 +53,39 @@ impl Nexus {
         let status = driver.task_status(task);
         let period = driver.task_period(task);
         Ok(BackgroundTask::new(task.name(), description, period, status))
+    }
+
+    pub(crate) async fn bgtask_activate(
+        &self,
+        opctx: &OpContext,
+        mut names: BTreeSet<String>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let driver = &self.background_tasks.driver;
+
+        // Ensure all task names are valid by removing them from the set of
+        // names as we find them.
+        let tasks_to_activate: Vec<_> =
+            driver.tasks().filter(|t| names.remove(t.name())).collect();
+
+        // If any names weren't recognized, return an error.
+        if !names.is_empty() {
+            let mut names_str = "background tasks: ".to_owned();
+            for (i, name) in names.iter().enumerate() {
+                names_str.push_str(name);
+                if i < names.len() - 1 {
+                    names_str.push_str(", ");
+                }
+            }
+
+            return Err(LookupType::ByOther(names_str)
+                .into_not_found(ResourceType::BackgroundTask));
+        }
+
+        for task in tasks_to_activate {
+            driver.activate(task);
+        }
+
+        Ok(())
     }
 }

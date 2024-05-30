@@ -33,6 +33,10 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -165,7 +169,7 @@ impl Server {
         // on the physical rack.
         for zpool in &config.storage.zpools {
             let physical_disk_id = Uuid::new_v4();
-            let zpool_id = Uuid::new_v4();
+            let zpool_id = ZpoolUuid::new_v4();
             let vendor = "synthetic-vendor".to_string();
             let serial = format!("synthetic-serial-{zpool_id}");
             let model = "synthetic-model".to_string();
@@ -188,7 +192,7 @@ impl Server {
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
             datasets.push(NexusTypes::DatasetCreateRequest {
-                zpool_id,
+                zpool_id: zpool_id.into_untyped_uuid(),
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
@@ -363,7 +367,7 @@ pub async fn run_standalone_server(
         underlay_address: *http_bound.ip(),
         zone_type: OmicronZoneType::InternalDns {
             dataset: OmicronZoneDataset {
-                pool_name: ZpoolName::new_external(Uuid::new_v4()),
+                pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
             },
             http_address: http_bound,
             dns_address: match dns.dns_server.local_address() {
@@ -398,7 +402,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "nexus".parse().unwrap(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -432,7 +436,7 @@ pub async fn run_standalone_server(
             underlay_address: ip,
             zone_type: OmicronZoneType::ExternalDns {
                 dataset: OmicronZoneDataset {
-                    pool_name: ZpoolName::new_external(Uuid::new_v4()),
+                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 },
                 http_address: external_dns_internal_addr,
                 dns_address: SocketAddr::V6(external_dns_internal_addr),
@@ -441,7 +445,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "external-dns".parse().unwrap(),
                     ip: DNS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -478,8 +482,9 @@ pub async fn run_standalone_server(
     let physical_disks = server.sled_agent.get_all_physical_disks().await;
     let zpools = server.sled_agent.get_zpools().await;
     for zpool in &zpools {
+        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id);
         for (dataset_id, address) in
-            server.sled_agent.get_datasets(zpool.id).await
+            server.sled_agent.get_datasets(zpool_id).await
         {
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool.id,
@@ -498,17 +503,18 @@ pub async fn run_standalone_server(
     };
 
     let disks = server.sled_agent.omicron_physical_disks_list().await?;
-    let services =
-        zones.iter().map(|z| z.to_nexus_service_req(config.id)).collect();
     let mut sled_configs = BTreeMap::new();
-    sled_configs.insert(config.id, SledConfig { disks, zones });
+    sled_configs.insert(
+        SledUuid::from_untyped_uuid(config.id),
+        SledConfig { disks, zones },
+    );
 
     let rack_init_request = NexusTypes::RackInitializationRequest {
         blueprint: build_initial_blueprint_from_sled_configs(
-            sled_configs,
+            &sled_configs,
             internal_dns_version,
-        ),
-        services,
+        )
+        .expect("failed to construct initial blueprint"),
         physical_disks,
         zpools,
         datasets,
@@ -522,13 +528,14 @@ pub async fn run_standalone_server(
             HashMap::new(),
         ),
         rack_network_config: NexusTypes::RackNetworkConfigV1 {
-            rack_subnet: Ipv6Addr::LOCALHOST.into(),
+            rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,
             ports: Vec::new(),
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
+        allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

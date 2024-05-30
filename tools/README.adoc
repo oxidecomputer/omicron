@@ -66,10 +66,9 @@ version of a specific dependency. Some of these operate on Rust dependencies
 https://github.com/oxidecomputer/crucible[crucible]), while others are related
 to the binaries downloaded by the `cargo xtask download` scripts.
 
-
 == "Virtual Hardware" Management
 
 Another class of scripts is related to the setup and teardown of "virtual
 hardware", which can be useful when deploying omicron with a real sled agent.
-Current examples include the `{create,destroy}_virtual_hardware.sh` pair.
+Current examples includes the `cargo xtask virtual-hardware` task.
 See xref:docs/how-to-run.adoc[] for details.

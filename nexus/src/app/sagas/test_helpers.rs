@@ -34,7 +34,7 @@ type ControlPlaneTestContext =
 pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     OpContext::for_tests(
         cptestctx.logctx.log.new(o!()),
-        cptestctx.server.apictx().nexus.datastore().clone(),
+        cptestctx.server.server_context().nexus.datastore().clone(),
     )
 }
 
@@ -42,7 +42,7 @@ pub(crate) async fn instance_start(
     cptestctx: &ControlPlaneTestContext,
     id: &Uuid,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -62,7 +62,7 @@ pub(crate) async fn instance_stop(
     cptestctx: &ControlPlaneTestContext,
     id: &Uuid,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -83,7 +83,7 @@ pub(crate) async fn instance_stop_by_name(
     name: &str,
     project_name: &str,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -104,7 +104,7 @@ pub(crate) async fn instance_delete_by_name(
     name: &str,
     project_name: &str,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -126,7 +126,7 @@ pub(crate) async fn instance_simulate(
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let sa = nexus
         .instance_sled_by_id(instance_id)
         .await
@@ -145,7 +145,7 @@ pub(crate) async fn instance_simulate_by_name(
           "instance_name" => %name,
           "project_name" => %project_name);
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -168,7 +168,7 @@ pub async fn instance_fetch(
     cptestctx: &ControlPlaneTestContext,
     instance_id: Uuid,
 ) -> InstanceAndActiveVmm {
-    let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let opctx = test_opctx(&cptestctx);
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id)
@@ -194,7 +194,7 @@ pub async fn no_virtual_provisioning_resource_records_exist(
     use nexus_db_queries::db::model::VirtualProvisioningResource;
     use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
 
-    let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
     datastore
@@ -223,7 +223,7 @@ pub async fn no_virtual_provisioning_collection_records_using_instances(
     use nexus_db_queries::db::model::VirtualProvisioningCollection;
     use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
-    let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
     datastore

@@ -20,8 +20,7 @@ use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::redact_variable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use std::io::BufReader;
 use std::io::BufWriter;
@@ -57,7 +56,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Setup
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_background(
@@ -119,7 +118,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to assemble reconfigurator state");
 
     // Smoke check the initial state.
-    let sled_id: TypedUuid<SledKind> = SLED_AGENT_UUID.parse().unwrap();
+    let sled_id: SledUuid = SLED_AGENT_UUID.parse().unwrap();
     assert!(state1.planning_input.sled_resources(&sled_id).is_some());
     assert!(!state1.planning_input.service_ip_pool_ranges().is_empty());
     assert!(!state1.silo_names.is_empty());

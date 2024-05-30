@@ -4,6 +4,7 @@
 
 //! omdb commands that query oximeter
 
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
@@ -20,7 +21,14 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct OximeterArgs {
     /// URL of the oximeter collector to query
-    #[arg(long, env("OMDB_OXIMETER_URL"))]
+    #[arg(
+        long,
+        env = "OMDB_OXIMETER_URL",
+        // This can't be global = true (i.e. passed in later in the
+        // command-line) because global options can't be required. If this
+        // changes to being optional, we should set global = true.
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     oximeter_url: String,
 
     #[command(subcommand)]
@@ -82,7 +90,6 @@ impl OximeterArgs {
 struct Producer {
     id: Uuid,
     address: SocketAddr,
-    base_route: String,
     interval: String,
 }
 
@@ -92,7 +99,6 @@ impl From<ProducerEndpoint> for Producer {
         Self {
             id: p.id,
             address: p.address.parse().unwrap(),
-            base_route: p.base_route,
             interval: humantime::format_duration(interval).to_string(),
         }
     }

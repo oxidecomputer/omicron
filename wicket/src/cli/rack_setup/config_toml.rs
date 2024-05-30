@@ -5,21 +5,30 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
+use omicron_common::address::IpRange;
+use omicron_common::api::external::AllowedSourceIps;
+use omicron_common::api::internal::shared::BgpConfig;
+use omicron_common::api::internal::shared::RouteConfig;
 use serde::Serialize;
+use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::fmt;
 use toml_edit::Array;
+use toml_edit::ArrayOfTables;
 use toml_edit::DocumentMut;
 use toml_edit::Formatted;
 use toml_edit::InlineTable;
 use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::Value;
-use wicket_common::rack_update::SpType;
-use wicketd_client::types::BootstrapSledDescription;
-use wicketd_client::types::CurrentRssUserConfigInsensitive;
-use wicketd_client::types::IpRange;
-use wicketd_client::types::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::BootstrapSledDescription;
+use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::GatewaySpType;
+use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
+use wicket_common::rack_setup::UserSpecifiedPortConfig;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -90,6 +99,11 @@ impl TomlTemplate {
             );
         }
 
+        populate_allowed_source_ips(
+            &mut doc,
+            config.allowed_source_ips.as_ref(),
+        );
+
         *doc.get_mut("bootstrap_sleds").unwrap().as_array_mut().unwrap() =
             build_sleds_array(&config.bootstrap_sleds);
 
@@ -100,6 +114,53 @@ impl TomlTemplate {
 
         Self { doc }
     }
+}
+
+// Populate the allowed source IP list, which can be specified as a specified as
+// a string "any" or a list of IP addresses.
+fn populate_allowed_source_ips(
+    doc: &mut DocumentMut,
+    allowed_source_ips: Option<&AllowedSourceIps>,
+) {
+    const ALLOWLIST_COMMENT: &str = r#"
+# Allowlist of source IPs that can make requests to user-facing services.
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
+# Use the below two lines to only allow requests from the specified IP subnets.
+# Requests from any other source IPs are refused. Note that individual addresses
+# must include the netmask, e.g., "1.2.3.4/32".
+#
+# allow = "list"
+# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+"#;
+
+    let mut table = toml_edit::Table::new();
+    table.decor_mut().set_prefix(ALLOWLIST_COMMENT);
+    match allowed_source_ips {
+        None | Some(AllowedSourceIps::Any) => {
+            table.insert(
+                "allow",
+                Item::Value(Value::String(Formatted::new("any".to_string()))),
+            );
+        }
+        Some(AllowedSourceIps::List(list)) => {
+            let entries = list
+                .iter()
+                .map(|ip| Value::String(Formatted::new(ip.to_string())))
+                .collect();
+            table.insert(
+                "allow",
+                Item::Value(Value::String(Formatted::new("list".to_string()))),
+            );
+            table.insert("ips", Item::Value(Value::Array(entries)));
+        }
+    }
+    doc.insert("allowed_source_ips", Item::Table(table)).unwrap();
 }
 
 impl fmt::Display for TomlTemplate {
@@ -116,10 +177,9 @@ fn format_multiline_array(array: &mut Array) {
     array.set_trailing("\n");
 }
 
-fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
+fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
     // Helper function to build the comment attached to a given sled.
     fn sled_comment(sled: &BootstrapSledDescription, end: &str) -> String {
-        use wicketd_client::types::Baseboard;
         let ip = sled
             .bootstrap_ip
             .map(|ip| Cow::from(format!("{ip}")))
@@ -145,7 +205,7 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
 
     for sled in sleds {
         // We should never get a non-sled from wicketd; if we do, filter it out.
-        if sled.id.type_ != SpType::Sled {
+        if sled.id.type_ != GatewaySpType::Sled {
             continue;
         }
 
@@ -178,18 +238,6 @@ fn populate_network_table(
     table: &mut Table,
     config: Option<&UserSpecifiedRackNetworkConfig>,
 ) {
-    // Helper function to serialize enums into their appropriate string
-    // representations.
-    fn enum_to_toml_string<T: Serialize>(value: &T) -> String {
-        let value = toml::Value::try_from(value).unwrap();
-        match value {
-            toml::Value::String(s) => s,
-            other => {
-                panic!("improper use of enum_to_toml_string: got {other:?}");
-            }
-        }
-    }
-
     let Some(config) = config else {
         return;
     };
@@ -202,143 +250,58 @@ fn populate_network_table(
             Value::String(Formatted::new(value));
     }
 
-    if !config.ports.is_empty() {
-        *table.get_mut("ports").unwrap().as_array_of_tables_mut().unwrap() =
-            config
-                .ports
-                .iter()
-                .map(|cfg| {
-                    let mut uplink = Table::new();
-                    let mut _last_key = None;
-                    for (property, value) in [
-                        ("switch", cfg.switch.to_string()),
-                        ("port", cfg.port.to_string()),
-                        (
-                            "uplink_port_speed",
-                            enum_to_toml_string(&cfg.uplink_port_speed),
-                        ),
-                        (
-                            "uplink_port_fec",
-                            enum_to_toml_string(&cfg.uplink_port_fec),
-                        ),
-                    ] {
-                        uplink.insert(
-                            property,
-                            Item::Value(Value::String(Formatted::new(value))),
-                        );
-                        _last_key = Some(property);
-                    }
-                    uplink.insert(
-                        "autoneg",
-                        Item::Value(Value::Boolean(Formatted::new(
-                            cfg.autoneg,
-                        ))),
-                    );
+    if !config.switch0.is_empty() {
+        let switch_table = table
+            .get_mut("switch0")
+            .expect("[rack_network_config.switch0] table exists in template")
+            .as_table_mut()
+            .expect("[rack_network_config.switch0] is a table");
+        switch_table.clear();
+        switch_table.set_implicit(true);
 
-                    let mut routes = Array::new();
-                    for r in &cfg.routes {
-                        let mut route = InlineTable::new();
-                        route.insert(
-                            "nexthop",
-                            Value::String(Formatted::new(
-                                r.nexthop.to_string(),
-                            )),
-                        );
-                        route.insert(
-                            "destination",
-                            Value::String(Formatted::new(
-                                r.destination.to_string(),
-                            )),
-                        );
-                        routes.push(Value::InlineTable(route));
-                    }
-                    uplink.insert("routes", Item::Value(Value::Array(routes)));
-
-                    let mut addresses = Array::new();
-                    for a in &cfg.addresses {
-                        addresses
-                            .push(Value::String(Formatted::new(a.to_string())))
-                    }
-                    uplink.insert(
-                        "addresses",
-                        Item::Value(Value::Array(addresses)),
-                    );
-
-                    let mut peers = Array::new();
-                    for p in &cfg.bgp_peers {
-                        let mut peer = InlineTable::new();
-                        peer.insert(
-                            "addr",
-                            Value::String(Formatted::new(p.addr.to_string())),
-                        );
-                        peer.insert(
-                            "asn",
-                            Value::Integer(Formatted::new(p.asn as i64)),
-                        );
-                        peer.insert(
-                            "port",
-                            Value::String(Formatted::new(p.port.to_string())),
-                        );
-                        if let Some(x) = p.hold_time {
-                            peer.insert(
-                                "hold_time",
-                                Value::Integer(Formatted::new(x as i64)),
-                            );
-                        }
-                        if let Some(x) = p.connect_retry {
-                            peer.insert(
-                                "connect_retry",
-                                Value::Integer(Formatted::new(x as i64)),
-                            );
-                        }
-                        if let Some(x) = p.delay_open {
-                            peer.insert(
-                                "delay_open",
-                                Value::Integer(Formatted::new(x as i64)),
-                            );
-                        }
-                        if let Some(x) = p.idle_hold_time {
-                            peer.insert(
-                                "idle_hold_time",
-                                Value::Integer(Formatted::new(x as i64)),
-                            );
-                        }
-                        if let Some(x) = p.keepalive {
-                            peer.insert(
-                                "keepalive",
-                                Value::Integer(Formatted::new(x as i64)),
-                            );
-                        }
-                        peers.push(Value::InlineTable(peer));
-                    }
-                    uplink
-                        .insert("bgp_peers", Item::Value(Value::Array(peers)));
-                    uplink
-                })
-                .collect();
+        for (port, cfg) in &config.switch0 {
+            let uplink = populate_uplink_table(cfg);
+            switch_table.insert(port, Item::Table(uplink));
+        }
     }
+
+    if !config.switch1.is_empty() {
+        let switch_table = table
+            .get_mut("switch1")
+            .expect("[rack_network_config.switch1] table exists in template")
+            .as_table_mut()
+            .expect("[rack_network_config.switch1] is a table");
+        switch_table.clear();
+        switch_table.set_implicit(true);
+
+        for (port, cfg) in &config.switch1 {
+            let uplink = populate_uplink_table(cfg);
+            switch_table.insert(port, Item::Table(uplink));
+        }
+    }
+
     if !config.bgp.is_empty() {
         *table.get_mut("bgp").unwrap().as_array_of_tables_mut().unwrap() =
             config
                 .bgp
                 .iter()
                 .map(|cfg| {
-                    let mut bgp = Table::new();
-                    bgp.insert(
-                        "asn",
-                        Item::Value(Value::Integer(Formatted::new(
-                            cfg.asn as i64,
-                        ))),
-                    );
+                    // This style ensures that if a new field is added, this
+                    // fails at compile time.
+                    // XXX: shaper and checker are going to go away
+                    let BgpConfig { asn, originate, shaper: _, checker: _ } =
+                        cfg;
 
-                    let mut originate = Array::new();
-                    for o in &cfg.originate {
-                        originate
-                            .push(Value::String(Formatted::new(o.to_string())));
+                    let mut bgp = Table::new();
+                    bgp.insert("asn", i64_item(i64::from(*asn)));
+
+                    let mut originate_out = Array::new();
+                    for o in originate {
+                        originate_out.push(string_value(o));
                     }
                     bgp.insert(
                         "originate",
-                        Item::Value(Value::Array(originate)),
+                        Item::Value(Value::Array(originate_out)),
                     );
                     bgp
                 })
@@ -346,206 +309,237 @@ fn populate_network_table(
     }
 }
 
+#[must_use]
+fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
+    // This style ensures that if a new field is added, this fails loudly.
+    let UserSpecifiedPortConfig {
+        routes,
+        addresses,
+        uplink_port_speed,
+        uplink_port_fec,
+        autoneg,
+        bgp_peers,
+    } = cfg;
+
+    let mut uplink = Table::new();
+
+    // routes = []
+    let mut routes_out = Array::new();
+    for r in routes {
+        let RouteConfig { destination, nexthop, vlan_id } = r;
+        let mut route = InlineTable::new();
+        route.insert("nexthop", string_value(nexthop));
+        route.insert("destination", string_value(destination));
+        if let Some(vlan_id) = vlan_id {
+            route.insert("vlan_id", i64_value(i64::from(*vlan_id)));
+        }
+        routes_out.push(Value::InlineTable(route));
+    }
+    uplink.insert("routes", Item::Value(Value::Array(routes_out)));
+
+    // addresses = []
+    let mut addresses_out = Array::new();
+    for a in addresses {
+        addresses_out.push(string_value(a));
+    }
+    uplink.insert("addresses", Item::Value(Value::Array(addresses_out)));
+
+    // General properties
+    for (property, value) in [
+        ("uplink_port_speed", enum_to_toml_string(&uplink_port_speed)),
+        ("uplink_port_fec", enum_to_toml_string(&uplink_port_fec)),
+    ] {
+        uplink.insert(property, string_item(value));
+    }
+    uplink.insert("autoneg", bool_item(*autoneg));
+
+    // [[rack_network_config.port.<port>.bgp_peers]]
+
+    let mut peers = ArrayOfTables::new();
+    for p in bgp_peers {
+        // This style ensures that if a new field is added, this
+        // fails at compile time.
+        let UserSpecifiedBgpPeerConfig {
+            asn,
+            port,
+            addr,
+            hold_time,
+            idle_hold_time,
+            delay_open,
+            connect_retry,
+            keepalive,
+            remote_asn,
+            min_ttl,
+            auth_key_id,
+            multi_exit_discriminator,
+            communities,
+            local_pref,
+            enforce_first_as,
+            allowed_import,
+            allowed_export,
+            vlan_id,
+        } = p;
+
+        let mut peer = Table::new();
+
+        // asn = 0
+        peer.insert("asn", i64_item(i64::from(*asn)));
+
+        // port = ""
+        peer.insert("port", string_item(port));
+
+        // addr = ""
+        peer.insert("addr", string_item(addr));
+
+        // hold_time
+        if let Some(x) = hold_time {
+            peer.insert("hold_time", i64_item(*x as i64));
+        }
+
+        // idle_hold_time
+        if let Some(x) = idle_hold_time {
+            peer.insert("idle_hold_time", i64_item(*x as i64));
+        }
+
+        // delay_open
+        if let Some(x) = delay_open {
+            peer.insert("delay_open", i64_item(*x as i64));
+        }
+
+        // connect_retry
+        if let Some(x) = connect_retry {
+            peer.insert("connect_retry", i64_item(*x as i64));
+        }
+
+        // keepalive
+        if let Some(x) = keepalive {
+            peer.insert("keepalive", i64_item(*x as i64));
+        }
+
+        // remote_asn
+        if let Some(x) = remote_asn {
+            peer.insert("remote_asn", i64_item(i64::from(*x)));
+        }
+
+        // min_ttl
+        if let Some(x) = min_ttl {
+            peer.insert("min_ttl", i64_item(i64::from(*x)));
+        }
+
+        // auth_key_id
+        if let Some(x) = &auth_key_id {
+            peer.insert("auth_key_id", string_item(x));
+        }
+
+        // multi_exit_discriminator
+        if let Some(x) = multi_exit_discriminator {
+            peer.insert("multi_exit_discriminator", i64_item(i64::from(*x)));
+        }
+
+        // communities
+        if !communities.is_empty() {
+            let mut out = Array::new();
+            for c in communities {
+                out.push(i64_value(i64::from(*c)));
+            }
+            peer.insert("communities", Item::Value(Value::Array(out)));
+        }
+
+        // allowed import policy
+        if let UserSpecifiedImportExportPolicy::Allow(list) = allowed_import {
+            let mut out = Array::new();
+            for x in list.iter() {
+                out.push(string_value(x.to_string()));
+            }
+            peer.insert("allowed_import", Item::Value(Value::Array(out)));
+        }
+
+        // allowed export policy
+        if let UserSpecifiedImportExportPolicy::Allow(list) = allowed_export {
+            let mut out = Array::new();
+            for x in list.iter() {
+                out.push(string_value(x.to_string()));
+            }
+            peer.insert("allowed_export", Item::Value(Value::Array(out)));
+        }
+
+        //vlan
+        if let Some(x) = vlan_id {
+            peer.insert("vlan_id", i64_item(i64::from(*x)));
+        }
+
+        // local_pref
+        if let Some(x) = local_pref {
+            peer.insert("local_pref", i64_item(i64::from(*x)));
+        }
+
+        // enforce_first_as
+        peer.insert("enforce_first_as", bool_item(*enforce_first_as));
+
+        peers.push(peer);
+    }
+
+    uplink.insert("bgp_peers", Item::ArrayOfTables(peers));
+
+    uplink
+}
+
+// Helper function to serialize enums into their appropriate string
+// representations.
+fn enum_to_toml_string<T: Serialize>(value: &T) -> String {
+    let value = toml::Value::try_from(value).unwrap();
+    match value {
+        toml::Value::String(s) => s,
+        other => {
+            panic!("improper use of enum_to_toml_string: got {other:?}");
+        }
+    }
+}
+
+fn string_value(s: impl ToString) -> Value {
+    Value::String(Formatted::new(s.to_string()))
+}
+
+fn string_item(s: impl ToString) -> Item {
+    Item::Value(string_value(s))
+}
+
+fn i64_value(i: i64) -> Value {
+    Value::Integer(Formatted::new(i))
+}
+
+fn i64_item(i: i64) -> Item {
+    Item::Value(i64_value(i))
+}
+
+fn bool_value(b: bool) -> Value {
+    Value::Boolean(Formatted::new(b))
+}
+
+fn bool_item(b: bool) -> Item {
+    Item::Value(bool_value(b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv6Addr;
-    use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-    use wicket_common::rack_update::SpIdentifier;
-    use wicketd_client::types::Baseboard;
-    use wicketd_client::types::BgpConfig;
-    use wicketd_client::types::BgpPeerConfig;
-    use wicketd_client::types::PortConfigV1;
-    use wicketd_client::types::PortFec;
-    use wicketd_client::types::PortSpeed;
-    use wicketd_client::types::RouteConfig;
-    use wicketd_client::types::SwitchLocation;
-
-    fn put_config_from_current_config(
-        value: CurrentRssUserConfigInsensitive,
-    ) -> PutRssUserConfigInsensitive {
-        use omicron_common::api::internal::shared::BgpConfig as InternalBgpConfig;
-        use omicron_common::api::internal::shared::BgpPeerConfig as InternalBgpPeerConfig;
-        use omicron_common::api::internal::shared::PortConfigV1 as InternalPortConfig;
-        use omicron_common::api::internal::shared::PortFec as InternalPortFec;
-        use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
-        use omicron_common::api::internal::shared::RouteConfig as InternalRouteConfig;
-        use omicron_common::api::internal::shared::SwitchLocation as InternalSwitchLocation;
-        use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig as InternalUserSpecifiedRackNetworkConfig;
-
-        let rnc = value.rack_network_config.unwrap();
-
-        PutRssUserConfigInsensitive {
-            bootstrap_sleds: value
-                .bootstrap_sleds
-                .into_iter()
-                .map(|sled| sled.id.slot)
-                .collect(),
-            dns_servers: value.dns_servers,
-            external_dns_zone_name: value.external_dns_zone_name,
-            internal_services_ip_pool_ranges: value
-                .internal_services_ip_pool_ranges
-                .into_iter()
-                .map(|r| {
-                    use omicron_common::address;
-                    match r {
-                        IpRange::V4(r) => address::IpRange::V4(
-                            address::Ipv4Range::new(r.first, r.last).unwrap(),
-                        ),
-                        IpRange::V6(r) => address::IpRange::V6(
-                            address::Ipv6Range::new(r.first, r.last).unwrap(),
-                        ),
-                    }
-                })
-                .collect(),
-            external_dns_ips: value.external_dns_ips,
-            ntp_servers: value.ntp_servers,
-            rack_network_config: InternalUserSpecifiedRackNetworkConfig {
-                infra_ip_first: rnc.infra_ip_first,
-                infra_ip_last: rnc.infra_ip_last,
-                ports: rnc
-                    .ports
-                    .iter()
-                    .map(|config| InternalPortConfig {
-                        routes: config
-                            .routes
-                            .iter()
-                            .map(|r| InternalRouteConfig {
-                                destination: r.destination,
-                                nexthop: r.nexthop,
-                            })
-                            .collect(),
-                        addresses: config.addresses.clone(),
-                        bgp_peers: config
-                            .bgp_peers
-                            .iter()
-                            .map(|p| InternalBgpPeerConfig {
-                                asn: p.asn,
-                                port: p.port.clone(),
-                                addr: p.addr,
-                                hold_time: p.hold_time,
-                                connect_retry: p.connect_retry,
-                                delay_open: p.delay_open,
-                                idle_hold_time: p.idle_hold_time,
-                                keepalive: p.keepalive,
-                            })
-                            .collect(),
-                        port: config.port.clone(),
-                        uplink_port_speed: match config.uplink_port_speed {
-                            PortSpeed::Speed0G => InternalPortSpeed::Speed0G,
-                            PortSpeed::Speed1G => InternalPortSpeed::Speed1G,
-                            PortSpeed::Speed10G => InternalPortSpeed::Speed10G,
-                            PortSpeed::Speed25G => InternalPortSpeed::Speed25G,
-                            PortSpeed::Speed40G => InternalPortSpeed::Speed40G,
-                            PortSpeed::Speed50G => InternalPortSpeed::Speed50G,
-                            PortSpeed::Speed100G => {
-                                InternalPortSpeed::Speed100G
-                            }
-                            PortSpeed::Speed200G => {
-                                InternalPortSpeed::Speed200G
-                            }
-                            PortSpeed::Speed400G => {
-                                InternalPortSpeed::Speed400G
-                            }
-                        },
-                        uplink_port_fec: match config.uplink_port_fec {
-                            PortFec::Firecode => InternalPortFec::Firecode,
-                            PortFec::None => InternalPortFec::None,
-                            PortFec::Rs => InternalPortFec::Rs,
-                        },
-                        autoneg: config.autoneg,
-                        switch: match config.switch {
-                            SwitchLocation::Switch0 => {
-                                InternalSwitchLocation::Switch0
-                            }
-                            SwitchLocation::Switch1 => {
-                                InternalSwitchLocation::Switch1
-                            }
-                        },
-                    })
-                    .collect(),
-                bgp: rnc
-                    .bgp
-                    .iter()
-                    .map(|config| InternalBgpConfig {
-                        asn: config.asn,
-                        originate: config.originate.clone(),
-                    })
-                    .collect(),
-            },
-        }
-    }
+    use wicket_common::{
+        example::ExampleRackSetupData, rack_setup::PutRssUserConfigInsensitive,
+    };
 
     #[test]
     fn round_trip_nonempty_config() {
-        let config = CurrentRssUserConfigInsensitive {
-            bootstrap_sleds: vec![
-                BootstrapSledDescription {
-                    id: SpIdentifier { slot: 1, type_: SpType::Sled },
-                    baseboard: Baseboard::Gimlet {
-                        model: "model1".into(),
-                        revision: 3,
-                        identifier: "serial 1 2 3".into(),
-                    },
-                    bootstrap_ip: None,
-                },
-                BootstrapSledDescription {
-                    id: SpIdentifier { slot: 5, type_: SpType::Sled },
-                    baseboard: Baseboard::Gimlet {
-                        model: "model2".into(),
-                        revision: 5,
-                        identifier: "serial 4 5 6".into(),
-                    },
-                    bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
-                },
-            ],
-            dns_servers: vec![
-                "1.1.1.1".parse().unwrap(),
-                "2.2.2.2".parse().unwrap(),
-            ],
-            external_dns_zone_name: "oxide.computer".into(),
-            internal_services_ip_pool_ranges: vec![IpRange::V4(
-                wicketd_client::types::Ipv4Range {
-                    first: "10.0.0.1".parse().unwrap(),
-                    last: "10.0.0.5".parse().unwrap(),
-                },
-            )],
-            external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
-            ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
-            rack_network_config: Some(UserSpecifiedRackNetworkConfig {
-                infra_ip_first: "172.30.0.1".parse().unwrap(),
-                infra_ip_last: "172.30.0.10".parse().unwrap(),
-                ports: vec![PortConfigV1 {
-                    addresses: vec!["172.30.0.1/24".parse().unwrap()],
-                    routes: vec![RouteConfig {
-                        destination: "0.0.0.0/0".parse().unwrap(),
-                        nexthop: "172.30.0.10".parse().unwrap(),
-                    }],
-                    bgp_peers: vec![BgpPeerConfig {
-                        asn: 47,
-                        addr: "10.2.3.4".parse().unwrap(),
-                        port: "port0".into(),
-                        hold_time: Some(6),
-                        connect_retry: Some(3),
-                        delay_open: Some(0),
-                        idle_hold_time: Some(3),
-                        keepalive: Some(2),
-                    }],
-                    uplink_port_speed: PortSpeed::Speed400G,
-                    uplink_port_fec: PortFec::Firecode,
-                    autoneg: true,
-                    port: "port0".into(),
-                    switch: SwitchLocation::Switch0,
-                }],
-                bgp: vec![BgpConfig {
-                    asn: 47,
-                    originate: vec!["10.0.0.0/16".parse().unwrap()],
-                }],
-            }),
-        };
-        let template = TomlTemplate::populate(&config).to_string();
+        let example = ExampleRackSetupData::non_empty();
+        let template =
+            TomlTemplate::populate(&example.current_insensitive).to_string();
+
+        // Write out the template to a file as a snapshot test.
+        expectorate::assert_contents(
+            "tests/output/example_non_empty.toml",
+            &template,
+        );
         let parsed: PutRssUserConfigInsensitive =
             toml::de::from_str(&template).unwrap();
-        assert_eq!(put_config_from_current_config(config), parsed);
+        assert_eq!(example.put_insensitive, parsed);
     }
 }

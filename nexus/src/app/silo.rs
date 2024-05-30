@@ -101,18 +101,12 @@ impl super::Nexus {
             .dns_zones_list_all(nexus_opctx, DnsGroup::External)
             .await
             .internal_context("listing external DNS zones")?;
-        let target_blueprint = datastore
+        let (_, target_blueprint) = datastore
             .blueprint_target_get_current_full(opctx)
             .await
             .internal_context("loading target blueprint")?;
-        let nexus_external_ips = match target_blueprint {
-            Some((_, blueprint)) => blueprint_nexus_external_ips(&blueprint),
-            None => {
-                datastore
-                    .nexus_external_addresses_from_service_table(nexus_opctx)
-                    .await?
-            }
-        };
+        let nexus_external_ips =
+            blueprint_nexus_external_ips(&target_blueprint);
         let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {

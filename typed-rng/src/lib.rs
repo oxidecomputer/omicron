@@ -56,6 +56,7 @@
 
 use std::{fmt, hash::Hash, marker::PhantomData};
 
+use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind};
 use rand::rngs::StdRng;
 use rand_core::{RngCore, SeedableRng};
 use uuid::Uuid;
@@ -245,7 +246,14 @@ impl Generatable for Uuid {
     }
 }
 
+impl<T: TypedUuidKind> Generatable for TypedUuid<T> {
+    fn generate<R: RngCore>(rng: &mut R) -> Self {
+        TypedUuid::from_untyped_uuid(Uuid::generate(rng))
+    }
+}
+
 pub type UuidRng = TypedRng<Uuid, StdRng>;
+pub type TypedUuidRng<T> = TypedRng<TypedUuid<T>, StdRng>;
 
 #[cfg(test)]
 mod tests {

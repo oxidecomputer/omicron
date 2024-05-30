@@ -5,7 +5,7 @@
 use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{physical_disk, service, sled, zpool};
+use crate::schema::{physical_disk, sled, zpool};
 use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
@@ -114,6 +114,10 @@ impl Sled {
     pub fn state(&self) -> SledState {
         self.state
     }
+
+    pub fn time_modified(&self) -> DateTime<Utc> {
+        self.identity.time_modified
+    }
 }
 
 impl From<Sled> for views::Sled {
@@ -175,13 +179,6 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
-}
-
-impl DatastoreCollectionConfig<super::Service> for Sled {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = sled::dsl::rcgen;
-    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
-    type CollectionIdColumn = service::dsl::sled_id;
 }
 
 /// Form of `Sled` used for updates from sled-agent. This is missing some

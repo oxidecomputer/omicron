@@ -4,6 +4,7 @@
 
 //! Background task initialization
 
+use super::abandoned_vmm_reaper;
 use super::bfd;
 use super::blueprint_execution;
 use super::blueprint_load;
@@ -12,13 +13,17 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::instance_watcher;
 use super::inventory_collection;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::physical_disk_adoption;
 use super::region_replacement;
+use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
+use super::v2p_mappings::V2PManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
@@ -26,6 +31,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -68,6 +74,9 @@ pub struct BackgroundTasks {
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
 
+    /// task handle for the task that collects inventory
+    pub task_physical_disk_adoption: common::TaskHandle,
+
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
 
@@ -83,9 +92,23 @@ pub struct BackgroundTasks {
     /// task handle for the switch port settings manager
     pub task_switch_port_settings_manager: common::TaskHandle,
 
+    /// task handle for the opte v2p manager
+    pub task_v2p_manager: common::TaskHandle,
+
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
+
+    /// task handle for the task that polls sled agents for instance states.
+    pub task_instance_watcher: common::TaskHandle,
+
+    /// task handle for propagation of VPC firewall rules for Omicron services
+    /// with external network connectivity,
+    pub task_service_firewall_propagation: common::TaskHandle,
+
+    /// task handle for deletion of database records for VMMs abandoned by their
+    /// instances.
+    pub task_abandoned_vmm_reaper: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -95,9 +118,15 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
+        rack_id: Uuid,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
+        v2p_watcher: (
+            tokio::sync::watch::Sender<()>,
+            tokio::sync::watch::Receiver<()>,
+        ),
+        producer_registry: &ProducerRegistry,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -245,7 +274,7 @@ impl BackgroundTasks {
         // because the blueprint executor might also depend indirectly on the
         // inventory collector.  In that case, we may need to do something more
         // complicated.  But for now, this works.
-        let task_inventory_collection = {
+        let (task_inventory_collection, inventory_watcher) = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
                 resolver.clone(),
@@ -253,6 +282,7 @@ impl BackgroundTasks {
                 config.inventory.nkeep,
                 config.inventory.disable,
             );
+            let inventory_watcher = collector.watcher();
             let task = driver.register(
                 String::from("inventory_collection"),
                 String::from(
@@ -265,7 +295,24 @@ impl BackgroundTasks {
                 vec![Box::new(rx_blueprint_exec)],
             );
 
-            task
+            (task, inventory_watcher)
+        };
+
+        let task_physical_disk_adoption = {
+            driver.register(
+                "physical_disk_adoption".to_string(),
+                "ensure new physical disks are automatically marked in-service"
+                    .to_string(),
+                config.physical_disk_adoption.period_secs,
+                Box::new(physical_disk_adoption::PhysicalDiskAdoption::new(
+                    datastore.clone(),
+                    inventory_watcher.clone(),
+                    config.physical_disk_adoption.disable,
+                    rack_id,
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(inventory_watcher)],
+            )
         };
 
         let task_service_zone_nat_tracker = {
@@ -298,11 +345,22 @@ impl BackgroundTasks {
             )
         };
 
+        let task_v2p_manager = {
+            driver.register(
+                "v2p_manager".to_string(),
+                String::from("manages opte v2p mappings for vpc networking"),
+                config.v2p_mapping_propagation.period_secs,
+                Box::new(V2PManager::new(datastore.clone())),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(v2p_watcher.1)],
+            )
+        };
+
         // Background task: detect if a region needs replacement and begin the
         // process
         let task_region_replacement = {
             let detector = region_replacement::RegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
                 saga_request.clone(),
             );
 
@@ -318,6 +376,52 @@ impl BackgroundTasks {
             task
         };
 
+        let task_instance_watcher = {
+            let watcher = instance_watcher::InstanceWatcher::new(
+                datastore.clone(),
+                resolver.clone(),
+                producer_registry,
+                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                v2p_watcher.0,
+            );
+            driver.register(
+                "instance_watcher".to_string(),
+                "periodically checks instance states".to_string(),
+                config.instance_watcher.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+        // Background task: service firewall rule propagation
+        let task_service_firewall_propagation = driver.register(
+            String::from("service_firewall_rule_propagation"),
+            String::from(
+                "propagates VPC firewall rules for Omicron \
+                services with external network connectivity",
+            ),
+            config.service_firewall_propagation.period_secs,
+            Box::new(service_firewall_rules::ServiceRulePropagator::new(
+                datastore.clone(),
+            )),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        // Background task: abandoned VMM reaping
+        let task_abandoned_vmm_reaper = driver.register(
+        String::from("abandoned_vmm_reaper"),
+        String::from(
+            "deletes sled reservations for VMMs that have been abandoned by their instances",
+        ),
+        config.abandoned_vmm_reaper.period_secs,
+        Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
+            datastore,
+        )),
+        opctx.child(BTreeMap::new()),
+        vec![],
+    );
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -330,12 +434,17 @@ impl BackgroundTasks {
             nat_cleanup,
             bfd_manager,
             task_inventory_collection,
+            task_physical_disk_adoption,
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
+            task_v2p_manager,
             task_region_replacement,
+            task_instance_watcher,
+            task_service_firewall_propagation,
+            task_abandoned_vmm_reaper,
         }
     }
 
@@ -435,7 +544,7 @@ pub mod test {
     //     the new DNS configuration
     #[nexus_test(server = crate::Server)]
     async fn test_dns_propagation_basic(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
