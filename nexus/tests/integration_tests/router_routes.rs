@@ -31,6 +31,8 @@ use nexus_test_utils::resource_helpers::{
 };
 
 use crate::integration_tests::vpc_routers::PROJECT_NAME;
+use crate::integration_tests::vpc_routers::ROUTER_NAMES;
+use crate::integration_tests::vpc_routers::VPC_NAME;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -245,11 +247,11 @@ async fn test_router_routes_disallow_mixed_v4_v6(
 ) {
     let client = &cptestctx.external_client;
     let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
 
-    let vpc_name = "default";
-    let router_name = "routy";
+    let router_name = ROUTER_NAMES[0];
     let _router =
-        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
 
     // Some targets/strings refer to a mixed v4/v6 entity, e.g.,
     // subnet or instance. Others refer to one kind only (ipnet, ip).
@@ -294,7 +296,7 @@ async fn test_router_routes_disallow_mixed_v4_v6(
             create_route(
                 client,
                 PROJECT_NAME,
-                vpc_name,
+                VPC_NAME,
                 router_name,
                 &route_name,
                 dest,
@@ -305,7 +307,7 @@ async fn test_router_routes_disallow_mixed_v4_v6(
             let err = create_route_with_error(
                 client,
                 PROJECT_NAME,
-                vpc_name,
+                VPC_NAME,
                 router_name,
                 &route_name,
                 dest,
@@ -327,14 +329,13 @@ async fn test_router_routes_modify_system_routes(
 ) {
     let client = &cptestctx.external_client;
     let _ = create_project(&client, PROJECT_NAME).await;
-
-    let vpc_name = "default";
+    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
 
     // Attempting to add a new route to a system router should fail.
     let err = create_route_with_error(
         client,
         PROJECT_NAME,
-        vpc_name,
+        VPC_NAME,
         "system",
         "bad-route",
         "ipnet:240.0.0.0/8".parse().unwrap(),
@@ -349,13 +350,13 @@ async fn test_router_routes_modify_system_routes(
 
     // Get the system router's routes
     let [v4_route, v6_route, subnet_route] =
-        get_system_routes(client, vpc_name).await;
+        get_system_routes(client, VPC_NAME).await;
 
     // Attempting to modify a VPC subnet route should fail.
     // Deletes are tested above.
     let err = object_put_error(
         client,
-        &get_route_url(vpc_name, "system", subnet_route.name().as_str())
+        &get_route_url(VPC_NAME, "system", subnet_route.name().as_str())
             .as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -376,7 +377,7 @@ async fn test_router_routes_modify_system_routes(
     // Modifying the target of a Default (gateway) route should succeed.
     let v4_route: RouterRoute = object_put(
         client,
-        &get_route_url(vpc_name, "system", v4_route.name().as_str()).as_str(),
+        &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -391,7 +392,7 @@ async fn test_router_routes_modify_system_routes(
 
     let v6_route: RouterRoute = object_put(
         client,
-        &get_route_url(vpc_name, "system", v6_route.name().as_str()).as_str(),
+        &get_route_url(VPC_NAME, "system", v6_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -407,7 +408,7 @@ async fn test_router_routes_modify_system_routes(
     // Modifying the *destination* should not.
     let err = object_put_error(
         client,
-        &get_route_url(vpc_name, "system", v4_route.name().as_str()).as_str(),
+        &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -431,10 +432,10 @@ async fn test_router_routes_internet_gateway_target(
 ) {
     let client = &cptestctx.external_client;
     let _ = create_project(&client, PROJECT_NAME).await;
-    let vpc_name = "default";
-    let router_name = "routy";
+    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+    let router_name = ROUTER_NAMES[0];
     let _router =
-        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
 
     // Internet gateways are not fully supported: only 'inetgw:outbound'
     // is a valid choice.
@@ -443,7 +444,7 @@ async fn test_router_routes_internet_gateway_target(
     let err = create_route_with_error(
         client,
         PROJECT_NAME,
-        vpc_name,
+        VPC_NAME,
         &router_name,
         "bad-route",
         dest.clone(),
@@ -462,7 +463,7 @@ async fn test_router_routes_internet_gateway_target(
     let route = create_route(
         client,
         PROJECT_NAME,
-        vpc_name,
+        VPC_NAME,
         router_name,
         "good-route",
         dest.clone(),
@@ -479,10 +480,10 @@ async fn test_router_routes_disallow_custom_targets(
 ) {
     let client = &cptestctx.external_client;
     let _ = create_project(&client, PROJECT_NAME).await;
-    let vpc_name = "default";
-    let router_name = "routy";
+    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+    let router_name = ROUTER_NAMES[0];
     let _router =
-        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
 
     // Neither 'vpc:xxx' nor 'subnet:xxx' can be specified as route targets
     // in custom routers.
@@ -491,7 +492,7 @@ async fn test_router_routes_disallow_custom_targets(
     let err = create_route_with_error(
         client,
         PROJECT_NAME,
-        vpc_name,
+        VPC_NAME,
         &router_name,
         "bad-route",
         dest.clone(),
@@ -507,7 +508,7 @@ async fn test_router_routes_disallow_custom_targets(
     let err = create_route_with_error(
         client,
         PROJECT_NAME,
-        vpc_name,
+        VPC_NAME,
         &router_name,
         "bad-route",
         "vpc:a-vpc-name-unknown".parse().unwrap(),
@@ -523,7 +524,7 @@ async fn test_router_routes_disallow_custom_targets(
     let err = create_route_with_error(
         client,
         PROJECT_NAME,
-        vpc_name,
+        VPC_NAME,
         &router_name,
         "bad-route",
         dest.clone(),

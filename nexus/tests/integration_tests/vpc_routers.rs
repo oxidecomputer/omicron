@@ -2,13 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::integration_tests::instances::assert_sled_vpc_routes;
+use crate::integration_tests::instances::instance_simulate;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_route;
 use nexus_test_utils::resource_helpers::create_router;
 use nexus_test_utils::resource_helpers::create_vpc_subnet;
 use nexus_test_utils::resource_helpers::object_delete;
@@ -17,6 +24,8 @@ use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils::resource_helpers::{object_put, object_put_error};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
+use nexus_types::external_api::params::InstanceNetworkInterfaceCreate;
 use nexus_types::external_api::params::VpcSubnetUpdate;
 use nexus_types::external_api::views::VpcRouter;
 use nexus_types::external_api::views::VpcRouterKind;
@@ -26,8 +35,15 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
+use omicron_common::api::internal::shared::RouterTarget;
+use std::collections::HashMap;
 
-pub const PROJECT_NAME: &str = "os-cartographers";
+pub const PROJECT_NAME: &str = "cartographer";
+pub const VPC_NAME: &str = "the-isles";
+pub const SUBNET_NAMES: &[&str] = &["scotia", "albion", "eire"];
+const INSTANCE_NAMES: &[&str] = &["glaschu", "londinium"];
+pub const ROUTER_NAMES: &[&str] = &["cycle-network", "motorways"];
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -40,14 +56,13 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     let _ = create_project(&client, PROJECT_NAME).await;
 
     // Create a VPC.
-    let vpc_name = "vpc1";
-    let vpc = create_vpc(&client, PROJECT_NAME, vpc_name).await;
+    let vpc = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
 
     let routers_url =
-        format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, vpc_name);
+        format!("/v1/vpc-routers?project={}&vpc={}", PROJECT_NAME, VPC_NAME);
 
     // get routers should have only the system router created w/ the VPC
-    let routers = list_routers(client, &vpc_name).await;
+    let routers = list_routers(client, &VPC_NAME).await;
     assert_eq!(routers.len(), 1);
     assert_eq!(routers[0].kind, VpcRouterKind::System);
 
@@ -67,10 +82,10 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     assert_eq!(error.message, "cannot delete system router");
 
-    let router_name = "router1";
+    let router_name = ROUTER_NAMES[0];
     let router_url = format!(
         "/v1/vpc-routers/{}?project={}&vpc={}",
-        router_name, PROJECT_NAME, vpc_name
+        router_name, PROJECT_NAME, VPC_NAME
     );
 
     // fetching a particular router should 404
@@ -86,11 +101,14 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
+    assert_eq!(
+        error.message,
+        format!("not found: vpc-router with name \"{router_name}\"")
+    );
 
     // Create a VPC Router.
     let router =
-        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
     assert_eq!(router.identity.name, router_name);
     assert_eq!(router.identity.description, "router description");
     assert_eq!(router.vpc_id, vpc.identity.id);
@@ -107,7 +125,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     routers_eq(&router, &same_router);
 
     // routers list should now have the one in it
-    let routers = list_routers(client, &vpc_name).await;
+    let routers = list_routers(client, &VPC_NAME).await;
     assert_eq!(routers.len(), 2);
     routers_eq(&routers[0], &router);
 
@@ -128,12 +146,15 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "already exists: vpc-router \"router1\"");
+    assert_eq!(
+        error.message,
+        format!("already exists: vpc-router \"{router_name}\"")
+    );
 
-    let router2_name = "router2";
+    let router2_name = ROUTER_NAMES[1];
     let router2_url = format!(
         "/v1/vpc-routers/{}?project={}&vpc={}",
-        router2_name, PROJECT_NAME, vpc_name
+        router2_name, PROJECT_NAME, VPC_NAME
     );
 
     // second router 404s before it's created
@@ -149,17 +170,20 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: vpc-router with name \"router2\"");
+    assert_eq!(
+        error.message,
+        format!("not found: vpc-router with name \"{router2_name}\"")
+    );
 
     // create second custom router
     let router2 =
-        create_router(client, PROJECT_NAME, vpc_name, router2_name).await;
+        create_router(client, PROJECT_NAME, VPC_NAME, router2_name).await;
     assert_eq!(router2.identity.name, router2_name);
     assert_eq!(router2.vpc_id, vpc.identity.id);
     assert_eq!(router2.kind, VpcRouterKind::Custom);
 
     // routers list should now have two custom and one system
-    let routers = list_routers(client, &vpc_name).await;
+    let routers = list_routers(client, &VPC_NAME).await;
     assert_eq!(routers.len(), 3);
     routers_eq(&routers[0], &router);
     routers_eq(&routers[1], &router2);
@@ -199,11 +223,14 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
+    assert_eq!(
+        error.message,
+        format!("not found: vpc-router with name \"{router_name}\"")
+    );
 
     let router_url = format!(
         "/v1/vpc-routers/new-name?project={}&vpc={}",
-        PROJECT_NAME, vpc_name
+        PROJECT_NAME, VPC_NAME
     );
 
     // fetching by new name works
@@ -215,13 +242,17 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
             .unwrap()
             .parsed_body()
             .unwrap();
+
     routers_eq(&update, &updated_router);
     assert_eq!(&updated_router.identity.description, "another description");
 
     // fetching list should show updated one
-    let routers = list_routers(client, &vpc_name).await;
+    let routers = list_routers(client, &VPC_NAME).await;
     assert_eq!(routers.len(), 3);
-    routers_eq(&routers[0], &updated_router);
+    routers_eq(
+        &routers.iter().find(|v| v.name().as_str() == "new-name").unwrap(),
+        &updated_router,
+    );
 
     // delete first router
     NexusRequest::object_delete(&client, &router_url)
@@ -231,7 +262,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // routers list should now have two again, one system and one custom
-    let routers = list_routers(client, &vpc_name).await;
+    let routers = list_routers(client, &VPC_NAME).await;
     assert_eq!(routers.len(), 2);
     routers_eq(&routers[0], &router2);
 
@@ -282,31 +313,30 @@ async fn test_vpc_routers_attach_to_subnet(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    // This includes the vpc 'default'.
     let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
 
-    let vpc_name = "default";
     let subnet_name = "default";
 
     let subnets_url =
-        format!("/v1/vpc-subnets?project={}&vpc={}", PROJECT_NAME, vpc_name);
+        format!("/v1/vpc-subnets?project={}&vpc={}", PROJECT_NAME, VPC_NAME);
 
     // get routers should have only the system router created w/ the VPC
-    let routers = list_routers(client, vpc_name).await;
+    let routers = list_routers(client, VPC_NAME).await;
     assert_eq!(routers.len(), 1);
     assert_eq!(routers[0].kind, VpcRouterKind::System);
 
     // Create a custom router for later use.
-    let router_name = "routy";
+    let router_name = ROUTER_NAMES[0];
     let router =
-        create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
     assert_eq!(router.kind, VpcRouterKind::Custom);
 
     // Attaching a system router should fail.
     let err = object_put_error(
         client,
         &format!(
-            "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
+            "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
         &VpcSubnetUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -324,7 +354,7 @@ async fn test_vpc_routers_attach_to_subnet(
     let default_subnet = set_custom_router(
         client,
         "default",
-        vpc_name,
+        VPC_NAME,
         Some(router.identity.id.into()),
     )
     .await;
@@ -332,11 +362,11 @@ async fn test_vpc_routers_attach_to_subnet(
 
     // Attaching a custom router to another subnet (same VPC) should succeed:
     // ... at create time.
-    let subnet2_name = "subnetty";
+    let subnet2_name = SUBNET_NAMES[0];
     let subnet2 = create_vpc_subnet(
         &client,
         &PROJECT_NAME,
-        &vpc_name,
+        &VPC_NAME,
         &subnet2_name,
         Ipv4Net("192.168.0.0/24".parse().unwrap()),
         None,
@@ -346,11 +376,11 @@ async fn test_vpc_routers_attach_to_subnet(
     assert_eq!(subnet2.custom_router_id, Some(router.identity.id));
 
     // ... and via update.
-    let subnet3_name = "subnettier";
+    let subnet3_name = SUBNET_NAMES[1];
     let _ = create_vpc_subnet(
         &client,
         &PROJECT_NAME,
-        &vpc_name,
+        &VPC_NAME,
         &subnet3_name,
         Ipv4Net("192.168.1.0/24".parse().unwrap()),
         None,
@@ -361,7 +391,7 @@ async fn test_vpc_routers_attach_to_subnet(
     let subnet3 = set_custom_router(
         client,
         subnet3_name,
-        vpc_name,
+        VPC_NAME,
         Some(router.identity.id.into()),
     )
     .await;
@@ -385,19 +415,19 @@ async fn test_vpc_routers_attach_to_subnet(
     assert_eq!(err.message, "router and subnet must belong to the same VPC");
 
     // Detach (and double detach) should succeed without issue.
-    let subnet3 = set_custom_router(client, subnet3_name, vpc_name, None).await;
+    let subnet3 = set_custom_router(client, subnet3_name, VPC_NAME, None).await;
     assert_eq!(subnet3.custom_router_id, None);
-    let subnet3 = set_custom_router(client, subnet3_name, vpc_name, None).await;
+    let subnet3 = set_custom_router(client, subnet3_name, VPC_NAME, None).await;
     assert_eq!(subnet3.custom_router_id, None);
 
     // Assigning a new router should not require that we first detach the old one.
-    let router2_name = "routier";
+    let router2_name = ROUTER_NAMES[1];
     let router2 =
-        create_router(&client, PROJECT_NAME, vpc_name, router2_name).await;
+        create_router(&client, PROJECT_NAME, VPC_NAME, router2_name).await;
     let subnet2 = set_custom_router(
         client,
         subnet2_name,
-        vpc_name,
+        VPC_NAME,
         Some(router2.identity.id.into()),
     )
     .await;
@@ -407,7 +437,7 @@ async fn test_vpc_routers_attach_to_subnet(
     let subnet2 = set_custom_router(
         client,
         subnet2_name,
-        vpc_name,
+        VPC_NAME,
         Some(router.identity.id.into()),
     )
     .await;
@@ -417,8 +447,7 @@ async fn test_vpc_routers_attach_to_subnet(
     object_delete(
         &client,
         &format!(
-            "/v1/vpc-routers/{router_name}?vpc={}&project={PROJECT_NAME}",
-            "default"
+            "/v1/vpc-routers/{router_name}?vpc={VPC_NAME}&project={PROJECT_NAME}",
         ),
     )
     .await;
@@ -434,16 +463,208 @@ async fn test_vpc_routers_attach_to_subnet(
 async fn test_vpc_routers_custom_delivered_to_instance(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let _client = &cptestctx.external_client;
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create some instances, one per subnet, and a default pool etc.
+    create_default_ip_pool(client).await;
+    create_project(client, PROJECT_NAME).await;
+
+    let vpc = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+
+    let mut subnets = vec![];
+    let mut instances = vec![];
+    let mut instance_nics = HashMap::new();
+    for (i, (subnet_name, instance_name)) in
+        SUBNET_NAMES.iter().zip(INSTANCE_NAMES.iter()).enumerate()
+    {
+        let subnet = create_vpc_subnet(
+            &client,
+            PROJECT_NAME,
+            VPC_NAME,
+            subnet_name,
+            Ipv4Net(format!("192.168.{i}.0/24").parse().unwrap()),
+            None,
+            None,
+        )
+        .await;
+
+        let instance = create_instance_with(
+            client,
+            PROJECT_NAME,
+            instance_name,
+            &InstanceNetworkInterfaceAttachment::Create(vec![
+                InstanceNetworkInterfaceCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: format!("nic-{i}").parse().unwrap(),
+                        description: "".into(),
+                    },
+                    vpc_name: vpc.name().clone(),
+                    subnet_name: subnet_name.parse().unwrap(),
+                    ip: Some(format!("192.168.{i}.10").parse().unwrap()),
+                },
+            ]),
+            vec![],
+            vec![],
+            true,
+        )
+        .await;
+        instance_simulate(nexus, &instance.identity.id).await;
+
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+
+        let guest_nics = datastore
+            .derive_guest_network_interface_info(&opctx, &authz_instance)
+            .await
+            .unwrap();
+
+        instance_nics.insert(*instance_name, guest_nics);
+        subnets.push(subnet);
+        instances.push(instance);
+    }
+
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+
+    // Create some routers!
+    let mut routers = vec![];
+    for router_name in ROUTER_NAMES {
+        let router =
+            create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
+
+        routers.push(router);
+    }
+
+    let vni = instance_nics[INSTANCE_NAMES[0]][0].vni;
 
     // Installing a custom router onto a subnet with a live instance
-    // should install routes at that sled.
+    // should install routes at that sled. We should only have one sled.
+    // First, assert the default state.
+    for subnet in &subnets {
+        let (_system, custom) = assert_sled_vpc_routes(
+            &sled_agent,
+            &opctx,
+            &datastore,
+            subnet.id(),
+            vni,
+        )
+        .await;
+
+        assert!(custom.is_empty());
+    }
+
+    // Push a distinct route into each router and attach to each subnet.
+    for i in 0..2 {
+        create_route(
+            &client,
+            PROJECT_NAME,
+            VPC_NAME,
+            ROUTER_NAMES[i],
+            "a-sharp-drop",
+            format!("ipnet:24{i}.0.0.0/8").parse().unwrap(),
+            "drop".parse().unwrap(),
+        )
+        .await;
+
+        set_custom_router(
+            &client,
+            SUBNET_NAMES[i],
+            VPC_NAME,
+            Some(NameOrId::Name(ROUTER_NAMES[i].parse().unwrap())),
+        )
+        .await;
+    }
+
+    // Re-verify, assert that new routes are resolved correctly.
+    // Vec<(System, Custom)>.
+    let mut last_routes = vec![];
+    for subnet in &subnets {
+        last_routes.push(
+            assert_sled_vpc_routes(
+                &sled_agent,
+                &opctx,
+                &datastore,
+                subnet.id(),
+                vni,
+            )
+            .await,
+        );
+    }
+
+    assert!(last_routes[0].1.contains(&ResolvedVpcRoute {
+        dest: "240.0.0.0/8".parse().unwrap(),
+        target: RouterTarget::Drop
+    }));
+    assert!(last_routes[1].1.contains(&ResolvedVpcRoute {
+        dest: "241.0.0.0/8".parse().unwrap(),
+        target: RouterTarget::Drop
+    }));
+
+    // Adding a new route should propagate that out to sleds.
+    create_route(
+        &client,
+        PROJECT_NAME,
+        VPC_NAME,
+        ROUTER_NAMES[0],
+        "ncn-74",
+        "ipnet:2.0.7.0/24".parse().unwrap(),
+        format!("instance:{}", INSTANCE_NAMES[1]).parse().unwrap(),
+    )
+    .await;
+
+    let (new_system, new_custom) = assert_sled_vpc_routes(
+        &sled_agent,
+        &opctx,
+        &datastore,
+        subnets[0].id(),
+        vni,
+    )
+    .await;
+
+    assert_eq!(last_routes[0].0, new_system);
+    assert!(new_custom.contains(&ResolvedVpcRoute {
+        dest: "2.0.7.0/24".parse().unwrap(),
+        target: RouterTarget::Ip(instance_nics[INSTANCE_NAMES[1]][0].ip)
+    }));
 
     // Swapping router should change the installed routes at that sled.
+    set_custom_router(
+        &client,
+        SUBNET_NAMES[0],
+        VPC_NAME,
+        Some(NameOrId::Name(ROUTER_NAMES[1].parse().unwrap())),
+    )
+    .await;
+    let (new_system, new_custom) = assert_sled_vpc_routes(
+        &sled_agent,
+        &opctx,
+        &datastore,
+        subnets[0].id(),
+        vni,
+    )
+    .await;
+    assert_eq!(last_routes[0].0, new_system);
+    assert_eq!(last_routes[1].1, new_custom);
 
     // Unsetting a router should remove affected non-system routes.
-
-    todo!()
+    set_custom_router(&client, SUBNET_NAMES[0], VPC_NAME, None).await;
+    let (new_system, new_custom) = assert_sled_vpc_routes(
+        &sled_agent,
+        &opctx,
+        &datastore,
+        subnets[0].id(),
+        vni,
+    )
+    .await;
+    assert_eq!(last_routes[0].0, new_system);
+    assert!(new_custom.is_empty());
 }
 
 async fn set_custom_router(

@@ -4731,7 +4731,7 @@ pub async fn assert_sled_vpc_routes(
     datastore: &DataStore,
     subnet_id: Uuid,
     vni: Vni,
-) {
+) -> (HashSet<ResolvedVpcRoute>, HashSet<ResolvedVpcRoute>) {
     let (.., authz_vpc, _, db_subnet) = LookupPath::new(opctx, datastore)
         .vpc_subnet_id(subnet_id)
         .fetch()
@@ -4790,6 +4790,8 @@ pub async fn assert_sled_vpc_routes(
     )
     .await
     .expect("matching vpc routes should be present");
+
+    (system_routes, custom_routes)
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we
