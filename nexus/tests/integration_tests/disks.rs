@@ -47,6 +47,7 @@ use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -2495,13 +2496,20 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let disk_url = get_disk_url(DISK_NAME);
     let client = client.clone();
 
+    let (task_started_tx, task_started_rx) = oneshot::channel();
+
     let jh = tokio::spawn(async move {
+        task_started_tx.send(()).unwrap();
+
         NexusRequest::object_delete(&client, &disk_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
             .expect("failed to delete disk");
     });
+
+    // Wait until the task starts
+    task_started_rx.await.unwrap();
 
     // It won't finish until the dataset is expunged.
     assert!(!jh.is_finished());
