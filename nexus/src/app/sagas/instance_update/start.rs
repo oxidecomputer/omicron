@@ -13,6 +13,7 @@ use super::{
     ACTION_GENERATE_ID, INSTANCE_LOCK_ID,
 };
 use crate::app::sagas::declare_saga_actions;
+use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::{authn, authz};
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node};
@@ -35,7 +36,7 @@ declare_saga_actions! {
 
     // Acquire the instance updater" lock with this saga's ID if no other saga
     // is currently updating the instance.
-    LOCK_INSTANCE -> "saga_instance_lock_gen" {
+    LOCK_INSTANCE -> "instance_lock" {
         + siu_lock_instance
         - siu_lock_instance_undo
     }
@@ -81,7 +82,7 @@ impl NexusSaga for SagaInstanceUpdate {
 
 async fn siu_lock_instance(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<instance::UpdaterLock, ActionError> {
     let osagactx = sagactx.user_data();
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
@@ -96,10 +97,9 @@ async fn siu_lock_instance(
     );
     osagactx
         .datastore()
-        .instance_updater_lock(&opctx, authz_instance, &lock_id)
+        .instance_updater_lock(&opctx, authz_instance, lock_id)
         .await
         .map_err(ActionError::action_failed)
-        .map(|_| ())
 }
 
 async fn siu_lock_instance_undo(
@@ -115,9 +115,11 @@ async fn siu_lock_instance_undo(
 async fn siu_fetch_state_and_start_real_saga(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
     let Params { serialized_authn, authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
+    let orig_lock =
+        sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK_ID)?;
+    let osagactx = sagactx.user_data();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
 
@@ -132,6 +134,7 @@ async fn siu_fetch_state_and_start_real_saga(
             serialized_authn,
             authz_instance,
             state,
+            orig_lock,
         })
         .await
         .map_err(ActionError::action_failed)?;
