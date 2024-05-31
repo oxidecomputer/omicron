@@ -255,7 +255,7 @@ impl super::Nexus {
         let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // Updating the subnet is a separate action.
+        // Updating the custom router is a separate action.
         self.vpc_subnet_update_custom_router(
             opctx,
             &authz_vpc,
