@@ -191,3 +191,122 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
     /// Returns the Polar class that implements this resource
     fn polar_class(&self) -> oso::Class;
 }
+
+#[cfg(test)]
+mod test {
+    use crate::authn;
+    use crate::authz::Action;
+    use crate::authz::AnyActor;
+    use crate::authz::Authz;
+    use crate::authz::Context;
+    use crate::authz::RoleSet;
+    use crate::context::OpContext;
+    use omicron_test_utils::dev;
+    use std::sync::Arc;
+
+    use nexus_db_model::IdentityType;
+    use nexus_db_model::RoleAssignment;
+    use omicron_common::api::external::Error;
+    use omicron_common::api::external::ResourceType;
+    use uuid::Uuid;
+
+    struct FakeStorage {}
+
+    impl FakeStorage {
+        fn new() -> Arc<dyn crate::storage::Storage> {
+            Arc::new(Self {})
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::storage::Storage for FakeStorage {
+        async fn role_asgn_list_for(
+            &self,
+            _opctx: &OpContext,
+            _identity_type: IdentityType,
+            _identity_id: Uuid,
+            _resource_type: ResourceType,
+            _resource_id: Uuid,
+        ) -> Result<Vec<RoleAssignment>, Error> {
+            todo!();
+        }
+    }
+
+    fn authz_context_for_actor(
+        log: &slog::Logger,
+        authn: authn::Context,
+        datastore: Arc<dyn crate::storage::Storage>,
+    ) -> Context {
+        let authz = Authz::new(log);
+        Context::new(Arc::new(authn), Arc::new(authz), datastore)
+    }
+
+    #[tokio::test]
+    async fn test_unregistered_resource() {
+        let logctx = dev::test_setup_log("test_unregistered_resource");
+        let datastore = FakeStorage::new();
+        let opctx = OpContext::for_background(
+            logctx.log.new(o!()),
+            Arc::new(Authz::new(&logctx.log)),
+            authn::Context::internal_db_init(),
+            Arc::clone(&datastore) as Arc<dyn crate::storage::Storage>,
+        );
+
+        // Define a resource that we "forget" to register with Oso.
+        use crate::authz::AuthorizedResource;
+        use oso::PolarClass;
+        #[derive(Clone, PolarClass)]
+        struct UnregisteredResource;
+        impl AuthorizedResource for UnregisteredResource {
+            fn load_roles<'a, 'b, 'c, 'd, 'e>(
+                &'a self,
+                _: &'b OpContext,
+                _: &'c authn::Context,
+                _: &'d mut RoleSet,
+            ) -> futures::future::BoxFuture<'e, Result<(), Error>>
+            where
+                'a: 'e,
+                'b: 'e,
+                'c: 'e,
+                'd: 'e,
+            {
+                // authorize() shouldn't get far enough to call this.
+                unimplemented!();
+            }
+
+            fn on_unauthorized(
+                &self,
+                _: &Authz,
+                _: Error,
+                _: AnyActor,
+                _: Action,
+            ) -> Error {
+                // authorize() shouldn't get far enough to call this.
+                unimplemented!();
+            }
+
+            fn polar_class(&self) -> oso::Class {
+                Self::get_polar_class()
+            }
+        }
+
+        // Make sure an authz check with this resource fails with a clear
+        // message.
+        let unregistered_resource = UnregisteredResource {};
+        let authz_privileged = authz_context_for_actor(
+            &logctx.log,
+            authn::Context::privileged_test_user(),
+            Arc::clone(&datastore) as Arc<dyn crate::storage::Storage>,
+        );
+        let error = authz_privileged
+            .authorize(&opctx, Action::Read, unregistered_resource)
+            .await;
+        println!("{:?}", error);
+        assert!(matches!(error, Err(Error::InternalError {
+            internal_message
+        }) if internal_message == "attempted authz check \
+            on unregistered resource: \"UnregisteredResource\""));
+
+        logctx.cleanup_successful();
+    }
+}
