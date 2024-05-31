@@ -5496,7 +5496,6 @@ dependencies = [
  "nexus-auth",
  "nexus-client",
  "nexus-config",
- "nexus-db-fixed-data",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
