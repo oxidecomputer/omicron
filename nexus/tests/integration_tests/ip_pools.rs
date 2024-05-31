@@ -741,7 +741,7 @@ async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
         let name = format!("silo-{}", i);
         let silo =
             create_silo(&client, &name, true, SiloIdentityMode::SamlJit).await;
-        silo_ids.push(silo.id().clone());
+        silo_ids.push(silo.id());
         link_ip_pool(client, "p0", &silo.id(), false).await;
     }
 
