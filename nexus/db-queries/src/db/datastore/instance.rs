@@ -102,7 +102,9 @@ impl InstanceAndActiveVmm {
                 (external::InstanceState::from(*state), *time_state_updated)
             }
             None => (
-                external::InstanceState::Stopped,
+                external::InstanceState::from(
+                    instance.runtime_state.nexus_state,
+                ),
                 instance.runtime_state.time_updated,
             ),
         }
