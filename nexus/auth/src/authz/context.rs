@@ -201,13 +201,12 @@ mod test {
     use crate::authz::Context;
     use crate::authz::RoleSet;
     use crate::context::OpContext;
-    use omicron_test_utils::dev;
-    use std::sync::Arc;
-
     use nexus_db_model::IdentityType;
     use nexus_db_model::RoleAssignment;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::ResourceType;
+    use omicron_test_utils::dev;
+    use std::sync::Arc;
     use uuid::Uuid;
 
     struct FakeStorage {}

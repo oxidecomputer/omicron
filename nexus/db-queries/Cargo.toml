@@ -25,7 +25,6 @@ futures.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 once_cell.workspace = true
-oso.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -83,6 +82,7 @@ nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapiv3.workspace = true
+oso.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 predicates.workspace = true
