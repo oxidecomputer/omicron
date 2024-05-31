@@ -34,13 +34,13 @@ use dropshot::{
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{ApiEndpoint, EmptyScanParams};
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::{authz, db::datastore::ProbeInfo};
-use nexus_types::external_api::shared::BfdStatus;
+use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;

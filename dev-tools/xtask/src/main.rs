@@ -39,6 +39,9 @@ enum Cmds {
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
 
+    /// Manage OpenAPI specifications.
+    Apigen(external::External),
+
     #[cfg(target_os = "illumos")]
     /// Build a TUF repo
     Releng(external::External),
@@ -66,6 +69,7 @@ fn main() -> Result<()> {
     match args.cmd {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
+        Cmds::Apigen(external) => external.exec("apigen"),
 
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {

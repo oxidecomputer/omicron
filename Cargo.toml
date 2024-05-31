@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "api_identity",
+    "apis/*",
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
@@ -84,6 +85,7 @@ members = [
 ]
 
 default-members = [
+    "apis/*",
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
@@ -291,6 +293,7 @@ hyper = "0.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
+indent_write = "2.2.0"
 indexmap = "2.2.6"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
@@ -323,6 +326,7 @@ nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-inventory = { path = "nexus/inventory" }
+nexus-internal-api = { path = "apis/nexus-internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-networking = { path = "nexus/networking" }
@@ -425,6 +429,7 @@ shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
+similar = { version = "2.5.0", features = ["bytes"] }
 similar-asserts = "1.5.0"
 sled = "0.34"
 sled-agent-client = { path = "clients/sled-agent-client" }
@@ -667,8 +672,8 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-#[patch."https://github.com/oxidecomputer/dropshot"]
-#dropshot = { path = "../dropshot/dropshot" }
+[patch."https://github.com/oxidecomputer/dropshot"]
+dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]

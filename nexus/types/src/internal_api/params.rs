@@ -221,7 +221,7 @@ pub struct RackInitializationRequest {
     /// Blueprint describing services initialized by RSS.
     pub blueprint: Blueprint,
 
-    /// "Managed" physical disks owned by the control plane
+/// "Managed" physical disks owned by the control plane
     pub physical_disks: Vec<PhysicalDiskPutRequest>,
 
     /// Zpools created within the physical disks created by the control plane.
