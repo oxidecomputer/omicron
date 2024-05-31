@@ -152,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.83"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25bdb32cbbdce2b519a9cd7df3a678443100e265d5e25ca763b7572a5104f5f3"
+checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 dependencies = [
  "backtrace",
 ]
@@ -1591,7 +1591,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=025389ff39d594bf2b815377e2c1dc4dd23b1f96#025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=5630887d0373857f77cb264f84aa19bdec720ce3#5630887d0373857f77cb264f84aa19bdec720ce3"
 dependencies = [
  "percent-encoding",
  "progenitor",
@@ -1727,17 +1727,6 @@ dependencies = [
  "quote",
  "rustc_version 0.4.0",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "derror-macro"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn 2.0.64",
 ]
 
 [[package]]
@@ -3481,7 +3470,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
+source = "git+https://github.com/oxidecomputer/opte?rev=d6177ca84f23e60a661461bb4cece475689502d2#d6177ca84f23e60a661461bb4cece475689502d2"
 
 [[package]]
 name = "illumos-utils"
@@ -3895,7 +3884,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
+source = "git+https://github.com/oxidecomputer/opte?rev=d6177ca84f23e60a661461bb4cece475689502d2#d6177ca84f23e60a661461bb4cece475689502d2"
 dependencies = [
  "quote",
  "syn 2.0.64",
@@ -4307,7 +4296,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=025389ff39d594bf2b815377e2c1dc4dd23b1f96#025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=5630887d0373857f77cb264f84aa19bdec720ce3#5630887d0373857f77cb264f84aa19bdec720ce3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6060,10 +6049,9 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
+source = "git+https://github.com/oxidecomputer/opte?rev=d6177ca84f23e60a661461bb4cece475689502d2#d6177ca84f23e60a661461bb4cece475689502d2"
 dependencies = [
  "cfg-if",
- "derror-macro",
  "dyn-clone",
  "illumos-sys-hdrs",
  "kstat-macro",
@@ -6078,7 +6066,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
+source = "git+https://github.com/oxidecomputer/opte?rev=d6177ca84f23e60a661461bb4cece475689502d2#d6177ca84f23e60a661461bb4cece475689502d2"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -6090,7 +6078,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
+source = "git+https://github.com/oxidecomputer/opte?rev=d6177ca84f23e60a661461bb4cece475689502d2#d6177ca84f23e60a661461bb4cece475689502d2"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -6164,7 +6152,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=194a8d1d6443f78d59702a25849607dba33db732#194a8d1d6443f78d59702a25849607dba33db732"
+source = "git+https://github.com/oxidecomputer/opte?rev=d6177ca84f23e60a661461bb4cece475689502d2#d6177ca84f23e60a661461bb4cece475689502d2"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
