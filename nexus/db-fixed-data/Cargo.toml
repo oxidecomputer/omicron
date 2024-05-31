@@ -69,13 +69,6 @@ omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
 
-# only enabled during tests or via the `testing` feature
-omicron-test-utils = { workspace = true, optional = true }
-
-[features]
-# Enable to export `datastore_test`
-testing = ["omicron-test-utils"]
-
 [dev-dependencies]
 assert_matches.workspace = true
 camino-tempfile.workspace = true
@@ -89,7 +82,6 @@ nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
-omicron-test-utils.workspace = true
 openapiv3.workspace = true
 pem.workspace = true
 petgraph.workspace = true

@@ -6,7 +6,7 @@
 
 use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
-use crate::authz;
+use nexus_auth::authz;
 use crate::db::model::ArtifactId;
 use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
@@ -367,8 +367,8 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
     [
         // Non-resources:
         authz::Action::get_polar_class(),
-        authz::actor::AnyActor::get_polar_class(),
-        authz::actor::AuthenticatedActor::get_polar_class(),
+        authz::AnyActor::get_polar_class(),
+        authz::AuthenticatedActor::get_polar_class(),
         // Resources whose behavior should be identical to an existing type
         // and we don't want to do the test twice for performance reasons:
         // none yet.

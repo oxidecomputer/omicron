@@ -52,7 +52,6 @@ impl Authz {
         self.oso.is_allowed(actor.clone(), action, resource.clone())
     }
 
-    #[cfg(test)]
     pub fn into_class_names(self) -> BTreeSet<String> {
         self.class_names
     }
@@ -191,96 +190,4 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
 
     /// Returns the Polar class that implements this resource
     fn polar_class(&self) -> oso::Class;
-}
-
-#[cfg(test)]
-mod test {
-    use crate::authn;
-    use crate::authz::Action;
-    use crate::authz::Authz;
-    use crate::authz::Context;
-    use crate::db::DataStore;
-    use nexus_test_utils::db::test_setup_database;
-    use omicron_test_utils::dev;
-    use std::sync::Arc;
-
-    fn authz_context_for_actor(
-        log: &slog::Logger,
-        authn: authn::Context,
-        datastore: Arc<DataStore>,
-    ) -> Context {
-        let authz = Authz::new(log);
-        Context::new(Arc::new(authn), Arc::new(authz), datastore)
-    }
-
-    #[tokio::test]
-    async fn test_unregistered_resource() {
-        let logctx = dev::test_setup_log("test_unregistered_resource");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
-
-        // Define a resource that we "forget" to register with Oso.
-        use super::AuthorizedResource;
-        use crate::authz::actor::AnyActor;
-        use crate::authz::roles::RoleSet;
-        use crate::context::OpContext;
-        use omicron_common::api::external::Error;
-        use oso::PolarClass;
-        #[derive(Clone, PolarClass)]
-        struct UnregisteredResource;
-        impl AuthorizedResource for UnregisteredResource {
-            fn load_roles<'a, 'b, 'c, 'd, 'e>(
-                &'a self,
-                _: &'b OpContext,
-                _: &'c authn::Context,
-                _: &'d mut RoleSet,
-            ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-            where
-                'a: 'e,
-                'b: 'e,
-                'c: 'e,
-                'd: 'e,
-            {
-                // authorize() shouldn't get far enough to call this.
-                unimplemented!();
-            }
-
-            fn on_unauthorized(
-                &self,
-                _: &Authz,
-                _: Error,
-                _: AnyActor,
-                _: Action,
-            ) -> Error {
-                // authorize() shouldn't get far enough to call this.
-                unimplemented!();
-            }
-
-            fn polar_class(&self) -> oso::Class {
-                Self::get_polar_class()
-            }
-        }
-
-        // Make sure an authz check with this resource fails with a clear
-        // message.
-        let unregistered_resource = UnregisteredResource {};
-        let authz_privileged = authz_context_for_actor(
-            &logctx.log,
-            authn::Context::privileged_test_user(),
-            Arc::clone(&datastore),
-        );
-        let error = authz_privileged
-            .authorize(&opctx, Action::Read, unregistered_resource)
-            .await;
-        println!("{:?}", error);
-        assert!(matches!(error, Err(Error::InternalError {
-            internal_message
-        }) if internal_message == "attempted authz check \
-            on unregistered resource: \"UnregisteredResource\""));
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
 }

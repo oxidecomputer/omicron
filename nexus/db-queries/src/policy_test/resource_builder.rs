@@ -6,10 +6,10 @@
 //! IAM policy test
 
 use super::coverage::Coverage;
-use crate::authz;
-use crate::authz::ApiResourceWithRolesType;
-use crate::authz::AuthorizedResource;
-use crate::context::OpContext;
+use nexus_auth::authz;
+use nexus_auth::authz::ApiResourceWithRolesType;
+use nexus_auth::authz::AuthorizedResource;
+use nexus_auth::context::OpContext;
 use crate::db;
 use authz::ApiResource;
 use futures::future::BoxFuture;
@@ -192,35 +192,6 @@ pub trait DynAuthorizedResource: AuthorizedResource + std::fmt::Debug {
     fn resource_name(&self) -> String;
 }
 
-impl<T> DynAuthorizedResource for T
-where
-    T: ApiResource + AuthorizedResource + oso::PolarClass + Clone,
-{
-    fn do_authorize<'a, 'b>(
-        &'a self,
-        opctx: &'b OpContext,
-        action: authz::Action,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'b: 'a,
-    {
-        opctx.authorize(action, self).boxed()
-    }
-
-    fn resource_name(&self) -> String {
-        let my_ident = match self.lookup_type() {
-            LookupType::ByName(name) => format!("{:?}", name),
-            LookupType::ById(id) => format!("id {:?}", id.to_string()),
-            LookupType::ByCompositeId(id) => format!("id {:?}", id),
-            LookupType::ByOther(_) => {
-                unimplemented!()
-            }
-        };
-
-        format!("{:?} {}", self.resource_type(), my_ident)
-    }
-}
-
 macro_rules! impl_dyn_authorized_resource_for_global {
     ($t:ty) => {
         impl DynAuthorizedResource for $t {
@@ -242,7 +213,68 @@ macro_rules! impl_dyn_authorized_resource_for_global {
     };
 }
 
-impl_dyn_authorized_resource_for_global!(authz::oso_generic::Database);
+macro_rules! impl_dyn_authorized_resource_for_resource {
+    ($t:ty) => {
+        impl DynAuthorizedResource for $t {
+            fn resource_name(&self) -> String {
+                let my_ident = match self.lookup_type() {
+                    LookupType::ByName(name) => format!("{:?}", name),
+                    LookupType::ById(id) => format!("id {:?}", id.to_string()),
+                    LookupType::ByCompositeId(id) => format!("id {:?}", id),
+                    LookupType::ByOther(_) => {
+                        unimplemented!()
+                    }
+                };
+                format!("{:?} {}", self.resource_type(), my_ident)
+            }
+
+            fn do_authorize<'a, 'b>(
+                &'a self,
+                opctx: &'b OpContext,
+                action: authz::Action,
+            ) -> BoxFuture<'a, Result<(), Error>>
+            where
+                'b: 'a,
+            {
+                opctx.authorize(action, self).boxed()
+            }
+        }
+    };
+}
+
+impl_dyn_authorized_resource_for_resource!(authz::AddressLot);
+impl_dyn_authorized_resource_for_resource!(authz::Blueprint);
+impl_dyn_authorized_resource_for_resource!(authz::Certificate);
+impl_dyn_authorized_resource_for_resource!(authz::DeviceAccessToken);
+impl_dyn_authorized_resource_for_resource!(authz::DeviceAuthRequest);
+impl_dyn_authorized_resource_for_resource!(authz::Disk);
+impl_dyn_authorized_resource_for_resource!(authz::Fleet);
+impl_dyn_authorized_resource_for_resource!(authz::FloatingIp);
+impl_dyn_authorized_resource_for_resource!(authz::IdentityProvider);
+impl_dyn_authorized_resource_for_resource!(authz::Image);
+impl_dyn_authorized_resource_for_resource!(authz::Instance);
+impl_dyn_authorized_resource_for_resource!(authz::InstanceNetworkInterface);
+impl_dyn_authorized_resource_for_resource!(authz::LoopbackAddress);
+impl_dyn_authorized_resource_for_resource!(authz::Rack);
+impl_dyn_authorized_resource_for_resource!(authz::PhysicalDisk);
+impl_dyn_authorized_resource_for_resource!(authz::Project);
+impl_dyn_authorized_resource_for_resource!(authz::ProjectImage);
+impl_dyn_authorized_resource_for_resource!(authz::SamlIdentityProvider);
+impl_dyn_authorized_resource_for_resource!(authz::Service);
+impl_dyn_authorized_resource_for_resource!(authz::Silo);
+impl_dyn_authorized_resource_for_resource!(authz::SiloGroup);
+impl_dyn_authorized_resource_for_resource!(authz::SiloImage);
+impl_dyn_authorized_resource_for_resource!(authz::SiloUser);
+impl_dyn_authorized_resource_for_resource!(authz::Sled);
+impl_dyn_authorized_resource_for_resource!(authz::Snapshot);
+impl_dyn_authorized_resource_for_resource!(authz::SshKey);
+impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
+impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
+impl_dyn_authorized_resource_for_resource!(authz::Vpc);
+impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
+impl_dyn_authorized_resource_for_resource!(authz::Zpool);
+
+impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);
 impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);

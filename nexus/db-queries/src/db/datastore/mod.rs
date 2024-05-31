@@ -483,7 +483,7 @@ mod test {
             logctx.log.new(o!("component" => "TestExternalAuthn")),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::external_authn(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let token = "a_token".to_string();
@@ -585,7 +585,7 @@ mod test {
                 *DEFAULT_SILO_ID,
                 SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
             ),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let delete = datastore
             .session_hard_delete(&silo_user_opctx, &authz_session)
@@ -1622,8 +1622,10 @@ mod test {
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore =
             Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let opctx = OpContext::for_tests(
+            logctx.log.new(o!()),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
 
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();

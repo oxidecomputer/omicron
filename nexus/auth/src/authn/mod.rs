@@ -253,7 +253,6 @@ pub struct SiloAuthnPolicy {
 }
 
 impl SiloAuthnPolicy {
-    #[cfg(test)]
     pub fn new(
         mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
     ) -> SiloAuthnPolicy {
@@ -289,8 +288,8 @@ mod test {
     use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
-    use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
-    use crate::db::identity::Asset;
+    use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
+    use nexus_types::identity::Asset;
 
     #[test]
     fn test_internal_users() {

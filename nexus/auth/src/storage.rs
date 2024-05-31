@@ -18,10 +18,10 @@ use uuid::Uuid;
 pub trait Storage: Send + Sync {
     async fn role_asgn_list_for(
         &self,
-        _opctx: &OpContext,
-        _identity_type: IdentityType,
-        _identity_id: Uuid,
-        _resource_type: ResourceType,
-        _resource_id: Uuid,
+        opctx: &OpContext,
+        identity_type: IdentityType,
+        identity_id: Uuid,
+        resource_type: ResourceType,
+        resource_id: Uuid,
     ) -> Result<Vec<RoleAssignment>, Error>;
 }

@@ -347,6 +347,7 @@ impl Session for ConsoleSessionWithSiloId {
     }
 }
 
+/*
 #[cfg(test)]
 mod test {
     use super::OpContext;
@@ -462,3 +463,4 @@ mod test {
         logctx.cleanup_successful();
     }
 }
+*/

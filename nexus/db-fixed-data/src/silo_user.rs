@@ -63,7 +63,7 @@ mod test {
     use super::super::assert_valid_uuid;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
-    use crate::db::identity::Asset;
+    use nexus_types::identity::Asset;
 
     #[test]
     fn test_silo_user_ids_are_valid() {

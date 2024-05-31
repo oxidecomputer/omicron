@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::authz;
-use crate::authz::AuthorizedResource;
+use nexus_auth::authz;
+use nexus_auth::authz::AuthorizedResource;
+use slog::{debug, error, o, warn};
 use std::collections::BTreeSet;
 
 /// Helper for identifying authz resources not covered by the IAM role policy

@@ -168,6 +168,8 @@
 //! allowed.  Otherwise, it's not.
 
 mod actor;
+pub use actor::AnyActor;
+pub use actor::AuthenticatedActor;
 
 mod api_resources;
 pub use api_resources::*;
@@ -179,9 +181,8 @@ pub use context::Context;
 
 mod oso_generic;
 pub use oso_generic::Action;
+pub use oso_generic::Database;
 pub use oso_generic::DATABASE;
 
 mod roles;
-
-#[cfg(test)]
-mod policy_test;
+pub use roles::RoleSet;

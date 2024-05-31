@@ -14,12 +14,12 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
-use crate::authn;
-use crate::authn::SiloAuthnPolicy;
-use crate::authz;
-use crate::context::OpContext;
+use nexus_auth::authn;
+use nexus_auth::authn::SiloAuthnPolicy;
+use nexus_auth::authn::USER_TEST_PRIVILEGED;
+use nexus_auth::authz;
+use nexus_auth::context::OpContext;
 use crate::db;
-use authn::USER_TEST_PRIVILEGED;
 use coverage::Coverage;
 use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
@@ -33,6 +33,7 @@ use omicron_test_utils::dev;
 use resource_builder::DynAuthorizedResource;
 use resource_builder::ResourceBuilder;
 use resource_builder::ResourceSet;
+use slog::{o, trace};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -117,7 +118,7 @@ async fn test_iam_roles_behavior() {
                     main_silo_id,
                     SiloAuthnPolicy::default(),
                 ),
-                Arc::clone(&datastore),
+                Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
             );
 
             Arc::new((username.clone(), opctx))
@@ -140,7 +141,7 @@ async fn test_iam_roles_behavior() {
             user_log,
             Arc::clone(&authz),
             authn::Context::internal_unauthenticated(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         ),
     )));
 
@@ -439,7 +440,7 @@ async fn test_conferred_roles() {
                             main_silo_id,
                             policy.clone(),
                         ),
-                        Arc::clone(&datastore),
+                        Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
                     );
                     Arc::new((username.clone(), opctx))
                 })

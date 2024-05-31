@@ -332,7 +332,6 @@ mod test {
 
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
-    use nexus_db_fixed_data;
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;
@@ -384,8 +383,8 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> TestData {
-        let fleet_id = *fixed_data::FLEET_ID;
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let fleet_id = *nexus_db_fixed_data::FLEET_ID;
+        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
 
         let (authz_project, _project) = datastore

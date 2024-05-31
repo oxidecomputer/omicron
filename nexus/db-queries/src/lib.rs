@@ -12,6 +12,9 @@ pub mod db;
 pub mod provisioning;
 pub mod transaction_retry;
 
+#[cfg(test)]
+mod policy_test;
+
 #[macro_use]
 extern crate slog;
 #[cfg(test)]

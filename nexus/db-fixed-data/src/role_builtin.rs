@@ -83,7 +83,7 @@ pub static BUILTIN_ROLES: Lazy<Vec<RoleBuiltinConfig>> = Lazy::new(|| {
 #[cfg(test)]
 mod test {
     use super::BUILTIN_ROLES;
-    use crate::db::model::DatabaseString;
+    use nexus_db_model::DatabaseString;
     use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
     use omicron_common::api::external::ResourceType;
     use strum::IntoEnumIterator;
