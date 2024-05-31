@@ -1,0 +1,50 @@
+This schema change splits the "instance state" enum that instances and VMMs
+share into two enums, one for instance states and one for VMM states. Variants
+used by only one of these objects only appear in the corresponding enum.
+
+This change is mechanically tricky for two reasons. First, the states instances
+and VMMs have after an upgrade depends on the state that they have before the
+upgrade. (While this upgrade is supposed to take place offline, past experience
+with instances that are stuck in a non-Stopped state shows that we can't take
+for granted that all instances and VMMs will be Stopped at upgrade time.)
+Second, Postgres and/or CRDB don't support all the schema change primitives we
+might use to deprecate the old state column. Specifically:
+
+* CockroachDB doesn't support altering column types without enabling an
+  experimental flag (cockroachdb#49329).
+* Postgres doesn't support removing enum variants (adding and renaming are OK),
+  so we can't shrink and directly reuse the existing instance state enum without
+  leaving a set of "reserved"/"unused" variants around.
+* Even if it did, Postgres doesn't support the `IF EXISTS` qualifier for many
+  `ALTER TYPE` and `ALTER TABLE` statements, e.g. `ALTER TABLE RENAME COLUMN`
+  and `ALTER TYPE RENAME TO`. There are ways to work around this (e.g. put the
+  statement into a user-defined function or code block and catch the relevant
+  exceptions from it), but CockroachDB v22.1.9 doesn't support UDFs (support
+  was added in v22.2).
+
+These limitations make it hard to change the schema idempotently. To get around
+this for instances, do the following:
+
+. Create an `instance_state_v2` enum with the variants of interest.
+. Create a new `downlevel_state` column in the instance table (`ALTER TABLE ADD
+  COLUMN` supports `IF NOT EXISTS`).
+. Copy all existing instance states to that column.
+. Drop the existing `state` column (`ALTER TABLE DROP COLUMN` supports `IF
+  EXISTS`).
+. Recreate the `state` column with the new type.
+. Populate the column's values based on what was saved in the `downlevel_state`
+  column.
+. Add a `NOT NULL` qualifier to the new `state` column.
+. Drop the `downlevel_state` column.
+
+VMMs are similar, except that the new enum is called `vmm_state`.
+
+Once all this work is done the original `instance_state` enum can be dropped.
+
+There are two other small details to keep in mind:
+
+- The upgrade process needs to delete and recreate the `sled_instance` view
+  because it depends on the instance and VMM state columns.
+- Deleting and recreating a state column (instead of modifying it in place)
+  changes its column index in its table, so these columns need to be moved
+  to the (current) ends of the table definitions in dbinit.sql.

@@ -954,15 +954,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
  * Instances
  */
 
-CREATE TYPE IF NOT EXISTS omicron.public.instance_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
+    /* The instance exists in the DB but its create saga is still in flight. */
     'creating',
+
+    /*
+     * The instance has no active VMM. Corresponds to the "stopped" external
+     * state.
+     */
+    'no_vmm',
+
+    /* The instance's state is derived from its active VMM's state. */
+    'vmm',
+
+    /* Something bad happened while trying to interact with the instance. */
+    'failed',
+
+    /* The instance has been destroyed. */
+    'destroyed'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'starting',
     'running',
     'stopping',
     'stopped',
     'rebooting',
     'migrating',
-    'repairing',
     'failed',
     'destroyed'
 );
@@ -989,12 +1007,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
-    /* The state of the instance when it has no active VMM. */
-    state omicron.public.instance_state NOT NULL,
+    /* The last-updated time and generation for the instance's state. */
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
 
     /* FK into `vmm` for the Propolis server that's backing this instance. */
+    /* TODO(gjc): add constraint that state = 'active' iff this is not NULL */
     active_propolis_id UUID,
 
     /* FK into `vmm` for the migration target Propolis server, if one exists. */
@@ -1014,8 +1032,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     updater_id UUID,
 
     /* Generation of the instance updater lock */
-    updater_gen INT NOT NULL DEFAULT 0
+    updater_gen INT NOT NULL DEFAULT 0,
 
+    /*
+     * The internal instance state. If this is 'vmm', the externally-visible
+     * instance state is derived from its active VMM's state. This column is
+     * distant from its generation number and update time because it is
+     * deleted and recreated by the schema upgrade process; see the
+     * `separate-instance-and-vmm-states` schema change for details.
+     */
+    state omicron.public.instance_state_v2 NOT NULL
 );
 
 -- Names for instances within a project should be unique
@@ -3477,12 +3503,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     instance_id UUID NOT NULL,
-    state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
-    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
+    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
+
+    /*
+     * N.B. This column's
+     */
+    state omicron.public.vmm_state NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
