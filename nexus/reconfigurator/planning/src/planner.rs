@@ -12,11 +12,13 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -170,15 +172,8 @@ impl<'a> Planner<'a> {
         {
             commissioned_sled_ids.insert(sled_id);
 
-            // Does this sled need zone expungement based on the details?
-            let Some(reason) =
-                needs_zone_expungement(sled_details.state, sled_details.policy)
-            else {
-                continue;
-            };
-
-            // Perform the expungement.
-            self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+            // Perform the expungement, for any zones that might need it.
+            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -558,7 +553,7 @@ impl<'a> Planner<'a> {
 
 /// Returns `Some(reason)` if the sled needs its zones to be expunged,
 /// based on the policy and state.
-fn needs_zone_expungement(
+fn sled_needs_all_zones_expunged(
     state: SledState,
     policy: SledPolicy,
 ) -> Option<ZoneExpungeReason> {
@@ -569,7 +564,7 @@ fn needs_zone_expungement(
             // an illegal state, but representable. If we see a sled in this
             // state, we should still expunge all zones in it, but parent code
             // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned { policy });
+            return Some(ZoneExpungeReason::SledDecommissioned);
         }
     }
 
@@ -579,13 +574,36 @@ fn needs_zone_expungement(
     }
 }
 
+pub(crate) fn zone_needs_expungement(
+    sled_details: &SledDetails,
+    zone_config: &BlueprintZoneConfig,
+) -> Option<ZoneExpungeReason> {
+    // Should we expunge the zone because the sled is gone?
+    if let Some(reason) =
+        sled_needs_all_zones_expunged(sled_details.state, sled_details.policy)
+    {
+        return Some(reason);
+    }
+
+    // Should we expunge the zone because durable storage is gone?
+    if let Some(durable_storage_zpool) = zone_config.zone_type.zpool() {
+        let zpool_id = durable_storage_zpool.id();
+        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
+            return Some(ZoneExpungeReason::DiskExpunged);
+        }
+    };
+
+    None
+}
+
 /// The reason a sled's zones need to be expunged.
 ///
 /// This is used only for introspection and logging -- it's not part of the
 /// logical flow.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum ZoneExpungeReason {
-    SledDecommissioned { policy: SledPolicy },
+    DiskExpunged,
+    SledDecommissioned,
     SledExpunged,
 }
 
@@ -611,6 +629,9 @@ mod test {
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::OmicronZoneNetworkResources;
+    use nexus_types::deployment::SledDisk;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -1032,7 +1053,7 @@ mod test {
         // Make generated disk ids deterministic
         let mut disk_rng =
             TypedUuidRng::from_seed(TEST_NAME, "NewPhysicalDisks");
-        let mut new_sled_disk = |policy| nexus_types::deployment::SledDisk {
+        let mut new_sled_disk = |policy| SledDisk {
             disk_identity: DiskIdentity {
                 vendor: "test-vendor".to_string(),
                 serial: "test-serial".to_string(),
@@ -1040,7 +1061,7 @@ mod test {
             },
             disk_id: PhysicalDiskUuid::from(disk_rng.next()),
             policy,
-            state: nexus_types::external_api::views::PhysicalDiskState::Active,
+            state: PhysicalDiskState::Active,
         };
 
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
@@ -1057,13 +1078,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::InService),
+                new_sled_disk(PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::Expunged),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
             );
         }
 
@@ -1092,6 +1113,73 @@ mod test {
             NEW_IN_SERVICE_DISKS
         );
         assert!(!diff.zones.removed.contains_key(sled_id));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_disk_expungement_removes_zones() {
+        static TEST_NAME: &str = "planner_disk_expungement_removes_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Aside: Avoid churning on the quantity of Nexus zones - we're okay
+        // staying at one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        // The example system should be assigning crucible zones to each
+        // in-service disk. When we expunge one of these disks, the planner
+        // should remove the associated zone.
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+        let (_, disk) =
+            sled_details.resources.zpools.iter_mut().next().unwrap();
+        disk.policy = PhysicalDiskPolicy::Expunged;
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: expunge a disk",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 1);
+
+        // We should be removing a single zone, associated with the Crucible
+        // using that device.
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 1);
+
+        let (_zone_id, modified_zones) =
+            diff.zones.modified.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.len(), 1);
+        let modified_zone = &modified_zones.zones.first().unwrap().zone;
+        assert!(
+            matches!(modified_zone.kind(), ZoneKind::Crucible),
+            "Expected the modified zone to be a Crucible zone, but it was: {:?}",
+            modified_zone.kind()
+        );
+        assert_eq!(
+            modified_zone.disposition(),
+            BlueprintZoneDisposition::Expunged,
+            "Should have expunged this zone"
+        );
 
         logctx.cleanup_successful();
     }

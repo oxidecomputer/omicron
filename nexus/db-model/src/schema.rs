@@ -430,6 +430,8 @@ table! {
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        updater_id -> Nullable<Uuid>,
+        updater_gen-> Int8,
     }
 }
 
