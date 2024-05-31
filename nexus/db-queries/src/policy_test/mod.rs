@@ -14,14 +14,14 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
+use crate::db;
+use coverage::Coverage;
+use futures::StreamExt;
 use nexus_auth::authn;
 use nexus_auth::authn::SiloAuthnPolicy;
 use nexus_auth::authn::USER_TEST_PRIVILEGED;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
-use crate::db;
-use coverage::Coverage;
-use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::FleetRole;
@@ -440,7 +440,8 @@ async fn test_conferred_roles() {
                             main_silo_id,
                             policy.clone(),
                         ),
-                        Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+                        Arc::clone(&datastore)
+                            as Arc<dyn nexus_auth::storage::Storage>,
                     );
                     Arc::new((username.clone(), opctx))
                 })

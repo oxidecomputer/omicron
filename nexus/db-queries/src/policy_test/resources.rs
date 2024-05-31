@@ -6,8 +6,8 @@
 
 use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
-use nexus_auth::authz;
 use crate::db::model::ArtifactId;
+use nexus_auth::authz;
 use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;

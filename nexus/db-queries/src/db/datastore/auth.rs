@@ -111,8 +111,8 @@ mod test {
                 .await;
 
         // Define a resource that we "forget" to register with Oso.
-        use nexus_auth::authz::AuthorizedResource;
         use crate::context::OpContext;
+        use nexus_auth::authz::AuthorizedResource;
         use omicron_common::api::external::Error;
         use oso::PolarClass;
         #[derive(Clone, PolarClass)]

@@ -347,26 +347,48 @@ impl Session for ConsoleSessionWithSiloId {
     }
 }
 
-/*
 #[cfg(test)]
 mod test {
     use super::OpContext;
     use crate::authn;
     use crate::authz;
     use authz::Action;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_db_model::IdentityType;
+    use nexus_db_model::RoleAssignment;
     use omicron_common::api::external::Error;
+    use omicron_common::api::external::ResourceType;
     use omicron_test_utils::dev;
     use std::collections::BTreeMap;
     use std::sync::Arc;
+    use uuid::Uuid;
+
+    struct FakeStorage {}
+
+    impl FakeStorage {
+        fn new() -> Arc<dyn crate::storage::Storage> {
+            Arc::new(Self {})
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::storage::Storage for FakeStorage {
+        async fn role_asgn_list_for(
+            &self,
+            _opctx: &OpContext,
+            _identity_type: IdentityType,
+            _identity_id: Uuid,
+            _resource_type: ResourceType,
+            _resource_id: Uuid,
+        ) -> Result<Vec<RoleAssignment>, Error> {
+            todo!();
+        }
+    }
 
     #[tokio::test]
     async fn test_background_context() {
         let logctx = dev::test_setup_log("test_background_context");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
+
+        let datastore = FakeStorage::new();
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -389,17 +411,13 @@ mod test {
             .await
             .expect_err("expected authorization error");
         assert!(matches!(error, Error::Unauthenticated { .. }));
-        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_test_context() {
         let logctx = dev::test_setup_log("test_background_context");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
+        let datastore = FakeStorage::new();
         let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
@@ -411,17 +429,13 @@ mod test {
             .authorize(Action::Query, &authz::DATABASE)
             .await
             .expect("expected authorization to succeed");
-        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_child_context() {
         let logctx = dev::test_setup_log("test_child_context");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
+        let datastore = FakeStorage::new();
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -459,8 +473,6 @@ mod test {
         assert_eq!(grandchild_opctx.metadata["one"], "seven");
         assert_eq!(grandchild_opctx.metadata["five"], "six");
 
-        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }
-*/
