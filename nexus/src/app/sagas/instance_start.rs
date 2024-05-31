@@ -14,9 +14,10 @@ use crate::app::instance::InstanceRegisterReason;
 use crate::app::instance::InstanceStateChangeError;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
+use nexus_db_model::InstanceState;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::external::{Error, InstanceState};
+use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog::info;
 use steno::{ActionError, Node};
@@ -200,7 +201,7 @@ async fn sis_destroy_vmm_record(
     );
 
     let vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    super::instance_common::destroy_vmm_record(
+    super::instance_common::unwind_vmm_record(
         osagactx.datastore(),
         &opctx,
         &vmm,
@@ -260,9 +261,7 @@ async fn sis_move_to_starting(
         // be running before Propolis thinks it has started.)
         None => {
             let new_runtime = db::model::InstanceRuntimeState {
-                nexus_state: db::model::InstanceState::new(
-                    InstanceState::Running,
-                ),
+                nexus_state: db::model::InstanceState::Running,
                 propolis_id: Some(propolis_id),
                 time_updated: Utc::now(),
                 gen: db_instance.runtime().gen.next().into(),
@@ -300,7 +299,7 @@ async fn sis_move_to_starting_undo(
           "instance_id" => %instance_id);
 
     let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: InstanceState::Stopped,
         propolis_id: None,
         gen: db_instance.runtime_state.gen.next().into(),
         ..db_instance.runtime_state
@@ -762,8 +761,7 @@ mod test {
                 .as_ref()
                 .expect("running instance should have a vmm")
                 .runtime
-                .state
-                .0;
+                .state;
 
         assert_eq!(vmm_state, InstanceState::Running);
     }
@@ -818,7 +816,7 @@ mod test {
 
                         assert!(new_db_instance.runtime().propolis_id.is_none());
                         assert_eq!(
-                            new_db_instance.runtime().nexus_state.0,
+                            new_db_instance.runtime().nexus_state,
                             InstanceState::Stopped
                         );
 
@@ -861,8 +859,7 @@ mod test {
                 .as_ref()
                 .expect("running instance should have a vmm")
                 .runtime
-                .state
-                .0;
+                .state;
 
         assert_eq!(vmm_state, InstanceState::Running);
     }
@@ -930,7 +927,7 @@ mod test {
 
         assert_eq!(
             db_instance.instance().runtime_state.nexus_state,
-            nexus_db_model::InstanceState(InstanceState::Stopped)
+            nexus_db_model::InstanceState::Stopped
         );
         assert!(db_instance.vmm().is_none());
 

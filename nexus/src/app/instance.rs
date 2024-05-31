@@ -18,6 +18,7 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_queries::authn;
@@ -477,7 +478,7 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state.0 != InstanceState::Running
+            || vmm.as_ref().unwrap().runtime.state != InstanceState::Running
         {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
@@ -704,45 +705,29 @@ impl super::Nexus {
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
-        let (instance, vmm) = (state.instance(), state.vmm());
+        // An instance may only be started if it is in the `Stopped` effective state.
+        match state.effective_state() {
+            InstanceState::Starting
+            | InstanceState::Running
+            | InstanceState::Rebooting => {
+                debug!(self.log, "asked to start an active instance";
+                       "instance_id" => %authz_instance.id());
 
-        if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Rebooting => {
-                    debug!(self.log, "asked to start an active instance";
-                           "instance_id" => %authz_instance.id());
-
-                    return Ok(state);
-                }
-                InstanceState::Stopped => {
-                    let propolis_id = instance
-                        .runtime()
-                        .propolis_id
-                        .expect("needed a VMM ID to fetch a VMM record");
-                    error!(self.log,
-                           "instance is stopped but still has an active VMM";
-                           "instance_id" => %authz_instance.id(),
-                           "propolis_id" => %propolis_id);
-
-                    return Err(Error::internal_error(
-                        "instance is stopped but still has an active VMM",
-                    ));
-                }
-                _ => {
-                    return Err(Error::conflict(&format!(
-                        "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state.0,
-                        InstanceState::Stopped
-                    )));
-                }
+                return Ok(state);
+            }
+            // Okay to start
+            InstanceState::Stopped => {}
+            instance_state => {
+                return Err(Error::conflict(&format!(
+                    "instance is in state {instance_state} but must be {} to be started",
+                    InstanceState::Stopped
+                )))
             }
         }
 
         let saga_params = sagas::instance_start::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            db_instance: instance.clone(),
+            db_instance: state.instance().clone(),
         };
 
         self.execute_saga::<sagas::instance_start::SagaInstanceStart>(
@@ -840,10 +825,13 @@ impl super::Nexus {
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
+        // N.B. that this *doesn't* use the `InstanceAndVmms::effective_state
+        // method, because we actually want to inspect the real state of the
+        // active VMM here.
         let effective_state = if let Some(vmm) = vmm_state {
-            vmm.runtime.state.0
+            vmm.runtime.state
         } else {
-            instance_state.runtime().nexus_state.0
+            instance_state.runtime().nexus_state
         };
 
         // Requests that operate on active instances have to be directed to the
@@ -856,7 +844,7 @@ impl super::Nexus {
                 // If there's no active sled because the instance is stopped,
                 // allow requests to stop to succeed silently for idempotency,
                 // but reject requests to do anything else.
-                InstanceState::Stopped => match requested {
+                DbInstanceState::Stopped => match requested {
                     InstanceStateChangeRequest::Run => {
                         return Err(Error::invalid_request(&format!(
                             "cannot run an instance in state {} with no VMM",
@@ -883,7 +871,7 @@ impl super::Nexus {
                 // If the instance is still being created (such that it hasn't
                 // even begun to start yet), no runtime state change is valid.
                 // Return a specific error message explaining the problem.
-                InstanceState::Creating => {
+                DbInstanceState::Creating => {
                     return Err(Error::invalid_request(
                                 "cannot change instance state while it is \
                                 still being created"
@@ -896,7 +884,7 @@ impl super::Nexus {
                 // TODO(#2825): Failed instances should be allowed to stop, but
                 // this requires a special action because there is no sled to
                 // send the request to.
-                InstanceState::Failed | InstanceState::Destroyed => {
+                DbInstanceState::Failed | DbInstanceState::Destroyed | DbInstanceState::SagaUnwound => {
                     return Err(Error::invalid_request(&format!(
                         "instance state cannot be changed from {}",
                         effective_state
@@ -926,27 +914,30 @@ impl super::Nexus {
             InstanceStateChangeRequest::Run
             | InstanceStateChangeRequest::Reboot
             | InstanceStateChangeRequest::Stop => match effective_state {
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Repairing | InstanceState::Failed => false,
-                InstanceState::Destroyed => false,
+                DbInstanceState::Creating
+                | DbInstanceState::Starting
+                | DbInstanceState::Running
+                | DbInstanceState::Stopping
+                | DbInstanceState::Stopped
+                | DbInstanceState::Rebooting
+                | DbInstanceState::Migrating => true,
+                DbInstanceState::Repairing | DbInstanceState::Failed => false,
+                DbInstanceState::Destroyed | DbInstanceState::SagaUnwound => {
+                    false
+                }
             },
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
-                InstanceState::Running
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Repairing
-                | InstanceState::Failed
-                | InstanceState::Destroyed => false,
+                DbInstanceState::Running
+                | DbInstanceState::Rebooting
+                | DbInstanceState::Migrating => true,
+                DbInstanceState::Creating
+                | DbInstanceState::Starting
+                | DbInstanceState::Stopping
+                | DbInstanceState::Stopped
+                | DbInstanceState::Repairing
+                | DbInstanceState::Failed
+                | DbInstanceState::Destroyed
+                | DbInstanceState::SagaUnwound => false,
             },
         };
 
@@ -1647,24 +1638,24 @@ impl super::Nexus {
 
         let (instance, vmm) = (state.instance(), state.vmm());
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Running
-                | InstanceState::Rebooting
-                | InstanceState::Migrating
-                | InstanceState::Repairing => {
+            match vmm.runtime.state {
+                DbInstanceState::Running
+                | DbInstanceState::Rebooting
+                | DbInstanceState::Migrating
+                | DbInstanceState::Repairing => {
                     Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Failed => {
+                DbInstanceState::Creating
+                | DbInstanceState::Starting
+                | DbInstanceState::Stopping
+                | DbInstanceState::Stopped
+                | DbInstanceState::Failed => {
                     Err(Error::invalid_request(format!(
                         "cannot connect to serial console of instance in state \"{}\"",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                     )))
                 }
-                InstanceState::Destroyed => Err(Error::invalid_request(
+                DbInstanceState::Destroyed | DbInstanceState::SagaUnwound => Err(Error::invalid_request(
                     "cannot connect to serial console of destroyed instance",
                 )),
             }

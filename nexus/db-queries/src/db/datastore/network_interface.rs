@@ -713,7 +713,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_runtime =
@@ -759,7 +758,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_state =

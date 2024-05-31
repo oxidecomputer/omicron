@@ -9,14 +9,13 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use chrono::Utc;
 use nexus_db_model::{
-    ByteCount, ExternalIp, IpAttachState, Ipv4NatEntry,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
     SledReservationConstraints, SledResource,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::{Error, NameOrId};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
@@ -113,19 +112,19 @@ pub async fn create_and_insert_vmm_record(
     Ok(vmm)
 }
 
-/// Given a previously-inserted VMM record, set its state to Destroyed and then
+/// Given a previously-inserted VMM record, set its state to `SagaUnwound` and then
 /// delete it.
 ///
 /// This function succeeds idempotently if called with the same parameters,
 /// provided that the VMM record was not changed by some other actor after the
 /// calling saga inserted it.
-pub async fn destroy_vmm_record(
+pub async fn unwind_vmm_record(
     datastore: &DataStore,
     opctx: &OpContext,
     prev_record: &db::model::Vmm,
 ) -> Result<(), anyhow::Error> {
     let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::InstanceState(InstanceState::Destroyed),
+        state: db::model::InstanceState::SagaUnwound,
         time_state_updated: Utc::now(),
         gen: prev_record.runtime.gen.next().into(),
     };
@@ -220,7 +219,9 @@ pub async fn instance_ip_get_instance_state(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let found_state = inst_and_vmm.instance().runtime_state.nexus_state.0;
+    // XXX(eliza): not sure if this should operate on
+    // `InstanceAndActiveVmm::effective_state` or not?
+    let found_state = inst_and_vmm.instance().runtime_state.nexus_state;
     let mut sled_id = inst_and_vmm.sled_id();
 
     // Arriving here means we started in a correct state (running/stopped).
@@ -243,12 +244,12 @@ pub async fn instance_ip_get_instance_state(
             sled_id = None;
         }
         InstanceState::Running => {}
-        state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state.into()) => {
+        state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
             ))))
         }
-        InstanceState::Destroyed => {
+        InstanceState::Destroyed | InstanceState::SagaUnwound => {
             return Err(ActionError::action_failed(Error::not_found_by_id(
                 omicron_common::api::external::ResourceType::Instance,
                 &authz_instance.id(),

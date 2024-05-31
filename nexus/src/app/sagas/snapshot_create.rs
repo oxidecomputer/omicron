@@ -1609,6 +1609,7 @@ mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_model::InstanceState;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::DataStore;
@@ -2041,13 +2042,9 @@ mod test {
             .as_ref()
             .expect("running instance should have a sled")
             .runtime
-            .state
-            .0;
+            .state;
 
-        assert_eq!(
-            new_state,
-            omicron_common::api::external::InstanceState::Running
-        );
+        assert_eq!(new_state, InstanceState::Running);
 
         instance_state
     }

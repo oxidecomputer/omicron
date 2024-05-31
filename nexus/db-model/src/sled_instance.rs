@@ -34,7 +34,7 @@ impl From<SledInstance> for views::SledInstance {
             active_sled_id: sled_instance.active_sled_id,
             silo_name: sled_instance.silo_name.into(),
             project_name: sled_instance.project_name.into(),
-            state: *sled_instance.state.state(),
+            state: sled_instance.state.state(),
             migration_id: sled_instance.migration_id,
             ncpus: sled_instance.ncpus,
             memory: sled_instance.memory,

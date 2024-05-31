@@ -21,6 +21,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::InstanceState;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
@@ -30,13 +31,14 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::Disk;
 use nexus_db_model::VmmRuntimeState;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api;
+use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -70,13 +72,39 @@ impl InstanceAndActiveVmm {
         self.vmm.as_ref().map(|v| v.sled_id)
     }
 
-    pub fn effective_state(
-        &self,
-    ) -> omicron_common::api::external::InstanceState {
-        if let Some(vmm) = &self.vmm {
-            vmm.runtime.state.0
-        } else {
-            self.instance.runtime().nexus_state.0
+    pub fn effective_state(&self) -> external::InstanceState {
+        Self::determine_effective_state(&self.instance, &self.vmm).0
+    }
+
+    pub fn determine_effective_state(
+        instance: &Instance,
+        vmm: &Option<Vmm>,
+    ) -> (external::InstanceState, DateTime<Utc>) {
+        match vmm.as_ref().map(|v| &v.runtime) {
+            // If an active VMM is `Stopped`, the instance must be recast as
+            // `Stopping`, as no start saga can proceed until the active VMM has
+            // been `Destroyed`.
+            Some(VmmRuntimeState {
+                state: InstanceState::Stopped,
+                time_state_updated,
+                ..
+            }) => (external::InstanceState::Stopping, *time_state_updated),
+            // If the active VMM is `SagaUnwound`, then the instance should be
+            // treated as `Stopped`.
+            Some(VmmRuntimeState {
+                state: InstanceState::SagaUnwound,
+                time_state_updated,
+                ..
+            }) => (external::InstanceState::Stopped, *time_state_updated),
+            // If the active VMM is `SagaUnwound`, then the instance should be
+            // treated as `Stopped`.
+            Some(VmmRuntimeState { state, time_state_updated, .. }) => {
+                (external::InstanceState::from(*state), *time_state_updated)
+            }
+            None => (
+                external::InstanceState::Stopped,
+                instance.runtime_state.time_updated,
+            ),
         }
     }
 }
@@ -89,15 +117,11 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
 
 impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
-        let (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
-            (vmm.runtime.state, vmm.runtime.time_state_updated)
-        } else {
-            (
-                value.instance.runtime_state.nexus_state.clone(),
-                value.instance.runtime_state.time_updated,
-            )
-        };
-
+        let (run_state, time_run_state_updated) =
+            InstanceAndActiveVmm::determine_effective_state(
+                &value.instance,
+                &value.vmm,
+            );
         Self {
             identity: value.instance.identity(),
             project_id: value.instance.project_id,
@@ -109,7 +133,7 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             runtime: omicron_common::api::external::InstanceRuntimeState {
-                run_state: *run_state.state(),
+                run_state,
                 time_run_state_updated,
             },
         }
@@ -197,7 +221,7 @@ impl DataStore {
 
         bail_unless!(
             instance.runtime().nexus_state.state()
-                == &api::external::InstanceState::Creating,
+                == api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime().nexus_state
         );

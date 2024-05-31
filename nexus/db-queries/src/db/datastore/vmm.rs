@@ -22,7 +22,6 @@ use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -55,14 +54,15 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &Uuid,
     ) -> UpdateResult<bool> {
-        let valid_states = vec![
-            DbInstanceState::new(ApiInstanceState::Destroyed),
-            DbInstanceState::new(ApiInstanceState::Failed),
+        const VALID_STATES: &[DbInstanceState] = &[
+            DbInstanceState::Destroyed,
+            DbInstanceState::Failed,
+            DbInstanceState::SagaUnwound,
         ];
 
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(*vmm_id))
-            .filter(dsl::state.eq_any(valid_states))
+            .filter(dsl::state.eq_any(VALID_STATES))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
             .check_if_exists::<Vmm>(*vmm_id)
@@ -190,7 +190,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Vmm> {
         use crate::db::schema::instance::dsl as instance_dsl;
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let destroyed = DbInstanceState::Destroyed;
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
             // - in the `Destroyed` state

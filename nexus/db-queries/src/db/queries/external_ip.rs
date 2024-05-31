@@ -31,20 +31,17 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpAttachStateEnum;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use uuid::Uuid;
 
 // Broadly, we want users to be able to attach/detach at will
 // once an instance is created and functional.
 pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-    DbInstanceState(ApiInstanceState::Creating),
+    DbInstanceState::Stopped,
+    DbInstanceState::Running,
+    DbInstanceState::Creating,
 ];
-pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-];
+pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] =
+    [DbInstanceState::Stopped, DbInstanceState::Running];
 // If we're in a state which will naturally resolve to either
 // stopped/running, we want users to know that the request can be
 // retried safely via Error::unavail.
@@ -52,11 +49,11 @@ pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
 //       There may be a good case for RPWing
 //       external_ip_state -> { NAT RPW, sled-agent } in future.
 pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
-    DbInstanceState(ApiInstanceState::Starting),
-    DbInstanceState(ApiInstanceState::Stopping),
-    DbInstanceState(ApiInstanceState::Creating),
-    DbInstanceState(ApiInstanceState::Rebooting),
-    DbInstanceState(ApiInstanceState::Migrating),
+    DbInstanceState::Starting,
+    DbInstanceState::Stopping,
+    DbInstanceState::Creating,
+    DbInstanceState::Rebooting,
+    DbInstanceState::Migrating,
 ];
 
 /// The maximum number of disks that can be attached to an instance.
