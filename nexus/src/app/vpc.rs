@@ -4,7 +4,10 @@
 
 //! VPCs and firewall rules
 
+use crate::app::project::Project;
+use crate::app::saga;
 use crate::app::sagas;
+use crate::app::SagaContext;
 use crate::external_api::params;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -26,11 +29,36 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
-    // VPCs
+/// Application level operations on VPCs
+#[derive(Clone)]
+pub struct Vpc {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    sec_client: Arc<saga::SecClient>,
+    opctx_sled_lookup: OpContext,
+    project: Project,
+}
+
+impl Vpc {
+    pub fn new(
+        log: Logger,
+        authz: Arc<authz::Authz>,
+        datastore: Arc<db::DataStore>,
+        sec_client: Arc<saga::SecClient>,
+        project: Project,
+    ) -> Vpc {
+        let opctx_sled_lookup = OpContext::for_background(
+            log.new(o!("component" => "SledLookupForVpc")),
+            authz,
+            authn::Context::internal_read(),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        Vpc { log, datastore, sec_client, opctx_sled_lookup, project }
+    }
 
     pub fn vpc_lookup<'a>(
         &'a self,
@@ -39,14 +67,14 @@ impl super::Nexus {
     ) -> LookupResult<lookup::Vpc<'a>> {
         match vpc_selector {
             params::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
-                let vpc = LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
+                let vpc = LookupPath::new(opctx, &self.datastore).vpc_id(id);
                 Ok(vpc)
             }
             params::VpcSelector {
                 vpc: NameOrId::Name(name),
                 project: Some(project),
             } => {
-                let vpc = self
+                let vpc = self.project
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .vpc_name_owned(name.into());
                 Ok(vpc)
@@ -64,8 +92,9 @@ impl super::Nexus {
     }
 
     pub(crate) async fn project_create_vpc(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         project_lookup: &lookup::Project<'_>,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
@@ -81,7 +110,11 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::vpc_create::SagaVpcCreate>(saga_params)
+            .sec_client
+            .execute_saga::<sagas::vpc_create::SagaVpcCreate>(
+                saga_params,
+                saga_context.clone(),
+            )
             .await?;
 
         let (_, db_vpc) = saga_outputs
@@ -100,7 +133,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Vpc> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.vpc_list(&opctx, &authz_project, pagparams).await
+        self.datastore.vpc_list(&opctx, &authz_project, pagparams).await
     }
 
     pub(crate) async fn project_update_vpc(
@@ -111,7 +144,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Vpc> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await
     }
@@ -141,16 +174,12 @@ impl super::Nexus {
         //
         // TODO: This should eventually use a saga to call the
         // networking subsystem to have it clean up the networking resources
-        self.db_datastore
-            .project_delete_vpc(opctx, &db_vpc, &authz_vpc)
-            .await?;
-        self.db_datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
+        self.datastore.project_delete_vpc(opctx, &db_vpc, &authz_vpc).await?;
+        self.datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.
-        self.db_datastore
-            .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
-            .await
+        self.datastore.vpc_delete_all_firewall_rules(&opctx, &authz_vpc).await
     }
 
     // Firewall rules
@@ -161,7 +190,7 @@ impl super::Nexus {
         vpc_lookup: &lookup::Vpc<'_>,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
         nexus_networking::vpc_list_firewall_rules(
-            &self.db_datastore,
+            &self.datastore,
             opctx,
             vpc_lookup,
         )
@@ -181,7 +210,7 @@ impl super::Nexus {
             params.clone(),
         );
         let rules = self
-            .db_datastore
+            .datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
             .await?;
         self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules, &[])
@@ -242,12 +271,12 @@ impl super::Nexus {
         sleds_filter: &[Uuid],
     ) -> Result<(), Error> {
         nexus_networking::send_sled_agents_firewall_rules(
-            &self.db_datastore,
+            &self.datastore,
             opctx,
             vpc,
             rules,
             sleds_filter,
-            &self.opctx_alloc,
+            &self.opctx_sled_lookup,
             &self.log,
         )
         .await
@@ -260,7 +289,7 @@ impl super::Nexus {
         rules: &[db::model::VpcFirewallRule],
     ) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
         nexus_networking::resolve_firewall_rules_for_sled_agent(
-            &self.db_datastore,
+            &self.datastore,
             opctx,
             vpc,
             rules,

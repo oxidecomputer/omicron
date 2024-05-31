@@ -1,8 +1,12 @@
-use nexus_db_model::Probe;
-use nexus_db_queries::authz;
+use crate::app::instance_network::InstanceNetwork;
+use crate::app::ip_pool::IpPool;
+use crate::app::sled::Sled;
+use internal_dns::resolver::Resolver;
+use nexus_db_model::Probe as ModelProbe;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::ProbeInfo;
 use nexus_db_queries::db::lookup;
+use nexus_db_queries::{authz, db};
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -10,9 +14,43 @@ use omicron_common::api::external::{
     http_pagination::PaginatedBy, CreateResult, DataPageParams, DeleteResult,
     ListResultVec, LookupResult, NameOrId,
 };
+use slog::Logger;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on probes
+#[derive(Clone)]
+pub struct Probe {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    sled: Sled,
+    ip_pool: IpPool,
+    instance_network: InstanceNetwork,
+    internal_resolver: Resolver,
+    opctx_alloc: OpContext,
+}
+
+impl Probe {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        sled: Sled,
+        ip_pool: IpPool,
+        instance_network: InstanceNetwork,
+        internal_resolver: Resolver,
+        opctx_alloc: OpContext,
+    ) -> Probe {
+        Probe {
+            log,
+            datastore,
+            sled,
+            ip_pool,
+            instance_network,
+            internal_resolver,
+            opctx_alloc,
+        }
+    }
+
     /// List the probes in the given project.
     pub(crate) async fn probe_list(
         &self,
@@ -22,7 +60,7 @@ impl super::Nexus {
     ) -> ListResultVec<ProbeInfo> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.probe_list(opctx, &authz_project, pagparams).await
+        self.datastore.probe_list(opctx, &authz_project, pagparams).await
     }
 
     /// List the probes for the given sled. This is used by sled agents to
@@ -33,7 +71,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
         sled: Uuid,
     ) -> ListResultVec<ProbeInfo> {
-        self.db_datastore.probe_list_for_sled(sled, opctx, pagparams).await
+        self.datastore.probe_list_for_sled(sled, opctx, pagparams).await
     }
 
     /// Get info about a particular probe.
@@ -45,7 +83,7 @@ impl super::Nexus {
     ) -> LookupResult<ProbeInfo> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
-        self.db_datastore.probe_get(opctx, &authz_project, &name_or_id).await
+        self.datastore.probe_get(opctx, &authz_project, &name_or_id).await
     }
 
     /// Create a probe. This adds the probe to the data store and sets up the
@@ -56,14 +94,15 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         new_probe_params: &params::ProbeCreate,
-    ) -> CreateResult<Probe> {
+    ) -> CreateResult<ModelProbe> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // resolve NameOrId into authz::IpPool
         let pool = match &new_probe_params.ip_pool {
             Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
+                self.ip_pool
+                    .ip_pool_lookup(opctx, &pool)?
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
@@ -72,24 +111,30 @@ impl super::Nexus {
         };
 
         let new_probe =
-            Probe::from_create(new_probe_params, authz_project.id());
+            ModelProbe::from_create(new_probe_params, authz_project.id());
         let probe = self
-            .db_datastore
+            .datastore
             .probe_create(opctx, &authz_project, &new_probe, pool)
             .await?;
 
-        let (.., sled) =
-            self.sled_lookup(opctx, &new_probe_params.sled)?.fetch().await?;
+        let (.., sled) = self
+            .sled
+            .sled_lookup(opctx, &new_probe_params.sled)?
+            .fetch()
+            .await?;
 
         let boundary_switches =
-            self.boundary_switches(&self.opctx_alloc).await?;
+            self.instance_network.boundary_switches(&self.opctx_alloc).await?;
 
         for switch in &boundary_switches {
-            let dpd_clients = self.dpd_clients().await.map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to get dpd_clients: {e}"
-                ))
-            })?;
+            let dpd_clients =
+                super::dpd_clients(&self.internal_resolver, &self.log)
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to get dpd_clients: {e}"
+                        ))
+                    })?;
 
             let dpd_client = dpd_clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
@@ -97,14 +142,15 @@ impl super::Nexus {
                 ))
             })?;
 
-            self.probe_ensure_dpd_config(
-                opctx,
-                probe.id(),
-                sled.ip.into(),
-                None,
-                dpd_client,
-            )
-            .await?;
+            self.instance_network
+                .probe_ensure_dpd_config(
+                    opctx,
+                    probe.id(),
+                    sled.ip.into(),
+                    None,
+                    dpd_client,
+                )
+                .await?;
         }
 
         Ok(probe)
@@ -120,10 +166,10 @@ impl super::Nexus {
     ) -> DeleteResult {
         let probe = self.probe_get(opctx, project_lookup, &name_or_id).await?;
 
-        self.probe_delete_dpd_config(opctx, probe.id).await?;
+        self.instance_network.probe_delete_dpd_config(opctx, probe.id).await?;
 
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
-        self.db_datastore.probe_delete(opctx, &authz_project, &name_or_id).await
+        self.datastore.probe_delete(opctx, &authz_project, &name_or_id).await
     }
 }

@@ -2,17 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::app::background::BackgroundTasks;
 use crate::external_api::params;
 use crate::external_api::shared::SwitchLinkState;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
+use internal_dns::resolver::Resolver;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
-use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
+use nexus_db_queries::db::model::{
+    SwitchPort as ModelSwitchPort, SwitchPortSettings,
+};
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::SwitchLocation;
@@ -20,12 +24,40 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on Switch Ports
+#[derive(Clone)]
+pub struct SwitchPort {
+    // TODO: typed UUIDs
+    rack_id: Uuid,
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    internal_resolver: Resolver,
+}
+
+impl SwitchPort {
+    pub fn new(
+        rack_id: Uuid,
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        internal_resolver: Resolver,
+    ) -> SwitchPort {
+        SwitchPort {
+            rack_id,
+            log,
+            datastore,
+            background_tasks,
+            internal_resolver,
+        }
+    }
+
     pub(crate) async fn switch_port_settings_post(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
@@ -36,7 +68,7 @@ impl super::Nexus {
         //     the Omicron way of doing things here is.
 
         match self
-            .db_datastore
+            .datastore
             .switch_port_settings_exist(
                 opctx,
                 params.identity.name.clone().into(),
@@ -51,16 +83,16 @@ impl super::Nexus {
     }
 
     pub async fn switch_port_settings_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
-        self.db_datastore.switch_port_settings_create(opctx, &params, id).await
+        self.datastore.switch_port_settings_create(opctx, &params, id).await
     }
 
     pub(crate) async fn switch_port_settings_update(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         switch_port_settings_id: Uuid,
         new_settings: params::SwitchPortSettingsCreate,
@@ -84,7 +116,7 @@ impl super::Nexus {
             .await?;
 
         let ports = self
-            .db_datastore
+            .datastore
             .switch_ports_using_settings(opctx, switch_port_settings_id)
             .await?;
 
@@ -112,7 +144,7 @@ impl super::Nexus {
         params: &params::SwitchPortSettingsSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        self.db_datastore.switch_port_settings_delete(opctx, params).await
+        self.datastore.switch_port_settings_delete(opctx, params).await
     }
 
     pub(crate) async fn switch_port_settings_list(
@@ -121,7 +153,7 @@ impl super::Nexus {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<SwitchPortSettings> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.db_datastore.switch_port_settings_list(opctx, pagparams).await
+        self.datastore.switch_port_settings_list(opctx, pagparams).await
     }
 
     pub(crate) async fn switch_port_settings_get(
@@ -130,7 +162,7 @@ impl super::Nexus {
         name_or_id: &NameOrId,
     ) -> LookupResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.switch_port_settings_get(opctx, name_or_id).await
+        self.datastore.switch_port_settings_get(opctx, name_or_id).await
     }
 
     async fn switch_port_create(
@@ -139,8 +171,8 @@ impl super::Nexus {
         rack_id: Uuid,
         switch_location: Name,
         port: Name,
-    ) -> CreateResult<SwitchPort> {
-        self.db_datastore
+    ) -> CreateResult<ModelSwitchPort> {
+        self.datastore
             .switch_port_create(
                 opctx,
                 rack_id,
@@ -154,9 +186,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<SwitchPort> {
+    ) -> ListResultVec<ModelSwitchPort> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.switch_port_list(opctx, pagparams).await
+        self.datastore.switch_port_list(opctx, pagparams).await
     }
 
     pub(crate) async fn set_switch_port_settings_id(
@@ -167,7 +199,7 @@ impl super::Nexus {
         current_id: UpdatePrecondition<Uuid>,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        self.db_datastore
+        self.datastore
             .switch_port_set_settings_id(
                 opctx,
                 switch_port_id,
@@ -178,7 +210,7 @@ impl super::Nexus {
     }
 
     pub(crate) async fn switch_port_apply_settings(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         port: &Name,
         selector: &params::SwitchPortSelector,
@@ -186,7 +218,7 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
-            .db_datastore
+            .datastore
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
@@ -198,7 +230,7 @@ impl super::Nexus {
         let switch_port_settings_id = match &settings.port_settings {
             NameOrId::Id(id) => *id,
             NameOrId::Name(name) => {
-                self.db_datastore
+                self.datastore
                     .switch_port_settings_get_id(opctx, name.clone().into())
                     .await?
             }
@@ -221,14 +253,14 @@ impl super::Nexus {
     }
 
     pub(crate) async fn switch_port_clear_settings(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         port: &Name,
         params: &params::SwitchPortSelector,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
-            .db_datastore
+            .datastore
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
@@ -301,9 +333,12 @@ impl super::Nexus {
         // no breakout support yet, link id always 0
         let link_id = LinkId(0);
 
-        let dpd_clients = self.dpd_clients().await.map_err(|e| {
-            Error::internal_error(&format!("dpd clients get: {e}"))
-        })?;
+        let dpd_clients =
+            super::dpd_clients(&self.internal_resolver, &self.log)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!("dpd clients get: {e}"))
+                })?;
 
         let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
             &format!("no client for switch {switch}"),
@@ -352,7 +387,7 @@ impl super::Nexus {
 pub(crate) async fn list_switch_ports_with_uplinks(
     datastore: &DataStore,
     opctx: &OpContext,
-) -> ListResultVec<SwitchPort> {
+) -> ListResultVec<ModelSwitchPort> {
     opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
     datastore.switch_ports_with_uplinks(opctx).await
 }

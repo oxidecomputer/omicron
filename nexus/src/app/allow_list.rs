@@ -7,21 +7,39 @@
 //! Nexus methods for operating on source IP allowlists.
 
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::AllowList;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use slog::Logger;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use crate::context::ServerKind;
 
-impl super::Nexus {
+/// Application level operations on source IP allowlists
+pub struct SourceIpAllowList {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    opctx_for_internal_api: OpContext,
+}
+
+impl SourceIpAllowList {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        opctx_for_internal_api: OpContext,
+    ) -> Self {
+        SourceIpAllowList { log, datastore, opctx_for_internal_api }
+    }
+
     /// Fetch the allowlist of source IPs that can reach user-facing services.
     pub async fn allow_list_view(
         &self,
         opctx: &OpContext,
     ) -> Result<AllowList, Error> {
-        self.db_datastore
+        self.datastore
             .allow_list_view(opctx)
             .await
             .and_then(AllowList::try_from)
@@ -90,7 +108,7 @@ impl super::Nexus {
 
         // Actually insert the new allowlist.
         let list = self
-            .db_datastore
+            .datastore
             .allow_list_upsert(opctx, params.allowed_ips.clone())
             .await
             .and_then(AllowList::try_from)?;
@@ -112,9 +130,9 @@ impl super::Nexus {
             internal opcontext to plumb rules to sled-agents";
             "new_allowlist" => ?params.allowed_ips,
         );
-        let new_opctx = self.opctx_for_internal_api();
+        let new_opctx = self.opctx_for_internal_api.clone();
         match nexus_networking::plumb_service_firewall_rules(
-            self.datastore(),
+            &self.datastore,
             &new_opctx,
             &[],
             &new_opctx,
@@ -146,10 +164,10 @@ impl super::Nexus {
     /// sled-agents responsible. This should only be called from
     /// rack-initialization handling.
     pub(crate) async fn await_ip_allowlist_plumbing(&self) {
-        let opctx = self.opctx_for_internal_api();
+        let opctx = self.opctx_for_internal_api.clone();
         loop {
             match nexus_networking::plumb_service_firewall_rules(
-                self.datastore(),
+                &self.datastore,
                 &opctx,
                 &[],
                 &opctx,

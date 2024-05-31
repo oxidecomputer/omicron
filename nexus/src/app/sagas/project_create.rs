@@ -268,10 +268,14 @@ mod test {
         let authz_silo = opctx.authn.silo_required().unwrap();
         let params = new_test_params(&opctx, authz_silo);
         let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sec_client.run_saga(runnable_saga).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

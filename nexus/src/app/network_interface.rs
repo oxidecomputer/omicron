@@ -1,3 +1,10 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Network interfaces
+
+use crate::app::instance::Instance;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::queries::network_interface;
@@ -11,13 +18,31 @@ use omicron_common::api::external::NameOrId;
 
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
+use slog::Logger;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup::{self, LookupPath};
 
-impl super::Nexus {
+/// Application level operations on network interfaces
+#[derive(Clone)]
+pub struct NetworkInterface {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    instance: Instance,
+}
+
+impl NetworkInterface {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        instance: Instance,
+    ) -> NetworkInterface {
+        NetworkInterface { log, datastore, instance }
+    }
+
     pub fn instance_network_interface_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -30,7 +55,7 @@ impl super::Nexus {
                 project: None
             } => {
                 let network_interface =
-                    LookupPath::new(opctx, &self.db_datastore)
+                    LookupPath::new(opctx, &self.datastore)
                         .instance_network_interface_id(id);
                 Ok(network_interface)
             }
@@ -39,7 +64,7 @@ impl super::Nexus {
                 instance: Some(instance),
                 project
             } => {
-                let network_interface = self
+                let network_interface = self.instance
                     .instance_lookup(opctx, params::InstanceSelector { project, instance })?
                     .instance_network_interface_name_owned(name.into());
                 Ok(network_interface)
@@ -78,7 +103,7 @@ impl super::Nexus {
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
         let (.., authz_subnet, db_subnet) =
-            LookupPath::new(opctx, &self.db_datastore)
+            LookupPath::new(opctx, &self.datastore)
                 .project_id(authz_project.id())
                 .vpc_name(&vpc_name)
                 .vpc_subnet_name(&subnet_name)
@@ -92,7 +117,7 @@ impl super::Nexus {
             params.identity.clone(),
             params.ip,
         )?;
-        self.db_datastore
+        self.datastore
             .instance_create_network_interface(
                 opctx,
                 &authz_subnet,
@@ -132,7 +157,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::InstanceNetworkInterface> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
+        self.datastore
             .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
             .await
     }
@@ -146,7 +171,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::InstanceNetworkInterface> {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .instance_update_network_interface(
                 opctx,
                 &authz_instance,
@@ -168,7 +193,7 @@ impl super::Nexus {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Delete).await?;
         let interface_was_deleted = self
-            .db_datastore
+            .datastore
             .instance_delete_network_interface(
                 opctx,
                 &authz_instance,

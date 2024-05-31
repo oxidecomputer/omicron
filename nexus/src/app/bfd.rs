@@ -2,31 +2,55 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::app::background::BackgroundTasks;
 use crate::external_api::params;
+use internal_dns::resolver::Resolver;
 use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_types::external_api::shared::{BfdState, BfdStatus};
 use omicron_common::api::{external::Error, internal::shared::SwitchLocation};
+use slog::Logger;
+use std::sync::Arc;
 
-impl super::Nexus {
+/// Application level operations for bidirectional forwarding detection
+pub struct Bfd {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    internal_resolver: Resolver,
+}
+
+impl Bfd {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        internal_resolver: Resolver,
+    ) -> Bfd {
+        Bfd { log, datastore, background_tasks, internal_resolver }
+    }
+
     async fn mg_client_for_switch_location(
         &self,
         switch: SwitchLocation,
     ) -> Result<mg_admin_client::Client, Error> {
-        let mg_client: mg_admin_client::Client = self
-            .mg_clients()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!("failed to get mg clients: {e}"))
-            })?
-            .get(&switch)
-            .ok_or_else(|| {
-                Error::not_found_by_name(
-                    omicron_common::api::external::ResourceType::Switch,
-                    &switch.to_string().parse().unwrap(),
-                )
-            })?
-            .clone();
+        let mg_client: mg_admin_client::Client =
+            super::mg_clients(&self.internal_resolver, &self.log)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to get mg clients: {e}"
+                    ))
+                })?
+                .get(&switch)
+                .ok_or_else(|| {
+                    Error::not_found_by_name(
+                        omicron_common::api::external::ResourceType::Switch,
+                        &switch.to_string().parse().unwrap(),
+                    )
+                })?
+                .clone();
 
         Ok(mg_client)
     }
@@ -38,7 +62,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         // add the bfd session to the db and trigger the bfd manager to handle
         // the reset
-        self.datastore().bfd_session_create(opctx, &session).await?;
+        self.datastore.bfd_session_create(opctx, &session).await?;
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
@@ -56,7 +80,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         // remove the bfd session from the db and trigger the bfd manager to
         // handle the reset
-        self.datastore().bfd_session_delete(opctx, &session).await?;
+        self.datastore.bfd_session_delete(opctx, &session).await?;
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);

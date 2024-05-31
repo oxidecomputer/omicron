@@ -23,7 +23,6 @@ mod phantom_disks;
 mod physical_disk_adoption;
 mod region_replacement;
 mod service_firewall_rules;
-mod status;
 mod sync_service_zone_nat;
 mod sync_switch_configuration;
 mod v2p_mappings;

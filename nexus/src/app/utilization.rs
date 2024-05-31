@@ -14,8 +14,19 @@ use nexus_db_queries::db::lookup;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use std::sync::Arc;
 
-impl super::Nexus {
+/// Application level operations regarding capacity and utilization
+#[derive(Clone)]
+pub struct Utilization {
+    datastore: Arc<db::DataStore>,
+}
+
+impl Utilization {
+    pub fn new(datastore: Arc<db::DataStore>) -> Utilization {
+        Utilization { datastore }
+    }
+
     pub async fn silo_utilization_view(
         &self,
         opctx: &OpContext,
@@ -23,7 +34,7 @@ impl super::Nexus {
     ) -> Result<db::model::SiloUtilization, Error> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
-        self.db_datastore.silo_utilization_view(opctx, &authz_silo).await
+        self.datastore.silo_utilization_view(opctx, &authz_silo).await
     }
 
     pub async fn silo_utilization_list(
@@ -31,7 +42,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::SiloUtilization> {
-        self.db_datastore.silo_utilization_list(opctx, pagparams).await
+        self.datastore.silo_utilization_list(opctx, pagparams).await
     }
 
     pub async fn ip_pool_utilization_view(
@@ -42,14 +53,10 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Read).await?;
 
-        let allocated = self
-            .db_datastore
-            .ip_pool_allocated_count(opctx, &authz_pool)
-            .await?;
-        let capacity = self
-            .db_datastore
-            .ip_pool_total_capacity(opctx, &authz_pool)
-            .await?;
+        let allocated =
+            self.datastore.ip_pool_allocated_count(opctx, &authz_pool).await?;
+        let capacity =
+            self.datastore.ip_pool_total_capacity(opctx, &authz_pool).await?;
 
         // we have one query for v4 and v6 allocated and one for both v4 and
         // v6 capacity so we can do two queries instead 4, but in the response

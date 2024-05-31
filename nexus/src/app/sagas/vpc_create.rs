@@ -381,7 +381,7 @@ async fn svc_update_firewall(
     let (authz_vpc, _) =
         sagactx.lookup::<(authz::Vpc, db::model::Vpc)>("vpc")?;
     let rules = osagactx
-        .nexus()
+        .vpc()
         .default_firewall_rules_for_vpc(
             authz_vpc.id(),
             params.vpc_create.identity.name.clone().into(),
@@ -429,7 +429,7 @@ async fn svc_notify_sleds(
         sagactx.lookup::<Vec<db::model::VpcFirewallRule>>("firewall")?;
 
     osagactx
-        .nexus()
+        .vpc()
         .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
         .await
         .map_err(ActionError::action_failed)?;
@@ -508,6 +508,7 @@ pub(crate) mod test {
             params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
+            .project
             .project_lookup(&opctx, project_selector)
             .expect("Invalid parameters constructing project lookup")
             .lookup_for(action)
@@ -725,10 +726,14 @@ pub(crate) mod test {
         .await;
         let params = new_test_params(&opctx, authz_project);
         let dag = create_saga_dag::<SagaVpcCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sec_client.run_saga(runnable_saga).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

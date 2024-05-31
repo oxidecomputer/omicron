@@ -4,11 +4,14 @@
 
 //! Volumes
 
+use crate::app::saga;
 use crate::app::sagas;
+use crate::app::SagaContext;
 use nexus_db_model::UpstairsRepairNotification;
 use nexus_db_model::UpstairsRepairNotificationType;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
@@ -19,14 +22,32 @@ use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
+use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on Volumes
+#[derive(Clone)]
+pub struct Volume {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    sec_client: Arc<saga::SecClient>,
+}
+
+impl Volume {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        sec_client: Arc<saga::SecClient>,
+    ) -> Volume {
+        Volume { log, datastore, sec_client }
+    }
+
     /// Start a saga to remove a read only parent from a volume.
     pub(crate) async fn volume_remove_read_only_parent(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         volume_id: Uuid,
     ) -> DeleteResult {
         let saga_params = sagas::volume_remove_rop::Params {
@@ -34,17 +55,19 @@ impl super::Nexus {
             volume_id,
         };
 
-        self.execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
-            saga_params,
-        )
-        .await?;
+        self.sec_client
+            .execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
+                saga_params,
+                saga_context.clone(),
+            )
+            .await?;
 
         Ok(())
     }
 
     /// An Upstairs is telling us when a repair is starting.
     pub(crate) async fn upstairs_repair_start(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
         repair_start_info: RepairStartInfo,
@@ -56,7 +79,7 @@ impl super::Nexus {
         );
 
         for repaired_downstairs in repair_start_info.repairs {
-            self.db_datastore
+            self.datastore
                 .upstairs_repair_notification(
                     opctx,
                     UpstairsRepairNotification::new(
@@ -78,7 +101,7 @@ impl super::Nexus {
 
     /// An Upstairs is telling us when a repair is finished, and the result.
     pub(crate) async fn upstairs_repair_finish(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
         repair_finish_info: RepairFinishInfo,
@@ -90,7 +113,7 @@ impl super::Nexus {
         );
 
         for repaired_downstairs in repair_finish_info.repairs {
-            self.db_datastore
+            self.datastore
                 .upstairs_repair_notification(
                     opctx,
                     UpstairsRepairNotification::new(
@@ -122,7 +145,7 @@ impl super::Nexus {
 
     /// An Upstairs is updating us with repair progress
     pub(crate) async fn upstairs_repair_progress(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
         repair_id: TypedUuid<UpstairsRepairKind>,
@@ -134,7 +157,7 @@ impl super::Nexus {
             repair_progress,
         );
 
-        self.db_datastore
+        self.datastore
             .upstairs_repair_progress(
                 opctx,
                 upstairs_id,
@@ -147,7 +170,7 @@ impl super::Nexus {
     /// An Upstairs is telling us that a Downstairs client task was requested to
     /// stop
     pub(crate) async fn downstairs_client_stop_request_notification(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
         downstairs_id: TypedUuid<DownstairsKind>,
@@ -159,7 +182,7 @@ impl super::Nexus {
             downstairs_client_stop_request,
         );
 
-        self.db_datastore
+        self.datastore
             .downstairs_client_stop_request_notification(
                 opctx,
                 upstairs_id,
@@ -171,7 +194,7 @@ impl super::Nexus {
 
     /// An Upstairs is telling us that a Downstairs client task was stopped
     pub(crate) async fn downstairs_client_stopped_notification(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
         downstairs_id: TypedUuid<DownstairsKind>,
@@ -183,7 +206,7 @@ impl super::Nexus {
             downstairs_client_stopped,
         );
 
-        self.db_datastore
+        self.datastore
             .downstairs_client_stopped_notification(
                 opctx,
                 upstairs_id,

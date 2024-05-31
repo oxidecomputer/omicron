@@ -4,6 +4,9 @@
 
 //! Rack management
 
+use crate::app::background::BackgroundTasks;
+use crate::app::sled::Sled;
+use crate::app::switch_port::SwitchPort;
 use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
@@ -68,6 +71,7 @@ use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 
+use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -75,15 +79,49 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on Racks
+#[derive(Clone)]
+pub struct Rack {
+    // TODO: Typed UUIDs
+    nexus_id: Uuid,
+    rack_id: Uuid,
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    sled: Sled,
+    switch_port: SwitchPort,
+}
+
+impl Rack {
+    pub fn new(
+        nexus_id: Uuid,
+        rack_id: Uuid,
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        sled: Sled,
+        switch_port: SwitchPort,
+    ) -> Rack {
+        Rack {
+            nexus_id,
+            rack_id,
+            log,
+            datastore,
+            background_tasks,
+            sled,
+            switch_port,
+        }
+    }
+
     pub(crate) async fn racks_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Rack> {
-        self.db_datastore.rack_list(&opctx, pagparams).await
+        self.datastore.rack_list(&opctx, pagparams).await
     }
 
     pub(crate) async fn rack_lookup(
@@ -91,7 +129,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
-        let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_rack) = LookupPath::new(opctx, &self.datastore)
             .rack_id(*rack_id)
             .fetch()
             .await?;
@@ -187,7 +225,7 @@ impl super::Nexus {
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
             &dns_zone.zone_name,
-            &self.id.to_string(),
+            &self.nexus_id.to_string(),
             "rack setup",
             dns_zone.records,
         );
@@ -195,7 +233,7 @@ impl super::Nexus {
         let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
             request.external_dns_zone_name.as_str(),
-            &self.id.to_string(),
+            &self.nexus_id.to_string(),
             "rack setup",
             HashMap::new(),
         );
@@ -218,7 +256,7 @@ impl super::Nexus {
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
             format!("create silo: {:?}", silo_name.as_str()),
-            self.id.to_string(),
+            self.nexus_id.to_string(),
         );
         let silo_dns_name = silo_dns_name(silo_name);
         let recovery_silo_fq_dns_name =
@@ -234,14 +272,11 @@ impl super::Nexus {
         // Fill in the CockroachDB metadata for the initial blueprint, and set
         // the `cluster.preserve_downgrade_option` setting ahead of blueprint
         // execution.
-        let cockroachdb_settings = self
-            .datastore()
-            .cockroachdb_settings(opctx)
-            .await
-            .internal_context(
+        let cockroachdb_settings =
+            self.datastore.cockroachdb_settings(opctx).await.internal_context(
                 "fetching cockroachdb settings for rack initialization",
             )?;
-        self.datastore()
+        self.datastore
             .cockroachdb_setting_set_string(
                 opctx,
                 cockroachdb_settings.state_fingerprint.clone(),
@@ -289,7 +324,7 @@ impl super::Nexus {
         let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
         rack.rack_subnet =
             Some(IpNet::from(rack_network_config.rack_subnet).into());
-        self.datastore().update_rack_subnet(opctx, &rack).await?;
+        self.datastore.update_rack_subnet(opctx, &rack).await?;
 
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
         // register all switches found during rack initialization
@@ -333,12 +368,13 @@ impl super::Nexus {
                         "populating ports for {switch}: {qsfp_ports:#?}"
                     );
 
-                    self.populate_switch_ports(
-                        &opctx,
-                        &qsfp_ports,
-                        switch.to_string().parse().unwrap(),
-                    )
-                    .await?;
+                    self.switch_port
+                        .populate_switch_ports(
+                            &opctx,
+                            &qsfp_ports,
+                            switch.to_string().parse().unwrap(),
+                        )
+                        .await?;
                 }
             }
             // TODO: #3602 Eliminate need for static port mappings for switch ports
@@ -348,12 +384,13 @@ impl super::Nexus {
                     "Using static configuration for external switchports"
                 );
                 for (switch, ports) in port_mappings {
-                    self.populate_switch_ports(
-                        &opctx,
-                        &ports,
-                        switch.to_string().parse().unwrap(),
-                    )
-                    .await?;
+                    self.switch_port
+                        .populate_switch_ports(
+                            &opctx,
+                            &ports,
+                            switch.to_string().parse().unwrap(),
+                        )
+                        .await?;
                 }
             }
         }
@@ -385,7 +422,7 @@ impl super::Nexus {
         let address_lot_params = AddressLotCreate { identity, kind, blocks };
 
         match self
-            .db_datastore
+            .datastore
             .address_lot_create(opctx, &address_lot_params)
             .await
         {
@@ -413,7 +450,7 @@ impl super::Nexus {
                 format!("as{}-lot", bgp_config.asn).parse().unwrap();
 
             match self
-                .db_datastore
+                .datastore
                 .address_lot_create(
                     &opctx,
                     &AddressLotCreate {
@@ -448,7 +485,7 @@ impl super::Nexus {
             }?;
 
             match self
-                .db_datastore
+                .datastore
                 .bgp_create_announce_set(
                     &opctx,
                     &BgpAnnounceSetCreate {
@@ -486,7 +523,7 @@ impl super::Nexus {
             }?;
 
             match self
-                .db_datastore
+                .datastore
                 .bgp_config_set(
                     &opctx,
                     &BgpConfigCreate {
@@ -617,7 +654,7 @@ impl super::Nexus {
             port_settings_params.links.insert("phy".to_string(), link);
 
             match self
-                .db_datastore
+                .datastore
                 .switch_port_settings_create(opctx, &port_settings_params, None)
                 .await
             {
@@ -626,7 +663,7 @@ impl super::Nexus {
             }?;
 
             let port_settings_id = self
-                .db_datastore
+                .datastore
                 .switch_port_settings_get_id(
                     opctx,
                     nexus_db_model::Name(name.clone()),
@@ -634,7 +671,7 @@ impl super::Nexus {
                 .await?;
 
             let switch_port_id = self
-                .db_datastore
+                .datastore
                 .switch_port_get_id(
                     opctx,
                     rack_id,
@@ -643,7 +680,7 @@ impl super::Nexus {
                 )
                 .await?;
 
-            self.db_datastore
+            self.datastore
                 .switch_port_set_settings_id(
                     opctx,
                     switch_port_id,
@@ -654,7 +691,7 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
           // record port speed
 
-        self.db_datastore
+        self.datastore
             .rack_set_initialized(
                 opctx,
                 RackInit {
@@ -682,7 +719,7 @@ impl super::Nexus {
             .await?;
 
         // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
+        self.sled.plumb_service_firewall_rules(opctx, &[]).await?;
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
@@ -743,7 +780,7 @@ impl super::Nexus {
         debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
         let collection =
-            self.db_datastore.inventory_get_latest_collection(opctx).await?;
+            self.datastore.inventory_get_latest_collection(opctx).await?;
 
         // There can't be any uninitialized sleds we know about
         // if there is no inventory.
@@ -760,7 +797,7 @@ impl super::Nexus {
 
         debug!(self.log, "Listing sleds");
         let sleds = self
-            .db_datastore
+            .datastore
             .sled_list(opctx, &pagparams, SledFilter::InService)
             .await?;
 
@@ -799,17 +836,15 @@ impl super::Nexus {
         sled: UninitializedSledId,
     ) -> Result<SledUuid, Error> {
         let baseboard_id = sled.clone().into();
-        let hw_baseboard_id = self
-            .db_datastore
-            .find_hw_baseboard_id(opctx, &baseboard_id)
-            .await?;
+        let hw_baseboard_id =
+            self.datastore.find_hw_baseboard_id(opctx, &baseboard_id).await?;
 
-        let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
+        let subnet = self.datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
             Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
         let allocation = match self
-            .db_datastore
+            .datastore
             .allocate_sled_underlay_subnet_octets(
                 opctx,
                 self.rack_id,
@@ -892,6 +927,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<String, Error> {
         let addr = self
+            .sled
             .sled_list(opctx, &DataPageParams::max_page())
             .await?
             .get(0)

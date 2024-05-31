@@ -331,7 +331,7 @@ async fn ssc_alloc_regions(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let strategy = &osagactx.nexus().default_region_allocation_strategy;
+    let strategy = osagactx.disk().default_region_allocation_strategy();
 
     let datasets_and_regions = osagactx
         .datastore()
@@ -380,7 +380,7 @@ async fn ssc_regions_ensure(
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
     let datasets_and_regions = osagactx
-        .nexus()
+        .crucible()
         .ensure_all_datasets_and_regions(
             &log,
             sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -464,7 +464,7 @@ async fn ssc_regions_ensure_undo(
     let log = osagactx.log();
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
     osagactx
-        .nexus()
+        .crucible()
         .delete_crucible_regions(
             log,
             sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -724,7 +724,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
           "sled_id" => %sled_id);
 
     let sled_agent_client = osagactx
-        .nexus()
+        .sled()
         .sled_client(&sled_id)
         .await
         .map_err(ActionError::action_failed)?;
@@ -770,7 +770,7 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
         osagactx
-            .nexus()
+            .crucible()
             .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
@@ -801,7 +801,7 @@ async fn ssc_get_pantry_address(
     let pantry_address = if let Some(pantry_address) = disk.pantry_address() {
         pantry_address
     } else {
-        get_pantry_address(osagactx.nexus()).await?
+        get_pantry_address(osagactx.internal_dns_resolver()).await?
     };
 
     let disk_already_attached_to_pantry = disk.pantry_address().is_some();
@@ -986,7 +986,7 @@ async fn ssc_call_pantry_attach_for_disk(
         call_pantry_attach_for_disk(
             &log,
             &opctx,
-            &osagactx.nexus(),
+            &osagactx.datastore(),
             params.disk_id,
             pantry_address,
         )
@@ -1095,7 +1095,7 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
         osagactx
-            .nexus()
+            .crucible()
             .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
@@ -1354,7 +1354,7 @@ async fn ssc_start_running_snapshot_undo(
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
         osagactx
-            .nexus()
+            .crucible()
             .delete_crucible_running_snapshot(
                 &log,
                 &dataset,
@@ -1909,10 +1909,14 @@ mod test {
             true, // use the pantry
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        let output = nexus.sec_client.run_saga(runnable_saga).await.unwrap();
 
         let snapshot = output
             .lookup_node_output::<nexus_db_queries::db::model::Snapshot>(
@@ -2027,7 +2031,7 @@ mod test {
         let sled_id = instance_state
             .sled_id()
             .expect("starting instance should have a sled");
-        let sa = nexus.sled_client(&sled_id).await.unwrap();
+        let sa = nexus.sled.sled_client(&sled_id).await.unwrap();
 
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus
@@ -2241,7 +2245,11 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Before running the saga, attach the disk to an instance!
         let _instance_and_vmm = setup_test_instance(
@@ -2256,7 +2264,7 @@ mod test {
         .await;
 
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = nexus.sec_client.run_saga(runnable_saga).await;
 
         // Expect to see 409
         match output {
@@ -2300,8 +2308,12 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
+        let output = nexus.sec_client.run_saga(runnable_saga).await;
 
         // Expect 200
         assert!(output.is_ok());
@@ -2353,7 +2365,11 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Before running the saga, detach the disk!
         let (.., authz_disk, db_disk) =
@@ -2374,7 +2390,7 @@ mod test {
             .expect("failed to detach disk"));
 
         // Actually run the saga. This should fail.
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = nexus.sec_client.run_saga(runnable_saga).await;
 
         assert!(output.is_err());
 
@@ -2402,8 +2418,12 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
+        let output = nexus.sec_client.run_saga(runnable_saga).await;
 
         // Expect 200
         assert!(output.is_ok());

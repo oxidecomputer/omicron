@@ -6,11 +6,16 @@
 
 use std::sync::Arc;
 
-use crate::external_api::views::ExternalIp;
+use crate::app::instance::Instance;
+use crate::app::ip_pool::IpPool;
+use crate::app::project::Project;
+use crate::app::SagaContext;
+use crate::external_api;
 use crate::external_api::views::FloatingIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::IpKind;
@@ -25,16 +30,34 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 
-impl super::Nexus {
+/// Application level operations on External IP addresses for instances
+#[derive(Clone)]
+pub struct ExternalIp {
+    datastore: Arc<db::DataStore>,
+    instance: Instance,
+    ip_pool: IpPool,
+    project: Project,
+}
+
+impl ExternalIp {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        instance: Instance,
+        ip_pool: IpPool,
+        project: Project,
+    ) -> Self {
+        ExternalIp { datastore, instance, ip_pool, project }
+    }
+
     pub(crate) async fn instance_list_external_ips(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> ListResultVec<ExternalIp> {
+    ) -> ListResultVec<external_api::views::ExternalIp> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
         Ok(self
-            .db_datastore
+            .datastore
             .instance_lookup_external_ips(opctx, authz_instance.id())
             .await?
             .into_iter()
@@ -58,7 +81,7 @@ impl super::Nexus {
         match fip_selector {
             params::FloatingIpSelector { floating_ip: NameOrId::Id(id), project: None } => {
                 let floating_ip =
-                    LookupPath::new(opctx, &self.db_datastore).floating_ip_id(id);
+                    LookupPath::new(opctx, &self.datastore).floating_ip_id(id);
                 Ok(floating_ip)
             }
             params::FloatingIpSelector {
@@ -66,6 +89,7 @@ impl super::Nexus {
                 project: Some(project),
             } => {
                 let floating_ip = self
+                    .project
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .floating_ip_name_owned(name.into());
                 Ok(floating_ip)
@@ -92,7 +116,7 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
 
         Ok(self
-            .db_datastore
+            .datastore
             .floating_ips_list(opctx, &authz_project, pagparams)
             .await?
             .into_iter()
@@ -114,7 +138,8 @@ impl super::Nexus {
         // resolve NameOrId into authz::IpPool
         let pool = match pool {
             Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
+                self.ip_pool
+                    .ip_pool_lookup(opctx, &pool)?
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
@@ -123,7 +148,7 @@ impl super::Nexus {
         };
 
         Ok(self
-            .db_datastore
+            .datastore
             .allocate_floating_ip(opctx, authz_project.id(), identity, ip, pool)
             .await?
             .try_into()
@@ -139,7 +164,7 @@ impl super::Nexus {
         let (.., authz_fip) =
             ip_lookup.lookup_for(authz::Action::Modify).await?;
         Ok(self
-            .db_datastore
+            .datastore
             .floating_ip_update(opctx, &authz_fip, params.clone().into())
             .await?
             .try_into()
@@ -154,12 +179,13 @@ impl super::Nexus {
         let (.., authz_fip) =
             ip_lookup.lookup_for(authz::Action::Delete).await?;
 
-        self.db_datastore.floating_ip_delete(opctx, &authz_fip).await
+        self.datastore.floating_ip_delete(opctx, &authz_fip).await
     }
 
     pub(crate) async fn floating_ip_attach(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         fip_selector: params::FloatingIpSelector,
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
@@ -182,23 +208,26 @@ impl super::Nexus {
                 };
 
                 let instance =
-                    self.instance_lookup(opctx, instance_selector)?;
+                    self.instance.instance_lookup(opctx, instance_selector)?;
 
-                self.instance_attach_floating_ip(
-                    opctx,
-                    &instance,
-                    authz_fip,
-                    authz_project,
-                )
-                .await
-                .and_then(FloatingIp::try_from)
+                self.instance
+                    .instance_attach_floating_ip(
+                        opctx,
+                        saga_context,
+                        &instance,
+                        authz_fip,
+                        authz_project,
+                    )
+                    .await
+                    .and_then(FloatingIp::try_from)
             }
         }
     }
 
     pub(crate) async fn floating_ip_detach(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         ip_lookup: lookup::FloatingIp<'_>,
     ) -> UpdateResult<views::FloatingIp> {
         // XXX: Today, this only happens for instances.
@@ -217,12 +246,19 @@ impl super::Nexus {
             project: None,
             instance: parent_id.into(),
         };
-        let instance = self.instance_lookup(opctx, instance_selector)?;
+        let instance =
+            self.instance.instance_lookup(opctx, instance_selector)?;
         let attach_params = &params::ExternalIpDetach::Floating {
             floating_ip: authz_fip.id().into(),
         };
 
-        self.instance_detach_external_ip(opctx, &instance, attach_params)
+        self.instance
+            .instance_detach_external_ip(
+                opctx,
+                saga_context,
+                &instance,
+                attach_params,
+            )
             .await
             .and_then(FloatingIp::try_from)
     }

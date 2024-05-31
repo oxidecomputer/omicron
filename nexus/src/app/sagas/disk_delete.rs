@@ -213,11 +213,13 @@ pub(crate) mod test {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
         let project_lookup =
-            nexus.project_lookup(&opctx, project_selector).unwrap();
+            nexus.project.project_lookup(&opctx, project_selector).unwrap();
 
         nexus
+            .disk
             .project_create_disk(
                 &opctx,
+                &nexus.saga_context,
                 &project_lookup,
                 &crate::app::sagas::disk_create::test::new_disk_create_params(),
             )
@@ -245,10 +247,14 @@ pub(crate) mod test {
             volume_id: disk.volume_id,
         };
         let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sec_client.run_saga(runnable_saga).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

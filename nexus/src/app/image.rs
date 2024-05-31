@@ -4,6 +4,10 @@
 
 //! Images (both project and silo scoped)
 
+use crate::app::project::Project;
+use crate::app::saga;
+use crate::app::silo::Silo;
+use crate::app::SagaContext;
 use crate::external_api::params;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -28,7 +32,24 @@ use uuid::Uuid;
 
 use super::sagas;
 
-impl super::Nexus {
+/// Application level operations on Images
+#[derive(Clone)]
+pub struct Image {
+    datastore: Arc<db::DataStore>,
+    project: Project,
+    silo: Silo,
+    sec_client: Arc<saga::SecClient>,
+}
+
+impl Image {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        project: Project,
+        silo: Silo,
+        sec_client: Arc<saga::SecClient>,
+    ) -> Image {
+        Image { datastore, project, silo, sec_client }
+    }
     pub(crate) async fn image_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -39,13 +60,13 @@ impl super::Nexus {
                 image: NameOrId::Id(id),
                 project: None,
             } => {
-                let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
+                let (.., db_image) = LookupPath::new(opctx, &self.datastore)
                     .image_id(id).fetch().await?;
                 let lookup = match db_image.project_id {
-                    Some(_) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
+                    Some(_) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.datastore)
                         .project_image_id(id)),
                     None => {
-                        ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
+                        ImageLookup::SiloImage(LookupPath::new(opctx, &self.datastore)
                             .silo_image_id(id))
                     },
                 };
@@ -56,14 +77,14 @@ impl super::Nexus {
                 project: Some(project),
             } => {
                 let image =
-                    self.project_lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
+                    self.project.project_lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
                 Ok(ImageLookup::ProjectImage(image))
             }
             params::ImageSelector {
                 image: NameOrId::Name(name),
                 project: None,
             } => {
-                let image = self.current_silo_lookup(opctx)?.silo_image_name_owned(name.into());
+                let image = self.silo.current_silo_lookup(opctx)?.silo_image_name_owned(name.into());
                 Ok(ImageLookup::SiloImage(image))
             }
             params::ImageSelector {
@@ -77,7 +98,7 @@ impl super::Nexus {
 
     /// Creates an image
     pub(crate) async fn image_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         lookup_parent: &ImageParentLookup<'_>,
         params: &params::ImageCreate,
@@ -99,11 +120,10 @@ impl super::Nexus {
                 let image_id = Uuid::new_v4();
 
                 // Grab the snapshot to get block size
-                let (.., db_snapshot) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(*id)
-                        .fetch()
-                        .await?;
+                let (.., db_snapshot) = LookupPath::new(opctx, &self.datastore)
+                    .snapshot_id(*id)
+                    .fetch()
+                    .await?;
 
                 if let Some(authz_project) = &maybe_authz_project {
                     if db_snapshot.project_id != authz_project.id() {
@@ -120,7 +140,7 @@ impl super::Nexus {
                 // each other out.
 
                 let image_volume = self
-                    .db_datastore
+                    .datastore
                     .volume_checkout_randomize_ids(
                         db_snapshot.volume_id,
                         db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
@@ -181,7 +201,7 @@ impl super::Nexus {
                 let new_image_volume =
                     db::model::Volume::new(Uuid::new_v4(), volume_data);
                 let volume =
-                    self.db_datastore.volume_create(new_image_volume).await?;
+                    self.datastore.volume_create(new_image_volume).await?;
 
                 db::model::Image {
                     identity: db::model::ImageIdentity::new(
@@ -203,7 +223,7 @@ impl super::Nexus {
 
         match maybe_authz_project {
             Some(authz_project) => {
-                self.db_datastore
+                self.datastore
                     .project_image_create(
                         opctx,
                         &authz_project,
@@ -212,7 +232,7 @@ impl super::Nexus {
                     .await
             }
             None => {
-                self.db_datastore
+                self.datastore
                     .silo_image_create(
                         opctx,
                         &authz_silo,
@@ -233,14 +253,14 @@ impl super::Nexus {
             ImageParentLookup::Project(project) => {
                 let (.., authz_project) =
                     project.lookup_for(authz::Action::ListChildren).await?;
-                self.db_datastore
+                self.datastore
                     .project_image_list(opctx, &authz_project, pagparams)
                     .await
             }
             ImageParentLookup::Silo(silo) => {
                 let (.., authz_silo) =
                     silo.lookup_for(authz::Action::ListChildren).await?;
-                self.db_datastore
+                self.datastore
                     .silo_image_list(opctx, &authz_silo, pagparams)
                     .await
             }
@@ -248,8 +268,9 @@ impl super::Nexus {
     }
 
     pub(crate) async fn image_delete(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         image_lookup: &ImageLookup<'_>,
     ) -> DeleteResult {
         let image_param: sagas::image_delete::ImageParam = match image_lookup {
@@ -270,7 +291,11 @@ impl super::Nexus {
             image_param,
         };
 
-        self.execute_saga::<sagas::image_delete::SagaImageDelete>(saga_params)
+        self.sec_client
+            .execute_saga::<sagas::image_delete::SagaImageDelete>(
+                saga_params,
+                saga_context.clone(),
+            )
             .await?;
 
         Ok(())
@@ -278,7 +303,7 @@ impl super::Nexus {
 
     /// Converts a project scoped image into a silo scoped image
     pub(crate) async fn image_promote(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
     ) -> UpdateResult<db::model::Image> {
@@ -289,7 +314,7 @@ impl super::Nexus {
                 opctx
                     .authorize(authz::Action::CreateChild, &authz_silo)
                     .await?;
-                self.db_datastore
+                self.datastore
                     .project_image_promote(
                         opctx,
                         &authz_silo,
@@ -306,7 +331,7 @@ impl super::Nexus {
 
     /// Converts a silo scoped image into a project scoped image
     pub(crate) async fn image_demote(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
         project_lookup: &lookup::Project<'_>,
@@ -317,7 +342,7 @@ impl super::Nexus {
                     lookup.fetch_for(authz::Action::Modify).await?;
                 let (_, authz_project) =
                     project_lookup.lookup_for(authz::Action::Modify).await?;
-                self.db_datastore
+                self.datastore
                     .silo_image_demote(
                         opctx,
                         &authz_silo_image,

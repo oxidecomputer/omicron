@@ -151,7 +151,7 @@ async fn sim_reserve_sled_resources(
         .build();
 
     let resource = super::instance_common::reserve_vmm_resources(
-        osagactx.nexus(),
+        osagactx.sled(),
         propolis_id,
         u32::from(params.instance.ncpus.0 .0),
         params.instance.memory,
@@ -168,7 +168,7 @@ async fn sim_release_sled_resources(
     let osagactx = sagactx.user_data();
     let propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
 
-    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
+    osagactx.sled().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
@@ -266,7 +266,7 @@ async fn sim_set_migration_ids(
           "prev_runtime_state" => ?db_instance.runtime());
 
     let updated_record = osagactx
-        .nexus()
+        .instance()
         .instance_set_migration_ids(
             &opctx,
             db_instance.id(),
@@ -307,7 +307,7 @@ async fn sim_clear_migration_ids(
     // produce a stale generation number and will not actually mark the instance
     // as failed.
     if let Err(e) = osagactx
-        .nexus()
+        .instance()
         .instance_clear_migration_ids(
             db_instance.id(),
             src_sled_id,
@@ -350,7 +350,7 @@ async fn sim_ensure_destination_propolis(
         .map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .instance()
         .instance_ensure_registered(
             &opctx,
             &authz_instance,
@@ -399,7 +399,7 @@ async fn sim_ensure_destination_propolis_undo(
     // record. Otherwise the unwind has failed and manual intervention is
     // needed.
     match osagactx
-        .nexus()
+        .instance()
         .instance_ensure_unregistered(&opctx, &authz_instance, &dst_sled_id)
         .await
     {
@@ -461,7 +461,7 @@ async fn sim_instance_migrate(
     // Possibly sled agent can help with this by using state or Propolis
     // generation numbers to filter out stale destruction requests.
     match osagactx
-        .nexus()
+        .instance()
         .instance_request_state(
             &opctx,
             &authz_instance,
@@ -635,8 +635,16 @@ mod tests {
         };
 
         let dag = create_saga_dag::<SagaInstanceMigrate>(params).unwrap();
-        let saga = nexus.create_runnable_saga(dag).await.unwrap();
-        nexus.run_saga(saga).await.expect("Migration saga should succeed");
+        let saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
+        nexus
+            .sec_client
+            .run_saga(saga)
+            .await
+            .expect("Migration saga should succeed");
 
         // Merely running the migration saga (without simulating any completion
         // steps in the simulated agents) should not change where the instance

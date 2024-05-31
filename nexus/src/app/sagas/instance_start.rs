@@ -130,7 +130,7 @@ async fn sis_alloc_server(
     let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
 
     let resource = super::instance_common::reserve_vmm_resources(
-        osagactx.nexus(),
+        osagactx.sled(),
         propolis_id,
         u32::from(hardware_threads.0),
         reservoir_ram,
@@ -147,7 +147,7 @@ async fn sis_alloc_server_undo(
     let osagactx = sagactx.user_data();
     let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
 
-    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
+    osagactx.sled().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
@@ -400,14 +400,15 @@ async fn sis_dpd_ensure(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
-        .sled_id(sled_uuid)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., sled) =
+        LookupPath::new(&osagactx.sled().opctx_sled_lookup(), &datastore)
+            .sled_id(sled_uuid)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .instance_network()
         .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
         .await
         .map_err(ActionError::action_failed)?;
@@ -437,7 +438,7 @@ async fn sis_dpd_ensure_undo(
         .map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .instance_network()
         .instance_delete_dpd_config(&opctx, &authz_instance)
         .await?;
 
@@ -448,8 +449,8 @@ async fn sis_v2p_ensure(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
+    let task = osagactx.background_tasks().task_v2p_manager.clone();
+    osagactx.background_tasks().activate(&task);
     Ok(())
 }
 
@@ -457,8 +458,8 @@ async fn sis_v2p_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
+    let task = osagactx.background_tasks().task_v2p_manager.clone();
+    osagactx.background_tasks().activate(&task);
     Ok(())
 }
 
@@ -489,7 +490,7 @@ async fn sis_ensure_registered(
         .map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .instance()
         .instance_ensure_registered(
             &opctx,
             &authz_instance,
@@ -535,7 +536,7 @@ async fn sis_ensure_registered_undo(
     // reason about the next action from the specific kind of error that was
     // returned.
     if let Err(e) = osagactx
-        .nexus()
+        .instance()
         .instance_ensure_unregistered(&opctx, &authz_instance, &sled_id)
         .await
     {
@@ -573,7 +574,7 @@ async fn sis_ensure_registered_undo(
                        "error" => ?inner);
 
                 if let Err(set_failed_error) = osagactx
-                    .nexus()
+                    .instance()
                     .mark_instance_failed(
                         &instance_id,
                         db_instance.runtime(),
@@ -639,7 +640,7 @@ async fn sis_ensure_running(
         .map_err(ActionError::action_failed)?;
 
     match osagactx
-        .nexus()
+        .instance()
         .instance_request_state(
             &opctx,
             &authz_instance,
@@ -751,8 +752,16 @@ mod test {
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        let saga = nexus.create_runnable_saga(dag).await.unwrap();
-        nexus.run_saga(saga).await.expect("Start saga should succeed");
+        let saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
+        nexus
+            .sec_client
+            .run_saga(saga)
+            .await
+            .expect("Start saga should succeed");
 
         test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
         let vmm_state =
@@ -915,8 +924,13 @@ mod test {
             )))
             .await;
 
-        let saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
         let saga_error = nexus
+            .sec_client
             .run_saga_raw_result(saga)
             .await
             .expect("saga execution should have started")

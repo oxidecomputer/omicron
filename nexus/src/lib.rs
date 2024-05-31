@@ -141,12 +141,17 @@ impl Server {
 
         // Wait until RSS handoff completes.
         let opctx = apictx.context.nexus.opctx_for_service_balancer();
-        apictx.context.nexus.await_rack_initialization(&opctx).await;
+        apictx.context.nexus.rack.await_rack_initialization(&opctx).await;
 
         // While we've started our internal server, we need to wait until we've
         // definitely implemented our source IP allowlist for making requests to
         // the external server we're about to start.
-        apictx.context.nexus.await_ip_allowlist_plumbing().await;
+        apictx
+            .context
+            .nexus
+            .source_ip_allow_list
+            .await_ip_allowlist_plumbing()
+            .await;
 
         // Launch the external server.
         let tls_config = apictx
@@ -303,6 +308,7 @@ impl nexus_test_interface::NexusServer for Server {
             .apictx
             .context
             .nexus
+            .rack
             .rack_initialize(
                 &opctx,
                 config.deployment.rack_id,
@@ -346,6 +352,7 @@ impl nexus_test_interface::NexusServer for Server {
         // sled non-provisionable.
         let nexus = &rv.server_context().nexus;
         nexus
+            .sled
             .sled_set_provision_policy(
                 &opctx,
                 &nexus_db_queries::db::lookup::LookupPath::new(
@@ -383,17 +390,25 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx
             .context
             .nexus
+            .sled
             .upsert_physical_disk(&opctx, physical_disk)
             .await
             .unwrap();
 
         let zpool_id = zpool.id;
 
-        self.apictx.context.nexus.upsert_zpool(&opctx, zpool).await.unwrap();
+        self.apictx
+            .context
+            .nexus
+            .sled
+            .upsert_zpool(&opctx, zpool)
+            .await
+            .unwrap();
 
         self.apictx
             .context
             .nexus
+            .sled
             .upsert_dataset(
                 dataset_id,
                 zpool_id,

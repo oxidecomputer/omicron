@@ -4,24 +4,42 @@
 
 use crate::app::authz;
 use crate::external_api::params;
+use internal_dns::resolver::Resolver;
 use mg_admin_client::types::MessageHistoryRequest;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus, CreateResult,
     DeleteResult, ListResultVec, LookupResult, NameOrId, SwitchBgpHistory,
 };
+use slog::Logger;
 use std::net::IpAddr;
+use std::sync::Arc;
 
-impl super::Nexus {
+/// Application level operations for BGP
+pub struct Bgp {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    internal_resolver: Resolver,
+}
+
+impl Bgp {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        internal_resolver: Resolver,
+    ) -> Bgp {
+        Bgp { log, datastore, internal_resolver }
+    }
     pub async fn bgp_config_set(
         &self,
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result = self.db_datastore.bgp_config_set(opctx, config).await?;
+        let result = self.datastore.bgp_config_set(opctx, config).await?;
         Ok(result)
     }
 
@@ -31,7 +49,7 @@ impl super::Nexus {
         name_or_id: NameOrId,
     ) -> LookupResult<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_config_get(opctx, &name_or_id).await
+        self.datastore.bgp_config_get(opctx, &name_or_id).await
     }
 
     pub async fn bgp_config_list(
@@ -40,7 +58,7 @@ impl super::Nexus {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_config_list(opctx, pagparams).await
+        self.datastore.bgp_config_list(opctx, pagparams).await
     }
 
     pub async fn bgp_config_delete(
@@ -49,7 +67,7 @@ impl super::Nexus {
         sel: &params::BgpConfigSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result = self.db_datastore.bgp_config_delete(opctx, sel).await?;
+        let result = self.datastore.bgp_config_delete(opctx, sel).await?;
         Ok(result)
     }
 
@@ -60,7 +78,7 @@ impl super::Nexus {
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
-            self.db_datastore.bgp_create_announce_set(opctx, announce).await?;
+            self.datastore.bgp_create_announce_set(opctx, announce).await?;
         Ok(result)
     }
 
@@ -70,7 +88,7 @@ impl super::Nexus {
         sel: &params::BgpAnnounceSetSelector,
     ) -> ListResultVec<BgpAnnouncement> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_announce_list(opctx, sel).await
+        self.datastore.bgp_announce_list(opctx, sel).await
     }
 
     pub async fn bgp_delete_announce_set(
@@ -79,8 +97,7 @@ impl super::Nexus {
         sel: &params::BgpAnnounceSetSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result =
-            self.db_datastore.bgp_delete_announce_set(opctx, sel).await?;
+        let result = self.datastore.bgp_delete_announce_set(opctx, sel).await?;
         Ok(result)
     }
 
@@ -90,11 +107,15 @@ impl super::Nexus {
     ) -> ListResultVec<BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
-            external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
-            ))
-        })? {
+        for (switch, client) in
+            &super::mg_clients(&self.internal_resolver, &self.log)
+                .await
+                .map_err(|e| {
+                    external::Error::internal_error(&format!(
+                        "failed to get mg clients: {e}"
+                    ))
+                })?
+        {
             let router_info = match client.read_routers().await {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
@@ -149,11 +170,15 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
-            external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
-            ))
-        })? {
+        for (switch, client) in
+            &super::mg_clients(&self.internal_resolver, &self.log)
+                .await
+                .map_err(|e| {
+                    external::Error::internal_error(&format!(
+                        "failed to get mg clients: {e}"
+                    ))
+                })?
+        {
             let history = match client
                 .message_history(&MessageHistoryRequest { asn: sel.asn })
                 .await
@@ -187,11 +212,15 @@ impl super::Nexus {
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
-            external::Error::internal_error(&format!(
-                "failed to get mg clients: {e}"
-            ))
-        })? {
+        for (switch, client) in
+            &super::mg_clients(&self.internal_resolver, &self.log)
+                .await
+                .map_err(|e| {
+                    external::Error::internal_error(&format!(
+                        "failed to get mg clients: {e}"
+                    ))
+                })?
+        {
             let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
             match client
                 .get_imported(&mg_admin_client::types::AsnSelector {

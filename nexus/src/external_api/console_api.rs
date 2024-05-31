@@ -21,6 +21,7 @@
 // toolchain; we can remove this attribute then.
 #![allow(clippy::declare_interior_mutable_const)]
 
+use crate::app;
 use crate::context::ApiContext;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -361,6 +362,7 @@ pub(crate) async fn login_saml(
             };
 
         let user = nexus
+            .silo
             .silo_user_from_authenticated_subject(
                 &opctx,
                 &authz_silo,
@@ -442,8 +444,9 @@ pub(crate) async fn login_local(
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
-        let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
+        let silo_lookup = nexus.silo.silo_lookup(&opctx, silo)?;
+        let user =
+            nexus.silo.login_local(&opctx, &silo_lookup, credentials).await?;
 
         let session = create_session(opctx, apictx, user).await?;
         let mut response =
@@ -477,7 +480,7 @@ async fn create_session(
 ) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
     let nexus = &apictx.context.nexus;
     let session = match user {
-        Some(user) => nexus.session_create(&opctx, user.id()).await?,
+        Some(user) => nexus.session.session_create(&opctx, user.id()).await?,
         None => Err(Error::Unauthenticated {
             internal_message: String::from(
                 "no matching user found or credentials were not valid",
@@ -506,7 +509,10 @@ pub(crate) async fn logout(
 
         if let Ok(opctx) = opctx {
             if let Some(token) = token {
-                nexus.session_hard_delete(&opctx, token.value()).await?;
+                nexus
+                    .session
+                    .session_hard_delete(&opctx, token.value())
+                    .await?;
             }
         }
 
@@ -596,7 +602,10 @@ async fn get_login_url(
     redirect_uri: Option<RelativeUri>,
 ) -> Result<String, Error> {
     let nexus = &rqctx.context().context.nexus;
-    let endpoint = nexus.endpoint_for_request(rqctx)?;
+    let endpoint = app::external_endpoints::endpoint_for_request(
+        &nexus.background_tasks(),
+        rqctx,
+    )?;
     let silo = endpoint.silo();
 
     let login_uri = if silo.authentication_mode == AuthenticationMode::Local {
@@ -606,8 +615,10 @@ async fn get_login_url(
         // It might be nice to have some policy for choosing which one is used
         // here.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        let silo_lookup =
+            nexus.silo.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
         let idps = nexus
+            .silo
             .identity_provider_list(
                 opctx,
                 &silo_lookup,

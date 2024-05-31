@@ -85,8 +85,10 @@ pub(crate) async fn device_auth_request(
             }
         };
 
-        let model =
-            nexus.device_auth_request_create(&opctx, params.client_id).await?;
+        let model = nexus
+            .device_auth
+            .device_auth_request_create(&opctx, params.client_id)
+            .await?;
         build_oauth_response(
             StatusCode::OK,
             &model.into_response(rqctx.server.using_tls(), host),
@@ -154,6 +156,7 @@ pub(crate) async fn device_auth_confirm(
             "creating new device auth session for current user",
         )?;
         let _token = nexus
+            .device_auth
             .device_auth_request_verify(
                 &opctx,
                 params.user_code,
@@ -216,6 +219,7 @@ pub(crate) async fn device_access_token(
         let opctx = nexus.opctx_external_authn();
         use DeviceAccessTokenResponse::*;
         match nexus
+            .device_auth
             .device_access_token_fetch(
                 &opctx,
                 params.client_id,

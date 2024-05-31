@@ -4,6 +4,7 @@
 
 //! Metrics
 
+use crate::app::oximeter::Oximeter;
 use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
@@ -18,7 +19,16 @@ use oximeter_db::{
 };
 use std::num::NonZeroU32;
 
-impl super::Nexus {
+/// Application level operations on metrics
+pub struct Metrics {
+    oximeter: Oximeter,
+}
+
+impl Metrics {
+    pub fn new(oximeter: Oximeter) -> Metrics {
+        Metrics { oximeter }
+    }
+
     pub(crate) async fn system_metric_list(
         &self,
         opctx: &OpContext,
@@ -49,13 +59,14 @@ impl super::Nexus {
                 format!("collection_target:{metric_name}")
             }
         };
-        self.select_timeseries(
-            &timeseries,
-            &[&format!("id=={}", resource_id)],
-            pagination,
-            limit,
-        )
-        .await
+        self.oximeter
+            .select_timeseries(
+                &timeseries,
+                &[&format!("id=={}", resource_id)],
+                pagination,
+                limit,
+            )
+            .await
     }
 
     pub(crate) async fn silo_metric_list(
@@ -90,13 +101,14 @@ impl super::Nexus {
                 format!("collection_target:{metric_name}")
             }
         };
-        self.select_timeseries(
-            &timeseries,
-            &[&format!("id=={}", resource_id)],
-            pagination,
-            limit,
-        )
-        .await
+        self.oximeter
+            .select_timeseries(
+                &timeseries,
+                &[&format!("id=={}", resource_id)],
+                pagination,
+                limit,
+            )
+            .await
     }
 
     /// List available timeseries schema.
@@ -112,7 +124,8 @@ impl super::Nexus {
         // checks here, letting less-privileged users fetch data for the
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.timeseries_client
+        self.oximeter
+            .timeseries_client()
             .get()
             .await
             .map_err(|e| {
@@ -145,7 +158,8 @@ impl super::Nexus {
         // checks here, letting less-privileged users fetch data for the
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.timeseries_client
+        self.oximeter
+            .timeseries_client()
             .get()
             .await
             .map_err(|e| {

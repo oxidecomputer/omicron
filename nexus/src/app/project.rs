@@ -4,7 +4,9 @@
 
 //! Project APIs
 
+use super::saga;
 use crate::app::sagas;
+use crate::app::SagaContext;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
@@ -25,13 +27,27 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use std::sync::Arc;
 
-impl super::Nexus {
+/// Application level operations on Projects
+#[derive(Clone)]
+pub struct Project {
+    datastore: Arc<db::DataStore>,
+    sec_client: Arc<saga::SecClient>,
+}
+
+impl Project {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        sec_client: Arc<saga::SecClient>,
+    ) -> Project {
+        Project { datastore, sec_client }
+    }
+
     pub fn project_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         project_selector: params::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
-        let lookup_path = LookupPath::new(opctx, &self.db_datastore);
+        let lookup_path = LookupPath::new(opctx, &self.datastore);
         Ok(match project_selector {
             params::ProjectSelector { project: NameOrId::Id(id) } => {
                 lookup_path.project_id(id)
@@ -43,8 +59,9 @@ impl super::Nexus {
     }
 
     pub(crate) async fn project_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         let authz_silo = opctx
@@ -59,8 +76,10 @@ impl super::Nexus {
             authz_silo,
         };
         let saga_outputs = self
+            .sec_client
             .execute_saga::<sagas::project_create::SagaProjectCreate>(
                 saga_params,
+                saga_context.clone(),
             )
             .await?;
         let (_authz_project, db_project) = saga_outputs
@@ -77,7 +96,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Project> {
-        self.db_datastore.projects_list(opctx, pagparams).await
+        self.datastore.projects_list(opctx, pagparams).await
     }
 
     pub(crate) async fn project_update(
@@ -88,7 +107,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Project> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .project_update(opctx, &authz_project, new_params.clone().into())
             .await
     }
@@ -100,9 +119,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_project, db_project) =
             project_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore
-            .project_delete(opctx, &authz_project, &db_project)
-            .await
+        self.datastore.project_delete(opctx, &authz_project, &db_project).await
     }
 
     // Role assignments
@@ -115,7 +132,7 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
-            .db_datastore
+            .datastore
             .role_assignment_fetch_visible(opctx, &authz_project)
             .await?
             .into_iter()
@@ -135,7 +152,7 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
         let role_assignments = self
-            .db_datastore
+            .datastore
             .role_assignment_replace_visible(
                 opctx,
                 &authz_project,

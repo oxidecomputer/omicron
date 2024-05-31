@@ -1,5 +1,8 @@
-use std::sync::Arc;
-
+use crate::app::disk::Disk;
+use crate::app::project::Project;
+use crate::app::saga;
+use crate::app::sagas;
+use crate::app::SagaContext;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -15,11 +18,25 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use std::sync::Arc;
 
-use super::sagas;
+/// Application level operations on Snapshots
+pub struct Snapshot {
+    datastore: Arc<db::DataStore>,
+    sec_client: Arc<saga::SecClient>,
+    project: Project,
+    disk: Disk,
+}
 
-impl super::Nexus {
-    // Snapshots
+impl Snapshot {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        sec_client: Arc<saga::SecClient>,
+        project: Project,
+        disk: Disk,
+    ) -> Snapshot {
+        Snapshot { datastore, sec_client, project, disk }
+    }
 
     pub fn snapshot_lookup<'a>(
         &'a self,
@@ -32,14 +49,14 @@ impl super::Nexus {
                 project: None,
             } => {
                 let snapshot =
-                    LookupPath::new(opctx, &self.db_datastore).snapshot_id(id);
+                    LookupPath::new(opctx, &self.datastore).snapshot_id(id);
                 Ok(snapshot)
             }
             params::SnapshotSelector {
                 snapshot: NameOrId::Name(name),
                 project: Some(project),
             } => {
-                let snapshot = self
+                let snapshot = self.project
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .snapshot_name_owned(name.into());
                 Ok(snapshot)
@@ -57,8 +74,9 @@ impl super::Nexus {
     }
 
     pub(crate) async fn snapshot_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         // Is passed by value due to `disk_name` taking ownership of `self` below
         project_lookup: lookup::Project<'_>,
         params: &params::SnapshotCreate,
@@ -75,7 +93,7 @@ impl super::Nexus {
             .disk
             .clone()
         {
-            NameOrId::Id(id) => self.disk_lookup(
+            NameOrId::Id(id) => self.disk.disk_lookup(
                 opctx,
                 DiskSelector { disk: NameOrId::Id(id), project: None },
             )?,
@@ -95,14 +113,13 @@ impl super::Nexus {
         let use_the_pantry = if let Some(attach_instance_id) =
             &db_disk.runtime_state.attach_instance_id
         {
-            let (.., authz_instance) =
-                LookupPath::new(opctx, &self.db_datastore)
-                    .instance_id(*attach_instance_id)
-                    .lookup_for(authz::Action::Read)
-                    .await?;
+            let (.., authz_instance) = LookupPath::new(opctx, &self.datastore)
+                .instance_id(*attach_instance_id)
+                .lookup_for(authz::Action::Read)
+                .await?;
 
             let instance_state = self
-                .datastore()
+                .datastore
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
 
@@ -125,8 +142,10 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
+            .sec_client
             .execute_saga::<sagas::snapshot_create::SagaSnapshotCreate>(
                 saga_params,
+                saga_context.clone(),
             )
             .await?;
 
@@ -148,12 +167,13 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
 
-        self.db_datastore.snapshot_list(opctx, &authz_project, pagparams).await
+        self.datastore.snapshot_list(opctx, &authz_project, pagparams).await
     }
 
     pub(crate) async fn snapshot_delete(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         snapshot_lookup: &lookup::Snapshot<'_>,
     ) -> DeleteResult {
         let (.., authz_snapshot, db_snapshot) =
@@ -165,10 +185,12 @@ impl super::Nexus {
             snapshot: db_snapshot,
         };
 
-        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sec_client
+            .execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
+                saga_params,
+                saga_context.clone(),
+            )
+            .await?;
 
         Ok(())
     }

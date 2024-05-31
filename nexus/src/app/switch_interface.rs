@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Switch interfaces
+
+use crate::app::address_lot::AddressLot;
+use crate::app::background::BackgroundTasks;
+use crate::app::rack::Rack;
 use crate::external_api::params;
 use db::model::{LoopbackAddress, Name};
 use nexus_db_queries::authz;
@@ -17,7 +22,24 @@ use oxnet::IpNet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on switch interfaces
+#[derive(Clone)]
+pub struct SwitchInterface {
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    rack: Rack,
+    address_lot: AddressLot,
+}
+
+impl SwitchInterface {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        rack: Rack,
+        address_lot: AddressLot,
+    ) -> SwitchInterface {
+        SwitchInterface { datastore, background_tasks, rack, address_lot }
+    }
     pub fn loopback_address_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -25,7 +47,7 @@ impl super::Nexus {
         switch_location: Name,
         address: IpNet,
     ) -> LookupResult<lookup::LoopbackAddress<'a>> {
-        Ok(LookupPath::new(opctx, &self.db_datastore).loopback_address(
+        Ok(LookupPath::new(opctx, &self.datastore).loopback_address(
             rack_id,
             switch_location,
             address.into(),
@@ -33,7 +55,7 @@ impl super::Nexus {
     }
 
     pub(crate) async fn loopback_address_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         params: params::LoopbackAddressCreate,
     ) -> CreateResult<LoopbackAddress> {
@@ -42,16 +64,17 @@ impl super::Nexus {
         validate_switch_location(params.switch_location.as_str())?;
 
         // Just a check to make sure a valid rack id was passed in.
-        self.rack_lookup(&opctx, &params.rack_id).await?;
+        self.rack.rack_lookup(&opctx, &params.rack_id).await?;
 
-        let address_lot_lookup =
-            self.address_lot_lookup(&opctx, params.address_lot.clone())?;
+        let address_lot_lookup = self
+            .address_lot
+            .address_lot_lookup(&opctx, params.address_lot.clone())?;
 
         let (.., authz_address_lot) =
             address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         let value = self
-            .db_datastore
+            .datastore
             .loopback_address_create(&opctx, &params, None, &authz_address_lot)
             .await?;
 
@@ -64,7 +87,7 @@ impl super::Nexus {
     }
 
     pub(crate) async fn loopback_address_delete(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         rack_id: Uuid,
         switch_location: Name,
@@ -80,7 +103,7 @@ impl super::Nexus {
         let (.., authz_loopback_address) =
             loopback_address_lookup.lookup_for(authz::Action::Delete).await?;
 
-        self.db_datastore
+        self.datastore
             .loopback_address_delete(&opctx, &authz_loopback_address)
             .await?;
 
@@ -93,12 +116,12 @@ impl super::Nexus {
     }
 
     pub(crate) async fn loopback_address_list(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<LoopbackAddress> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.db_datastore.loopback_address_list(opctx, pagparams).await
+        self.datastore.loopback_address_list(opctx, pagparams).await
     }
 }
 

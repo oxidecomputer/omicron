@@ -4,6 +4,8 @@
 
 //! Silos, Users, and SSH Keys.
 
+use crate::app::background::BackgroundTasks;
+use crate::app::external_dns;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
@@ -30,10 +32,27 @@ use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::bail_unless;
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
-    // Silos
+/// Application level operations on Silos
+#[derive(Clone)]
+pub struct Silo {
+    nexus_id: Uuid,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    opctx_external_authn: OpContext,
+}
+
+impl Silo {
+    pub fn new(
+        nexus_id: Uuid,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        opctx_external_authn: OpContext,
+    ) -> Silo {
+        Silo { nexus_id, datastore, background_tasks, opctx_external_authn }
+    }
     pub fn current_silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -52,12 +71,11 @@ impl super::Nexus {
     ) -> LookupResult<lookup::Silo<'a>> {
         match silo {
             NameOrId::Id(id) => {
-                let silo =
-                    LookupPath::new(opctx, &self.db_datastore).silo_id(id);
+                let silo = LookupPath::new(opctx, &self.datastore).silo_id(id);
                 Ok(silo)
             }
             NameOrId::Name(name) => {
-                let silo = LookupPath::new(opctx, &self.db_datastore)
+                let silo = LookupPath::new(opctx, &self.datastore)
                     .silo_name_owned(name.into());
                 Ok(silo)
             }
@@ -73,7 +91,7 @@ impl super::Nexus {
             self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
         let silo_dns_name = silo_dns_name(&silo.name());
         let external_dns_zones = self
-            .db_datastore
+            .datastore
             .dns_zones_list_all(opctx, nexus_db_model::DnsGroup::External)
             .await?;
 
@@ -92,16 +110,17 @@ impl super::Nexus {
         // generally do, like reading and modifying the fleet-wide external DNS
         // config.  Nexus assumes its own identity to do these operations in
         // this (very specific) context.
-        let nexus_opctx = self.opctx_external_authn();
-        let datastore = self.datastore();
+        let nexus_opctx = &self.opctx_external_authn;
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
-        let nexus_external_dns_zones = datastore
+        let nexus_external_dns_zones = self
+            .datastore
             .dns_zones_list_all(nexus_opctx, DnsGroup::External)
             .await
             .internal_context("listing external DNS zones")?;
-        let (_, target_blueprint) = datastore
+        let (_, target_blueprint) = self
+            .datastore
             .blueprint_target_get_current_full(opctx)
             .await
             .internal_context("loading target blueprint")?;
@@ -119,7 +138,7 @@ impl super::Nexus {
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
             format!("create silo: {:?}", silo_name.as_str()),
-            self.id.to_string(),
+            self.nexus_id.to_string(),
         );
         let silo_dns_name = silo_dns_name(silo_name);
         let new_silo_dns_names = nexus_external_dns_zones
@@ -129,7 +148,8 @@ impl super::Nexus {
 
         dns_update.add_name(silo_dns_name, dns_records)?;
 
-        let silo = datastore
+        let silo = self
+            .datastore
             .silo_create(
                 &opctx,
                 &nexus_opctx,
@@ -150,7 +170,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore
+        self.datastore
             .silos_list(opctx, pagparams, Discoverability::DiscoverableOnly)
             .await
     }
@@ -160,17 +180,16 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> DeleteResult {
-        let dns_opctx = self.opctx_external_authn();
-        let datastore = self.datastore();
+        let dns_opctx = &self.opctx_external_authn;
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
             format!("delete silo: {:?}", db_silo.name()),
-            self.id.to_string(),
+            self.nexus_id.to_string(),
         );
         dns_update.remove_name(silo_dns_name(&db_silo.name()))?;
-        datastore
+        self.datastore
             .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
             .await?;
         self.background_tasks
@@ -190,7 +209,7 @@ impl super::Nexus {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
-            .db_datastore
+            .datastore
             .role_assignment_fetch_visible(opctx, &authz_silo)
             .await?
             .into_iter()
@@ -210,7 +229,7 @@ impl super::Nexus {
             silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
         let role_assignments = self
-            .db_datastore
+            .datastore
             .role_assignment_replace_visible(
                 opctx,
                 &authz_silo,
@@ -238,7 +257,7 @@ impl super::Nexus {
         action: authz::Action,
     ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
         let (_, authz_silo_user, db_silo_user) =
-            LookupPath::new(opctx, self.datastore())
+            LookupPath::new(opctx, &self.datastore)
                 .silo_user_id(silo_user_id)
                 .fetch_for(action)
                 .await?;
@@ -258,7 +277,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::SiloUser> {
         let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
-        self.db_datastore
+        self.datastore
             .silo_users_list(opctx, &authz_silo_user_list, pagparams)
             .await
     }
@@ -325,7 +344,7 @@ impl super::Nexus {
         );
         // TODO These two steps should happen in a transaction.
         let (_, db_silo_user) =
-            self.datastore().silo_user_create(&authz_silo, silo_user).await?;
+            self.datastore.silo_user_create(&authz_silo, silo_user).await?;
         let authz_silo_user = authz::SiloUser::new(
             authz_silo.clone(),
             db_silo_user.id(),
@@ -359,7 +378,7 @@ impl super::Nexus {
                 authz::Action::Delete,
             )
             .await?;
-        self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
+        self.datastore.silo_user_delete(opctx, &authz_silo_user).await
     }
 
     /// Based on an authenticated subject, fetch or create a silo user
@@ -375,7 +394,7 @@ impl super::Nexus {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         let fetch_result = self
-            .datastore()
+            .datastore
             .silo_user_fetch_by_external_id(
                 opctx,
                 &authz_silo,
@@ -406,7 +425,7 @@ impl super::Nexus {
                             authenticated_subject.external_id.clone(),
                         );
 
-                        self.db_datastore
+                        self.datastore
                             .silo_user_create(&authz_silo, silo_user)
                             .await?
                     }
@@ -423,7 +442,7 @@ impl super::Nexus {
         for group in &authenticated_subject.groups {
             let silo_group = match db_silo.user_provision_type {
                 db::model::UserProvisionType::ApiOnly => {
-                    self.db_datastore
+                    self.datastore
                         .silo_group_optional_lookup(
                             opctx,
                             &authz_silo,
@@ -452,7 +471,7 @@ impl super::Nexus {
 
         // Update the user's group memberships
 
-        self.db_datastore
+        self.datastore
             .silo_group_membership_replace_for_user(
                 opctx,
                 &authz_silo_user,
@@ -525,7 +544,7 @@ impl super::Nexus {
             }
         };
 
-        self.datastore()
+        self.datastore
             .silo_user_password_hash_set(
                 opctx,
                 db_silo,
@@ -553,7 +572,7 @@ impl super::Nexus {
         let maybe_hash = match maybe_authz_silo_user {
             None => None,
             Some(authz_silo_user) => {
-                self.datastore()
+                self.datastore
                     .silo_user_password_hash_fetch(opctx, authz_silo_user)
                     .await?
             }
@@ -597,7 +616,7 @@ impl super::Nexus {
         // here, in that we'll do one fewer database lookup if a user does not
         // exist.  Rate limiting might help.  See omicron#2184.
         let fetch_user = self
-            .datastore()
+            .datastore
             .silo_user_fetch_by_external_id(
                 opctx,
                 &authz_silo,
@@ -632,14 +651,14 @@ impl super::Nexus {
         external_id: &String,
     ) -> LookupResult<db::model::SiloGroup> {
         match self
-            .db_datastore
+            .datastore
             .silo_group_optional_lookup(opctx, authz_silo, external_id.clone())
             .await?
         {
             Some(silo_group) => Ok(silo_group),
 
             None => {
-                self.db_datastore
+                self.datastore
                     .silo_group_ensure(
                         opctx,
                         authz_silo,
@@ -667,7 +686,7 @@ impl super::Nexus {
                 silo: None,
             } => {
 
-                let saml_provider = LookupPath::new(opctx, &self.db_datastore)
+                let saml_provider = LookupPath::new(opctx, &self.datastore)
                     .saml_identity_provider_id(id);
                 Ok(saml_provider)
             }
@@ -697,7 +716,7 @@ impl super::Nexus {
         // TODO-security: This should likely be lookup_for ListChildren on the silo
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
-        self.db_datastore
+        self.datastore
             .identity_provider_list(opctx, &authz_idp_list, pagparams)
             .await
     }
@@ -708,6 +727,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
+        external_resolver: &Arc<external_dns::Resolver>,
         params: params::SamlIdentityProviderCreate,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
         // TODO-security: This should likely be fetch_for CreateChild on the silo
@@ -751,7 +771,7 @@ impl super::Nexus {
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)
-                    .dns_resolver(self.external_resolver.clone())
+                    .dns_resolver(external_resolver.clone())
                     .build()
                     .map_err(|e| {
                         Error::internal_error(&format!(
@@ -883,7 +903,7 @@ impl super::Nexus {
                 // parameters of this request doesn't work.
                 Error::invalid_request(&e.to_string()))?;
 
-        self.db_datastore
+        self.datastore
             .saml_identity_provider_create(opctx, &authz_idp_list, provider)
             .await
     }
@@ -893,6 +913,6 @@ impl super::Nexus {
         opctx: &'a OpContext,
         group_id: &'a Uuid,
     ) -> db::lookup::SiloGroup<'a> {
-        LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
+        LookupPath::new(opctx, &self.datastore).silo_group_id(*group_id)
     }
 }

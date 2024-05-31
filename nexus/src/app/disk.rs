@@ -4,8 +4,13 @@
 
 //! Disks and snapshots
 
+use crate::app::project::Project;
+use crate::app::saga;
 use crate::app::sagas;
+use crate::app::volume::Volume;
+use crate::app::SagaContext;
 use crate::external_api::params;
+use nexus_config::RegionAllocationStrategy;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -25,14 +30,52 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use sled_agent_client::Client as SledAgentClient;
+use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::MAX_DISK_SIZE_BYTES;
 use super::MIN_DISK_SIZE_BYTES;
 
-impl super::Nexus {
-    // Disks
+/// Application level operations on Disks
+#[derive(Clone)]
+pub struct Disk {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    sec_client: Arc<saga::SecClient>,
+    project: Project,
+    volume: Volume,
+    reqwest_client: reqwest::Client,
+    default_region_allocation_strategy: RegionAllocationStrategy,
+}
+
+impl Disk {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        sec_client: Arc<saga::SecClient>,
+        project: Project,
+        volume: Volume,
+        reqwest_client: reqwest::Client,
+        default_region_allocation_strategy: RegionAllocationStrategy,
+    ) -> Disk {
+        Disk {
+            log,
+            datastore,
+            sec_client,
+            project,
+            volume,
+            reqwest_client,
+            default_region_allocation_strategy,
+        }
+    }
+
+    pub fn default_region_allocation_strategy(
+        &self,
+    ) -> &RegionAllocationStrategy {
+        &self.default_region_allocation_strategy
+    }
+
     pub fn disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -41,14 +84,14 @@ impl super::Nexus {
         match disk_selector {
             params::DiskSelector { disk: NameOrId::Id(id), project: None } => {
                 let disk =
-                    LookupPath::new(opctx, &self.db_datastore).disk_id(id);
+                    LookupPath::new(opctx, &self.datastore).disk_id(id);
                 Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(name),
                 project: Some(project),
             } => {
-                let disk = self
+                let disk = self.project
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .disk_name_owned(name.into());
                 Ok(disk)
@@ -66,7 +109,7 @@ impl super::Nexus {
     }
 
     pub(super) async fn validate_disk_create_params(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
         params: &params::DiskCreate,
@@ -77,11 +120,10 @@ impl super::Nexus {
                 block_size.into()
             }
             params::DiskSource::Snapshot { snapshot_id } => {
-                let (.., db_snapshot) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(snapshot_id)
-                        .fetch()
-                        .await?;
+                let (.., db_snapshot) = LookupPath::new(opctx, &self.datastore)
+                    .snapshot_id(snapshot_id)
+                    .fetch()
+                    .await?;
 
                 // Return an error if the snapshot does not belong to our
                 // project.
@@ -106,7 +148,7 @@ impl super::Nexus {
                 db_snapshot.block_size.to_bytes().into()
             }
             params::DiskSource::Image { image_id } => {
-                let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
+                let (.., db_image) = LookupPath::new(opctx, &self.datastore)
                     .image_id(image_id)
                     .fetch()
                     .await?;
@@ -188,8 +230,9 @@ impl super::Nexus {
     }
 
     pub(crate) async fn project_create_disk(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         project_lookup: &lookup::Project<'_>,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
@@ -203,7 +246,11 @@ impl super::Nexus {
             create_params: params.clone(),
         };
         let saga_outputs = self
-            .execute_saga::<sagas::disk_create::SagaDiskCreate>(saga_params)
+            .sec_client
+            .execute_saga::<sagas::disk_create::SagaDiskCreate>(
+                saga_params,
+                saga_context.clone(),
+            )
             .await?;
         let disk_created = saga_outputs
             .lookup_node_output::<db::model::Disk>("created_disk")
@@ -220,7 +267,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.disk_list(opctx, &authz_project, pagparams).await
+        self.datastore.disk_list(opctx, &authz_project, pagparams).await
     }
 
     /// Modifies the runtime state of the Disk as requested.  This generally
@@ -260,7 +307,7 @@ impl super::Nexus {
 
         let new_runtime: DiskRuntimeState = new_runtime.into_inner().into();
 
-        self.db_datastore
+        self.datastore
             .disk_update_runtime(opctx, authz_disk, &new_runtime.into())
             .await
             .map(|_| ())
@@ -273,13 +320,13 @@ impl super::Nexus {
         new_state: &DiskRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let (.., authz_disk) = LookupPath::new(&opctx, &self.db_datastore)
+        let (.., authz_disk) = LookupPath::new(&opctx, &self.datastore)
             .disk_id(id)
             .lookup_for(authz::Action::Modify)
             .await?;
 
         let result = self
-            .db_datastore
+            .datastore
             .disk_update_runtime(opctx, &authz_disk, &new_state.clone().into())
             .await;
 
@@ -324,14 +371,15 @@ impl super::Nexus {
     }
 
     pub(crate) async fn project_delete_disk(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         disk_lookup: &lookup::Disk<'_>,
     ) -> DeleteResult {
         let (.., project, authz_disk) =
             disk_lookup.lookup_for(authz::Action::Delete).await?;
 
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_disk) = LookupPath::new(opctx, &self.datastore)
             .disk_id(authz_disk.id())
             .fetch()
             .await?;
@@ -342,7 +390,11 @@ impl super::Nexus {
             disk_id: authz_disk.id(),
             volume_id: db_disk.volume_id,
         };
-        self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
+        self.sec_client
+            .execute_saga::<sagas::disk_delete::SagaDiskDelete>(
+                saga_params,
+                saga_context.clone(),
+            )
             .await?;
         Ok(())
     }
@@ -352,19 +404,26 @@ impl super::Nexus {
     /// name, but we provide this interface when all the caller has is
     /// the disk UUID as the internal volume_id is not exposed.
     pub(crate) async fn disk_remove_read_only_parent(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         disk_id: Uuid,
     ) -> DeleteResult {
         // First get the internal volume ID that is stored in the disk
         // database entry, once we have that just call the volume method
         // to remove the read only parent.
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_disk) = LookupPath::new(opctx, &self.datastore)
             .disk_id(disk_id)
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
+        self.volume
+            .volume_remove_read_only_parent(
+                &opctx,
+                saga_context,
+                db_disk.volume_id,
+            )
+            .await?;
 
         Ok(())
     }
@@ -372,7 +431,7 @@ impl super::Nexus {
     /// Move a disk from the "ImportReady" state to the "Importing" state,
     /// blocking any import from URL jobs.
     pub(crate) async fn disk_manual_import_start(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
     ) -> UpdateResult<()> {
@@ -397,7 +456,7 @@ impl super::Nexus {
             }
         }
 
-        self.db_datastore
+        self.datastore
             .disk_update_runtime(
                 opctx,
                 &authz_disk,
@@ -409,7 +468,7 @@ impl super::Nexus {
 
     /// Bulk write some bytes into a disk that's in state ImportingFromBulkWrites
     pub(crate) async fn disk_manual_import(
-        self: &Arc<Self>,
+        &self,
         disk_lookup: &lookup::Disk<'_>,
         param: params::ImportBlocksBulkWrite,
     ) -> UpdateResult<()> {
@@ -531,7 +590,7 @@ impl super::Nexus {
     /// "ImportReady" state, usually signalling the end of manually importing
     /// blocks.
     pub(crate) async fn disk_manual_import_stop(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
     ) -> UpdateResult<()> {
@@ -556,7 +615,7 @@ impl super::Nexus {
             }
         }
 
-        self.db_datastore
+        self.datastore
             .disk_update_runtime(
                 opctx,
                 &authz_disk,
@@ -569,8 +628,9 @@ impl super::Nexus {
     /// Move a disk from the "ImportReady" state to the "Detach" state, making
     /// it ready for general use.
     pub(crate) async fn disk_finalize_import(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         disk_lookup: &lookup::Disk<'_>,
         finalize_params: &params::FinalizeDisk,
     ) -> UpdateResult<()> {
@@ -585,10 +645,12 @@ impl super::Nexus {
             snapshot_name: finalize_params.snapshot_name.clone(),
         };
 
-        self.execute_saga::<sagas::finalize_disk::SagaFinalizeDisk>(
-            saga_params,
-        )
-        .await?;
+        self.sec_client
+            .execute_saga::<sagas::finalize_disk::SagaFinalizeDisk>(
+                saga_params,
+                saga_context.clone(),
+            )
+            .await?;
 
         Ok(())
     }

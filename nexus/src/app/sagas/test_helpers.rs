@@ -51,9 +51,10 @@ pub(crate) async fn instance_start(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_start(&opctx, &instance_lookup)
+        .instance
+        .instance_start(&opctx, &nexus.saga_context, &instance_lookup)
         .await
         .expect("Failed to start instance");
 }
@@ -71,8 +72,9 @@ pub(crate) async fn instance_stop(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
+        .instance
         .instance_stop(&opctx, &instance_lookup)
         .await
         .expect("Failed to stop instance");
@@ -92,8 +94,9 @@ pub(crate) async fn instance_stop_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
+        .instance
         .instance_stop(&opctx, &instance_lookup)
         .await
         .expect("Failed to stop instance");
@@ -113,9 +116,10 @@ pub(crate) async fn instance_delete_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .project_destroy_instance(&opctx, &instance_lookup)
+        .instance
+        .project_destroy_instance(&opctx, &nexus.saga_context, &instance_lookup)
         .await
         .expect("Failed to destroy instance");
 }
@@ -154,7 +158,7 @@ pub(crate) async fn instance_simulate_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
     let sa = nexus
         .instance_sled_by_id(&instance.id())
@@ -261,9 +265,14 @@ pub(crate) async fn actions_succeed_idempotently(
     nexus: &Arc<Nexus>,
     dag: SagaDag,
 ) {
-    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    let runnable_saga = nexus
+        .sec_client
+        .create_runnable_saga(dag.clone(), nexus.saga_context.clone())
+        .await
+        .unwrap();
     for node in dag.get_nodes() {
         nexus
+            .sec_client
             .sec()
             .saga_inject_repeat(
                 runnable_saga.id(),
@@ -277,7 +286,11 @@ pub(crate) async fn actions_succeed_idempotently(
             .unwrap();
     }
 
-    nexus.run_saga(runnable_saga).await.expect("Saga should have succeeded");
+    nexus
+        .sec_client
+        .run_saga(runnable_saga)
+        .await
+        .expect("Saga should have succeeded");
 }
 
 /// Tests that a saga `S` functions properly when any of its nodes fails and
@@ -345,16 +358,21 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
             "label" => node.label()
         );
 
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag.clone(), nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         nexus
+            .sec_client
             .sec()
             .saga_inject_error(runnable_saga.id(), node.index())
             .await
             .unwrap();
 
         let saga_error = nexus
+            .sec_client
             .run_saga_raw_result(runnable_saga)
             .await
             .expect("saga should have started successfully")
@@ -446,16 +464,21 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             "label" => error_node.label(),
         );
 
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag.clone(), nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         nexus
+            .sec_client
             .sec()
             .saga_inject_error(runnable_saga.id(), error_node.index())
             .await
             .unwrap();
 
         nexus
+            .sec_client
             .sec()
             .saga_inject_repeat(
                 runnable_saga.id(),
@@ -469,6 +492,7 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             .unwrap();
 
         let saga_error = nexus
+            .sec_client
             .run_saga_raw_result(runnable_saga)
             .await
             .expect("saga should have started successfully")

@@ -95,7 +95,7 @@ async fn siia_begin_attach_ip(
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
-                        .nexus()
+                        .ip_pool()
                         .ip_pool_lookup(&opctx, name_or_id)
                         .map_err(ActionError::action_failed)?
                         .lookup_for(authz::Action::CreateChild)
@@ -233,7 +233,7 @@ async fn siia_nat_undo(
     // exact row we created..
 
     if let Err(e) = osagactx
-        .nexus()
+        .instance_network()
         .delete_dpd_config_by_entry(&opctx, &nat_entry)
         .await
         .map_err(ActionError::action_failed)
@@ -424,8 +424,16 @@ pub(crate) mod test {
             let params = new_test_params(&opctx, datastore, use_float).await;
 
             let dag = create_saga_dag::<SagaInstanceIpAttach>(params).unwrap();
-            let saga = nexus.create_runnable_saga(dag).await.unwrap();
-            nexus.run_saga(saga).await.expect("Attach saga should succeed");
+            let saga = nexus
+                .sec_client
+                .create_runnable_saga(dag, nexus.saga_context.clone())
+                .await
+                .unwrap();
+            nexus
+                .sec_client
+                .run_saga(saga)
+                .await
+                .expect("Attach saga should succeed");
         }
 
         let instance_id = instance.id();

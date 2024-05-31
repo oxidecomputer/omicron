@@ -93,6 +93,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     // Assert external authenticator opctx can read it
     let nexus = &cptestctx.server.server_context().nexus;
     let (.., _retrieved_silo_nexus) = nexus
+        .silo
         .silo_lookup(
             &nexus.opctx_external_authn(),
             omicron_common::api::external::Name::try_from(

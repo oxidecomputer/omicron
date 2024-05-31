@@ -10,13 +10,13 @@ use crate::app::sagas::SagaRequest;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
+use crate::saga_interface;
 use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
 use nexus_config::NexusConfig;
-use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
 use nexus_config::UpdatesConfig;
 use nexus_db_queries::authn;
@@ -31,8 +31,8 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -44,18 +44,18 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
-mod crucible;
+pub(crate) mod crucible;
 mod deployment;
-mod device_auth;
-mod disk;
-mod external_dns;
+pub(crate) mod device_auth;
+pub(crate) mod disk;
+pub(crate) mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
-mod instance;
-mod instance_network;
-mod ip_pool;
+pub(crate) mod instance;
+pub(crate) mod instance_network;
+pub(crate) mod ip_pool;
 mod metrics;
 mod network_interface;
 pub(crate) mod oximeter;
@@ -64,10 +64,9 @@ mod project;
 mod quota;
 mod rack;
 pub(crate) mod saga;
-mod session;
+pub(crate) mod session;
 mod silo;
-mod sled;
-mod sled_instance;
+pub(crate) mod sled;
 mod snapshot;
 mod ssh_key;
 mod switch;
@@ -77,7 +76,7 @@ pub mod test_interfaces;
 mod update;
 mod utilization;
 mod volume;
-mod vpc;
+pub(crate) mod vpc;
 mod vpc_router;
 mod vpc_subnet;
 
@@ -132,7 +131,7 @@ pub struct Nexus {
     authz: Arc<authz::Authz>,
 
     /// saga execution coordinator
-    sec_client: Arc<steno::SecClient>,
+    sec_client: Arc<saga::SecClient>,
 
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
@@ -153,25 +152,12 @@ pub struct Nexus {
     /// The metric producer server from which oximeter collects metric data.
     producer_server: std::sync::Mutex<Option<ProducerServer>>,
 
-    /// Reusable `reqwest::Client`, to be cloned and used with the Progenitor-
-    /// generated `Client::new_with_client`.
-    ///
-    /// (This does not need to be in an `Arc` because `reqwest::Client` uses
-    /// `Arc` internally.)
-    reqwest_client: reqwest::Client,
-
-    /// Client to the timeseries database.
-    timeseries_client: LazyTimeseriesClient,
-
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
     updates_config: Option<UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
-
-    /// Operational context used for Instance allocation
-    opctx_alloc: OpContext,
 
     /// Operational context used for external request authentication
     opctx_external_authn: OpContext,
@@ -190,20 +176,62 @@ pub struct Nexus {
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
 
-    /// DNS servers used in `external_resolver`, used to provide DNS servers to
-    /// instances via DHCP
-    // TODO: This needs to be moved to the database.
-    // https://github.com/oxidecomputer/omicron/issues/3732
-    external_dns_servers: Vec<IpAddr>,
-
     /// Background tasks
-    background_tasks: background::BackgroundTasks,
+    background_tasks: Arc<background::BackgroundTasks>,
 
-    /// Default Crucible region allocation strategy
-    default_region_allocation_strategy: RegionAllocationStrategy,
-
-    /// Channel for notifying background task of change to opte v2p state
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    /**
+     *
+     * Application level types that previously were methods on Nexus. These
+     * types are pub since they only provide methods, and adding getters seems
+     * superfluous. Each of these types is clonable for use in passing around
+     * the system.
+     *
+     * Please do not `impl super::Nexus` in any other files, and consider
+     * attaching new methods to distinct types.
+     *
+     * We may decide to merge some of these types, put them in external crates,
+     * etc.. Separating the methods into distinct types makes the above possible
+     * and also allows us to use them in background tasks where we can't cleanly
+     * pass Nexus due to the circular dependency.
+     *
+     **/
+    pub address_lot: address_lot::AddressLot,
+    pub source_ip_allow_list: allow_list::SourceIpAllowList,
+    pub bfd: bfd::Bfd,
+    pub bgp: bgp::Bgp,
+    pub certificate: certificate::Certificate,
+    pub crucible: crucible::Crucible,
+    pub blueprint: deployment::Blueprint,
+    pub device_auth: device_auth::DeviceAuth,
+    pub disk: disk::Disk,
+    pub external_ip: external_ip::ExternalIp,
+    pub iam: iam::Iam,
+    pub image: image::Image,
+    pub instance_network: instance_network::InstanceNetwork,
+    pub instance: instance::Instance,
+    pub ip_pool: ip_pool::IpPool,
+    pub metrics: metrics::Metrics,
+    pub network_interface: network_interface::NetworkInterface,
+    pub oximeter: oximeter::Oximeter,
+    pub probe: probe::Probe,
+    pub project: project::Project,
+    pub quota: quota::Quota,
+    pub rack: rack::Rack,
+    pub session: session::Session,
+    pub silo: silo::Silo,
+    pub sled: sled::Sled,
+    pub snapshot: snapshot::Snapshot,
+    pub ssh_key: ssh_key::SshKey,
+    pub switch_interface: switch_interface::SwitchInterface,
+    pub switch_port: switch_port::SwitchPort,
+    pub switch: switch::Switch,
+    pub update: update::Update,
+    pub utilization: utilization::Utilization,
+    pub volume: volume::Volume,
+    pub vpc_router: vpc_router::VpcRouter,
+    pub vpc_subnet: vpc_subnet::VpcSubnet,
+    pub vpc: vpc::Vpc,
+    pub saga_context: saga_interface::SagaContext,
 }
 
 impl Nexus {
@@ -238,12 +266,15 @@ impl Nexus {
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
-        let sec_client = Arc::new(steno::sec(
-            log.new(o!(
-                "component" => "SEC",
-                "sec_id" => my_sec_id.to_string()
-            )),
-            sec_store,
+        let sec_client = Arc::new(saga::SecClient::new(
+            &log,
+            steno::sec(
+                log.new(o!(
+                    "component" => "SEC",
+                    "sec_id" => my_sec_id.to_string()
+                )),
+                sec_store,
+            ),
         ));
 
         let client_state = dpd_client::ClientState {
@@ -395,10 +426,11 @@ impl Nexus {
         );
 
         let v2p_watcher_channel = tokio::sync::watch::channel(());
+        let v2p_notification_tx = v2p_watcher_channel.0.clone();
 
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
-        let background_tasks = background::BackgroundTasks::start(
+        let background_tasks = Arc::new(background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
@@ -408,7 +440,7 @@ impl Nexus {
             saga_request,
             v2p_watcher_channel.clone(),
             producer_registry,
-        );
+        ));
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -418,6 +450,224 @@ impl Nexus {
                 &config.deployment.external_dns_servers,
             ))
         };
+        let opctx_external_authn = OpContext::for_background(
+            log.new(o!("component" => "ExternalAuthn")),
+            Arc::clone(&authz),
+            authn::Context::external_authn(),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+
+        // Create application level types
+        let address_lot =
+            address_lot::AddressLot::new(Arc::clone(&db_datastore));
+        let source_ip_allow_list = allow_list::SourceIpAllowList::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            opctx_for_internal_api(
+                &log,
+                Arc::clone(&authz),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
+            ),
+        );
+        let bfd = bfd::Bfd::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            resolver.clone(),
+        );
+        let bgp = bgp::Bgp::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            resolver.clone(),
+        );
+        let silo = silo::Silo::new(
+            config.deployment.id,
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            opctx_external_authn.clone(),
+        );
+        let certificate = certificate::Certificate::new(
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            silo.clone(),
+            opctx_external_authn.clone(),
+        );
+        let crucible = crucible::Crucible::new(
+            Arc::clone(&db_datastore),
+            reqwest_client.clone(),
+        );
+        let blueprint = deployment::Blueprint::new(
+            config.deployment.id,
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+        );
+        let device_auth =
+            device_auth::DeviceAuth::new(Arc::clone(&db_datastore));
+        let project = project::Project::new(
+            Arc::clone(&db_datastore),
+            Arc::clone(&sec_client),
+        );
+        let volume = volume::Volume::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&sec_client),
+        );
+        let disk = disk::Disk::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&sec_client),
+            project.clone(),
+            volume.clone(),
+            reqwest_client.clone(),
+            config.pkg.default_region_allocation_strategy.clone(),
+        );
+        let sled = sled::Sled::new(
+            rack_id,
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            Arc::clone(&authz),
+        );
+        let opctx_alloc = OpContext::for_background(
+            log.new(o!("component" => "InstanceAllocator")),
+            Arc::clone(&authz),
+            authn::Context::internal_read(),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        let instance_network = instance_network::InstanceNetwork::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            resolver.clone(),
+            opctx_alloc.clone(),
+        );
+        let vpc = vpc::Vpc::new(
+            log.clone(),
+            Arc::clone(&authz),
+            Arc::clone(&db_datastore),
+            Arc::clone(&sec_client),
+            project.clone(),
+        );
+        let instance = instance::Instance::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            opctx_alloc.clone(),
+            resolver.clone(),
+            disk.clone(),
+            sled.clone(),
+            instance_network.clone(),
+            project.clone(),
+            vpc.clone(),
+            silo.clone(),
+            Arc::clone(&sec_client),
+            config.deployment.external_dns_servers.clone(),
+            v2p_notification_tx,
+        );
+        let ip_pool =
+            ip_pool::IpPool::new(Arc::clone(&db_datastore), silo.clone());
+
+        let external_ip = external_ip::ExternalIp::new(
+            Arc::clone(&db_datastore),
+            instance.clone(),
+            ip_pool.clone(),
+            project.clone(),
+        );
+        let iam = iam::Iam::new(Arc::clone(&db_datastore));
+        let image = image::Image::new(
+            Arc::clone(&db_datastore),
+            project.clone(),
+            silo.clone(),
+            Arc::clone(&sec_client),
+        );
+        let oximeter = oximeter::Oximeter::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            timeseries_client,
+        );
+        let metrics = metrics::Metrics::new(oximeter.clone());
+        let network_interface = network_interface::NetworkInterface::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            instance.clone(),
+        );
+        let probe = probe::Probe::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            sled.clone(),
+            ip_pool.clone(),
+            instance_network.clone(),
+            resolver.clone(),
+            opctx_alloc.clone(),
+        );
+        let quota = quota::Quota::new(Arc::clone(&db_datastore));
+        let switch_port = switch_port::SwitchPort::new(
+            rack_id,
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            resolver.clone(),
+        );
+        let rack = rack::Rack::new(
+            config.deployment.id,
+            rack_id,
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            sled.clone(),
+            switch_port.clone(),
+        );
+        let session = session::Session::new(Arc::clone(&db_datastore));
+        let snapshot = snapshot::Snapshot::new(
+            Arc::clone(&db_datastore),
+            Arc::clone(&sec_client),
+            project.clone(),
+            disk.clone(),
+        );
+        let ssh_key = ssh_key::SshKey::new(Arc::clone(&db_datastore));
+        let switch_interface = switch_interface::SwitchInterface::new(
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            rack.clone(),
+            address_lot.clone(),
+        );
+        let switch_port = switch_port::SwitchPort::new(
+            rack_id,
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&background_tasks),
+            resolver.clone(),
+        );
+        let switch = switch::Switch::new(Arc::clone(&db_datastore));
+        let update = update::Update::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            config.pkg.updates.clone(),
+        );
+        let utilization =
+            utilization::Utilization::new(Arc::clone(&db_datastore));
+        let vpc_router =
+            vpc_router::VpcRouter::new(Arc::clone(&db_datastore), vpc.clone());
+        let vpc_subnet = vpc_subnet::VpcSubnet::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            config.pkg.tunables.clone(),
+            vpc.clone(),
+        );
+        let saga_context = SagaContext::new(
+            log.clone(),
+            Arc::clone(&db_datastore),
+            Arc::clone(&authz),
+            resolver.clone(),
+            vpc.clone(),
+            disk.clone(),
+            crucible.clone(),
+            sled.clone(),
+            instance.clone(),
+            instance_network.clone(),
+            ip_pool.clone(),
+            Arc::clone(&background_tasks),
+        );
 
         let nexus = Nexus {
             id: config.deployment.id,
@@ -432,37 +682,51 @@ impl Nexus {
             internal_server: std::sync::Mutex::new(None),
             producer_server: std::sync::Mutex::new(None),
             populate_status,
-            reqwest_client,
-            timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
-            opctx_alloc: OpContext::for_background(
-                log.new(o!("component" => "InstanceAllocator")),
-                Arc::clone(&authz),
-                authn::Context::internal_read(),
-                Arc::clone(&db_datastore)
-                    as Arc<dyn nexus_auth::storage::Storage>,
-            ),
-            opctx_external_authn: OpContext::for_background(
-                log.new(o!("component" => "ExternalAuthn")),
-                Arc::clone(&authz),
-                authn::Context::external_authn(),
-                Arc::clone(&db_datastore)
-                    as Arc<dyn nexus_auth::storage::Storage>,
-            ),
+            opctx_external_authn,
             samael_max_issue_delay: std::sync::Mutex::new(None),
             internal_resolver: resolver,
             external_resolver,
-            external_dns_servers: config
-                .deployment
-                .external_dns_servers
-                .clone(),
-            background_tasks,
-            default_region_allocation_strategy: config
-                .pkg
-                .default_region_allocation_strategy
-                .clone(),
-            v2p_notification_tx: v2p_watcher_channel.0,
+            background_tasks: Arc::clone(&background_tasks),
+
+            address_lot,
+            source_ip_allow_list,
+            bfd,
+            bgp,
+            certificate,
+            crucible,
+            blueprint,
+            device_auth,
+            disk,
+            external_ip,
+            iam,
+            image,
+            instance_network,
+            instance,
+            ip_pool,
+            metrics,
+            network_interface,
+            oximeter,
+            probe,
+            project,
+            quota,
+            rack,
+            session,
+            silo,
+            sled,
+            snapshot,
+            ssh_key,
+            switch_interface,
+            switch_port,
+            switch,
+            update,
+            utilization,
+            volume,
+            vpc_router,
+            vpc_subnet,
+            vpc,
+            saga_context,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -478,12 +742,21 @@ impl Nexus {
             opctx,
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(
-                Arc::clone(&nexus),
                 saga_logger,
+                Arc::clone(&db_datastore),
                 Arc::clone(&authz),
+                nexus.internal_resolver.clone(),
+                nexus.vpc.clone(),
+                nexus.disk.clone(),
+                nexus.crucible.clone(),
+                nexus.sled.clone(),
+                nexus.instance.clone(),
+                nexus.instance_network.clone(),
+                nexus.ip_pool.clone(),
+                background_tasks,
             ))),
             db_datastore,
-            Arc::clone(&sec_client),
+            Arc::clone(sec_client.sec()),
             sagas::ACTION_REGISTRY.clone(),
         );
 
@@ -552,6 +825,18 @@ impl Nexus {
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
+    }
+
+    pub fn sec_client(&self) -> &Arc<saga::SecClient> {
+        &self.sec_client
+    }
+
+    pub fn external_dns_resolver(&self) -> &Arc<external_dns::Resolver> {
+        &self.external_resolver
+    }
+
+    pub fn background_tasks(&self) -> &background::BackgroundTasks {
+        &self.background_tasks
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -710,10 +995,9 @@ impl Nexus {
 
     /// Returns an [`OpContext`] used for internal API calls.
     pub(crate) fn opctx_for_internal_api(&self) -> OpContext {
-        OpContext::for_background(
-            self.log.new(o!("component" => "InternalApi")),
+        opctx_for_internal_api(
+            &self.log,
             Arc::clone(&self.authz),
-            authn::Context::internal_api(),
             Arc::clone(&self.db_datastore)
                 as Arc<dyn nexus_auth::storage::Storage>,
         )
@@ -914,10 +1198,6 @@ impl Nexus {
         *mid
     }
 
-    pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
-        self.internal_resolver.clone()
-    }
-
     /// Reliable persistent workflows can request that sagas be executed by
     /// sending a SagaRequest to a supplied channel. Execute those here.
     pub(crate) async fn handle_saga_request(&self, saga_request: SagaRequest) {
@@ -927,34 +1207,6 @@ impl Nexus {
                 unimplemented!();
             }
         }
-    }
-
-    pub(crate) async fn dpd_clients(
-        &self,
-    ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-        let resolver = self.resolver().await;
-        dpd_clients(&resolver, &self.log).await
-    }
-
-    pub(crate) async fn mg_clients(
-        &self,
-    ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
-        let resolver = self.resolver().await;
-        let mappings =
-            switch_zone_address_mappings(&resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
-            vec![];
-        for (location, addr) in &mappings {
-            let port = MGD_PORT;
-            let socketaddr =
-                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = mg_admin_client::Client::new(
-                format!("http://{}", socketaddr).as_str(),
-                self.log.clone(),
-            );
-            clients.push((*location, client));
-        }
-        Ok(clients.into_iter().collect::<HashMap<_, _>>())
     }
 }
 
@@ -972,6 +1224,39 @@ pub enum Unimpl {
     #[allow(unused)]
     Public,
     ProtectedLookup(Error),
+}
+
+/// Returns an [`OpContext`] used for internal API calls.
+pub(crate) fn opctx_for_internal_api(
+    log: &Logger,
+    authz: Arc<authz::Authz>,
+    datastore: Arc<dyn nexus_auth::storage::Storage>,
+) -> OpContext {
+    OpContext::for_background(
+        log.new(o!("component" => "InternalApi")),
+        authz,
+        authn::Context::internal_api(),
+        datastore,
+    )
+}
+
+pub(crate) async fn mg_clients(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+    let mappings = switch_zone_address_mappings(&resolver, &log).await?;
+    let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> = vec![];
+    for (location, addr) in &mappings {
+        let port = MGD_PORT;
+        let socketaddr =
+            std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
+        let client = mg_admin_client::Client::new(
+            format!("http://{}", socketaddr).as_str(),
+            log.clone(),
+        );
+        clients.push((*location, client));
+    }
+    Ok(clients.into_iter().collect::<HashMap<_, _>>())
 }
 
 pub(crate) async fn dpd_clients(

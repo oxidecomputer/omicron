@@ -13,9 +13,19 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::UpdateResult;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on system quotas
+pub struct Quota {
+    datastore: Arc<db::DataStore>,
+}
+
+impl Quota {
+    pub fn new(datastore: Arc<db::DataStore>) -> Quota {
+        Quota { datastore }
+    }
+
     pub async fn silo_quotas_view(
         &self,
         opctx: &OpContext,
@@ -23,7 +33,7 @@ impl super::Nexus {
     ) -> Result<db::model::SiloQuotas, Error> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
-        self.db_datastore.silo_quotas_view(opctx, &authz_silo).await
+        self.datastore.silo_quotas_view(opctx, &authz_silo).await
     }
 
     pub(crate) async fn fleet_list_quotas(
@@ -31,7 +41,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloQuotas> {
-        self.db_datastore.fleet_list_quotas(opctx, pagparams).await
+        self.datastore.fleet_list_quotas(opctx, pagparams).await
     }
 
     pub(crate) async fn silo_update_quota(
@@ -42,7 +52,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::SiloQuotas> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .silo_update_quota(opctx, &authz_silo, updates.clone().into())
             .await
     }

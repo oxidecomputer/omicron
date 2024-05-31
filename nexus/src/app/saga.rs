@@ -19,6 +19,7 @@ use omicron_common::api::external::ListResult;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use slog::Logger;
 use std::sync::Arc;
 use steno::DagBuilder;
 use steno::SagaDag;
@@ -56,7 +57,20 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
     Ok(SagaDag::new(dag, params))
 }
 
-impl super::Nexus {
+/// A mechanism for interacting with the saga execution coordinator (SEC)
+/// running in this Nexus instance.
+#[derive(Clone)]
+pub struct SecClient {
+    log: Logger,
+    sec_client: Arc<steno::SecClient>,
+}
+
+impl SecClient {
+    pub(crate) fn new(log: &Logger, sec_client: steno::SecClient) -> SecClient {
+        let log = log.new(o!("component" => "SecClient"));
+        let sec_client = Arc::new(sec_client);
+        SecClient { log, sec_client }
+    }
     pub(crate) async fn sagas_list(
         &self,
         opctx: &OpContext,
@@ -82,48 +96,46 @@ impl super::Nexus {
     pub(crate) async fn saga_get(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: SagaId,
     ) -> LookupResult<nexus_types::internal_api::views::Saga> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sec_client
-            .saga_get(SagaId::from(id))
+            .saga_get(id)
             .await
             .map(nexus_types::internal_api::views::Saga::from)
             .map(Ok)
             .map_err(|_: ()| {
-                Error::not_found_by_id(ResourceType::SagaDbg, &id)
+                Error::not_found_by_id(ResourceType::SagaDbg, &id.0)
             })?
     }
 
     pub(crate) async fn create_runnable_saga(
-        self: &Arc<Self>,
+        &self,
         dag: SagaDag,
+        saga_context: SagaContext,
     ) -> Result<RunnableSaga, Error> {
         // Construct the context necessary to execute this saga.
         let saga_id = SagaId(Uuid::new_v4());
 
-        self.create_runnable_saga_with_id(dag, saga_id).await
+        self.create_runnable_saga_with_id(dag, saga_id, saga_context).await
     }
 
     pub(crate) async fn create_runnable_saga_with_id(
-        self: &Arc<Self>,
+        &self,
         dag: SagaDag,
         saga_id: SagaId,
+        mut saga_context: SagaContext,
     ) -> Result<RunnableSaga, Error> {
         let saga_logger = self.log.new(o!(
             "saga_name" => dag.saga_name().to_string(),
             "saga_id" => saga_id.to_string()
         ));
-        let saga_context = Arc::new(Arc::new(SagaContext::new(
-            self.clone(),
-            saga_logger,
-            Arc::clone(&self.authz),
-        )));
+        saga_context.set_logger(saga_logger);
         let future = self
             .sec_client
             .saga_create(
                 saga_id,
-                saga_context,
+                Arc::new(Arc::new(saga_context)),
                 Arc::new(dag),
                 ACTION_REGISTRY.clone(),
             )
@@ -197,20 +209,22 @@ impl super::Nexus {
         Ok(runnable_saga.fut.await)
     }
 
-    pub fn sec(&self) -> &steno::SecClient {
+    pub fn sec(&self) -> &Arc<steno::SecClient> {
         &self.sec_client
     }
 
     /// Given a saga type and parameters, create a new saga and execute it.
     pub(crate) async fn execute_saga<N: NexusSaga>(
-        self: &Arc<Self>,
+        &self,
         params: N::Params,
+        saga_context: SagaContext,
     ) -> Result<SagaResultOk, Error> {
         // Construct the DAG specific to this saga.
         let dag = create_saga_dag::<N>(params)?;
 
         // Register the saga with the saga executor.
-        let runnable_saga = self.create_runnable_saga(dag).await?;
+        let runnable_saga =
+            self.create_runnable_saga(dag, saga_context).await?;
 
         // Actually run the saga to completion.
         //

@@ -26,6 +26,7 @@
 //! "certificate resolver" object that impls
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
+use crate::app::background::BackgroundTasks;
 use crate::context::ApiContext;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -651,41 +652,39 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
     }
 }
 
-impl super::Nexus {
-    /// Attempts to determine which external endpoint the given request is
-    /// attempting to reach
-    ///
-    /// This is intended primarily for unauthenticated requests so that we can
-    /// determine which Silo's identity providers we should refer a user to so
-    /// that they can log in.  For authenticated users, we know which Silo
-    /// they're in.  In the future, we may also want this for authenticated
-    /// requests to restrict access to a Silo only via one of its endpoints.
-    ///
-    /// Normally, this works as follows: a client (whether a browser, CLI, or
-    /// otherwise) would be given a Silo-specific DNS name to use to reach one
-    /// of our external endpoints.  They'd use our own external DNS servers
-    /// (mostly likely indirectly) to resolve this to one of Nexus's external
-    /// IPs.  Clients then put that DNS name in either the "host" header (in
-    /// HTTP 1.1) or the URL's authority section (in HTTP 2 and later).
-    ///
-    /// In development, we do not assume that DNS has been set up properly.
-    /// That means we might receive requests that appear targeted at an IP
-    /// address or maybe are missing these fields altogether.  To support that
-    /// case, we'll choose an arbitrary Silo.
-    pub fn endpoint_for_request(
-        &self,
-        rqctx: &dropshot::RequestContext<ApiContext>,
-    ) -> Result<Arc<ExternalEndpoint>, Error> {
-        let log = &rqctx.log;
-        let rqinfo = &rqctx.request;
-        let requested_authority = authority_for_request(rqinfo)
-            .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?;
-        endpoint_for_authority(
-            log,
-            &requested_authority,
-            &self.background_tasks.external_endpoints,
-        )
-    }
+/// Attempts to determine which external endpoint the given request is
+/// attempting to reach
+///
+/// This is intended primarily for unauthenticated requests so that we can
+/// determine which Silo's identity providers we should refer a user to so
+/// that they can log in.  For authenticated users, we know which Silo
+/// they're in.  In the future, we may also want this for authenticated
+/// requests to restrict access to a Silo only via one of its endpoints.
+///
+/// Normally, this works as follows: a client (whether a browser, CLI, or
+/// otherwise) would be given a Silo-specific DNS name to use to reach one
+/// of our external endpoints.  They'd use our own external DNS servers
+/// (mostly likely indirectly) to resolve this to one of Nexus's external
+/// IPs.  Clients then put that DNS name in either the "host" header (in
+/// HTTP 1.1) or the URL's authority section (in HTTP 2 and later).
+///
+/// In development, we do not assume that DNS has been set up properly.
+/// That means we might receive requests that appear targeted at an IP
+/// address or maybe are missing these fields altogether.  To support that
+/// case, we'll choose an arbitrary Silo.
+pub fn endpoint_for_request(
+    background_tasks: &BackgroundTasks,
+    rqctx: &dropshot::RequestContext<ApiContext>,
+) -> Result<Arc<ExternalEndpoint>, Error> {
+    let log = &rqctx.log;
+    let rqinfo = &rqctx.request;
+    let requested_authority = authority_for_request(rqinfo)
+        .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?;
+    endpoint_for_authority(
+        log,
+        &requested_authority,
+        &background_tasks.external_endpoints,
+    )
 }
 
 /// Returns the host and port of the server that the client is trying to
@@ -722,7 +721,7 @@ pub fn authority_for_request(
     }
 }
 
-// See `Nexus::endpoint_for_request()` above.  This is factored out to be able
+// See `endpoint_for_request()` above.  This is factored out to be able
 // to test it without a whole server.
 fn endpoint_for_authority(
     log: &slog::Logger,

@@ -6,7 +6,7 @@
 
 use std::net::{IpAddr, Ipv6Addr};
 
-use crate::Nexus;
+use crate::app::sled::Sled;
 use chrono::Utc;
 use nexus_db_model::{
     ByteCount, ExternalIp, IpAttachState, Ipv4NatEntry,
@@ -34,7 +34,7 @@ const DEFAULT_PROPOLIS_PORT: u16 = 12400;
 /// This function succeeds idempotently if called repeatedly with the same
 /// `propolis_id`.
 pub async fn reserve_vmm_resources(
-    nexus: &Nexus,
+    sled: &Sled,
     propolis_id: Uuid,
     ncpus: u32,
     guest_memory: ByteCount,
@@ -68,7 +68,7 @@ pub async fn reserve_vmm_resources(
         guest_memory,
     );
 
-    let resource = nexus
+    let resource = sled
         .reserve_on_random_sled(
             propolis_id,
             nexus_db_model::SledResourceKind::Instance,
@@ -298,14 +298,15 @@ pub async fn instance_ip_add_nat(
 
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
-        .sled_id(sled_uuid)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., sled) =
+        LookupPath::new(&osagactx.sled().opctx_sled_lookup(), &datastore)
+            .sled_id(sled_uuid)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .instance_network()
         .instance_ensure_dpd_config(
             &opctx,
             authz_instance.id(),
@@ -352,7 +353,7 @@ pub async fn instance_ip_remove_nat(
     };
 
     osagactx
-        .nexus()
+        .instance_network()
         .external_ip_delete_dpd_config(&opctx, &target_ip)
         .await
         .map_err(ActionError::action_failed)?;
@@ -391,7 +392,7 @@ pub async fn instance_ip_add_opte(
         target_ip.try_into().map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .sled()
         .sled_client(&sled_uuid)
         .await
         .map_err(|_| {
@@ -446,7 +447,7 @@ pub async fn instance_ip_remove_opte(
         target_ip.try_into().map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .sled()
         .sled_client(&sled_uuid)
         .await
         .map_err(|_| {

@@ -4,12 +4,13 @@
 
 //! Configuration of the deployment system
 
+use crate::app::background::BackgroundTasks;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
-use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
@@ -27,6 +28,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
@@ -36,26 +38,43 @@ struct PlanningContext {
     inventory: Option<Collection>,
 }
 
-impl super::Nexus {
+/// Application level operations on blueprints
+#[derive(Clone)]
+pub struct Blueprint {
+    // TODO: typed UUIDs
+    nexus_id: Uuid,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+}
+
+impl Blueprint {
+    pub fn new(
+        nexus_id: Uuid,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+    ) -> Blueprint {
+        Blueprint { nexus_id, datastore, background_tasks }
+    }
+
     pub async fn blueprint_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<BlueprintMetadata> {
-        self.db_datastore.blueprints_list(opctx, pagparams).await
+        self.datastore.blueprints_list(opctx, pagparams).await
     }
 
     pub async fn blueprint_view(
         &self,
         opctx: &OpContext,
         blueprint_id: Uuid,
-    ) -> LookupResult<Blueprint> {
+    ) -> LookupResult<nexus_types::deployment::Blueprint> {
         let blueprint = authz::Blueprint::new(
             authz::FLEET,
             blueprint_id,
             LookupType::ById(blueprint_id),
         );
-        self.db_datastore.blueprint_read(opctx, &blueprint).await
+        self.datastore.blueprint_read(opctx, &blueprint).await
     }
 
     pub async fn blueprint_delete(
@@ -68,14 +87,14 @@ impl super::Nexus {
             blueprint_id,
             LookupType::ById(blueprint_id),
         );
-        self.db_datastore.blueprint_delete(opctx, &blueprint).await
+        self.datastore.blueprint_delete(opctx, &blueprint).await
     }
 
     pub async fn blueprint_target_view(
         &self,
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, Error> {
-        self.db_datastore.blueprint_target_get_current(opctx).await
+        self.datastore.blueprint_target_get_current(opctx).await
     }
 
     pub async fn blueprint_target_set(
@@ -89,9 +108,7 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
-        self.db_datastore
-            .blueprint_target_set_current(opctx, new_target)
-            .await?;
+        self.datastore.blueprint_target_set_current(opctx, new_target).await?;
 
         // We have a new target: trigger the background task to load this
         // blueprint.
@@ -112,7 +129,7 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
-        self.db_datastore
+        self.datastore
             .blueprint_target_set_current_enabled(opctx, new_target)
             .await?;
 
@@ -128,8 +145,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<PlanningContext, Error> {
-        let creator = self.id.to_string();
-        let datastore = self.datastore();
+        let creator = self.nexus_id.to_string();
+        let datastore = &self.datastore;
 
         let sled_rows = datastore
             .sled_list_all_batched(opctx, SledFilter::Commissioned)
@@ -208,17 +225,17 @@ impl super::Nexus {
     async fn blueprint_add(
         &self,
         opctx: &OpContext,
-        blueprint: &Blueprint,
+        blueprint: &nexus_types::deployment::Blueprint,
     ) -> Result<(), Error> {
-        self.db_datastore.blueprint_insert(opctx, blueprint).await
+        self.datastore.blueprint_insert(opctx, blueprint).await
     }
 
     pub async fn blueprint_create_regenerate(
         &self,
         opctx: &OpContext,
-    ) -> CreateResult<Blueprint> {
+    ) -> CreateResult<nexus_types::deployment::Blueprint> {
         let (_, parent_blueprint) =
-            self.db_datastore.blueprint_target_get_current_full(opctx).await?;
+            self.datastore.blueprint_target_get_current_full(opctx).await?;
 
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {
@@ -250,7 +267,7 @@ impl super::Nexus {
     pub async fn blueprint_import(
         &self,
         opctx: &OpContext,
-        blueprint: Blueprint,
+        blueprint: nexus_types::deployment::Blueprint,
     ) -> Result<(), Error> {
         let _ = self.blueprint_add(&opctx, &blueprint).await?;
         Ok(())

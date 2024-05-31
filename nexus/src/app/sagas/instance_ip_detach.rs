@@ -365,8 +365,10 @@ pub(crate) mod test {
             )
             .await;
             nexus
+                .instance
                 .instance_attach_external_ip(
                     opctx,
+                    &nexus.saga_context,
                     authz_instance.clone(),
                     authz_proj.id(),
                     params.create_params,
@@ -397,8 +399,16 @@ pub(crate) mod test {
             let params = new_test_params(&opctx, datastore, use_float).await;
 
             let dag = create_saga_dag::<SagaInstanceIpDetach>(params).unwrap();
-            let saga = nexus.create_runnable_saga(dag).await.unwrap();
-            nexus.run_saga(saga).await.expect("Detach saga should succeed");
+            let saga = nexus
+                .sec_client
+                .create_runnable_saga(dag, nexus.saga_context.clone())
+                .await
+                .unwrap();
+            nexus
+                .sec_client
+                .run_saga(saga)
+                .await
+                .expect("Detach saga should succeed");
         }
 
         let instance_id = instance.id();

@@ -317,6 +317,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     // Test that a user is granted privileges from their group membership
     let admin_group_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -814,6 +815,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                 .unwrap();
 
         let existing_silo_user = nexus
+            .silo
             .silo_user_from_authenticated_subject(
                 &authn_opctx,
                 &authz_silo,
@@ -1052,6 +1054,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 
     // Should create two groups from the authenticated subject
     let existing_silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -1126,6 +1129,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
 
     // Should not create groups from the authenticated subject
     let existing_silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -1182,6 +1186,7 @@ async fn test_silo_groups_remove_from_one_group(
 
     // Add to two groups
     let existing_silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -1225,6 +1230,7 @@ async fn test_silo_groups_remove_from_one_group(
 
     // Then remove their membership from one group
     let existing_silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -1295,6 +1301,7 @@ async fn test_silo_groups_remove_from_both_groups(
 
     // Add to two groups
     let existing_silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -1338,6 +1345,7 @@ async fn test_silo_groups_remove_from_both_groups(
 
     // Then remove from both groups, and add to a new one
     let existing_silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &authn_opctx,
             &authz_silo,
@@ -1407,6 +1415,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
 
     // Add a user with a group membership
     let silo_user = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &opctx_external_authn,
             &authz_silo,
@@ -1488,6 +1497,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
 
     // Add the first user with a group membership
     let _silo_user_1 = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &nexus.opctx_external_authn(),
             &authz_silo,
@@ -1503,6 +1513,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
 
     // Add the first user with a group membership
     let _silo_user_2 = nexus
+        .silo
         .silo_user_from_authenticated_subject(
             &nexus.opctx_external_authn(),
             &authz_silo,

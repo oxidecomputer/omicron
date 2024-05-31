@@ -12,12 +12,21 @@ use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
+use crate::app::disk::Disk;
+use crate::app::instance_network::InstanceNetwork;
+use crate::app::project::Project;
+use crate::app::saga;
 use crate::app::sagas;
+use crate::app::silo::Silo;
+use crate::app::sled::Sled;
+use crate::app::vpc::Vpc;
+use crate::app::SagaContext;
 use crate::cidata::InstanceCiData;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use internal_dns::resolver::Resolver;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_queries::authn;
@@ -56,7 +65,9 @@ use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
+use slog::Logger;
 use std::matches;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -181,7 +192,62 @@ pub(crate) enum InstanceRegisterReason {
     Migrate { vmm_id: Uuid, target_vmm_id: Uuid },
 }
 
-impl super::Nexus {
+/// Application level operations on instances
+#[derive(Clone)]
+pub struct Instance {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    opctx_alloc: OpContext,
+    internal_resolver: Resolver,
+    disk: Disk,
+    sled: Sled,
+    network: InstanceNetwork,
+    project: Project,
+    vpc: Vpc,
+    silo: Silo,
+    sec_client: Arc<saga::SecClient>,
+    // TODO: This needs to be moved to the database.
+    // https://github.com/oxidecomputer/omicron/issues/3732
+    external_dns_servers: Vec<IpAddr>,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+}
+
+impl Instance {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        opctx_alloc: OpContext,
+        internal_resolver: Resolver,
+        disk: Disk,
+        sled: Sled,
+        network: InstanceNetwork,
+        project: Project,
+        vpc: Vpc,
+        silo: Silo,
+        sec_client: Arc<saga::SecClient>,
+        // TODO: This needs to be moved to the database.
+        // https://github.com/oxidecomputer/omicron/issues/3732
+        external_dns_servers: Vec<IpAddr>,
+        v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    ) -> Instance {
+        Instance {
+            log,
+            datastore,
+            opctx_alloc,
+            internal_resolver,
+            disk,
+            sled,
+            network,
+            project,
+            vpc,
+            silo,
+            sec_client,
+            external_dns_servers,
+            v2p_notification_tx,
+        }
+    }
+
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -193,14 +259,14 @@ impl super::Nexus {
                 project: None
             } => {
                 let instance =
-                    LookupPath::new(opctx, &self.db_datastore).instance_id(id);
+                    LookupPath::new(opctx, &self.datastore).instance_id(id);
                 Ok(instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(name),
                 project: Some(project)
             } => {
-                let instance = self
+                let instance = self.project
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .instance_name_owned(name.into());
                 Ok(instance)
@@ -222,8 +288,9 @@ impl super::Nexus {
     }
 
     pub(crate) async fn project_create_instance(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         project_lookup: &lookup::Project<'_>,
         params: &params::InstanceCreate,
     ) -> CreateResult<InstanceAndActiveVmm> {
@@ -239,7 +306,8 @@ impl super::Nexus {
         }
         for disk in &params.disks {
             if let params::InstanceDiskAttachment::Create(create) = disk {
-                self.validate_disk_create_params(opctx, &authz_project, create)
+                self.disk
+                    .validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
         }
@@ -333,14 +401,14 @@ impl super::Nexus {
         let actor = opctx.authn.actor_required().internal_context(
             "loading current user's ssh keys for new Instance",
         )?;
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(actor.actor_id())
             .lookup_for(authz::Action::ListChildren)
             .await?;
 
         let ssh_keys = match &params.ssh_public_keys {
             Some(keys) => Some(
-                self.db_datastore
+                self.datastore
                     .ssh_keys_batch_lookup(opctx, &authz_user, keys)
                     .await?
                     .iter()
@@ -366,13 +434,16 @@ impl super::Nexus {
                 ..params.clone()
             },
             boundary_switches: self
+                .network
                 .boundary_switches(&self.opctx_alloc)
                 .await?,
         };
 
         let saga_outputs = self
+            .sec_client
             .execute_saga::<sagas::instance_create::SagaInstanceCreate>(
                 saga_params,
+                saga_context.clone(),
             )
             .await?;
 
@@ -386,10 +457,11 @@ impl super::Nexus {
         // so this is not guaranteed to succeed, and its result should not
         // affect the result of the attempt to create the instance.
         if params.start {
-            let lookup = LookupPath::new(opctx, &self.db_datastore)
+            let lookup = LookupPath::new(opctx, &self.datastore)
                 .instance_id(instance_id);
 
-            let start_result = self.instance_start(opctx, &lookup).await;
+            let start_result =
+                self.instance_start(opctx, saga_context, &lookup).await;
             if let Err(e) = start_result {
                 info!(self.log, "failed to start newly-created instance";
                       "instance_id" => %instance_id,
@@ -407,12 +479,12 @@ impl super::Nexus {
         // possible to yank the outputs out of the appropriate saga steps and
         // return them here.
 
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, &self.datastore)
             .instance_id(instance_id)
             .lookup_for(authz::Action::Read)
             .await?;
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     pub(crate) async fn instance_list(
@@ -423,15 +495,16 @@ impl super::Nexus {
     ) -> ListResultVec<InstanceAndActiveVmm> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.instance_list(opctx, &authz_project, pagparams).await
+        self.datastore.instance_list(opctx, &authz_project, pagparams).await
     }
 
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
     pub(crate) async fn project_destroy_instance(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
         // TODO-robustness We need to figure out what to do with Destroyed
@@ -446,7 +519,7 @@ impl super::Nexus {
         // propogated to new boundary switches / removed from former boundary
         // switches, meaning we could end up with stale or missing entries.
         let boundary_switches =
-            self.boundary_switches(&self.opctx_alloc).await?;
+            self.network.boundary_switches(&self.opctx_alloc).await?;
 
         let saga_params = sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -454,16 +527,19 @@ impl super::Nexus {
             instance,
             boundary_switches,
         };
-        self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sec_client
+            .execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
+                saga_params,
+                saga_context.clone(),
+            )
+            .await?;
         Ok(())
     }
 
     pub(crate) async fn project_instance_migrate(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         instance_lookup: &lookup::Instance<'_>,
         params: params::InstanceMigrate,
     ) -> UpdateResult<InstanceAndActiveVmm> {
@@ -471,7 +547,7 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         let state = self
-            .db_datastore
+            .datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
@@ -502,15 +578,17 @@ impl super::Nexus {
             src_vmm: vmm.clone(),
             migrate_params: params,
         };
-        self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
-            saga_params,
-        )
-        .await?;
+        self.sec_client
+            .execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
+                saga_params,
+                saga_context.clone(),
+            )
+            .await?;
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
         // See comment in project_create_instance.
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Attempts to set the migration IDs for the supplied instance via the
@@ -539,12 +617,12 @@ impl super::Nexus {
         assert!(prev_instance_runtime.migration_id.is_none());
         assert!(prev_instance_runtime.dst_propolis_id.is_none());
 
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, &self.datastore)
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        let sa = self.sled_client(&sled_id).await?;
+        let sa = self.sled.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
@@ -580,10 +658,7 @@ impl super::Nexus {
         };
 
         if updated {
-            Ok(self
-                .db_datastore
-                .instance_refetch(opctx, &authz_instance)
-                .await?)
+            Ok(self.datastore.instance_refetch(opctx, &authz_instance).await?)
         } else {
             Err(Error::conflict(
                 "instance is already migrating, or underwent an operation that \
@@ -615,7 +690,7 @@ impl super::Nexus {
         assert!(prev_instance_runtime.migration_id.is_some());
         assert!(prev_instance_runtime.dst_propolis_id.is_some());
 
-        let sa = self.sled_client(&sled_id).await?;
+        let sa = self.sled.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
@@ -659,7 +734,7 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         let state = self
-            .db_datastore
+            .datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
@@ -688,20 +763,21 @@ impl super::Nexus {
             return Err(e.into());
         }
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Attempts to start an instance if it is currently stopped.
     pub(crate) async fn instance_start(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<InstanceAndActiveVmm> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         let state = self
-            .db_datastore
+            .datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
@@ -745,12 +821,14 @@ impl super::Nexus {
             db_instance: instance.clone(),
         };
 
-        self.execute_saga::<sagas::instance_start::SagaInstanceStart>(
-            saga_params,
-        )
-        .await?;
+        self.sec_client
+            .execute_saga::<sagas::instance_start::SagaInstanceStart>(
+                saga_params,
+                saga_context.clone(),
+            )
+            .await?;
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Make sure the given Instance is stopped.
@@ -763,7 +841,7 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         let state = self
-            .db_datastore
+            .datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
@@ -792,7 +870,7 @@ impl super::Nexus {
             return Err(e.into());
         }
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
@@ -806,7 +884,7 @@ impl super::Nexus {
     ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
     {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let sa = self.sled_client(&sled_id).await?;
+        let sa = self.sled.sled_client(&sled_id).await?;
         sa.instance_unregister(&authz_instance.id())
             .await
             .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -978,7 +1056,7 @@ impl super::Nexus {
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
             InstanceStateChangeRequestAction::SendToSled(sled_id) => {
-                let sa = self.sled_client(&sled_id).await?;
+                let sa = self.sled.sled_client(&sled_id).await?;
                 let instance_put_result = sa
                     .instance_put_state(
                         &instance_id,
@@ -1041,7 +1119,7 @@ impl super::Nexus {
 
         // Gather disk information and turn that into DiskRequests
         let disks = self
-            .db_datastore
+            .datastore
             .instance_list_disks(
                 &opctx,
                 &authz_instance,
@@ -1075,7 +1153,7 @@ impl super::Nexus {
             };
 
             let volume = self
-                .db_datastore
+                .datastore
                 .volume_checkout(
                     disk.volume_id,
                     match operation {
@@ -1099,13 +1177,13 @@ impl super::Nexus {
         }
 
         let nics = self
-            .db_datastore
+            .datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
         // Collect the external IPs for the instance.
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
-            .db_datastore
+            .datastore
             .instance_lookup_external_ips(&opctx, authz_instance.id())
             .await?
             .into_iter()
@@ -1176,25 +1254,26 @@ impl super::Nexus {
         let firewall_rules = if let Some(nic) = nics.first() {
             let vni = nic.vni;
             let vpc = self
-                .db_datastore
+                .datastore
                 .resolve_vni_to_vpc(opctx, db::model::Vni(vni))
                 .await?;
-            let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            let (.., authz_vpc) = LookupPath::new(opctx, &self.datastore)
                 .vpc_id(vpc.id())
                 .lookup_for(authz::Action::Read)
                 .await?;
             let rules = self
-                .db_datastore
+                .datastore
                 .vpc_list_firewall_rules(opctx, &authz_vpc)
                 .await?;
-            self.resolve_firewall_rules_for_sled_agent(opctx, &vpc, &rules)
+            self.vpc
+                .resolve_firewall_rules_for_sled_agent(opctx, &vpc, &rules)
                 .await?
         } else {
             vec![]
         };
 
         let ssh_keys = self
-            .db_datastore
+            .datastore
             .instance_ssh_keys_list(
                 opctx,
                 authz_instance,
@@ -1216,6 +1295,7 @@ impl super::Nexus {
         // This requires another fetch on the silo and project, to extract their
         // IDs.
         let (.., db_project) = self
+            .project
             .project_lookup(
                 opctx,
                 params::ProjectSelector {
@@ -1224,7 +1304,8 @@ impl super::Nexus {
             )?
             .fetch()
             .await?;
-        let (_, db_silo) = self.current_silo_lookup(opctx)?.fetch().await?;
+        let (_, db_silo) =
+            self.silo.current_silo_lookup(opctx)?.fetch().await?;
         let metadata = sled_agent_client::types::InstanceMetadata {
             silo_id: db_silo.id(),
             project_id: db_project.id(),
@@ -1259,7 +1340,7 @@ impl super::Nexus {
             )),
         };
 
-        let sa = self.sled_client(&initial_vmm.sled_id).await?;
+        let sa = self.sled.sled_client(&initial_vmm.sled_id).await?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),
@@ -1327,7 +1408,7 @@ impl super::Nexus {
 
         if let Some(state) = state {
             let update_result = self
-                .db_datastore
+                .datastore
                 .instance_and_vmm_update_runtime(
                     instance_id,
                     &state.instance_state.into(),
@@ -1373,7 +1454,7 @@ impl super::Nexus {
         };
 
         match self
-            .db_datastore
+            .datastore
             .instance_update_runtime(&instance_id, &new_runtime)
             .await
         {
@@ -1399,7 +1480,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Disk> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
+        self.datastore
             .instance_list_disks(opctx, &authz_instance, pagparams)
             .await
     }
@@ -1414,6 +1495,7 @@ impl super::Nexus {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_project_disk, authz_disk) = self
+            .disk
             .disk_lookup(
                 opctx,
                 params::DiskSelector {
@@ -1453,7 +1535,7 @@ impl super::Nexus {
         // - If the instance is not running...
         //   - Update the disk state in the DB to "Attached".
         let (_instance, disk) = self
-            .db_datastore
+            .datastore
             .instance_attach_disk(
                 &opctx,
                 &authz_instance,
@@ -1474,6 +1556,7 @@ impl super::Nexus {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_disk) = self
+            .disk
             .disk_lookup(
                 opctx,
                 params::DiskSelector {
@@ -1500,7 +1583,7 @@ impl super::Nexus {
         // - If the instance is not running...
         //   - Update the disk state in the DB to "Detached".
         let disk = self
-            .db_datastore
+            .datastore
             .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
@@ -1515,8 +1598,8 @@ impl super::Nexus {
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         notify_instance_updated(
-            &self.datastore(),
-            &self.resolver().await,
+            &self.datastore,
+            &self.internal_resolver,
             &self.opctx_alloc,
             opctx,
             &self.log,
@@ -1641,7 +1724,7 @@ impl super::Nexus {
         let (.., authz_instance) = instance_lookup.lookup_for(action).await?;
 
         let state = self
-            .db_datastore
+            .datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
@@ -1845,8 +1928,9 @@ impl super::Nexus {
 
     /// Attach an ephemeral IP to an instance.
     pub(crate) async fn instance_attach_ephemeral_ip(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
     ) -> UpdateResult<views::ExternalIp> {
@@ -1855,6 +1939,7 @@ impl super::Nexus {
 
         self.instance_attach_external_ip(
             opctx,
+            saga_context,
             authz_instance,
             authz_project.id(),
             ExternalIpAttach::Ephemeral { pool },
@@ -1864,8 +1949,9 @@ impl super::Nexus {
 
     /// Attach an ephemeral IP to an instance.
     pub(crate) async fn instance_attach_floating_ip(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         instance_lookup: &lookup::Instance<'_>,
         authz_fip: authz::FloatingIp,
         authz_fip_project: authz::Project,
@@ -1881,6 +1967,7 @@ impl super::Nexus {
 
         self.instance_attach_external_ip(
             opctx,
+            saga_context,
             authz_instance,
             authz_project.id(),
             ExternalIpAttach::Floating { floating_ip: authz_fip },
@@ -1890,8 +1977,9 @@ impl super::Nexus {
 
     /// Attach an external IP to an instance.
     pub(crate) async fn instance_attach_external_ip(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         authz_instance: authz::Instance,
         project_id: Uuid,
         ext_ip: ExternalIpAttach,
@@ -1904,8 +1992,10 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
+            .sec_client
             .execute_saga::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
                 saga_params,
+                saga_context.clone(),
             )
             .await?;
 
@@ -1917,8 +2007,9 @@ impl super::Nexus {
 
     /// Detach an external IP from an instance.
     pub(crate) async fn instance_detach_external_ip(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
+        saga_context: &SagaContext,
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpDetach,
     ) -> UpdateResult<views::ExternalIp> {
@@ -1933,8 +2024,10 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
+            .sec_client
             .execute_saga::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
                 saga_params,
+                saga_context.clone(),
             )
             .await?;
 
@@ -2148,7 +2241,7 @@ pub(crate) async fn notify_instance_updated(
 
 #[cfg(test)]
 mod tests {
-    use super::super::Nexus;
+    use super::Instance;
     use super::{CloseCode, CloseFrame, WebSocketMessage, WebSocketStream};
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
@@ -2184,8 +2277,11 @@ mod tests {
                 None,
             )
             .await;
-            Nexus::proxy_instance_serial_ws(nexus_client_stream, propolis_conn)
-                .await
+            Instance::proxy_instance_serial_ws(
+                nexus_client_stream,
+                propolis_conn,
+            )
+            .await
         });
         let mut nexus_client_ws = WebSocketStream::from_raw_socket(
             nexus_client_conn,

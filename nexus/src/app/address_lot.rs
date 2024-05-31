@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Address Lots
+
 use crate::external_api::params;
-use db::model::{AddressLot, AddressLotBlock};
+use db::model::AddressLotBlock;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -21,7 +23,17 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on Address Lots
+#[derive(Clone)]
+pub struct AddressLot {
+    datastore: Arc<db::DataStore>,
+}
+
+impl AddressLot {
+    pub fn new(datastore: Arc<db::DataStore>) -> AddressLot {
+        AddressLot { datastore }
+    }
+
     pub fn address_lot_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -29,12 +41,12 @@ impl super::Nexus {
     ) -> LookupResult<lookup::AddressLot<'a>> {
         match address_lot {
             NameOrId::Id(id) => {
-                let lot = LookupPath::new(opctx, &self.db_datastore)
-                    .address_lot_id(id);
+                let lot =
+                    LookupPath::new(opctx, &self.datastore).address_lot_id(id);
                 Ok(lot)
             }
             NameOrId::Name(name) => {
-                let lot = LookupPath::new(opctx, &self.db_datastore)
+                let lot = LookupPath::new(opctx, &self.datastore)
                     .address_lot_name_owned(name.into());
                 Ok(lot)
             }
@@ -42,43 +54,43 @@ impl super::Nexus {
     }
 
     pub(crate) async fn address_lot_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         params: params::AddressLotCreate,
     ) -> CreateResult<AddressLotCreateResult> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         validate_blocks(&params)?;
-        self.db_datastore.address_lot_create(opctx, &params).await
+        self.datastore.address_lot_create(opctx, &params).await
     }
 
     pub(crate) async fn address_lot_delete(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         address_lot_lookup: &lookup::AddressLot<'_>,
     ) -> DeleteResult {
         let (.., authz_address_lot) =
             address_lot_lookup.lookup_for(authz::Action::Delete).await?;
-        self.db_datastore.address_lot_delete(opctx, &authz_address_lot).await
+        self.datastore.address_lot_delete(opctx, &authz_address_lot).await
     }
 
     pub(crate) async fn address_lot_list(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<AddressLot> {
+    ) -> ListResultVec<db::model::AddressLot> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.address_lot_list(opctx, pagparams).await
+        self.datastore.address_lot_list(opctx, pagparams).await
     }
 
     pub(crate) async fn address_lot_block_list(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         address_lot: &lookup::AddressLot<'_>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<AddressLotBlock> {
         let (.., authz_address_lot) =
             address_lot.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
+        self.datastore
             .address_lot_block_list(opctx, &authz_address_lot, pagparams)
             .await
     }

@@ -255,7 +255,7 @@ async fn sdc_alloc_regions(
         &params.serialized_authn,
     );
 
-    let strategy = &osagactx.nexus().default_region_allocation_strategy;
+    let strategy = &osagactx.disk().default_region_allocation_strategy();
 
     let datasets_and_regions = osagactx
         .datastore()
@@ -350,7 +350,7 @@ async fn sdc_regions_ensure(
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
     let datasets_and_regions = osagactx
-        .nexus()
+        .crucible()
         .ensure_all_datasets_and_regions(
             &log,
             sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -555,7 +555,7 @@ async fn sdc_regions_ensure_undo(
     warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
 
     let result = osagactx
-        .nexus()
+        .crucible()
         .delete_crucible_regions(
             log,
             sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -709,7 +709,8 @@ async fn sdc_get_pantry_address(
     // Pick a random Pantry and use it for this disk. This will be the
     // Pantry used for all subsequent import operations until the disk
     // is "finalized".
-    let pantry_address = get_pantry_address(osagactx.nexus()).await?;
+    let pantry_address =
+        get_pantry_address(osagactx.internal_dns_resolver()).await?;
 
     info!(
         log,
@@ -747,7 +748,7 @@ async fn sdc_call_pantry_attach_for_disk(
     call_pantry_attach_for_disk(
         &log,
         &opctx,
-        &osagactx.nexus(),
+        &osagactx.datastore(),
         disk_id,
         pantry_address,
     )
@@ -887,10 +888,14 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        let output = nexus.sec_client.run_saga(runnable_saga).await.unwrap();
 
         let disk = output
             .lookup_node_output::<nexus_db_queries::db::model::Disk>(
@@ -1105,10 +1110,12 @@ pub(crate) mod test {
             ),
             disk: Name::try_from(DISK_NAME.to_string()).unwrap().into(),
         };
-        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector).unwrap();
+        let disk_lookup =
+            nexus.disk.disk_lookup(&opctx, disk_selector).unwrap();
 
         nexus
-            .project_delete_disk(&opctx, &disk_lookup)
+            .disk
+            .project_delete_disk(&opctx, &nexus.saga_context, &disk_lookup)
             .await
             .expect("Failed to delete disk");
     }

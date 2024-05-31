@@ -23,6 +23,7 @@ use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -39,11 +40,13 @@ pub const PRODUCER_LEASE_DURATION: Duration = Duration::from_secs(10 * 60);
 /// or DNS) separately from actually making that connection. This
 /// is particularly useful in situations where configurations are parsed
 /// prior to Clickhouse existing.
+#[derive(Clone)]
 pub struct LazyTimeseriesClient {
     log: Logger,
     source: ClientSource,
 }
 
+#[derive(Clone)]
 enum ClientSource {
     FromDns { resolver: Resolver },
     FromIp { address: SocketAddr },
@@ -73,7 +76,28 @@ impl LazyTimeseriesClient {
     }
 }
 
-impl super::Nexus {
+/// Application level operations using Oximeter
+#[derive(Clone)]
+pub struct Oximeter {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    timeseries_client: LazyTimeseriesClient,
+}
+
+impl Oximeter {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        timeseries_client: LazyTimeseriesClient,
+    ) -> Oximeter {
+        Oximeter { log, datastore, timeseries_client }
+    }
+
+    /// Return a reference to the timeseries client
+    pub(crate) fn timeseries_client(&self) -> &LazyTimeseriesClient {
+        &self.timeseries_client
+    }
+
     /// Insert a new record of an Oximeter collector server.
     pub(crate) async fn upsert_oximeter_collector(
         &self,
@@ -84,7 +108,7 @@ impl super::Nexus {
         // specifically, the time_modified, ip, and port columns, if the instance has already been
         // registered.
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
-        self.db_datastore.oximeter_create(opctx, &db_info).await?;
+        self.datastore.oximeter_create(opctx, &db_info).await?;
         info!(
             self.log,
             "registered new oximeter metric collection server";
@@ -101,7 +125,7 @@ impl super::Nexus {
         collector_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
-        self.db_datastore
+        self.datastore
             .producers_list_by_oximeter_id(opctx, collector_id, pagparams)
             .await
             .map(|list| list.into_iter().map(ProducerEndpoint::from).collect())
@@ -115,7 +139,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         let (collector, id) = self.next_collector(opctx).await?;
         let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
-        self.db_datastore.producer_endpoint_create(opctx, &db_info).await?;
+        self.datastore.producer_endpoint_create(opctx, &db_info).await?;
         collector
             .producers_post(&oximeter_client::types::ProducerEndpoint::from(
                 &producer_info,
@@ -251,7 +275,7 @@ impl super::Nexus {
             direction: dropshot::PaginationOrder::Ascending,
             limit: std::num::NonZeroU32::new(1).unwrap(),
         };
-        let oxs = self.db_datastore.oximeter_list(opctx, &page_params).await?;
+        let oxs = self.datastore.oximeter_list(opctx, &page_params).await?;
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
             internal_message: String::from("no oximeter collectors available"),
         })?;

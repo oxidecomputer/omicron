@@ -78,16 +78,21 @@ async fn test_saga_stuck(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let params = Params {};
     let dag = create_saga_dag::<SagaTest>(params).unwrap();
-    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    let runnable_saga = nexus
+        .sec_client
+        .create_runnable_saga(dag.clone(), nexus.saga_context.clone())
+        .await
+        .unwrap();
     let saga_id = runnable_saga.id();
 
     // Inject an error into the second node's action and the first node's undo
     // action.  This should cause the saga to become stuck.
     let n1 = dag.get_index("n1").unwrap();
     let n2 = dag.get_index("n2").unwrap();
-    nexus.sec().saga_inject_error(saga_id, n2).await.unwrap();
-    nexus.sec().saga_inject_error_undo(saga_id, n1).await.unwrap();
+    nexus.sec_client().sec().saga_inject_error(saga_id, n2).await.unwrap();
+    nexus.sec_client().sec().saga_inject_error_undo(saga_id, n1).await.unwrap();
     let result = nexus
+        .sec_client
         .run_saga(runnable_saga)
         .await
         .expect_err("expected saga to finish stuck");

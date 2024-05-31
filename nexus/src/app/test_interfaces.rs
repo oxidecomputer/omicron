@@ -87,7 +87,7 @@ impl TestInterfaces for super::Nexus {
     ) -> Result<Option<Arc<SledAgentClient>>, Error> {
         let sled_id = self.instance_sled_id_with_opctx(id, opctx).await?;
         if let Some(sled_id) = sled_id {
-            Ok(Some(self.sled_client(&sled_id).await?))
+            Ok(Some(self.sled.sled_client(&sled_id).await?))
         } else {
             Ok(None)
         }

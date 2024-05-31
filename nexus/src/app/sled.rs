@@ -4,10 +4,12 @@
 
 //! Sleds, and the hardware and services within them.
 
+use crate::app::background::BackgroundTasks;
 use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskPutRequest, SledAgentInfo, SledRole, ZpoolPutRequest,
 };
+use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -21,18 +23,50 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;
+use slog::Logger;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
-    // Sleds
+/// Application level operations on sleds
+#[derive(Clone)]
+pub struct Sled {
+    // TODO: typed UUIDs
+    rack_id: Uuid,
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    opctx_sled_lookup: OpContext,
+}
+
+impl Sled {
+    pub fn new(
+        rack_id: Uuid,
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        authz: Arc<authz::Authz>,
+    ) -> Sled {
+        let opctx_sled_lookup = OpContext::for_background(
+            log.new(o!("component" => "SledLookup")),
+            authz,
+            authn::Context::internal_read(),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        Sled { rack_id, log, datastore, background_tasks, opctx_sled_lookup }
+    }
+
+    // Same as opctx_alloc, but specifically targeted for sled lookup
+    pub fn opctx_sled_lookup(&self) -> &OpContext {
+        &self.opctx_sled_lookup
+    }
+
     pub fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<lookup::Sled<'a>> {
-        nexus_networking::sled_lookup(&self.db_datastore, opctx, *sled_id)
+        nexus_networking::sled_lookup(&self.datastore, opctx, *sled_id)
     }
 
     // TODO-robustness we should have a limit on how many sled agents there can
@@ -70,7 +104,7 @@ impl super::Nexus {
             self.rack_id,
             info.generation.into(),
         );
-        let (_, was_modified) = self.db_datastore.sled_upsert(sled).await?;
+        let (_, was_modified) = self.datastore.sled_upsert(sled).await?;
 
         // If a new sled-agent just came online we want to trigger inventory
         // collection.
@@ -78,7 +112,8 @@ impl super::Nexus {
         // This will allow us to learn about disks so that they can be added to
         // the control plane.
         if was_modified {
-            self.activate_inventory_collection();
+            self.background_tasks
+                .activate(&self.background_tasks.task_inventory_collection);
         }
 
         Ok(())
@@ -98,7 +133,7 @@ impl super::Nexus {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
+        self.datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
     }
 
     pub(crate) async fn sled_request_firewall_rules(
@@ -116,9 +151,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore
-            .sled_list(&opctx, pagparams, SledFilter::InService)
-            .await
+        self.datastore.sled_list(&opctx, pagparams, SledFilter::InService).await
     }
 
     pub async fn sled_client(
@@ -133,8 +166,8 @@ impl super::Nexus {
         // little silly; it's not actually used if each client connection exists
         // as a one-shot.
         let client = nexus_networking::sled_client(
-            &self.db_datastore,
-            &self.opctx_alloc,
+            &self.datastore,
+            &self.opctx_sled_lookup,
             *id,
             &self.log,
         )
@@ -149,9 +182,9 @@ impl super::Nexus {
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResource, Error> {
-        self.db_datastore
+        self.datastore
             .sled_reservation_create(
-                &self.opctx_alloc,
+                &self.opctx_sled_lookup,
                 resource_id,
                 resource_kind,
                 resources,
@@ -164,8 +197,8 @@ impl super::Nexus {
         &self,
         resource_id: Uuid,
     ) -> Result<(), Error> {
-        self.db_datastore
-            .sled_reservation_delete(&self.opctx_alloc, resource_id)
+        self.datastore
+            .sled_reservation_delete(&self.opctx_sled_lookup, resource_id)
             .await
     }
 
@@ -178,7 +211,7 @@ impl super::Nexus {
     ) -> Result<SledProvisionPolicy, Error> {
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .sled_set_provision_policy(opctx, &authz_sled, new_policy)
             .await
     }
@@ -190,7 +223,7 @@ impl super::Nexus {
         opctx: &'a OpContext,
         disk_selector: &params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
-        Ok(lookup::LookupPath::new(&opctx, &self.db_datastore)
+        Ok(lookup::LookupPath::new(&opctx, &self.datastore)
             .physical_disk(disk_selector.disk_id))
     }
 
@@ -200,7 +233,7 @@ impl super::Nexus {
         sled_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
-        self.db_datastore
+        self.datastore
             .sled_list_physical_disks(&opctx, sled_id, pagparams)
             .await
     }
@@ -210,7 +243,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
-        self.db_datastore.physical_disk_list(&opctx, pagparams).await
+        self.datastore.physical_disk_list(&opctx, pagparams).await
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.
@@ -235,7 +268,7 @@ impl super::Nexus {
             request.variant.into(),
             request.sled_id,
         );
-        self.db_datastore.physical_disk_insert(&opctx, disk).await?;
+        self.datastore.physical_disk_insert(&opctx, disk).await?;
         Ok(())
     }
 
@@ -259,7 +292,7 @@ impl super::Nexus {
             request.sled_id,
             request.physical_disk_id,
         );
-        self.db_datastore.zpool_insert(&opctx, zpool).await?;
+        self.datastore.zpool_insert(&opctx, zpool).await?;
         Ok(())
     }
 
@@ -281,7 +314,7 @@ impl super::Nexus {
             "address" => address.to_string()
         );
         let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
-        self.db_datastore.dataset_upsert(dataset).await?;
+        self.datastore.dataset_upsert(dataset).await?;
         Ok(())
     }
 
@@ -292,12 +325,24 @@ impl super::Nexus {
         sleds_filter: &[Uuid],
     ) -> Result<(), Error> {
         nexus_networking::plumb_service_firewall_rules(
-            &self.db_datastore,
+            &self.datastore,
             opctx,
             sleds_filter,
-            &self.opctx_alloc,
+            &self.opctx_sled_lookup,
             &self.log,
         )
         .await
+    }
+
+    pub(crate) async fn sled_instance_list(
+        &self,
+        opctx: &OpContext,
+        sled_lookup: &lookup::Sled<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SledInstance> {
+        let (.., authz_sled) =
+            sled_lookup.lookup_for(authz::Action::Read).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.datastore.sled_instance_list(opctx, &authz_sled, pagparams).await
     }
 }

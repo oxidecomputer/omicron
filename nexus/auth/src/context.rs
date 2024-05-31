@@ -38,6 +38,7 @@ use uuid::Uuid;
 // Not all of these fields are used yet, but they may still prove useful for
 // debugging.
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct OpContext {
     pub log: slog::Logger,
     pub authn: Arc<authn::Context>,

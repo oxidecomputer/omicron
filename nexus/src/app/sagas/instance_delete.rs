@@ -102,7 +102,6 @@ async fn sid_delete_network_interfaces(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -113,7 +112,8 @@ async fn sid_delete_network_interfaces(
         .instance_delete_all_network_interfaces(&opctx, &params.authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
-    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
+    let task = osagactx.background_tasks().task_v2p_manager.clone();
+    osagactx.background_tasks().activate(&task);
     Ok(())
 }
 
@@ -135,7 +135,7 @@ async fn sid_delete_nat(
         .map_err(ActionError::action_failed)?;
 
     osagactx
-        .nexus()
+        .instance_network()
         .instance_delete_dpd_config(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
@@ -279,10 +279,15 @@ mod test {
             .await,
         )
         .unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
         nexus
+            .sec_client
             .run_saga(runnable_saga)
             .await
             .expect("Saga should have succeeded");
@@ -299,10 +304,16 @@ mod test {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =
-            nexus.project_lookup(&opctx, project_selector).unwrap();
+            nexus.project.project_lookup(&opctx, project_selector).unwrap();
 
         let instance_state = nexus
-            .project_create_instance(&opctx, &project_lookup, &params)
+            .instance
+            .project_create_instance(
+                &opctx,
+                &nexus.saga_context,
+                &project_lookup,
+                &params,
+            )
             .await
             .unwrap();
 

@@ -7,13 +7,17 @@
 use bytes::Bytes;
 use dropshot::HttpError;
 use futures::Stream;
+use nexus_config::UpdatesConfig;
 use nexus_db_model::TufRepoDescription;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use omicron_common::api::external::{
     Error, SemverVersion, TufRepoInsertResponse,
 };
 use omicron_common::update::ArtifactId;
+use slog::Logger;
+use std::sync::Arc;
 use update_common::artifacts::ArtifactsWithPlan;
 
 mod common_sp_update;
@@ -37,7 +41,23 @@ pub enum UpdateProgress {
     Failed(String),
 }
 
-impl super::Nexus {
+/// Application level operations related to software updates
+#[derive(Clone)]
+pub struct Update {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    updates_config: Option<UpdatesConfig>,
+}
+
+impl Update {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        updates_config: Option<UpdatesConfig>,
+    ) -> Update {
+        Update { log, datastore, updates_config }
+    }
+
     pub(crate) async fn updates_put_repository(
         &self,
         opctx: &OpContext,
@@ -63,7 +83,7 @@ impl super::Nexus {
         );
 
         let response = self
-            .db_datastore
+            .datastore
             .update_tuf_repo_insert(opctx, tuf_repo_description)
             .await
             .map_err(HttpError::from)?;
@@ -83,7 +103,7 @@ impl super::Nexus {
             })?;
 
         let tuf_repo_description = self
-            .db_datastore
+            .datastore
             .update_tuf_repo_get(opctx, system_version.into())
             .await
             .map_err(HttpError::from)?;

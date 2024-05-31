@@ -6,7 +6,6 @@
 
 use super::*;
 
-use crate::Nexus;
 use internal_dns::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -19,11 +18,9 @@ use std::net::SocketAddrV6;
 // Common Pantry operations
 
 pub(crate) async fn get_pantry_address(
-    nexus: &Arc<Nexus>,
+    resolver: &internal_dns::resolver::Resolver,
 ) -> Result<SocketAddrV6, ActionError> {
-    nexus
-        .resolver()
-        .await
+    resolver
         .lookup_socket_v6(ServiceName::CruciblePantry)
         .await
         .map_err(|e| e.to_string())
@@ -33,20 +30,19 @@ pub(crate) async fn get_pantry_address(
 pub(crate) async fn call_pantry_attach_for_disk(
     log: &slog::Logger,
     opctx: &OpContext,
-    nexus: &Arc<Nexus>,
+    datastore: &Arc<db::DataStore>,
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
     let endpoint = format!("http://{}", pantry_address);
 
-    let (.., disk) = LookupPath::new(opctx, &nexus.datastore())
+    let (.., disk) = LookupPath::new(opctx, datastore)
         .disk_id(disk_id)
         .fetch_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
 
-    let disk_volume = nexus
-        .datastore()
+    let disk_volume = datastore
         .volume_checkout(
             disk.volume_id,
             db::datastore::VolumeCheckoutReason::Pantry,

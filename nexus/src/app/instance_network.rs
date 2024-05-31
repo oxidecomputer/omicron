@@ -4,7 +4,9 @@
 
 //! Routines that manage instance-related networking state.
 
+use crate::app::background::BackgroundTasks;
 use crate::app::switch_port;
+use internal_dns::resolver::Resolver;
 use ipnetwork::IpNetwork;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
@@ -22,20 +24,46 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use slog::Logger;
 use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::Arc;
 use uuid::Uuid;
 
-use super::background::BackgroundTasks;
+/// Application level operations on Instance Networks
+#[derive(Clone)]
+pub struct InstanceNetwork {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    internal_resolver: Resolver,
+    opctx_alloc: OpContext,
+}
 
-impl super::Nexus {
+impl InstanceNetwork {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        internal_resolver: Resolver,
+        opctx_alloc: OpContext,
+    ) -> InstanceNetwork {
+        InstanceNetwork {
+            log,
+            datastore,
+            background_tasks,
+            internal_resolver,
+            opctx_alloc,
+        }
+    }
+
     /// Returns the set of switches with uplinks configured and boundary
     /// services enabled.
     pub(crate) async fn boundary_switches(
         &self,
         opctx: &OpContext,
     ) -> Result<HashSet<SwitchLocation>, Error> {
-        boundary_switches(&self.db_datastore, opctx).await
+        boundary_switches(&self.datastore, opctx).await
     }
 
     /// Ensures that the Dendrite configuration for the supplied instance is
@@ -68,9 +96,9 @@ impl super::Nexus {
         ip_filter: Option<Uuid>,
     ) -> Result<Vec<Ipv4NatEntry>, Error> {
         instance_ensure_dpd_config(
-            &self.db_datastore,
+            &self.datastore,
             &self.log,
-            &self.resolver().await,
+            &self.internal_resolver,
             opctx,
             &self.opctx_alloc,
             instance_id,
@@ -93,7 +121,7 @@ impl super::Nexus {
         dpd_client: &dpd_client::Client,
     ) -> Result<(), Error> {
         probe_ensure_dpd_config(
-            &self.db_datastore,
+            &self.datastore,
             &self.log,
             opctx,
             probe_id,
@@ -131,11 +159,10 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
     ) -> Result<(), Error> {
-        let resolver = self.resolver().await;
         instance_delete_dpd_config(
-            &self.db_datastore,
+            &self.datastore,
             &self.log,
-            &resolver,
+            &self.internal_resolver,
             opctx,
             &self.opctx_alloc,
             authz_instance,
@@ -153,7 +180,7 @@ impl super::Nexus {
         external_ip: &ExternalIp,
     ) -> Result<(), Error> {
         external_ip_delete_dpd_config_inner(
-            &self.db_datastore,
+            &self.datastore,
             &self.log,
             opctx,
             external_ip,
@@ -173,8 +200,8 @@ impl super::Nexus {
         nat_entry: &Ipv4NatEntry,
     ) -> Result<(), Error> {
         delete_dpd_config_by_entry(
-            &self.db_datastore,
-            &self.resolver().await,
+            &self.datastore,
+            &self.internal_resolver,
             &self.log,
             opctx,
             &self.opctx_alloc,
@@ -193,9 +220,9 @@ impl super::Nexus {
         probe_id: Uuid,
     ) -> Result<(), Error> {
         probe_delete_dpd_config(
-            &self.db_datastore,
+            &self.datastore,
             &self.log,
-            &self.resolver().await,
+            &self.internal_resolver,
             opctx,
             &self.opctx_alloc,
             probe_id,

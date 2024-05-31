@@ -4,7 +4,9 @@
 
 //! VPC Subnets and their network interfaces
 
+use crate::app::vpc::Vpc;
 use crate::external_api::params;
+use nexus_config::Tunables;
 use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -12,7 +14,6 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::model::VpcSubnet;
 use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -24,9 +25,29 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use slog::Logger;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on VPC subnets
+#[derive(Clone)]
+pub struct VpcSubnet {
+    log: Logger,
+    datastore: Arc<db::DataStore>,
+    tunables: Tunables,
+    vpc: Vpc,
+}
+
+impl VpcSubnet {
+    pub fn new(
+        log: Logger,
+        datastore: Arc<db::DataStore>,
+        tunables: Tunables,
+        vpc: Vpc,
+    ) -> VpcSubnet {
+        VpcSubnet { log, datastore, tunables, vpc }
+    }
+
     pub fn vpc_subnet_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -38,7 +59,7 @@ impl super::Nexus {
                 vpc: None,
                 project: None,
             } => {
-                let subnet = LookupPath::new(opctx, &self.db_datastore)
+                let subnet = LookupPath::new(opctx, &self.datastore)
                     .vpc_subnet_id(id);
                 Ok(subnet)
             }
@@ -48,6 +69,7 @@ impl super::Nexus {
                 project,
             } => {
                 let subnet = self
+                    .vpc
                     .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
                     .vpc_subnet_name_owned(name.into());
                 Ok(subnet)
@@ -133,7 +155,7 @@ impl super::Nexus {
                         ipv6_block,
                     );
                     let result = self
-                        .db_datastore
+                        .datastore
                         .vpc_create_subnet(opctx, &authz_vpc, subnet)
                         .await;
                     match result {
@@ -207,7 +229,7 @@ impl super::Nexus {
                     params.ipv4_block,
                     ipv6_block,
                 );
-                self.db_datastore
+                self.datastore
                     .vpc_create_subnet(opctx, &authz_vpc, subnet)
                     .await
                     .map(|(.., subnet)| subnet)
@@ -224,7 +246,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::VpcSubnet> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
+        self.datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
     }
 
     pub(crate) async fn vpc_update_subnet(
@@ -232,10 +254,10 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
         params: &params::VpcSubnetUpdate,
-    ) -> UpdateResult<VpcSubnet> {
+    ) -> UpdateResult<db::model::VpcSubnet> {
         let (.., authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
             .await
     }
@@ -249,9 +271,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_subnet, db_subnet) =
             vpc_subnet_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore
-            .vpc_delete_subnet(opctx, &db_subnet, &authz_subnet)
-            .await
+        self.datastore.vpc_delete_subnet(opctx, &db_subnet, &authz_subnet).await
     }
 
     pub(crate) async fn subnet_list_instance_network_interfaces(
@@ -262,7 +282,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::InstanceNetworkInterface> {
         let (.., authz_subnet) =
             subnet_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
+        self.datastore
             .subnet_list_instance_network_interfaces(
                 opctx,
                 &authz_subnet,

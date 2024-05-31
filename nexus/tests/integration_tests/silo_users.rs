@@ -53,6 +53,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     // create a group
     let group_name = "group1".to_string();
     nexus
+        .silo
         .silo_group_lookup_or_create_by_name(&opctx, &authz_silo, &group_name)
         .await
         .expect("Group created");

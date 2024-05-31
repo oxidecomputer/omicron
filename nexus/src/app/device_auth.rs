@@ -46,17 +46,28 @@
 
 use crate::external_api::device_auth::DeviceAccessTokenResponse;
 use nexus_db_queries::authn::{Actor, Reason};
-use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
+use nexus_db_queries::{authz, db};
 
 use omicron_common::api::external::{CreateResult, Error};
 
 use chrono::Utc;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level support for OAuth 2.0 Device Authorization
+#[derive(Clone)]
+pub struct DeviceAuth {
+    datastore: Arc<db::DataStore>,
+}
+
+impl DeviceAuth {
+    pub fn new(datastore: Arc<db::DataStore>) -> DeviceAuth {
+        DeviceAuth { datastore }
+    }
+
     /// Start a device authorization grant flow.
     /// Corresponds to steps 1 & 2 in the flow description above.
     pub(crate) async fn device_auth_request_create(
@@ -69,7 +80,7 @@ impl super::Nexus {
         // existing outstanding request. So we should retry some (small)
         // number of times if inserting the new request fails.
         let auth_request = DeviceAuthRequest::new(client_id);
-        self.db_datastore.device_auth_request_create(opctx, auth_request).await
+        self.datastore.device_auth_request_create(opctx, auth_request).await
     }
 
     /// Verify a device authorization grant, and delete the authorization
@@ -83,12 +94,12 @@ impl super::Nexus {
         silo_user_id: Uuid,
     ) -> CreateResult<DeviceAccessToken> {
         let (.., authz_request, db_request) =
-            LookupPath::new(opctx, &self.db_datastore)
+            LookupPath::new(opctx, &self.datastore)
                 .device_auth_request(&user_code)
                 .fetch()
                 .await?;
 
-        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -106,7 +117,7 @@ impl super::Nexus {
             // Store the expired token anyway so that the client
             // can get a proper "denied" message on its next poll.
             let token = token.expires(db_request.time_expires);
-            self.db_datastore
+            self.datastore
                 .device_access_token_create(
                     opctx,
                     &authz_request,
@@ -116,7 +127,7 @@ impl super::Nexus {
                 .await?;
             Err(Error::invalid_request("device authorization request expired"))
         } else {
-            self.db_datastore
+            self.datastore
                 .device_access_token_create(
                     opctx,
                     &authz_request,
@@ -137,7 +148,7 @@ impl super::Nexus {
     ) -> CreateResult<DeviceAccessTokenResponse> {
         use DeviceAccessTokenResponse::*;
         match self
-            .db_datastore
+            .datastore
             .device_access_token_fetch(opctx, client_id, device_code)
             .await
         {
@@ -154,7 +165,7 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> Result<Actor, Reason> {
-        let (.., db_access_token) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_access_token) = LookupPath::new(opctx, &self.datastore)
             .device_access_token(&token)
             .fetch()
             .await
@@ -166,7 +177,7 @@ impl super::Nexus {
             })?;
 
         let silo_user_id = db_access_token.silo_user_id;
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(silo_user_id)
             .fetch()
             .await

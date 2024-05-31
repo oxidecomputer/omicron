@@ -1,3 +1,4 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -372,8 +373,7 @@ where
     T: steno::SagaType<ExecContextType = Arc<SagaContext>>,
 {
     let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-    let datastore = Arc::clone(nexus.datastore());
+    let datastore = Arc::clone(osagactx.datastore());
 
     // TODO-debugging This would be a good place to put the saga name, but
     // we don't have it available here.  This log maybe should come from
@@ -433,7 +433,7 @@ impl authn::external::SiloUserSilo for ServerContext {
         silo_user_id: Uuid,
     ) -> Result<Uuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
+        self.nexus.session.lookup_silo_for_authn(opctx, silo_user_id).await
     }
 }
 
@@ -444,7 +444,7 @@ impl authn::external::token::TokenContext for ServerContext {
         token: String,
     ) -> Result<authn::Actor, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.device_access_token_actor(opctx, token).await
+        self.nexus.device_auth.device_access_token_actor(opctx, token).await
     }
 }
 
@@ -454,7 +454,7 @@ impl SessionStore for ServerContext {
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_fetch(opctx, token).await.ok()
+        self.nexus.session.session_fetch(opctx, token).await.ok()
     }
 
     async fn session_update_last_used(
@@ -462,12 +462,12 @@ impl SessionStore for ServerContext {
         token: String,
     ) -> Option<Self::SessionModel> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_update_last_used(&opctx, &token).await.ok()
+        self.nexus.session.session_update_last_used(&opctx, &token).await.ok()
     }
 
     async fn session_expire(&self, token: String) -> Option<()> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_hard_delete(opctx, &token).await.ok()
+        self.nexus.session.session_hard_delete(opctx, &token).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {

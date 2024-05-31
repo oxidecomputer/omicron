@@ -20,17 +20,26 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
-    // Global (fleet-wide) policy
+/// Application level operations related to Identity and Access Management
+pub struct Iam {
+    datastore: Arc<db::DataStore>,
+}
 
+impl Iam {
+    pub fn new(datastore: Arc<db::DataStore>) -> Iam {
+        Iam { datastore }
+    }
+
+    // Global (fleet-wide) policy
     pub(crate) async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<shared::Policy<shared::FleetRole>> {
         let role_assignments = self
-            .db_datastore
+            .datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
             .await?
             .into_iter()
@@ -46,7 +55,7 @@ impl super::Nexus {
         policy: &shared::Policy<shared::FleetRole>,
     ) -> UpdateResult<shared::Policy<shared::FleetRole>> {
         let role_assignments = self
-            .db_datastore
+            .datastore
             .role_assignment_replace_visible(
                 opctx,
                 &authz::FLEET,
@@ -73,7 +82,7 @@ impl super::Nexus {
             .internal_context("listing current silo's users")?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
 
-        self.db_datastore
+        self.datastore
             .silo_users_list(opctx, &authz_silo_user_list, pagparams)
             .await
     }
@@ -92,12 +101,12 @@ impl super::Nexus {
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
 
         let (.., authz_group, _db_group) =
-            LookupPath::new(opctx, &self.db_datastore)
+            LookupPath::new(opctx, &self.datastore)
                 .silo_group_id(*group_id)
                 .fetch()
                 .await?;
 
-        self.db_datastore
+        self.datastore
             .silo_group_users_list(
                 opctx,
                 &authz_silo_user_list,
@@ -116,7 +125,7 @@ impl super::Nexus {
             .authn
             .actor_required()
             .internal_context("loading current user")?;
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(actor.actor_id())
             .fetch()
             .await?;
@@ -128,7 +137,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloGroup> {
-        self.db_datastore.silo_groups_for_self(opctx, pagparams).await
+        self.datastore.silo_groups_for_self(opctx, pagparams).await
     }
 
     // Silo groups
@@ -142,7 +151,7 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("listing current silo's groups")?;
-        self.db_datastore
+        self.datastore
             .silo_groups_list_by_id(opctx, &authz_silo, pagparams)
             .await
     }
@@ -154,7 +163,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::UserBuiltin> {
-        self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
+        self.datastore.users_builtin_list_by_name(opctx, pagparams).await
     }
 
     pub fn user_builtin_lookup<'a>(
@@ -162,7 +171,7 @@ impl super::Nexus {
         opctx: &'a OpContext,
         user_selector: &'a params::UserBuiltinSelector,
     ) -> LookupResult<lookup::UserBuiltin<'a>> {
-        let lookup_path = LookupPath::new(opctx, &self.db_datastore);
+        let lookup_path = LookupPath::new(opctx, &self.datastore);
         let user = match user_selector {
             params::UserBuiltinSelector { user: NameOrId::Id(id) } => {
                 lookup_path.user_builtin_id(*id)
@@ -181,7 +190,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<db::model::RoleBuiltin> {
-        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
+        self.datastore.roles_builtin_list_by_name(opctx, pagparams).await
     }
 
     pub(crate) async fn role_builtin_fetch(
@@ -189,7 +198,7 @@ impl super::Nexus {
         opctx: &OpContext,
         name: &str,
     ) -> LookupResult<db::model::RoleBuiltin> {
-        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_role_builtin) = LookupPath::new(opctx, &self.datastore)
             .role_builtin_name(name)
             .fetch()
             .await?;

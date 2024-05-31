@@ -18,6 +18,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use std::sync::Arc;
 use uuid::Uuid;
 
 fn generate_session_token() -> String {
@@ -33,14 +34,24 @@ fn generate_session_token() -> String {
     hex::encode(random_bytes)
 }
 
-impl super::Nexus {
+/// Application level operations on console Sessions
+#[derive(Clone)]
+pub struct Session {
+    datastore: Arc<db::DataStore>,
+}
+
+impl Session {
+    pub fn new(datastore: Arc<db::DataStore>) -> Session {
+        Session { datastore }
+    }
+
     async fn login_allowed(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
     ) -> Result<bool, Error> {
         // Was this silo user deleted?
-        let fetch_result = LookupPath::new(opctx, &self.db_datastore)
+        let fetch_result = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(silo_user_id)
             .fetch()
             .await;
@@ -82,7 +93,7 @@ impl super::Nexus {
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user_id);
 
-        self.db_datastore.session_create(opctx, session).await
+        self.datastore.session_create(opctx, session).await
     }
 
     pub(crate) async fn session_fetch(
@@ -90,13 +101,12 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        let (.., db_console_session) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .console_session_token(&token)
-                .fetch()
-                .await?;
+        let (.., db_console_session) = LookupPath::new(opctx, &self.datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await?;
 
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(db_console_session.silo_user_id)
             .fetch()
             .await?;
@@ -118,7 +128,7 @@ impl super::Nexus {
             token.to_string(),
             LookupType::ByCompositeId(token.to_string()),
         );
-        self.db_datastore.session_update_last_used(opctx, &authz_session).await
+        self.datastore.session_update_last_used(opctx, &authz_session).await
     }
 
     pub(crate) async fn session_hard_delete(
@@ -131,7 +141,7 @@ impl super::Nexus {
             token.to_string(),
             LookupType::ByCompositeId(token.to_string()),
         );
-        self.db_datastore.session_hard_delete(opctx, &authz_session).await
+        self.datastore.session_hard_delete(opctx, &authz_session).await
     }
 
     pub(crate) async fn lookup_silo_for_authn(
@@ -139,7 +149,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_user_id: Uuid,
     ) -> Result<Uuid, Reason> {
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore)
             .silo_user_id(silo_user_id)
             .fetch()
             .await

@@ -4,6 +4,7 @@
 
 //! IP Pools, collections of external IP addresses for guest instances
 
+use crate::app::silo::Silo;
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
@@ -28,6 +29,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use std::matches;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Helper to make it easier to 404 on attempts to manipulate internal pools
@@ -46,7 +48,18 @@ fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
     }
 }
 
-impl super::Nexus {
+/// Application level operations on IP Pools
+#[derive(Clone)]
+pub struct IpPool {
+    datastore: Arc<db::DataStore>,
+    silo: Silo,
+}
+
+impl IpPool {
+    pub fn new(datastore: Arc<db::DataStore>, silo: Silo) -> IpPool {
+        IpPool { datastore, silo }
+    }
+
     pub fn ip_pool_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -54,13 +67,13 @@ impl super::Nexus {
     ) -> LookupResult<lookup::IpPool<'a>> {
         match pool {
             NameOrId::Name(name) => {
-                let pool = LookupPath::new(opctx, &self.db_datastore)
+                let pool = LookupPath::new(opctx, &self.datastore)
                     .ip_pool_name(Name::ref_cast(name));
                 Ok(pool)
             }
             NameOrId::Id(id) => {
                 let pool =
-                    LookupPath::new(opctx, &self.db_datastore).ip_pool_id(*id);
+                    LookupPath::new(opctx, &self.datastore).ip_pool_id(*id);
                 Ok(pool)
             }
         }
@@ -72,7 +85,7 @@ impl super::Nexus {
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
         let pool = db::model::IpPool::new(&pool_params.identity);
-        self.db_datastore.ip_pool_create(opctx, pool).await
+        self.datastore.ip_pool_create(opctx, pool).await
     }
 
     /// List IP pools in current silo
@@ -89,7 +102,7 @@ impl super::Nexus {
         // silo children
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
-        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
+        self.datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     // Look up pool by name or ID, but only return it if it's linked to the
@@ -103,7 +116,7 @@ impl super::Nexus {
             self.ip_pool_lookup(opctx, pool)?.fetch().await?;
 
         // 404 if no link is found in the current silo
-        let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
+        let link = self.datastore.ip_pool_fetch_link(opctx, pool.id()).await;
         match link {
             Ok(link) => Ok((pool, link)),
             Err(_) => Err(authz_pool.not_found()),
@@ -123,7 +136,7 @@ impl super::Nexus {
         // check ability to list silos in general
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
+        self.datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
     }
 
     // List pools for a given silo
@@ -139,7 +152,7 @@ impl super::Nexus {
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
-        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
+        self.datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     pub(crate) async fn ip_pool_link_silo(
@@ -151,15 +164,16 @@ impl super::Nexus {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
         let (authz_silo,) = self
+            .silo
             .silo_lookup(&opctx, silo_link.silo.clone())?
             .lookup_for(authz::Action::Modify)
             .await?;
-        self.db_datastore
+        self.datastore
             .ip_pool_link_silo(
                 opctx,
                 db::model::IpPoolResource {
@@ -181,14 +195,14 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
-        self.db_datastore
+        self.datastore
             .ip_pool_unlink_silo(opctx, &authz_pool, &authz_silo)
             .await
     }
@@ -203,14 +217,14 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
-        self.db_datastore
+        self.datastore
             .ip_pool_set_default(
                 opctx,
                 &authz_pool,
@@ -225,7 +239,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.ip_pools_list(opctx, pagparams).await
+        self.datastore.ip_pools_list(opctx, pagparams).await
     }
 
     pub(crate) async fn ip_pool_delete(
@@ -236,11 +250,11 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        self.db_datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
+        self.datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
     pub(crate) async fn ip_pool_update(
@@ -252,11 +266,11 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        self.db_datastore
+        self.datastore
             .ip_pool_update(opctx, &authz_pool, updates.clone().into())
             .await
     }
@@ -270,13 +284,11 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        self.db_datastore
-            .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
-            .await
+        self.datastore.ip_pool_list_ranges(opctx, &authz_pool, pagparams).await
     }
 
     pub(crate) async fn ip_pool_add_range(
@@ -288,7 +300,7 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -305,7 +317,7 @@ impl super::Nexus {
             ));
         }
 
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        self.datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
     pub(crate) async fn ip_pool_delete_range(
@@ -317,11 +329,11 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self.datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+        self.datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 
     // The "ip_pool_service_..." functions look up IP pools for Oxide service usage,
@@ -335,7 +347,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> LookupResult<db::model::IpPool> {
         let (authz_pool, db_pool) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+            self.datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         Ok(db_pool)
     }
@@ -346,11 +358,9 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+            self.datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
-        self.db_datastore
-            .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
-            .await
+        self.datastore.ip_pool_list_ranges(opctx, &authz_pool, pagparams).await
     }
 
     pub(crate) async fn ip_pool_service_add_range(
@@ -359,7 +369,7 @@ impl super::Nexus {
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+            self.datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         // Disallow V6 ranges until IPv6 is fully supported by the networking
         // subsystem. Instead of changing the API to reflect that (making this
@@ -373,7 +383,7 @@ impl super::Nexus {
                 "IPv6 ranges are not allowed yet",
             ));
         }
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        self.datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
     pub(crate) async fn ip_pool_service_delete_range(
@@ -382,8 +392,8 @@ impl super::Nexus {
         range: &IpRange,
     ) -> DeleteResult {
         let (authz_pool, ..) =
-            self.db_datastore.ip_pools_service_lookup(opctx).await?;
+            self.datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
-        self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+        self.datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 }

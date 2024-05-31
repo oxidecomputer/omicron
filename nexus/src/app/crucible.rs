@@ -65,7 +65,21 @@ fn into_external_error(
     }
 }
 
-impl super::Nexus {
+/// Application level operations on Crucible
+#[derive(Clone)]
+pub struct Crucible {
+    datastore: Arc<db::DataStore>,
+    reqwest_client: reqwest::Client,
+}
+
+impl Crucible {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        reqwest_client: reqwest::Client,
+    ) -> Crucible {
+        Crucible { datastore, reqwest_client }
+    }
+
     fn crucible_agent_client_for_dataset(
         &self,
         dataset: &db::model::Dataset,
@@ -83,10 +97,8 @@ impl super::Nexus {
         &self,
         dataset_id: Uuid,
     ) -> Result<bool, Error> {
-        let on_in_service_physical_disk = self
-            .datastore()
-            .dataset_physical_disk_in_service(dataset_id)
-            .await?;
+        let on_in_service_physical_disk =
+            self.datastore.dataset_physical_disk_in_service(dataset_id).await?;
 
         Ok(!on_in_service_physical_disk)
     }

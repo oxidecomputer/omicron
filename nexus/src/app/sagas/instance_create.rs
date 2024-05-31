@@ -710,7 +710,7 @@ async fn sic_allocate_instance_external_ip(
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
-                        .nexus()
+                        .ip_pool()
                         .ip_pool_lookup(&opctx, name_or_id)
                         .map_err(ActionError::action_failed)?
                         .lookup_for(authz::Action::CreateChild)
@@ -1144,10 +1144,15 @@ pub mod test {
         let opctx = test_helpers::test_opctx(&cptestctx);
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus
+            .sec_client
+            .create_runnable_saga(dag, nexus.saga_context.clone())
+            .await
+            .unwrap();
 
         // Actually run the saga
         nexus
+            .sec_client
             .run_saga(runnable_saga)
             .await
             .expect("Saga should have succeeded");

@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! x.509 Certificates
+//! X.509 Certificates
 
+use crate::app::background::BackgroundTasks;
+use crate::app::silo::Silo;
 use crate::external_api::params;
 use crate::external_api::shared;
 use nexus_db_queries::authz;
@@ -20,9 +22,27 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::NameOrId;
 use ref_cast::RefCast;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
+/// Application level operations on X.509 certificates
+#[derive(Clone)]
+pub struct Certificate {
+    datastore: Arc<db::DataStore>,
+    background_tasks: Arc<BackgroundTasks>,
+    silo: Silo,
+    opctx_external_authn: OpContext,
+}
+
+impl Certificate {
+    pub fn new(
+        datastore: Arc<db::DataStore>,
+        background_tasks: Arc<BackgroundTasks>,
+        silo: Silo,
+        opctx_external_authn: OpContext,
+    ) -> Certificate {
+        Certificate { datastore, background_tasks, silo, opctx_external_authn }
+    }
     pub fn certificate_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -30,9 +50,9 @@ impl super::Nexus {
     ) -> lookup::Certificate<'a> {
         match certificate {
             NameOrId::Id(id) => {
-                LookupPath::new(opctx, &self.db_datastore).certificate_id(*id)
+                LookupPath::new(opctx, &self.datastore).certificate_id(*id)
             }
-            NameOrId::Name(name) => LookupPath::new(opctx, &self.db_datastore)
+            NameOrId::Name(name) => LookupPath::new(opctx, &self.datastore)
                 .certificate_name(Name::ref_cast(name)),
         }
     }
@@ -48,7 +68,7 @@ impl super::Nexus {
             .internal_context("creating a Certificate")?;
 
         // The `opctx` we received is going to be checked for permission to
-        // create a cert below in `db_datastore.certificate_create`, but first
+        // create a cert below in `datastore.certificate_create`, but first
         // we need to look up this silo's fully-qualified domain names in order
         // to check that the cert we've been given is valid for this silo.
         // Looking up DNS names requires reading the DNS configuration of the
@@ -61,7 +81,8 @@ impl super::Nexus {
         // external DNS name(s) of the rack, which leads to their silo's DNS
         // name(s)).
         let silo_fq_dns_names = self
-            .silo_fq_dns_names(self.opctx_external_authn(), authz_silo.id())
+            .silo
+            .silo_fq_dns_names(&self.opctx_external_authn, authz_silo.id())
             .await?;
 
         let kind = params.service;
@@ -72,10 +93,8 @@ impl super::Nexus {
             params,
             &silo_fq_dns_names,
         )?;
-        let cert = self
-            .db_datastore
-            .certificate_create(opctx, new_certificate)
-            .await?;
+        let cert =
+            self.datastore.certificate_create(opctx, new_certificate).await?;
 
         match kind {
             shared::ServiceUsingCertificate::ExternalApi => {
@@ -95,9 +114,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Certificate> {
-        self.db_datastore
-            .certificate_list_for(opctx, None, pagparams, true)
-            .await
+        self.datastore.certificate_list_for(opctx, None, pagparams, true).await
     }
 
     pub(crate) async fn certificate_delete(
@@ -107,7 +124,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_cert, db_cert) =
             certificate_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore.certificate_delete(opctx, &authz_cert).await?;
+        self.datastore.certificate_delete(opctx, &authz_cert).await?;
         match db_cert.service {
             ServiceKind::Nexus => {
                 // See the comment in certificate_create() above.

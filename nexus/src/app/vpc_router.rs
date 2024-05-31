@@ -4,6 +4,7 @@
 
 //! VPC routers and routes
 
+use crate::app::vpc::Vpc;
 use crate::external_api::params;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -11,7 +12,6 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::RouterRoute;
-use nexus_db_queries::db::model::VpcRouter;
 use nexus_db_queries::db::model::VpcRouterKind;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -22,10 +22,20 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
+use std::sync::Arc;
 use uuid::Uuid;
 
-impl super::Nexus {
-    // Routers
+/// Application level operations on VPC routers
+pub struct VpcRouter {
+    datastore: Arc<db::DataStore>,
+    vpc: Vpc,
+}
+
+impl VpcRouter {
+    pub fn new(datastore: Arc<db::DataStore>, vpc: Vpc) -> VpcRouter {
+        VpcRouter { datastore, vpc }
+    }
+
     pub fn vpc_router_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -37,7 +47,7 @@ impl super::Nexus {
                 vpc: None,
                 project: None
             } => {
-                let router = LookupPath::new(opctx, &self.db_datastore)
+                let router = LookupPath::new(opctx, &self.datastore)
                     .vpc_router_id(id);
                 Ok(router)
             }
@@ -46,7 +56,7 @@ impl super::Nexus {
                 vpc: Some(vpc),
                 project
             } => {
-                let router = self
+                let router = self.vpc
                     .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
                     .vpc_router_name_owned(name.into());
                 Ok(router)
@@ -80,7 +90,7 @@ impl super::Nexus {
             params.clone(),
         );
         let (_, router) = self
-            .db_datastore
+            .datastore
             .vpc_create_router(&opctx, &authz_vpc, router)
             .await?;
         Ok(router)
@@ -95,7 +105,7 @@ impl super::Nexus {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
         let routers = self
-            .db_datastore
+            .datastore
             .vpc_router_list(opctx, &authz_vpc, pagparams)
             .await?;
         Ok(routers)
@@ -106,10 +116,10 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
         params: &params::VpcRouterUpdate,
-    ) -> UpdateResult<VpcRouter> {
+    ) -> UpdateResult<db::model::VpcRouter> {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
+        self.datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
     }
@@ -131,7 +141,7 @@ impl super::Nexus {
         if db_router.kind == VpcRouterKind::System {
             return Err(Error::invalid_request("Cannot delete system router"));
         }
-        self.db_datastore.vpc_delete_router(opctx, &authz_router).await
+        self.datastore.vpc_delete_router(opctx, &authz_router).await
     }
 
     // Routes
@@ -148,7 +158,7 @@ impl super::Nexus {
                 vpc: None,
                 project: None,
             } => {
-                let route = LookupPath::new(opctx, &self.db_datastore)
+                let route = LookupPath::new(opctx, &self.datastore)
                     .router_route_id(id);
                 Ok(route)
             }
@@ -195,7 +205,7 @@ impl super::Nexus {
             params.clone(),
         );
         let route = self
-            .db_datastore
+            .datastore
             .router_create_route(&opctx, &authz_router, route)
             .await?;
         Ok(route)
@@ -209,7 +219,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::RouterRoute> {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
+        self.datastore
             .vpc_router_route_list(opctx, &authz_router, pagparams)
             .await
     }
@@ -235,7 +245,7 @@ impl super::Nexus {
                 )));
             }
         }
-        self.db_datastore
+        self.datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())
             .await
     }
@@ -255,6 +265,6 @@ impl super::Nexus {
                 "DELETE not allowed on system routes",
             ));
         }
-        self.db_datastore.router_delete_route(opctx, &authz_route).await
+        self.datastore.router_delete_route(opctx, &authz_route).await
     }
 }
