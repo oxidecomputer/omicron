@@ -724,6 +724,54 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(get_names(next_page.items), &pool_names[5..8]);
 }
 
+#[nexus_test]
+async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // one pool, and there should be no linked silos
+    create_pool(client, "p0").await;
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 0);
+
+    // create and link some silos. we need to use discoverable silos because
+    // non-discoverable silos, while linkable, are filtered out of the list of
+    // linked silos for a pool
+    let mut silo_ids = vec![];
+    for i in 1..=8 {
+        let name = format!("silo-{}", i);
+        let silo =
+            create_silo(&client, &name, true, SiloIdentityMode::SamlJit).await;
+        silo_ids.push(silo.id().clone());
+        link_ip_pool(client, "p0", &silo.id(), false).await;
+    }
+
+    // we paginate by ID, so these should be in order to match
+    silo_ids.sort();
+
+    let base_url = "/v1/system/ip-pools/p0/silos";
+    let first_five_url = format!("{}?limit=5", base_url);
+    let first_five =
+        objects_list_page_authz::<IpPoolSiloLink>(client, &first_five_url)
+            .await;
+    assert!(first_five.next_page.is_some());
+    assert_eq!(
+        first_five.items.iter().map(|s| s.silo_id).collect::<Vec<_>>(),
+        &silo_ids[0..5]
+    );
+
+    let next_page_url = format!(
+        "{}?limit=5&page_token={}",
+        base_url,
+        first_five.next_page.unwrap()
+    );
+    let next_page =
+        objects_list_page_authz::<IpPoolSiloLink>(client, &next_page_url).await;
+    assert_eq!(
+        next_page.items.iter().map(|s| s.silo_id).collect::<Vec<_>>(),
+        &silo_ids[5..8]
+    );
+}
+
 /// helper to make tests less ugly
 fn get_names(pools: Vec<IpPool>) -> Vec<String> {
     pools.iter().map(|p| p.identity.name.to_string()).collect()
