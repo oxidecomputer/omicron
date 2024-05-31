@@ -78,7 +78,7 @@ impl Context {
         Context { authn, authz, datastore }
     }
 
-    pub fn datastore(&self) -> &Arc<dyn Storage> {
+    pub(crate) fn datastore(&self) -> &Arc<dyn Storage> {
         &self.datastore
     }
 

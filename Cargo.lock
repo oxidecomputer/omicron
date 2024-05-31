@@ -5978,6 +5978,7 @@ dependencies = [
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
+ "unicode-xid",
  "usdt 0.5.0",
  "usdt-impl 0.5.0",
  "uuid",
