@@ -122,7 +122,7 @@ WITH
       UNION (SELECT ").param().sql(" AS id)
     ),")
             .bind::<sql_types::Uuid, _>(project_id)
-            .bind::<sql_types::Uuid, _>(*crate::db::fixed_data::FLEET_ID)
+            .bind::<sql_types::Uuid, _>(*nexus_db_fixed_data::FLEET_ID)
             .sql("
   quotas
     AS (

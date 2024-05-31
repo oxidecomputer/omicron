@@ -37,9 +37,9 @@
 use super::api_resources::ApiResource;
 use crate::authn;
 use crate::context::OpContext;
-use crate::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
+use slog::trace;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -87,7 +87,6 @@ impl RoleSet {
 pub async fn load_roles_for_resource_tree<R>(
     resource: &R,
     opctx: &OpContext,
-    datastore: &DataStore,
     authn: &authn::Context,
     roleset: &mut RoleSet,
 ) -> Result<(), Error>
@@ -100,7 +99,6 @@ where
         let resource_id = with_roles.resource_id();
         load_directly_attached_roles(
             opctx,
-            datastore,
             authn,
             resource_type,
             resource_id,
@@ -115,7 +113,6 @@ where
         {
             load_directly_attached_roles(
                 opctx,
-                datastore,
                 authn,
                 resource_type,
                 resource_id,
@@ -135,7 +132,7 @@ where
     // it's clearer to just call this "parent" than
     // "related_resources_whose_roles_might_grant_access_to_this".)
     if let Some(parent) = resource.parent() {
-        parent.load_roles(opctx, datastore, authn, roleset).await?;
+        parent.load_roles(opctx, authn, roleset).await?;
     }
 
     Ok(())
@@ -143,7 +140,6 @@ where
 
 async fn load_directly_attached_roles(
     opctx: &OpContext,
-    datastore: &DataStore,
     authn: &authn::Context,
     resource_type: ResourceType,
     resource_id: Uuid,
@@ -159,7 +155,8 @@ async fn load_directly_attached_roles(
             "resource_id" => resource_id.to_string(),
         );
 
-        let roles = datastore
+        let roles = opctx
+            .datastore()
             .role_asgn_list_for(
                 opctx,
                 actor.into(),

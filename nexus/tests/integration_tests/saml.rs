@@ -106,20 +106,23 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let (.., retrieved_silo_idp_from_nexus) = IdentityProviderType::lookup(
-        &nexus.datastore(),
-        &nexus.opctx_external_authn(),
-        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
+    let (.., retrieved_silo_idp_from_nexus) = nexus
+        .datastore()
+        .identity_provider_lookup(
+            &nexus.opctx_external_authn(),
+            &omicron_common::api::external::Name::try_from(
+                SILO_NAME.to_string(),
+            )
             .unwrap()
             .into(),
-        &omicron_common::api::external::Name::try_from(
-            "some-totally-real-saml-provider".to_string(),
+            &omicron_common::api::external::Name::try_from(
+                "some-totally-real-saml-provider".to_string(),
+            )
+            .unwrap()
+            .into(),
         )
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap();
+        .await
+        .unwrap();
 
     match retrieved_silo_idp_from_nexus {
         IdentityProviderType::Saml(_) => {

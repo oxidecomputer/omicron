@@ -10,12 +10,13 @@ use crate::authn;
 use crate::authz::oso_generic;
 use crate::authz::Action;
 use crate::context::OpContext;
-use crate::db::DataStore;
+use crate::storage::Storage;
 use futures::future::BoxFuture;
 use omicron_common::api::external::Error;
 use omicron_common::bail_unless;
 use oso::Oso;
 use oso::OsoError;
+use slog::debug;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -66,16 +67,20 @@ impl Authz {
 pub struct Context {
     authn: Arc<authn::Context>,
     authz: Arc<Authz>,
-    datastore: Arc<DataStore>,
+    datastore: Arc<dyn Storage>,
 }
 
 impl Context {
     pub fn new(
         authn: Arc<authn::Context>,
         authz: Arc<Authz>,
-        datastore: Arc<DataStore>,
+        datastore: Arc<dyn Storage>,
     ) -> Context {
         Context { authn, authz, datastore }
+    }
+
+    pub fn datastore(&self) -> &Arc<dyn Storage> {
+        &self.datastore
     }
 
     /// Check whether the actor performing this request is authorized for
@@ -111,9 +116,7 @@ impl Context {
         );
 
         let mut roles = RoleSet::new();
-        resource
-            .load_roles(opctx, &self.datastore, &self.authn, &mut roles)
-            .await?;
+        resource.load_roles(opctx, &self.authn, &mut roles).await?;
         debug!(opctx.log, "roles"; "roles" => ?roles);
         let actor = AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
@@ -162,19 +165,17 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
     /// That's how this works for most resources.  There are other kinds of
     /// resources (like the Database itself) that aren't stored in the database
     /// and for which a different mechanism might be used.
-    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+    fn load_roles<'a, 'b, 'c, 'd, 'e>(
         &'a self,
         opctx: &'b OpContext,
-        datastore: &'c DataStore,
-        authn: &'d authn::Context,
-        roleset: &'e mut RoleSet,
-    ) -> BoxFuture<'f, Result<(), Error>>
+        authn: &'c authn::Context,
+        roleset: &'d mut RoleSet,
+    ) -> BoxFuture<'e, Result<(), Error>>
     where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f;
+        'a: 'e,
+        'b: 'e,
+        'c: 'e,
+        'd: 'e;
 
     /// Invoked on authz failure to determine the final authz result
     ///
@@ -230,19 +231,17 @@ mod test {
         #[derive(Clone, PolarClass)]
         struct UnregisteredResource;
         impl AuthorizedResource for UnregisteredResource {
-            fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+            fn load_roles<'a, 'b, 'c, 'd, 'e>(
                 &'a self,
                 _: &'b OpContext,
-                _: &'c DataStore,
-                _: &'d authn::Context,
-                _: &'e mut RoleSet,
-            ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+                _: &'c authn::Context,
+                _: &'d mut RoleSet,
+            ) -> futures::future::BoxFuture<'e, Result<(), Error>>
             where
-                'a: 'f,
-                'b: 'f,
-                'c: 'f,
-                'd: 'f,
-                'e: 'f,
+                'a: 'e,
+                'b: 'e,
+                'c: 'e,
+                'd: 'e,
             {
                 // authorize() shouldn't get far enough to call this.
                 unimplemented!();

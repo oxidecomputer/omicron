@@ -9,6 +9,7 @@ use super::SiloAuthnPolicy;
 use crate::authn;
 use async_trait::async_trait;
 use authn::Reason;
+use slog::trace;
 use std::borrow::Borrow;
 use uuid::Uuid;
 

@@ -783,8 +783,8 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data;
     use crate::db::lookup::LookupPath;
+    use nexus_db_fixed_data;
     use nexus_db_model::Project;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;

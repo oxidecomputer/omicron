@@ -49,6 +49,7 @@ use uuid::Uuid;
 
 mod address_lot;
 mod allow_list;
+mod auth;
 mod bfd;
 mod bgp;
 mod bootstore;
@@ -129,9 +130,6 @@ pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
-
-/// The name of the built-in Project and VPC for Oxide services.
-pub const SERVICES_DB_NAME: &str = "oxide-services";
 
 /// "limit" to be used in SQL queries that paginate through large result sets
 ///
@@ -385,8 +383,6 @@ mod test {
         IneligibleSledKind, IneligibleSleds,
     };
     use crate::db::explain::ExplainableAsync;
-    use crate::db::fixed_data::silo::DEFAULT_SILO;
-    use crate::db::fixed_data::silo::DEFAULT_SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
@@ -400,6 +396,8 @@ mod test {
     use futures::stream;
     use futures::StreamExt;
     use nexus_config::RegionAllocationStrategy;
+    use nexus_db_fixed_data::silo::DEFAULT_SILO;
+    use nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::{to_db_typed_uuid, Generation};
     use nexus_test_utils::db::test_setup_database;

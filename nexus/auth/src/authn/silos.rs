@@ -4,12 +4,6 @@
 
 //! Silo related authentication types and functions
 
-use crate::authz;
-use crate::context::OpContext;
-use crate::db::lookup::LookupPath;
-use crate::db::{model, DataStore};
-use omicron_common::api::external::LookupResult;
-
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use dropshot::HttpError;
@@ -36,10 +30,10 @@ pub struct SamlIdentityProvider {
     pub group_attribute_name: Option<String>,
 }
 
-impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
+impl TryFrom<nexus_db_model::SamlIdentityProvider> for SamlIdentityProvider {
     type Error = anyhow::Error;
     fn try_from(
-        model: model::SamlIdentityProvider,
+        model: nexus_db_model::SamlIdentityProvider,
     ) -> Result<Self, Self::Error> {
         let provider = SamlIdentityProvider {
             idp_metadata_document_string: model.idp_metadata_document_string,
@@ -66,57 +60,6 @@ impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
 
 pub enum IdentityProviderType {
     Saml(SamlIdentityProvider),
-}
-
-impl IdentityProviderType {
-    /// First, look up the provider type, then look in for the specific
-    /// provider details.
-    pub async fn lookup(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        silo_name: &model::Name,
-        provider_name: &model::Name,
-    ) -> LookupResult<(authz::Silo, model::Silo, Self)> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
-
-        let (.., identity_provider) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
-            .identity_provider_name(provider_name)
-            .fetch()
-            .await?;
-
-        match identity_provider.provider_type {
-            model::IdentityProviderType::Saml => {
-                let (.., saml_identity_provider) =
-                    LookupPath::new(opctx, datastore)
-                        .silo_name(silo_name)
-                        .saml_identity_provider_name(provider_name)
-                        .fetch()
-                        .await?;
-
-                let saml_identity_provider = IdentityProviderType::Saml(
-                    saml_identity_provider.try_into()
-                        .map_err(|e: anyhow::Error|
-                            // If an error is encountered converting from the
-                            // model to the authn type here, this is a server
-                            // error: it was validated before it went into the
-                            // DB.
-                            omicron_common::api::external::Error::internal_error(
-                                &format!(
-                                    "saml_identity_provider.try_into() failed! {}",
-                                    &e.to_string()
-                                )
-                            )
-                        )?
-                    );
-
-                Ok((authz_silo, db_silo, saml_identity_provider))
-            }
-        }
-    }
 }
 
 impl SamlIdentityProvider {

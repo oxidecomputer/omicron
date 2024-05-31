@@ -73,7 +73,8 @@ impl TestInterfaces for super::Nexus {
     ) -> Result<Option<Arc<SledAgentClient>>, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         self.instance_sled_by_id_with_opctx(id, &opctx).await
@@ -98,7 +99,8 @@ impl TestInterfaces for super::Nexus {
     ) -> Result<Option<Arc<SledAgentClient>>, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
         let (.., db_disk) = LookupPath::new(&opctx, &self.db_datastore)
             .disk_id(*id)
@@ -112,7 +114,8 @@ impl TestInterfaces for super::Nexus {
     async fn instance_sled_id(&self, id: &Uuid) -> Result<Option<Uuid>, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         self.instance_sled_id_with_opctx(id, &opctx).await
@@ -138,7 +141,8 @@ impl TestInterfaces for super::Nexus {
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let (.., authz_disk, db_disk) =

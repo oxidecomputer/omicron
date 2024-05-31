@@ -9,6 +9,8 @@ use dropshot::{
     ApiEndpointBodyContentType, ExtensionMode, ExtractorMetadata, HttpError,
     RequestContext, ServerContext, SharedExtractor,
 };
+use newtype_derive::NewtypeDeref;
+use newtype_derive::NewtypeFrom;
 
 pub fn parse_cookies(
     headers: &http::HeaderMap<http::HeaderValue>,

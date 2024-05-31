@@ -8,9 +8,12 @@ use super::authz;
 use crate::authn::external::session_cookie::Session;
 use crate::authn::ConsoleSessionWithSiloId;
 use crate::authz::AuthorizedResource;
-use crate::db::DataStore;
+use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
+use slog::debug;
+use slog::o;
+use slog::trace;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -111,6 +114,10 @@ impl OpContext {
         })
     }
 
+    pub(crate) fn datastore(&self) -> &Arc<dyn Storage> {
+        self.authz.datastore()
+    }
+
     fn log_and_metadata_for_authn(
         log: &slog::Logger,
         authn: &authn::Context,
@@ -135,8 +142,8 @@ impl OpContext {
         (log, metadata)
     }
 
-    pub fn load_request_metadata<T: Send + Sync + 'static>(
-        rqctx: &dropshot::RequestContext<T>,
+    pub fn load_request_metadata<C: Send + Sync + 'static>(
+        rqctx: &dropshot::RequestContext<C>,
         metadata: &mut BTreeMap<String, String>,
     ) {
         let request = &rqctx.request;
@@ -151,7 +158,7 @@ impl OpContext {
         log: slog::Logger,
         authz: Arc<authz::Authz>,
         authn: authn::Context,
-        datastore: Arc<DataStore>,
+        datastore: Arc<dyn Storage>,
     ) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
@@ -180,7 +187,7 @@ impl OpContext {
     // outside public interfaces.
     pub fn for_tests(
         log: slog::Logger,
-        datastore: Arc<DataStore>,
+        datastore: Arc<dyn Storage>,
     ) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
@@ -207,7 +214,7 @@ impl OpContext {
     /// functionally the same as one that you already have, but where you want
     /// to provide extra debugging information (in the form of key-value pairs)
     /// in both the OpContext itself and its logger.
-    pub fn child(&self, new_metadata: BTreeMap<String, String>) -> OpContext {
+    pub fn child(&self, new_metadata: BTreeMap<String, String>) -> Self {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
         let mut metadata = self.metadata.clone();

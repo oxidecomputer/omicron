@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db;
-use crate::db::datastore::SERVICES_DB_NAME;
+use crate::project::SERVICES_DB_NAME;
+use nexus_db_model as model;
 use nexus_types::external_api::params;
 use omicron_common::address::SERVICE_VPC_IPV6_PREFIX;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -31,8 +31,8 @@ pub static SERVICES_VPC_DEFAULT_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 });
 
 /// Built-in VPC for internal services on the rack.
-pub static SERVICES_VPC: Lazy<db::model::IncompleteVpc> = Lazy::new(|| {
-    db::model::IncompleteVpc::new(
+pub static SERVICES_VPC: Lazy<model::IncompleteVpc> = Lazy::new(|| {
+    model::IncompleteVpc::new(
         *SERVICES_VPC_ID,
         *super::project::SERVICES_PROJECT_ID,
         *SERVICES_VPC_ROUTER_ID,

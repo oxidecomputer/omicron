@@ -525,19 +525,22 @@ async fn test_deleting_a_silo_deletes_the_idp(
     // Expect that the silo is gone
     let nexus = &cptestctx.server.server_context().nexus;
 
-    let response = IdentityProviderType::lookup(
-        &nexus.datastore(),
-        &nexus.opctx_external_authn(),
-        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
+    let response = nexus
+        .datastore()
+        .identity_provider_lookup(
+            &nexus.opctx_external_authn(),
+            &omicron_common::api::external::Name::try_from(
+                SILO_NAME.to_string(),
+            )
             .unwrap()
             .into(),
-        &omicron_common::api::external::Name::try_from(
-            "some-totally-real-saml-provider".to_string(),
+            &omicron_common::api::external::Name::try_from(
+                "some-totally-real-saml-provider".to_string(),
+            )
+            .unwrap()
+            .into(),
         )
-        .unwrap()
-        .into(),
-    )
-    .await;
+        .await;
 
     assert!(response.is_err());
     match response.err().unwrap() {

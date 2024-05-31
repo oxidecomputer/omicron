@@ -39,6 +39,8 @@ members = [
     "nexus",
     "nexus-config",
     "nexus/authz-macros",
+    "nexus/auth",
+    "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -123,9 +125,11 @@ default-members = [
     "nexus",
     "nexus-config",
     "nexus/authz-macros",
+    "nexus/auth",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/networking",
+    "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -317,8 +321,10 @@ newtype_derive = "0.1.6"
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "025389ff39d594bf2b815377e2c1dc4dd23b1f96" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "025389ff39d594bf2b815377e2c1dc4dd23b1f96" }
 multimap = "0.10.0"
+nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
+nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }

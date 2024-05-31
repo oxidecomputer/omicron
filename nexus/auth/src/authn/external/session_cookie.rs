@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use dropshot::HttpError;
 use http::HeaderValue;
+use slog::debug;
 use uuid::Uuid;
 
 // many parts of the implementation will reference this OWASP guide

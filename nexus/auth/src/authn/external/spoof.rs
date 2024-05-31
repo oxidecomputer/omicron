@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
 use once_cell::sync::Lazy;
+use slog::debug;
 use uuid::Uuid;
 
 // This scheme is intended for demos, development, and testing until we have a

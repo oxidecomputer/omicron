@@ -6,8 +6,8 @@
 use super::role_builtin;
 use super::user_builtin;
 use super::FLEET_ID;
-use crate::db::model::IdentityType;
-use crate::db::model::RoleAssignment;
+use nexus_db_model::IdentityType;
+use nexus_db_model::RoleAssignment;
 use once_cell::sync::Lazy;
 
 pub static BUILTIN_ROLE_ASSIGNMENTS: Lazy<Vec<RoleAssignment>> =

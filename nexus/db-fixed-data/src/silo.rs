@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db;
+use nexus_db_model as model;
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use once_cell::sync::Lazy;
@@ -17,8 +17,8 @@ pub static DEFAULT_SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 ///
 /// This was historically used for demos and the unit tests.  The plan is to
 /// remove it per omicron#2305.
-pub static DEFAULT_SILO: Lazy<db::model::Silo> = Lazy::new(|| {
-    db::model::Silo::new_with_id(
+pub static DEFAULT_SILO: Lazy<model::Silo> = Lazy::new(|| {
+    model::Silo::new_with_id(
         *DEFAULT_SILO_ID,
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -47,8 +47,8 @@ pub static INTERNAL_SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 
 /// Built-in Silo to house internal resources. It contains no users and
 /// can't be logged into.
-pub static INTERNAL_SILO: Lazy<db::model::Silo> = Lazy::new(|| {
-    db::model::Silo::new_with_id(
+pub static INTERNAL_SILO: Lazy<model::Silo> = Lazy::new(|| {
+    model::Silo::new_with_id(
         *INTERNAL_SILO_ID,
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {

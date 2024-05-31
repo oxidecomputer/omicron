@@ -28,22 +28,21 @@ pub mod external;
 pub mod saga;
 pub mod silos;
 
-pub use crate::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
-pub use crate::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
-pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
-pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
-pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
-pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
-pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
-pub use crate::db::fixed_data::user_builtin::USER_SERVICE_BALANCER;
-use crate::db::model::ConsoleSession;
+pub use nexus_db_fixed_data::silo_user::USER_TEST_PRIVILEGED;
+pub use nexus_db_fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
+pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
+pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
+pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
+pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
+pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
+pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
 use crate::authz;
-use crate::db;
-use crate::db::fixed_data::silo::DEFAULT_SILO;
-use crate::db::identity::Asset;
+use newtype_derive::NewtypeDisplay;
+use nexus_db_fixed_data::silo::DEFAULT_SILO;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloRole;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -386,11 +385,13 @@ impl Actor {
     }
 }
 
-impl From<&Actor> for db::model::IdentityType {
-    fn from(actor: &Actor) -> db::model::IdentityType {
+impl From<&Actor> for nexus_db_model::IdentityType {
+    fn from(actor: &Actor) -> nexus_db_model::IdentityType {
         match actor {
-            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
-            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
+            Actor::UserBuiltin { .. } => {
+                nexus_db_model::IdentityType::UserBuiltin
+            }
+            Actor::SiloUser { .. } => nexus_db_model::IdentityType::SiloUser,
         }
     }
 }
@@ -421,7 +422,7 @@ impl std::fmt::Debug for Actor {
 /// A console session with the silo id of the authenticated user
 #[derive(Clone, Debug)]
 pub struct ConsoleSessionWithSiloId {
-    pub console_session: ConsoleSession,
+    pub console_session: nexus_db_model::ConsoleSession,
     pub silo_id: Uuid,
 }
 

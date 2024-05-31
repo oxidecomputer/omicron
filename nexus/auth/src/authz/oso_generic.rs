@@ -12,7 +12,6 @@ use super::roles::RoleSet;
 use super::Authz;
 use crate::authn;
 use crate::context::OpContext;
-use crate::db::DataStore;
 use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
@@ -20,6 +19,7 @@ use futures::FutureExt;
 use omicron_common::api::external::Error;
 use oso::Oso;
 use oso::PolarClass;
+use slog::info;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -267,19 +267,17 @@ impl oso::PolarClass for Database {
 }
 
 impl AuthorizedResource for Database {
-    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+    fn load_roles<'a, 'b, 'c, 'd, 'e>(
         &'a self,
         _: &'b OpContext,
-        _: &'c DataStore,
-        _: &'d authn::Context,
-        _: &'e mut RoleSet,
-    ) -> BoxFuture<'f, Result<(), Error>>
+        _: &'c authn::Context,
+        _: &'d mut RoleSet,
+    ) -> BoxFuture<'e, Result<(), Error>>
     where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f,
+        'a: 'e,
+        'b: 'e,
+        'c: 'e,
+        'd: 'e,
     {
         // We don't use (database) roles to grant access to the database.  The
         // role assignment is hardcoded for all authenticated users.  See the

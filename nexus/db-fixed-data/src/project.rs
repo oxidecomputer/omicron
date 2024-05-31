@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db;
-use crate::db::datastore::SERVICES_DB_NAME;
+use nexus_db_model as model;
 use nexus_types::external_api::params;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use once_cell::sync::Lazy;
+
+/// The name of the built-in Project and VPC for Oxide services.
+pub const SERVICES_DB_NAME: &str = "oxide-services";
 
 /// UUID of built-in project for internal services on the rack.
 pub static SERVICES_PROJECT_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
@@ -16,8 +18,8 @@ pub static SERVICES_PROJECT_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 });
 
 /// Built-in Project for internal services on the rack.
-pub static SERVICES_PROJECT: Lazy<db::model::Project> = Lazy::new(|| {
-    db::model::Project::new_with_id(
+pub static SERVICES_PROJECT: Lazy<model::Project> = Lazy::new(|| {
+    model::Project::new_with_id(
         *SERVICES_PROJECT_ID,
         *super::silo::INTERNAL_SILO_ID,
         params::ProjectCreate {

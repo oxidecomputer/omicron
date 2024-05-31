@@ -4,17 +4,16 @@
 
 //! Facilities for working with the Omicron database
 
-pub mod authn;
-pub mod authz;
-pub mod context;
+pub use nexus_auth::authn;
+pub use nexus_auth::authz;
+pub use nexus_auth::context;
+
 pub mod db;
 pub mod provisioning;
 pub mod transaction_retry;
 
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate newtype_derive;
 #[cfg(test)]
 #[macro_use]
 extern crate diesel;
