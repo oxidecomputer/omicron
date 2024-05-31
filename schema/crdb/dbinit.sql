@@ -3833,6 +3833,7 @@ WITH VmV2pMappings AS (
   JOIN omicron.public.sled s ON vmm.sled_id = s.id
   WHERE n.time_deleted IS NULL
   AND n.kind = 'instance'
+  AND (vmm.state = 'running' OR vmm.state = 'starting')
   AND s.sled_policy = 'in_service'
   AND s.sled_state = 'active'
 ),
