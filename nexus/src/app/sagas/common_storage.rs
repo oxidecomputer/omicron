@@ -7,6 +7,10 @@
 use super::*;
 
 use crate::Nexus;
+use crucible_agent_client::types::Region;
+use crucible_agent_client::types::RegionId;
+use crucible_agent_client::Client as CrucibleAgentClient;
+use crucible_pantry_client::types::VolumeConstructionRequest;
 use internal_dns::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -60,7 +64,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
         disk.volume_id,
     );
 
-    let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
+    let volume_construction_request: VolumeConstructionRequest =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
             ActionError::action_failed(Error::internal_error(&format!(
                 "failed to deserialize disk {} volume data: {}",
@@ -106,4 +110,41 @@ pub(crate) async fn call_pantry_detach_for_disk(
     })?;
 
     Ok(())
+}
+
+/// Get a Crucible Agent's Region
+pub(crate) async fn get_region_from_agent(
+    agent_address: &SocketAddrV6,
+    region_id: Uuid,
+) -> Result<Region, Error> {
+    let url = format!("http://{}", agent_address);
+    let client = CrucibleAgentClient::new(&url);
+
+    let result = client.region_get(&RegionId(region_id.to_string())).await;
+
+    match result {
+        Ok(v) => Ok(v.into_inner()),
+
+        Err(e) => match e {
+            crucible_agent_client::Error::ErrorResponse(rv) => {
+                match rv.status() {
+                    http::StatusCode::NOT_FOUND => {
+                        Err(Error::non_resourcetype_not_found(format!(
+                            "{region_id} not found"
+                        )))
+                    }
+
+                    status if status.is_client_error() => {
+                        Err(Error::invalid_request(&rv.message))
+                    }
+
+                    _ => Err(Error::internal_error(&rv.message)),
+                }
+            }
+
+            _ => Err(Error::internal_error(
+                "unexpected failure during `region_get`",
+            )),
+        },
+    }
 }
