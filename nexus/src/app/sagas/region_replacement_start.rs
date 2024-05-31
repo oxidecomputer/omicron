@@ -11,6 +11,7 @@
 //! It's this saga's responsibility to start that replacement process. This saga
 //! handles the following region replacement request state transitions:
 //!
+//! ```text
 //!         Requested   <--
 //!                       |
 //!             |         |
@@ -22,6 +23,7 @@
 //!             v
 //!
 //!          Running
+//! ```
 //!
 //! The first thing this saga does is set itself as the "operating saga" for the
 //! request, and change the state to "Allocating". Then, it performs the following
