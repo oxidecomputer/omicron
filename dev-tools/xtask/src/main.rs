@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 mod check_workspace_deps;
 mod clippy;
+mod download;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 
@@ -38,10 +39,13 @@ enum Cmds {
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
+    /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
+    Download(download::DownloadArgs),
 
     #[cfg(target_os = "illumos")]
     /// Build a TUF repo
     Releng(external::External),
+
     /// Verify we are not leaking library bindings outside of intended
     /// crates
     #[cfg(target_os = "illumos")]
@@ -61,12 +65,13 @@ enum Cmds {
     VirtualHardware,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
-
+        Cmds::Download(args) => download::run_cmd(args).await,
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec("omicron-releng")
