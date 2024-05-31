@@ -3842,6 +3842,7 @@ WITH VmV2pMappings AS (
   JOIN omicron.public.sled s ON vmm.sled_id = s.id
   WHERE n.time_deleted IS NULL
   AND n.kind = 'instance'
+  AND (vmm.state = 'running' OR vmm.state = 'starting')
   AND s.sled_policy = 'in_service'
   AND s.sled_state = 'active'
 ),
@@ -4020,7 +4021,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '68.0.0', NULL)
+    (TRUE, NOW(), NOW(), '69.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
