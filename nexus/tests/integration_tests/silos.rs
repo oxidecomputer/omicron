@@ -4,9 +4,7 @@
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use dropshot::ResultsPage;
-use nexus_db_queries::authn::silos::{
-    AuthenticatedSubject, IdentityProviderType,
-};
+use nexus_db_queries::authn::silos::AuthenticatedSubject;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
