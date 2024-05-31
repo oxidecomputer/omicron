@@ -5,6 +5,7 @@
 //! Low-level facility for generating Blueprints
 
 use crate::ip_allocator::IpAllocator;
+use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
 use internal_dns::config::Host;
@@ -25,6 +26,7 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
@@ -351,33 +353,72 @@ impl<'a> BlueprintBuilder<'a> {
         self.comments.push(String::from(comment));
     }
 
-    /// Expunges all zones from a sled.
+    /// Expunges all zones requiring expungement from a sled.
     ///
     /// Returns a list of zone IDs expunged (excluding zones that were already
     /// expunged). If the list is empty, then the operation was a no-op.
-    pub(crate) fn expunge_all_zones_for_sled(
+    pub(crate) fn expunge_zones_for_sled(
         &mut self,
         sled_id: SledUuid,
-        reason: ZoneExpungeReason,
-    ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
+        sled_details: &SledDetails,
+    ) -> Result<BTreeMap<OmicronZoneUuid, ZoneExpungeReason>, Error> {
         let log = self.log.new(o!(
             "sled_id" => sled_id.to_string(),
         ));
 
         // Do any zones need to be marked expunged?
-        let mut zones_to_expunge = BTreeSet::new();
+        let mut zones_to_expunge = BTreeMap::new();
 
         let sled_zones = self.zones.current_sled_zones(sled_id);
-        for (z, state) in sled_zones {
+        for (zone_config, state) in sled_zones {
+            let zone_id = zone_config.id;
+            let log = log.new(o!(
+                "zone_id" => zone_id.to_string()
+            ));
+
+            let Some(reason) =
+                zone_needs_expungement(sled_details, zone_config)
+            else {
+                continue;
+            };
+
             let is_expunged =
-                is_already_expunged(z, state).map_err(|error| {
+                is_already_expunged(zone_config, state).map_err(|error| {
                     Error::Planner(anyhow!(error).context(format!(
                         "for sled {sled_id}, error computing zones to expunge"
                     )))
                 })?;
 
             if !is_expunged {
-                zones_to_expunge.insert(z.id);
+                match reason {
+                    ZoneExpungeReason::DiskExpunged => {
+                        info!(
+                            &log,
+                            "expunged disk with non-expunged zone was found"
+                        );
+                    }
+                    ZoneExpungeReason::SledDecommissioned => {
+                        // A sled marked as decommissioned should have no resources
+                        // allocated to it. If it does, it's an illegal state, possibly
+                        // introduced by a bug elsewhere in the system -- we need to
+                        // produce a loud warning (i.e. an ERROR-level log message) on
+                        // this, while still removing the zones.
+                        error!(
+                            &log,
+                            "sled has state Decommissioned, yet has zone \
+                             allocated to it; will expunge it"
+                        );
+                    }
+                    ZoneExpungeReason::SledExpunged => {
+                        // This is the expected situation.
+                        info!(
+                            &log,
+                            "expunged sled with non-expunged zone found"
+                        );
+                    }
+                }
+
+                zones_to_expunge.insert(zone_id, reason);
             }
         }
 
@@ -389,51 +430,43 @@ impl<'a> BlueprintBuilder<'a> {
             return Ok(zones_to_expunge);
         }
 
-        match reason {
-            ZoneExpungeReason::SledDecommissioned { policy } => {
-                // A sled marked as decommissioned should have no resources
-                // allocated to it. If it does, it's an illegal state, possibly
-                // introduced by a bug elsewhere in the system -- we need to
-                // produce a loud warning (i.e. an ERROR-level log message) on
-                // this, while still removing the zones.
-                error!(
-                    &log,
-                    "sled has state Decommissioned, yet has zones \
-                     allocated to it; will expunge them \
-                     (sled policy is \"{policy:?}\")"
-                );
-            }
-            ZoneExpungeReason::SledExpunged => {
-                // This is the expected situation.
-                info!(
-                    &log,
-                    "expunged sled with {} non-expunged zones found \
-                     (will expunge all zones)",
-                    zones_to_expunge.len()
-                );
-            }
-        }
-
         // Now expunge all the zones that need it.
         let change = self.zones.change_sled_zones(sled_id);
-        change.expunge_zones(zones_to_expunge.clone()).map_err(|error| {
-            anyhow!(error)
-                .context(format!("for sled {sled_id}, error expunging zones"))
-        })?;
+        change
+            .expunge_zones(zones_to_expunge.keys().cloned().collect())
+            .map_err(|error| {
+                anyhow!(error).context(format!(
+                    "for sled {sled_id}, error expunging zones"
+                ))
+            })?;
 
-        // Finally, add a comment describing what happened.
-        let reason = match reason {
-            ZoneExpungeReason::SledDecommissioned { .. } => {
-                "sled state is decommissioned"
+        // Finally, add comments describing what happened.
+        //
+        // Group the zones by their reason for expungement.
+        let mut count_disk_expunged = 0;
+        let mut count_sled_decommissioned = 0;
+        let mut count_sled_expunged = 0;
+        for reason in zones_to_expunge.values() {
+            match reason {
+                ZoneExpungeReason::DiskExpunged => count_disk_expunged += 1,
+                ZoneExpungeReason::SledDecommissioned => {
+                    count_sled_decommissioned += 1;
+                }
+                ZoneExpungeReason::SledExpunged => count_sled_expunged += 1,
+            };
+        }
+        let count_and_reason = [
+            (count_disk_expunged, "zone was using expunged disk"),
+            (count_sled_decommissioned, "sled state is decommissioned"),
+            (count_sled_expunged, "sled policy is expunged"),
+        ];
+        for (count, reason) in count_and_reason {
+            if count > 0 {
+                self.comment(format!(
+                    "sled {sled_id} ({reason}): {count} zones expunged",
+                ));
             }
-            ZoneExpungeReason::SledExpunged => "sled policy is expunged",
-        };
-
-        self.comment(format!(
-            "sled {} ({reason}): {} zones expunged",
-            sled_id,
-            zones_to_expunge.len(),
-        ));
+        }
 
         Ok(zones_to_expunge)
     }

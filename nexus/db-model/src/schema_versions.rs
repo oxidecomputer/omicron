@@ -29,7 +29,8 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(67, "filter-v2p-mapping-by-instance-state"),
+        KnownVersion::new(68, "filter-v2p-mapping-by-instance-state"),
+        KnownVersion::new(67, "add-instance-updater-lock"),
         KnownVersion::new(66, "blueprint-crdb-preserve-downgrade"),
         KnownVersion::new(65, "region-replacement"),
         KnownVersion::new(64, "add-view-for-v2p-mappings"),
