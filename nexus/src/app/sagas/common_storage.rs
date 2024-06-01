@@ -112,7 +112,7 @@ pub(crate) async fn call_pantry_detach_for_disk(
     Ok(())
 }
 
-/// Get a Crucible Agent's Region
+/// GET a Region from a Crucible Agent
 pub(crate) async fn get_region_from_agent(
     agent_address: &SocketAddrV6,
     region_id: Uuid,
