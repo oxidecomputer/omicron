@@ -164,17 +164,12 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
     /// That's how this works for most resources.  There are other kinds of
     /// resources (like the Database itself) that aren't stored in the database
     /// and for which a different mechanism might be used.
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e;
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> BoxFuture<'fut, Result<(), Error>>;
 
     /// Invoked on authz failure to determine the final authz result
     ///
@@ -227,7 +222,7 @@ mod test {
             _resource_type: ResourceType,
             _resource_id: Uuid,
         ) -> Result<Vec<RoleAssignment>, Error> {
-            todo!();
+            unimplemented!("This test is not expected to access the database");
         }
     }
 
@@ -257,17 +252,12 @@ mod test {
         #[derive(Clone, PolarClass)]
         struct UnregisteredResource;
         impl AuthorizedResource for UnregisteredResource {
-            fn load_roles<'a, 'b, 'c, 'd, 'e>(
-                &'a self,
-                _: &'b OpContext,
-                _: &'c authn::Context,
-                _: &'d mut RoleSet,
-            ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-            where
-                'a: 'e,
-                'b: 'e,
-                'c: 'e,
-                'd: 'e,
+            fn load_roles<'fut>(
+                &'fut self,
+                _: &'fut OpContext,
+                _: &'fut authn::Context,
+                _: &'fut mut RoleSet,
+            ) -> futures::future::BoxFuture<'fut, Result<(), Error>>
             {
                 // authorize() shouldn't get far enough to call this.
                 unimplemented!();

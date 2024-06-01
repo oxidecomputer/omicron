@@ -266,18 +266,12 @@ impl oso::PolarClass for Database {
 }
 
 impl AuthorizedResource for Database {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        _: &'b OpContext,
-        _: &'c authn::Context,
-        _: &'d mut RoleSet,
-    ) -> BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        _: &'fut OpContext,
+        _: &'fut authn::Context,
+        _: &'fut mut RoleSet,
+    ) -> BoxFuture<'fut, Result<(), Error>> {
         // We don't use (database) roles to grant access to the database.  The
         // role assignment is hardcoded for all authenticated users.  See the
         // "has_role" Polar method above.

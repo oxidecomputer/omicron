@@ -380,7 +380,7 @@ mod test {
             _resource_type: ResourceType,
             _resource_id: Uuid,
         ) -> Result<Vec<RoleAssignment>, Error> {
-            todo!();
+            unimplemented!("This test is not expected to access the database");
         }
     }
 

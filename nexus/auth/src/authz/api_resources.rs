@@ -109,18 +109,12 @@ impl<T> AuthorizedResource for T
 where
     T: ApiResource + oso::PolarClass + Clone,
 {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> BoxFuture<'fut, Result<(), Error>> {
         load_roles_for_resource_tree(self, opctx, authn, roleset).boxed()
     }
 
@@ -261,18 +255,12 @@ impl oso::PolarClass for BlueprintConfig {
 }
 
 impl AuthorizedResource for BlueprintConfig {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on the BlueprintConfig, only permissions. But we
         // still need to load the Fleet-related roles to verify that the actor
         // has the "admin" role on the Fleet (possibly conferred from a Silo
@@ -318,18 +306,12 @@ impl oso::PolarClass for ConsoleSessionList {
 }
 
 impl AuthorizedResource for ConsoleSessionList {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
@@ -371,18 +353,12 @@ impl oso::PolarClass for DnsConfig {
 }
 
 impl AuthorizedResource for DnsConfig {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
@@ -424,18 +400,12 @@ impl oso::PolarClass for IpPoolList {
 }
 
 impl AuthorizedResource for IpPoolList {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on the IpPoolList, only permissions. But we still
         // need to load the Fleet-related roles to verify that the actor has the
         // "admin" role on the Fleet (possibly conferred from a Silo role).
@@ -472,18 +442,12 @@ impl oso::PolarClass for DeviceAuthRequestList {
 }
 
 impl AuthorizedResource for DeviceAuthRequestList {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on the DeviceAuthRequestList, only permissions. But we
         // still need to load the Fleet-related roles to verify that the actor has the
         // "admin" role on the Fleet.
@@ -527,18 +491,12 @@ impl oso::PolarClass for Inventory {
 }
 
 impl AuthorizedResource for Inventory {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
@@ -583,18 +541,12 @@ impl oso::PolarClass for SiloCertificateList {
 }
 
 impl AuthorizedResource for SiloCertificateList {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on this resource, but we still need to load the
         // Silo-related roles.
         self.silo().load_roles(opctx, authn, roleset)
@@ -641,18 +593,12 @@ impl oso::PolarClass for SiloIdentityProviderList {
 }
 
 impl AuthorizedResource for SiloIdentityProviderList {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on this resource, but we still need to load the
         // Silo-related roles.
         self.silo().load_roles(opctx, authn, roleset)
@@ -696,18 +642,12 @@ impl oso::PolarClass for SiloUserList {
 }
 
 impl AuthorizedResource for SiloUserList {
-    fn load_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        opctx: &'b OpContext,
-        authn: &'c authn::Context,
-        roleset: &'d mut RoleSet,
-    ) -> futures::future::BoxFuture<'e, Result<(), Error>>
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on this resource, but we still need to load the
         // Silo-related roles.
         self.silo().load_roles(opctx, authn, roleset)

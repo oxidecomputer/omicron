@@ -3,6 +3,7 @@ name = "nexus-db-fixed-data"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
+description = "Hard-coded database data, including defaults and built-ins"
 
 [lints]
 workspace = true
