@@ -783,7 +783,6 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data;
     use crate::db::lookup::LookupPath;
     use nexus_db_model::Project;
     use nexus_test_utils::db::test_setup_database;
@@ -796,7 +795,7 @@ mod tests {
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> authz::Instance {
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
         let instance_id = Uuid::new_v4();
 

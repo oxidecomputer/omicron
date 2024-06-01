@@ -86,6 +86,7 @@ tough.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 
+nexus-auth.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true

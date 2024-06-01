@@ -4474,6 +4474,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "authz-macros",
+ "base64 0.22.1",
+ "chrono",
+ "cookie 0.18.1",
+ "dropshot",
+ "futures",
+ "headers",
+ "http 0.2.12",
+ "hyper 0.14.28",
+ "newtype_derive",
+ "nexus-db-fixed-data",
+ "nexus-db-model",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "once_cell",
+ "openssl",
+ "oso",
+ "pq-sys",
+ "samael",
+ "serde",
+ "serde_urlencoded",
+ "slog",
+ "strum",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -4512,6 +4550,21 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "toml 0.8.13",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-db-fixed-data"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-model",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "once_cell",
+ "pq-sys",
+ "strum",
  "uuid",
 ]
 
@@ -4568,14 +4621,11 @@ dependencies = [
  "assert_matches",
  "async-bb8-diesel",
  "async-trait",
- "authz-macros",
- "base64 0.22.1",
  "bb8",
  "camino",
  "camino-tempfile",
  "chrono",
  "const_format",
- "cookie 0.18.1",
  "db-macros",
  "diesel",
  "diesel-dtrace",
@@ -4583,17 +4633,15 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
- "headers",
- "http 0.2.12",
- "hyper 0.14.28",
  "hyper-rustls 0.26.0",
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.1",
  "macaddr",
- "newtype_derive",
+ "nexus-auth",
  "nexus-config",
+ "nexus-db-fixed-data",
  "nexus-db-model",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
@@ -4608,7 +4656,6 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapiv3",
- "openssl",
  "oso",
  "oximeter",
  "oxnet",
@@ -4623,12 +4670,10 @@ dependencies = [
  "ref-cast",
  "regex",
  "rustls 0.22.4",
- "samael",
  "schemars",
  "semver 1.0.23",
  "serde",
  "serde_json",
- "serde_urlencoded",
  "serde_with",
  "sled-agent-client",
  "slog",
@@ -5437,6 +5482,7 @@ dependencies = [
  "itertools 0.12.1",
  "macaddr",
  "mg-admin-client",
+ "nexus-auth",
  "nexus-client",
  "nexus-config",
  "nexus-db-model",
@@ -5921,6 +5967,7 @@ dependencies = [
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
+ "unicode-xid",
  "usdt 0.5.0",
  "usdt-impl 0.5.0",
  "uuid",
