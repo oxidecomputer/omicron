@@ -83,21 +83,34 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<types::InstanceState>
-    for omicron_common::api::external::InstanceState
-{
-    fn from(s: types::InstanceState) -> Self {
+impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
+    fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmState as Input;
         match s {
-            types::InstanceState::Creating => Self::Creating,
-            types::InstanceState::Starting => Self::Starting,
-            types::InstanceState::Running => Self::Running,
-            types::InstanceState::Stopping => Self::Stopping,
-            types::InstanceState::Stopped => Self::Stopped,
-            types::InstanceState::Rebooting => Self::Rebooting,
-            types::InstanceState::Migrating => Self::Migrating,
-            types::InstanceState::Repairing => Self::Repairing,
-            types::InstanceState::Failed => Self::Failed,
-            types::InstanceState::Destroyed => Self::Destroyed,
+            Input::Starting => types::VmmState::Starting,
+            Input::Running => types::VmmState::Running,
+            Input::Stopping => types::VmmState::Stopping,
+            Input::Stopped => types::VmmState::Stopped,
+            Input::Rebooting => types::VmmState::Rebooting,
+            Input::Migrating => types::VmmState::Migrating,
+            Input::Failed => types::VmmState::Failed,
+            Input::Destroyed => types::VmmState::Destroyed,
+        }
+    }
+}
+
+impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
+    fn from(s: types::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmState as Output;
+        match s {
+            types::VmmState::Starting => Output::Starting,
+            types::VmmState::Running => Output::Running,
+            types::VmmState::Stopping => Output::Stopping,
+            types::VmmState::Stopped => Output::Stopped,
+            types::VmmState::Rebooting => Output::Rebooting,
+            types::VmmState::Migrating => Output::Migrating,
+            types::VmmState::Failed => Output::Failed,
+            types::VmmState::Destroyed => Output::Destroyed,
         }
     }
 }
@@ -122,8 +135,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
-        todo!("gjc");
-        // Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
+        Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
     }
 }
 
@@ -137,26 +149,6 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
             instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
-        }
-    }
-}
-
-impl From<omicron_common::api::external::InstanceState>
-    for types::InstanceState
-{
-    fn from(s: omicron_common::api::external::InstanceState) -> Self {
-        use omicron_common::api::external::InstanceState;
-        match s {
-            InstanceState::Creating => Self::Creating,
-            InstanceState::Starting => Self::Starting,
-            InstanceState::Running => Self::Running,
-            InstanceState::Stopping => Self::Stopping,
-            InstanceState::Stopped => Self::Stopped,
-            InstanceState::Rebooting => Self::Rebooting,
-            InstanceState::Migrating => Self::Migrating,
-            InstanceState::Repairing => Self::Repairing,
-            InstanceState::Failed => Self::Failed,
-            InstanceState::Destroyed => Self::Destroyed,
         }
     }
 }
@@ -189,25 +181,6 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
             DiskState::Detaching(u) => Self::Detaching(u),
             DiskState::Destroyed => Self::Destroyed,
             DiskState::Faulted => Self::Faulted,
-        }
-    }
-}
-
-impl From<&types::InstanceState>
-    for omicron_common::api::external::InstanceState
-{
-    fn from(state: &types::InstanceState) -> Self {
-        match state {
-            types::InstanceState::Creating => Self::Creating,
-            types::InstanceState::Starting => Self::Starting,
-            types::InstanceState::Running => Self::Running,
-            types::InstanceState::Stopping => Self::Stopping,
-            types::InstanceState::Stopped => Self::Stopped,
-            types::InstanceState::Rebooting => Self::Rebooting,
-            types::InstanceState::Migrating => Self::Migrating,
-            types::InstanceState::Repairing => Self::Repairing,
-            types::InstanceState::Failed => Self::Failed,
-            types::InstanceState::Destroyed => Self::Destroyed,
         }
     }
 }

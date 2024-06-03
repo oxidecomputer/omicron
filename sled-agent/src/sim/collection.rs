@@ -421,7 +421,6 @@ mod test {
     use omicron_common::api::external::DiskState;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::external::InstanceState;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_common::api::internal::nexus::SledInstanceState;

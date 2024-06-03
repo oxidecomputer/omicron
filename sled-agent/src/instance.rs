@@ -1539,7 +1539,7 @@ mod tests {
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
     use internal_dns::resolver::Resolver;
     use omicron_common::api::external::{
-        ByteCount, Generation, Hostname, InstanceCpuCount, InstanceState,
+        ByteCount, Generation, Hostname, InstanceCpuCount,
     };
     use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
     use omicron_common::FileKv;

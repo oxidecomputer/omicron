@@ -26,12 +26,6 @@ impl_enum_type!(
 );
 
 impl InstanceState {
-    /* TODO(gjc)
-    pub fn new(state: external::InstanceState) -> Self {
-        Self(state)
-    }
-    */
-
     pub fn state(&self) -> external::InstanceState {
         external::InstanceState::from(*self)
     }
@@ -65,34 +59,3 @@ impl From<InstanceState> for omicron_common::api::external::InstanceState {
         }
     }
 }
-
-impl From<InstanceState> for sled_agent_client::types::InstanceState {
-    fn from(s: InstanceState) -> Self {
-        todo!("gjc");
-        /*
-        use external::InstanceState::*;
-        use sled_agent_client::types::InstanceState as Output;
-        match s.0 {
-            Creating => Output::Creating,
-            Starting => Output::Starting,
-            Running => Output::Running,
-            Stopping => Output::Stopping,
-            Stopped => Output::Stopped,
-            Rebooting => Output::Rebooting,
-            Migrating => Output::Migrating,
-            Repairing => Output::Repairing,
-            Failed => Output::Failed,
-            Destroyed => Output::Destroyed,
-        }
-        */
-    }
-}
-
-// TODO(gjc) do we need this?
-/*
-impl From<external::InstanceState> for InstanceState {
-    fn from(state: external::InstanceState) -> Self {
-        Self::new(state)
-    }
-}
-*/

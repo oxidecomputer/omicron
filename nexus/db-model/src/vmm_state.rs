@@ -63,6 +63,22 @@ impl From<VmmState> for omicron_common::api::internal::nexus::VmmState {
     }
 }
 
+impl From<VmmState> for sled_agent_client::types::VmmState {
+    fn from(value: VmmState) -> Self {
+        use sled_agent_client::types::VmmState as Output;
+        match value {
+            VmmState::Starting => Output::Starting,
+            VmmState::Running => Output::Running,
+            VmmState::Stopping => Output::Stopping,
+            VmmState::Stopped => Output::Stopped,
+            VmmState::Rebooting => Output::Rebooting,
+            VmmState::Migrating => Output::Migrating,
+            VmmState::Failed => Output::Failed,
+            VmmState::Destroyed => Output::Destroyed,
+        }
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::VmmState> for VmmState {
     fn from(value: omicron_common::api::internal::nexus::VmmState) -> Self {
         use omicron_common::api::internal::nexus::VmmState as ApiState;

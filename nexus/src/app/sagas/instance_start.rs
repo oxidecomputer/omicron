@@ -16,7 +16,7 @@ use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::external::{Error, InstanceState};
+use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog::info;
 use steno::{ActionError, Node};
