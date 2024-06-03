@@ -260,9 +260,7 @@ async fn sis_move_to_starting(
         // be running before Propolis thinks it has started.)
         None => {
             let new_runtime = db::model::InstanceRuntimeState {
-                nexus_state: db::model::InstanceState::new(
-                    InstanceState::Running,
-                ),
+                nexus_state: db::model::InstanceState::Vmm,
                 propolis_id: Some(propolis_id),
                 time_updated: Utc::now(),
                 gen: db_instance.runtime().gen.next().into(),
@@ -300,7 +298,7 @@ async fn sis_move_to_starting_undo(
           "instance_id" => %instance_id);
 
     let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: db::model::InstanceState::NoVmm,
         propolis_id: None,
         gen: db_instance.runtime_state.gen.next().into(),
         ..db_instance.runtime_state

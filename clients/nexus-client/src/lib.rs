@@ -122,7 +122,8 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
-        Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
+        todo!("gjc");
+        // Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
     }
 }
 

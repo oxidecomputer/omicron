@@ -42,25 +42,25 @@ use uuid::Uuid;
 // States an instance must be in to operate on its network interfaces, in
 // most situations.
 static INSTANCE_STOPPED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Stopped));
+    Lazy::new(|| db::model::InstanceState::NoVmm);
 
 static INSTANCE_FAILED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Failed));
+    Lazy::new(|| db::model::InstanceState::Failed);
 
 // An instance can be in the creating state while we manipulate its
 // interfaces. The intention is for this only to be the case during sagas.
 static INSTANCE_CREATING: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Creating));
+    Lazy::new(|| db::model::InstanceState::Creating);
 
 // A sentinel value for the instance state when the instance actually does
 // not exist.
 static INSTANCE_DESTROYED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Destroyed));
+    Lazy::new(|| db::model::InstanceState::Destroyed);
 
 // A sentinel value for the instance state when the instance has an active
 // VMM, irrespective of that VMM's actual state.
 static INSTANCE_RUNNING: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Running));
+    Lazy::new(|| db::model::InstanceState::Vmm);
 
 static NO_INSTANCE_SENTINEL_STRING: Lazy<String> =
     Lazy::new(|| String::from(NO_INSTANCE_SENTINEL));

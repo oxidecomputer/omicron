@@ -72,9 +72,7 @@ impl Instance {
             InstanceIdentity::new(instance_id, params.identity.clone());
 
         let runtime_state = InstanceRuntimeState::new(
-            InstanceState::new(
-                omicron_common::api::external::InstanceState::Creating,
-            ),
+            InstanceState::Creating,
             identity.time_modified,
         );
 
@@ -138,8 +136,8 @@ impl DatastoreAttachTargetConfig<ExternalIp> for Instance {
 //      `diesel::prelude::AsChangeset`.
 #[diesel(table_name = instance, treat_none_as_null = true)]
 pub struct InstanceRuntimeState {
-    /// The instance state to fall back on if asked to compute this instance's
-    /// state while it has no active VMM.
+    /// The "internal" state of this instance. The instance's externally-visible
+    /// state may be delegated to the instance's active VMM, if it has one.
     ///
     /// This field is guarded by the instance's `gen` field.
     #[diesel(column_name = state)]
@@ -221,13 +219,13 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
         state: omicron_common::api::internal::nexus::InstanceRuntimeState,
     ) -> Self {
         let nexus_state = if state.propolis_id.is_some() {
-            omicron_common::api::external::InstanceState::Running
+            InstanceState::Vmm
         } else {
-            omicron_common::api::external::InstanceState::Stopped
+            InstanceState::NoVmm
         };
 
         Self {
-            nexus_state: InstanceState::new(nexus_state),
+            nexus_state,
             time_updated: state.time_updated,
             gen: state.gen.into(),
             propolis_id: state.propolis_id,

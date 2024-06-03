@@ -446,7 +446,7 @@ table! {
         propolis_port -> Int4,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -459,7 +459,7 @@ table! {
         project_name -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
         active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,

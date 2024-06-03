@@ -142,7 +142,7 @@ impl InstanceWatcher {
 
             let new_runtime_state: SledInstanceState = state.into();
             check.outcome =
-                CheckOutcome::Success(new_runtime_state.vmm_state.state);
+                CheckOutcome::Success(new_runtime_state.vmm_state.state.into());
             slog::debug!(
                 opctx.log,
                 "updating instance state";

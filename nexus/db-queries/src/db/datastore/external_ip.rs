@@ -479,11 +479,15 @@ impl DataStore {
                 }
 
                 Err(match &collection.runtime_state.nexus_state {
+                    // REVIEW(gjc): it was never possible for an instance to
+                    // have any of the SAFE_TRANSIENT_INSTANCE_STATES anyway
+                    /*
                     state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state)
                         => Error::unavail(&format!(
                         "tried to attach {kind} IP while instance was changing state: \
                          attach will be safe to retry once start/stop completes"
                     )),
+                    */
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
                             Error::invalid_request(&format!(
@@ -608,10 +612,14 @@ impl DataStore {
                 }
 
                 match collection.runtime_state.nexus_state {
+                    // REVIEW(gjc): see above, there was no way this was true
+                    // (I think)
+                    /*
                     state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(&format!(
                         "tried to attach {kind} IP while instance was changing state: \
                          detach will be safe to retry once start/stop completes"
                     )),
+                    */
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error(&format!("failed to detach {kind} IP"))
                     },

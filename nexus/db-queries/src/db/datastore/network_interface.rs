@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -681,8 +680,7 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null())
                 .select(Instance::as_select())
         };
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
+        let stopped = db::model::InstanceState::NoVmm;
 
         // This is the actual query to update the target interface.
         // Unlike Postgres, CockroachDB doesn't support inserting or updating a view

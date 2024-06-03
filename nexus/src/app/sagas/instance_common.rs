@@ -9,14 +9,12 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use chrono::Utc;
 use nexus_db_model::{
-    ByteCount, ExternalIp, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResource,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
+    SledReservationConstraints, SledResource, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::{Error, NameOrId};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
@@ -125,7 +123,7 @@ pub async fn destroy_vmm_record(
     prev_record: &db::model::Vmm,
 ) -> Result<(), anyhow::Error> {
     let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::InstanceState(InstanceState::Destroyed),
+        state: db::model::VmmState::Destroyed,
         time_state_updated: Utc::now(),
         gen: prev_record.runtime.gen.next().into(),
     };
@@ -220,7 +218,10 @@ pub async fn instance_ip_get_instance_state(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let found_state = inst_and_vmm.instance().runtime_state.nexus_state.0;
+    let found_vmm_state =
+        inst_and_vmm.vmm().as_ref().map(|vmm| vmm.runtime.state);
+    let found_instance_state =
+        inst_and_vmm.instance().runtime_state.nexus_state;
     let mut sled_id = inst_and_vmm.sled_id();
 
     // Arriving here means we started in a correct state (running/stopped).
@@ -236,29 +237,59 @@ pub async fn instance_ip_get_instance_state(
     // - deleting: can only be called from stopped -- we won't push to dpd
     //             or sled-agent, and IP record might be deleted or forcibly
     //             detached. Catch here just in case.
-    match found_state {
-        InstanceState::Stopped
-        | InstanceState::Starting
-        | InstanceState::Stopping => {
+    //
+    // REVIEW(gjc) did I change the semantics of this?
+    match (found_instance_state, found_vmm_state) {
+        (InstanceState::NoVmm, _)
+        | (InstanceState::Vmm, Some(VmmState::Starting)) => {
             sled_id = None;
         }
-        InstanceState::Running => {}
-        state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state.into()) => {
+        (InstanceState::Vmm, Some(VmmState::Running)) => {}
+        (
+            InstanceState::Vmm,
+            Some(VmmState::Rebooting)
+            | Some(VmmState::Migrating)
+            | Some(VmmState::Stopping)
+            | Some(VmmState::Stopped),
+        ) => {
+            // Unwrapping is safe since all the matched states are Some.
+            let found_vmm_state = found_vmm_state.unwrap();
             return Err(ActionError::action_failed(Error::unavail(&format!(
-                "can't {verb} in transient state {state}"
-            ))))
+                "can't {verb} in transient state {found_vmm_state}"
+            ))));
         }
-        InstanceState::Destroyed => {
+        (InstanceState::Destroyed, _) => {
             return Err(ActionError::action_failed(Error::not_found_by_id(
                 omicron_common::api::external::ResourceType::Instance,
                 &authz_instance.id(),
             )))
         }
-        // Final cases are repairing/failed.
-        _ => {
+        (InstanceState::Creating, _) => {
+            return Err(ActionError::action_failed(Error::invalid_request(
+                "cannot modify instance IPs, instance is still being created",
+            )))
+        }
+        (InstanceState::Failed, _)
+        | (InstanceState::Vmm, Some(VmmState::Failed)) => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is in unhealthy state",
             )))
+        }
+        (InstanceState::Vmm, None) => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!(
+                    "instance {} is in vmm state but has no valid vmm id",
+                    authz_instance.id(),
+                ),
+            )));
+        }
+        (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!(
+                    "instance {} points to destroyed vmm",
+                    authz_instance.id(),
+                ),
+            )));
         }
     }
 
