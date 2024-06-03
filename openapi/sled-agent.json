@@ -4179,14 +4179,6 @@
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
         "properties": {
-          "instance_state": {
-            "description": "The sled's conception of the state of the instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
-              }
-            ]
-          },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
             "type": "string",
@@ -4202,7 +4194,6 @@
           }
         },
         "required": [
-          "instance_state",
           "propolis_id",
           "vmm_state"
         ]
