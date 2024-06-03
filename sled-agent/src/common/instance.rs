@@ -400,7 +400,7 @@ impl InstanceStates {
         &self,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> bool {
-        match (self.migration, migration_ids) {
+        match (self.migration.as_ref(), migration_ids) {
             // If the migration ID is already set, and this is a request to set
             // IDs, the records match if the relevant IDs match.
             (Some(migration), Some(ids)) => {
