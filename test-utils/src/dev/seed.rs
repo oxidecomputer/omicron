@@ -9,7 +9,14 @@ use camino::{Utf8Path, Utf8PathBuf};
 use filetime::FileTime;
 use slog::Logger;
 
+use super::db::CockroachStarterBuilder;
+use super::db::COCKROACHDB_VERSION;
+use super::db::PREV_COCKROACHDB_VERSION;
 use super::CRDB_SEED_TAR_ENV;
+
+fn use_prev() -> bool {
+    std::env::var("CRDB_SEED_USE_PREV").as_deref() == Ok("yes")
+}
 
 /// Creates a string identifier for the current DB schema and version.
 //
@@ -17,7 +24,8 @@ use super::CRDB_SEED_TAR_ENV;
 /// for each revision of the DB.
 pub fn digest_unique_to_schema() -> String {
     let schema = include_str!("../../../schema/crdb/dbinit.sql");
-    let crdb_version = include_str!("../../../tools/cockroachdb_version");
+    let crdb_version =
+        if use_prev() { PREV_COCKROACHDB_VERSION } else { COCKROACHDB_VERSION };
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
     ctx.update(&schema.as_bytes());
     ctx.update(&crdb_version.as_bytes());
@@ -173,9 +181,31 @@ pub async fn test_setup_database_seed(
         super::StorageSource::PopulateLatest {
             output_dir: tmp_seed_dir.path().to_owned(),
         },
+        if use_prev() {
+            CockroachStarterBuilder::new_prev()
+        } else {
+            CockroachStarterBuilder::new()
+        },
     )
     .await
     .context("failed to setup database")?;
+    if use_prev() {
+        // ensure the cluster doesn't get upgraded once the newer binary starts
+        let (major, _) = PREV_COCKROACHDB_VERSION
+            .trim()
+            .trim_start_matches('v')
+            .rsplit_once('.')
+            .context("failed to get cockroachdb major version")?;
+        let sql = format!(
+            "SET CLUSTER SETTING cluster.preserve_downgrade_option = '{major}'"
+        );
+        db.connect()
+            .await
+            .context("failed to connect to database")?
+            .execute(&sql, &[])
+            .await
+            .context("failed to set cluster.preserve_downgrade_option")?;
+    }
     db.cleanup().await.context("failed to cleanup database")?;
 
     // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
