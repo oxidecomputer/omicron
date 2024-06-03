@@ -12,6 +12,7 @@ use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
+use nexus_db_queries::db::datastore::instance;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
@@ -249,7 +250,6 @@ async fn siud_update_instance(
 ) -> Result<(), ActionError> {
     let Params { ref authz_instance, ref vmm_id, instance, .. } =
         sagactx.saga_params::<Params>()?;
-
     let osagactx = sagactx.user_data();
     let new_runtime = InstanceRuntimeState {
         propolis_id: None,

@@ -135,8 +135,8 @@ pub struct InstanceAndVmms {
 /// when the lock is released.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UpdaterLock {
-    saga_lock_id: Uuid,
-    locked_gen: Generation,
+    pub saga_lock_id: Uuid,
+    pub locked_gen: Generation,
 }
 
 /// Errors returned by [`DataStore::instance_updater_lock`].
@@ -694,22 +694,21 @@ impl DataStore {
         // *same* instance at the same time. So, idempotency is probably more
         // important than handling that extremely unlikely edge case.
         let mut did_lock = false;
+        let mut locked_gen = instance.updater_gen;
         loop {
-            match instance.runtime_state.updater_id {
+            match instance.updater_id {
                 // If the `updater_id` field is not null and the ID equals this
                 // saga's ID, we already have the lock. We're done here!
                 Some(lock_id) if lock_id == saga_lock_id => {
-                    slog::info!(
+                    slog::debug!(
                         &opctx.log,
                         "instance updater lock acquired!";
                         "instance_id" => %instance_id,
                         "saga_id" => %saga_lock_id,
                         "already_locked" => !did_lock,
+                        "locked_gen" => ?locked_gen,
                     );
-                    return Ok(UpdaterLock {
-                        saga_lock_id,
-                        locked_gen: instance.runtime_state.updater_gen,
-                    });
+                    return Ok(UpdaterLock { saga_lock_id, locked_gen });
                 }
                 // The `updater_id` field is set, but it's not our ID. The instance
                 // is locked by a different saga, so give up.
@@ -729,7 +728,8 @@ impl DataStore {
             }
 
             // Okay, now attempt to acquire the lock
-            let current_gen = instance.runtime_state.updater_gen;
+            let current_gen = instance.updater_gen;
+            locked_gen = Generation(current_gen.0.next());
             slog::debug!(
                 &opctx.log,
                 "attempting to acquire instance updater lock";
@@ -752,7 +752,7 @@ impl DataStore {
                 // of a non-distributed, single-process mutex.
                 .filter(dsl::updater_gen.eq(current_gen))
                 .set((
-                    dsl::updater_gen.eq(dsl::updater_gen + 1),
+                    dsl::updater_gen.eq(locked_gen),
                     dsl::updater_id.eq(Some(saga_lock_id)),
                 ))
                 .check_if_exists::<Instance>(instance_id)
@@ -792,6 +792,7 @@ impl DataStore {
         use db::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
+        let new_gen = Generation(locked_gen.0.next());
 
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
@@ -799,7 +800,7 @@ impl DataStore {
             .filter(dsl::updater_gen.eq(locked_gen))
             .filter(dsl::updater_id.eq(parent_id))
             .set((
-                dsl::updater_gen.eq(dsl::updater_gen + 1),
+                dsl::updater_gen.eq(new_gen),
                 dsl::updater_id.eq(Some(child_lock_id)),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -818,27 +819,30 @@ impl DataStore {
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
-            UpdateAndQueryResult {
-                status: UpdateStatus::Updated,
-                ref found,
-            } => Ok(UpdaterLock {
-                saga_lock_id: child_lock_id,
-                locked_gen: found.runtime_state.updater_gen,
-            }),
+            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
+                slog::info!(
+                    &opctx.log,
+                    "inherited lock from {parent_id} to {child_lock_id}";
+                    "instance_id" => %instance_id,
+                    "locked_gen" => ?new_gen,
+                    "parent_gen" => ?locked_gen,
+                );
+                Ok(UpdaterLock {
+                    saga_lock_id: child_lock_id,
+                    locked_gen: new_gen,
+                })
+            }
             // The generation has advanced past the generation at which the
-            // lock was held. This means that we have already released the
+            // lock was held. This means that we have already inherited the
             // lock. Return `Ok(false)` here for idempotency.
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
-            } if found.runtime_state.updater_id == Some(child_lock_id) => {
-                debug_assert_eq!(
-                    found.runtime_state.updater_gen,
-                    Generation(locked_gen.0.next()),
-                );
+            } if found.updater_id == Some(child_lock_id) => {
+                debug_assert_eq!(found.updater_gen, new_gen,);
                 Ok(UpdaterLock {
                     saga_lock_id: child_lock_id,
-                    locked_gen: found.runtime_state.updater_gen,
+                    locked_gen: new_gen,
                 })
             }
             // The instance exists, but the lock ID doesn't match our lock ID.
@@ -910,13 +914,22 @@ impl DataStore {
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
-            } if found.runtime_state.updater_gen > locked_gen => Ok(false),
+            } if found.updater_gen > locked_gen => Ok(false),
             // The instance exists, but the lock ID doesn't match our lock ID.
             // This means we were trying to release a lock we never held, whcih
             // is almost certainly a programmer error.
             UpdateAndQueryResult { ref found, .. } => {
-                match found.runtime_state.updater_id {
+                match found.updater_id {
                     Some(lock_holder) => {
+                        slog::error!(
+                            &opctx.log,
+                            "attempted to release a lock held by another saga";
+                            "instance_id" => %instance_id,
+                            "saga_id" => %saga_lock_id,
+                            "lock_holder" => %lock_holder,
+                            "found_gen" => ?found.updater_gen,
+                            "locked_gen" => ?locked_gen,
+                        );
                         debug_assert_ne!(lock_holder, saga_lock_id);
                         Err(Error::internal_error(
                             "attempted to release a lock held by another saga! this is a bug!",

@@ -206,11 +206,18 @@ async fn unlock_instance_inner(
         "lock" => ?lock,
     );
 
-    osagactx
+    let did_unlock = osagactx
         .datastore()
         .instance_updater_unlock(&opctx, authz_instance, lock)
         .await
         .map_err(ActionError::action_failed)?;
+
+    slog::info!(
+        osagactx.log(),
+        "instance update: unlocked instance";
+        "instance_id" => %authz_instance.id(),
+        "did_unlock" => ?did_unlock,
+    );
 
     Ok(())
 }
