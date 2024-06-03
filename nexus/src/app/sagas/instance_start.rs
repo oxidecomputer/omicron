@@ -760,10 +760,9 @@ mod test {
                 .as_ref()
                 .expect("running instance should have a vmm")
                 .runtime
-                .state
-                .0;
+                .state;
 
-        assert_eq!(vmm_state, InstanceState::Running);
+        assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -816,8 +815,8 @@ mod test {
 
                         assert!(new_db_instance.runtime().propolis_id.is_none());
                         assert_eq!(
-                            new_db_instance.runtime().nexus_state.0,
-                            InstanceState::Stopped
+                            new_db_instance.runtime().nexus_state,
+                            nexus_db_model::InstanceState::NoVmm
                         );
 
                         assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
@@ -859,10 +858,9 @@ mod test {
                 .as_ref()
                 .expect("running instance should have a vmm")
                 .runtime
-                .state
-                .0;
+                .state;
 
-        assert_eq!(vmm_state, InstanceState::Running);
+        assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
 
     /// Tests that if a start saga unwinds because sled agent returned failure
@@ -928,7 +926,7 @@ mod test {
 
         assert_eq!(
             db_instance.instance().runtime_state.nexus_state,
-            nexus_db_model::InstanceState(InstanceState::Stopped)
+            nexus_db_model::InstanceState::NoVmm
         );
         assert!(db_instance.vmm().is_none());
 

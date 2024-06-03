@@ -219,15 +219,14 @@ mod tests {
     use chrono::Utc;
     use nexus_db_model::ByteCount;
     use nexus_db_model::Generation;
-    use nexus_db_model::InstanceState;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResource;
     use nexus_db_model::SledResourceKind;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmRuntimeState;
+    use nexus_db_model::VmmState;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::InstanceState as ApiInstanceState;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -269,9 +268,7 @@ mod tests {
                         propolis_ip: "::1".parse().unwrap(),
                         propolis_port: 12345.into(),
                         runtime: VmmRuntimeState {
-                            state: InstanceState::new(
-                                ApiInstanceState::Destroyed
-                            ),
+                            state: VmmState::Destroyed,
                             time_state_updated: Utc::now(),
                             gen: Generation::new(),
                         }

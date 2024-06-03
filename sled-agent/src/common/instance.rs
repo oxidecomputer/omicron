@@ -8,7 +8,7 @@ use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
+    InstanceRuntimeState, SledInstanceState, VmmRuntimeState, VmmState,
 };
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
@@ -35,7 +35,7 @@ impl From<PropolisApiState> for PropolisInstanceState {
     }
 }
 
-impl From<PropolisInstanceState> for ApiInstanceState {
+impl From<PropolisInstanceState> for VmmState {
     fn from(value: PropolisInstanceState) -> Self {
         use propolis_client::types::InstanceState as State;
         match value.0 {
@@ -43,25 +43,28 @@ impl From<PropolisInstanceState> for ApiInstanceState {
             // when an instance has an active VMM. A Propolis that is "creating"
             // its virtual machine objects is "starting" from the external API's
             // perspective.
-            State::Creating | State::Starting => ApiInstanceState::Starting,
-            State::Running => ApiInstanceState::Running,
-            State::Stopping => ApiInstanceState::Stopping,
+            State::Creating | State::Starting => VmmState::Starting,
+            State::Running => VmmState::Running,
+            State::Stopping => VmmState::Stopping,
             // A Propolis that is stopped but not yet destroyed should still
             // appear to be Stopping from an external API perspective, since
             // they cannot be restarted yet. Instances become logically Stopped
             // once Propolis reports that the VM is Destroyed (see below).
-            State::Stopped => ApiInstanceState::Stopping,
-            State::Rebooting => ApiInstanceState::Rebooting,
-            State::Migrating => ApiInstanceState::Migrating,
-            State::Repairing => ApiInstanceState::Repairing,
-            State::Failed => ApiInstanceState::Failed,
+            State::Stopped => VmmState::Stopping,
+            State::Rebooting => VmmState::Rebooting,
+            State::Migrating => VmmState::Migrating,
+            State::Failed => VmmState::Failed,
             // Nexus needs to learn when a VM has entered the "destroyed" state
             // so that it can release its resource reservation. When this
             // happens, this module also clears the active VMM ID from the
             // instance record, which will accordingly set the Nexus-owned
             // instance state to Stopped, preventing this state from being used
             // as an externally-visible instance state.
-            State::Destroyed => ApiInstanceState::Destroyed,
+            State::Destroyed => VmmState::Destroyed,
+            // Propolis never actually uses the Repairing state, so this should
+            // be unreachable, but since these states come from another process,
+            // program defensively and convert Repairing to Running.
+            State::Repairing => VmmState::Running,
         }
     }
 }
@@ -170,11 +173,11 @@ pub enum PublishedVmmState {
     Rebooting,
 }
 
-impl From<PublishedVmmState> for ApiInstanceState {
+impl From<PublishedVmmState> for VmmState {
     fn from(value: PublishedVmmState) -> Self {
         match value {
-            PublishedVmmState::Stopping => ApiInstanceState::Stopping,
-            PublishedVmmState::Rebooting => ApiInstanceState::Rebooting,
+            PublishedVmmState::Stopping => VmmState::Stopping,
+            PublishedVmmState::Rebooting => VmmState::Rebooting,
         }
     }
 }

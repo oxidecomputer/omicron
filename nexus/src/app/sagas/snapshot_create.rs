@@ -2041,13 +2041,9 @@ mod test {
             .as_ref()
             .expect("running instance should have a sled")
             .runtime
-            .state
-            .0;
+            .state;
 
-        assert_eq!(
-            new_state,
-            omicron_common::api::external::InstanceState::Running
-        );
+        assert_eq!(new_state, nexus_db_model::VmmState::Running);
 
         instance_state
     }
