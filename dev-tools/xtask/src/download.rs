@@ -47,6 +47,9 @@ enum Target {
     /// CockroachDB binary
     Cockroach,
 
+    /// CockroachDB binary (previous major version)
+    CockroachPrev,
+
     /// Web console assets
     Console,
 
@@ -122,7 +125,8 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                         bail!("We should have already filtered this 'All' target out?");
                     }
                     Target::Clickhouse => downloader.download_clickhouse().await,
-                    Target::Cockroach => downloader.download_cockroach().await,
+                    Target::Cockroach => downloader.download_cockroach("").await,
+                    Target::CockroachPrev => downloader.download_cockroach("prev_").await,
                     Target::Console => downloader.download_console().await,
                     Target::DendriteOpenapi => {
                         downloader.download_dendrite_openapi().await
@@ -478,33 +482,51 @@ impl<'a> Downloader<'a> {
         Ok(())
     }
 
-    async fn download_cockroach(&self) -> Result<()> {
+    async fn download_cockroach(&self, prefix: &str) -> Result<()> {
         let os = os_name()?;
+        let is_apple_silicon =
+            matches!(os, Os::Mac) && std::env::consts::ARCH == "aarch64";
 
         let download_dir = self.output_dir.join("downloads");
-        let destination_dir = self.output_dir.join("cockroachdb");
+        let destination_dir =
+            self.output_dir.join(format!("{prefix}cockroachdb"));
 
-        let checksums_path = self.versions_dir.join("cockroachdb_checksums");
+        let checksums_path =
+            self.versions_dir.join(format!("{prefix}cockroachdb_checksums"));
         let [checksum] = get_values_from_file(
-            [&format!("CIDL_SHA256_{}", os.env_name())],
+            [&format!(
+                "CIDL_SHA256_{}{}",
+                os.env_name(),
+                if is_apple_silicon { "_ARM64" } else { "" }
+            )],
             &checksums_path,
         )
         .await?;
 
-        let versions_path = self.versions_dir.join("cockroachdb_version");
+        let versions_path =
+            self.versions_dir.join(format!("{prefix}cockroachdb_version"));
         let version = tokio::fs::read_to_string(&versions_path)
             .await
             .context("Failed to read version from {versions_path}")?;
         let version = version.trim();
 
         let (url_base, suffix) = match os {
-            Os::Illumos => ("https://illumos.org/downloads", "tar.gz"),
+            Os::Illumos => (
+                "https://oxide-cockroachdb-build.s3.us-west-2.amazonaws.com",
+                "tar.gz",
+            ),
             Os::Linux | Os::Mac => ("https://binaries.cockroachdb.com", "tgz"),
         };
         let build = match os {
             Os::Illumos => "illumos",
             Os::Linux => "linux-amd64",
-            Os::Mac => "darwin-10.9-amd64",
+            Os::Mac => {
+                if is_apple_silicon {
+                    "darwin-11.0-arm64"
+                } else {
+                    "darwin-10.9-amd64"
+                }
+            }
         };
 
         let version_directory = format!("cockroach-{version}");
