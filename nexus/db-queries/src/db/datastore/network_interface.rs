@@ -895,7 +895,7 @@ mod tests {
             .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
-        let mut macs = external::MacAddr::iter_system();
+        let mut macs = omicron_common::api::external::MacAddr::iter_system();
         let mut service_nics = Vec::new();
         for (i, ip) in ip_range.enumerate() {
             let name = format!("service-nic-{i}");
@@ -903,7 +903,7 @@ mod tests {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 NEXUS_VPC_SUBNET.clone(),
-                external::IdentityMetadataCreateParams {
+                omicron_common::api::external::IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: name,
                 },

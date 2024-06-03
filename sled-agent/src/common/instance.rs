@@ -6,7 +6,6 @@
 
 use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState, VmmState,
 };
@@ -528,7 +527,7 @@ mod test {
         };
 
         let vmm = VmmRuntimeState {
-            state: ApiInstanceState::Starting,
+            state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: now,
         };
@@ -538,7 +537,7 @@ mod test {
 
     fn make_migration_source_instance() -> InstanceStates {
         let mut state = make_instance();
-        state.vmm.state = ApiInstanceState::Migrating;
+        state.vmm.state = VmmState::Migrating;
         state.instance.migration_id = Some(Uuid::new_v4());
         state.instance.dst_propolis_id = Some(Uuid::new_v4());
         state
@@ -546,7 +545,7 @@ mod test {
 
     fn make_migration_target_instance() -> InstanceStates {
         let mut state = make_instance();
-        state.vmm.state = ApiInstanceState::Migrating;
+        state.vmm.state = VmmState::Migrating;
         state.instance.migration_id = Some(Uuid::new_v4());
         state.propolis_id = Uuid::new_v4();
         state.instance.dst_propolis_id = Some(state.propolis_id);
@@ -664,7 +663,7 @@ mod test {
         // The Stopped state is translated internally to Stopping to prevent
         // external viewers from perceiving that the instance is stopped before
         // the VMM is fully retired.
-        assert_eq!(state.vmm.state, ApiInstanceState::Stopping);
+        assert_eq!(state.vmm.state, VmmState::Stopping);
         assert!(state.vmm.gen > prev.vmm.gen);
 
         let prev = state.clone();
@@ -675,7 +674,7 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Destroyed);
+        assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
     }
 
@@ -698,7 +697,7 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Failed);
+        assert_eq!(state.vmm.state, VmmState::Failed);
         assert!(state.vmm.gen > prev.vmm.gen);
     }
 
@@ -737,7 +736,7 @@ mod test {
         assert!(state.instance.migration_id.is_none());
         assert!(state.instance.dst_propolis_id.is_none());
         assert!(state.instance.gen > prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Running);
+        assert_eq!(state.vmm.state, VmmState::Running);
         assert!(state.vmm.gen > prev.vmm.gen);
 
         // Pretend Nexus set some new migration IDs.
@@ -769,7 +768,7 @@ mod test {
             state.instance.dst_propolis_id.unwrap(),
             prev.instance.dst_propolis_id.unwrap()
         );
-        assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
+        assert_eq!(state.vmm.state, VmmState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.gen, prev.instance.gen);
 
@@ -781,7 +780,7 @@ mod test {
         observed.migration_status = ObservedMigrationStatus::Succeeded;
         assert!(state.apply_propolis_observation(&observed).is_none());
         assert_state_change_has_gen_change(&prev, &state);
-        assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
+        assert_eq!(state.vmm.state, VmmState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.migration_id, prev.instance.migration_id);
         assert_eq!(

@@ -1853,6 +1853,7 @@ mod tests {
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
+    use crate::db::model::InstanceState;
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
@@ -1929,21 +1930,16 @@ mod tests {
         db_datastore: &DataStore,
     ) -> Instance {
         let instance = create_instance(opctx, project_id, db_datastore).await;
-        instance_set_state(
-            db_datastore,
-            instance,
-            external::InstanceState::Stopped,
-        )
-        .await
+        instance_set_state(db_datastore, instance, InstanceState::NoVmm).await
     }
 
     async fn instance_set_state(
         db_datastore: &DataStore,
         mut instance: Instance,
-        state: external::InstanceState,
+        state: InstanceState,
     ) -> Instance {
         let new_runtime = model::InstanceRuntimeState {
-            nexus_state: model::InstanceState::new(state),
+            nexus_state: state,
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
@@ -2102,7 +2098,7 @@ mod tests {
                     &self.db_datastore,
                 )
                 .await,
-                external::InstanceState::Stopped,
+                InstanceState::NoVmm,
             )
             .await
         }
@@ -2116,7 +2112,7 @@ mod tests {
                     &self.db_datastore,
                 )
                 .await,
-                external::InstanceState::Starting,
+                InstanceState::Vmm,
             )
             .await;
 
