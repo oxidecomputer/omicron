@@ -90,7 +90,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         if let Some(ref active_vmm) = params.state.active_vmm {
             // If the active VMM is `Destroyed`, schedule the active VMM
             // destroyed subsaga.
-            if active_vmm.runtime.state.state() == &InstanceState::Destroyed {
+            if active_vmm.runtime.state.state() == InstanceState::Destroyed {
                 const DESTROYED_SUBSAGA_PARAMS: &str =
                     "params_for_vmm_destroyed_subsaga";
                 let subsaga_params = destroyed::Params {
