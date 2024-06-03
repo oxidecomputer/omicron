@@ -84,7 +84,7 @@ impl NexusSaga for SagaInstanceUpdate {
 
 async fn siu_lock_instance(
     sagactx: NexusActionContext,
-) -> Result<instance::UpdaterLock, ActionError> {
+) -> Result<Option<instance::UpdaterLock>, ActionError> {
     let osagactx = sagactx.user_data();
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
@@ -97,11 +97,20 @@ async fn siu_lock_instance(
         "instance_id" => %authz_instance.id(),
         "saga_id" => %lock_id,
     );
-    osagactx
+    let locked = osagactx
         .datastore()
         .instance_updater_lock(&opctx, authz_instance, lock_id)
-        .await
-        .map_err(ActionError::action_failed)
+        .await;
+    match locked {
+        Ok(lock) => Ok(Some(lock)),
+        // Don't return an error if we can't take the lock. This saga will
+        // simply not start the real instance update saga, rather than having to unwind.
+        Err(instance::UpdaterLockError::AlreadyLocked) => Ok(None),
+        // Okay, that's a real error. Time to die!
+        Err(instance::UpdaterLockError::Query(e)) => {
+            Err(ActionError::action_failed(e))
+        }
+    }
 }
 
 async fn siu_lock_instance_undo(
@@ -119,8 +128,22 @@ async fn siu_fetch_state_and_start_real_saga(
 ) -> Result<(), ActionError> {
     let Params { serialized_authn, authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
-    let orig_lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
     let osagactx = sagactx.user_data();
+    let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
+    // Did we get the lock? If so, we can start the next saga, otherwise, just
+    // exit gracefully.
+    let Some(orig_lock) =
+        sagactx.lookup::<Option<instance::UpdaterLock>>(INSTANCE_LOCK)?
+    else {
+        slog::info!(
+            osagactx.log(),
+            "instance update: instance is already locked! doing nothing...";
+            "instance_id" => %authz_instance.id(),
+            "saga_id" => %lock_id,
+        );
+        return Ok(());
+    };
+
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
 
