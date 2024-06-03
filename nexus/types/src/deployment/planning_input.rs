@@ -813,11 +813,15 @@ mod tests {
             cockroachdb_version
         );
 
-        // In the next "tick" release, this version will be stored in a
-        // different file.
+        let prev_cockroachdb_version =
+            include_str!("../../../../tools/prev_cockroachdb_version")
+                .trim_start_matches('v')
+                .rsplit_once('.')
+                .unwrap()
+                .0;
         assert_eq!(
             CockroachDbClusterVersion::POLICY.to_string(),
-            cockroachdb_version
+            prev_cockroachdb_version
         );
     }
 }

@@ -153,10 +153,20 @@ mod test {
         );
 
         let settings = datastore.cockroachdb_settings(&opctx).await.unwrap();
-        // With a fresh cluster, this is the expected state
-        let version = CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string();
-        assert_eq!(settings.version, version);
-        assert_eq!(settings.preserve_downgrade, "");
+        // `version` will either match `NEWLY_INITIALIZED` while
+        // running tests normally, or `POLICY` while running tests with
+        // `CRDB_SEED_USE_PREV=yes`.
+        let version: CockroachDbClusterVersion =
+            settings.version.parse().expect("unexpected cluster version");
+        if version == CockroachDbClusterVersion::NEWLY_INITIALIZED {
+            // This is the expected default value.
+            assert_eq!(settings.preserve_downgrade, "");
+        } else if version == CockroachDbClusterVersion::POLICY {
+            // crdb-seed has set this to prevent automatic finalization.
+            assert_eq!(settings.preserve_downgrade, version.to_string());
+        } else {
+            panic!("cluster should not be version {}", version);
+        };
 
         // Verify that if a fingerprint is wrong, we get the expected SQL error
         // back.
@@ -165,7 +175,7 @@ mod test {
                 &opctx,
                 String::new(),
                 "cluster.preserve_downgrade_option",
-                version.clone(),
+                version.to_string(),
             )
             .await
         else {
@@ -190,7 +200,7 @@ mod test {
                     &opctx,
                     settings.state_fingerprint.clone(),
                     "cluster.preserve_downgrade_option",
-                    version.clone(),
+                    version.to_string(),
                 )
                 .await
                 .unwrap();
@@ -198,8 +208,8 @@ mod test {
                 datastore.cockroachdb_settings(&opctx).await.unwrap(),
                 CockroachDbSettings {
                     state_fingerprint: settings.state_fingerprint.clone(),
-                    version: version.clone(),
-                    preserve_downgrade: version.clone(),
+                    version: version.to_string(),
+                    preserve_downgrade: version.to_string(),
                 }
             );
         }
@@ -215,14 +225,24 @@ mod test {
                 )
                 .await
                 .unwrap();
-            assert_eq!(
-                datastore.cockroachdb_settings(&opctx).await.unwrap(),
-                CockroachDbSettings {
-                    state_fingerprint: settings.state_fingerprint.clone(),
-                    version: version.clone(),
-                    preserve_downgrade: String::new(),
-                }
-            );
+            let settings =
+                datastore.cockroachdb_settings(&opctx).await.unwrap();
+            if version == CockroachDbClusterVersion::NEWLY_INITIALIZED {
+                assert_eq!(
+                    settings,
+                    CockroachDbSettings {
+                        state_fingerprint: settings.state_fingerprint.clone(),
+                        version: version.to_string(),
+                        preserve_downgrade: String::new(),
+                    }
+                );
+            } else {
+                // Resetting it permits auto-finalization, so the state
+                // fingerprint and version are not predictable until that
+                // completes, but we can still verify that the variable was
+                // reset.
+                assert!(settings.preserve_downgrade.is_empty());
+            }
         }
 
         db.cleanup().await.unwrap();
