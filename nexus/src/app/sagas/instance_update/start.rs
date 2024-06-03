@@ -10,7 +10,7 @@
 
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID, INSTANCE_LOCK_ID,
+    ACTION_GENERATE_ID, INSTANCE_LOCK, INSTANCE_LOCK_ID,
 };
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::db::datastore::instance;
@@ -32,11 +32,11 @@ pub(crate) struct Params {
 // instance update saga: actions
 
 declare_saga_actions! {
-    instance_update;
+    start_instance_update;
 
     // Acquire the instance updater" lock with this saga's ID if no other saga
     // is currently updating the instance.
-    LOCK_INSTANCE -> "instance_lock" {
+    LOCK_INSTANCE -> "updater_lock" {
         + siu_lock_instance
         - siu_lock_instance_undo
     }
@@ -59,7 +59,9 @@ impl NexusSaga for SagaInstanceUpdate {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        instance_update_register_actions(registry);
+        start_instance_update_register_actions(registry);
+        super::SagaDoActualInstanceUpdate::register_actions(registry);
+        super::destroyed::SagaVmmDestroyed::register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -117,8 +119,7 @@ async fn siu_fetch_state_and_start_real_saga(
 ) -> Result<(), ActionError> {
     let Params { serialized_authn, authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
-    let orig_lock =
-        sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK_ID)?;
+    let orig_lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
     let osagactx = sagactx.user_data();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
