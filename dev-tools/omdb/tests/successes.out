@@ -567,8 +567,8 @@ WARNING: Zones exist without physical disks!
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
-    cluster.preserve_downgrade_option:   "22.1"
+    state fingerprint:::::::::::::::::   9e029edbdc549255e10e57808188d66f342f1992
+    cluster.preserve_downgrade_option:   "22.2"
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -605,8 +605,8 @@ WARNING: Zones exist without physical disks!
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
-    cluster.preserve_downgrade_option:   "22.1"
+    state fingerprint:::::::::::::::::   9e029edbdc549255e10e57808188d66f342f1992
+    cluster.preserve_downgrade_option:   "22.2"
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -646,8 +646,8 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
-    cluster.preserve_downgrade_option:   "22.1" (unchanged)
+    state fingerprint:::::::::::::::::   9e029edbdc549255e10e57808188d66f342f1992 (unchanged)
+    cluster.preserve_downgrade_option:   "22.2" (unchanged)
 
  METADATA:
     internal DNS version:   1 (unchanged)
