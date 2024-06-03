@@ -424,7 +424,6 @@ table! {
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -432,6 +431,7 @@ table! {
         migration_id -> Nullable<Uuid>,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
+        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -444,9 +444,9 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        state -> crate::InstanceStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
