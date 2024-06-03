@@ -7,16 +7,28 @@
 use crate::Sled;
 use anyhow::anyhow;
 use anyhow::Context;
+use cockroach_admin_client::types::NodeDecommission;
+use cockroach_admin_client::types::NodeId;
 use futures::stream;
 use futures::StreamExt;
+use internal_dns::resolver::Resolver;
+use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
+use slog::Logger;
 use std::collections::BTreeMap;
+use std::net::SocketAddrV6;
 
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
@@ -83,6 +95,178 @@ pub(crate) async fn deploy_zones(
     } else {
         Err(errors)
     }
+}
+
+/// Itempontently perform any cleanup actions necessary for expunged zones.
+///
+/// # Panics
+///
+/// Panics if any of the zones yielded by the `expunged_zones` iterator has a
+/// disposition other than `Expunged`.
+pub(crate) async fn clean_up_expunged_zones(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    resolver: &Resolver,
+    expunged_zones: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
+) -> Result<(), Vec<anyhow::Error>> {
+    let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
+        .filter_map(|(sled_id, config)| async move {
+            // It is a programmer error to call this function on a non-expunged
+            // zone.
+            assert_eq!(
+                config.disposition,
+                BlueprintZoneDisposition::Expunged,
+                "clean_up_expunged_zones called with \
+                 non-expunged zone {config:?}"
+            );
+
+            let log = opctx.log.new(slog::o!(
+                "sled_id" => sled_id.to_string(),
+                "zone_id" => config.id.to_string(),
+                "zone_type" => config.zone_type.kind().to_string(),
+            ));
+
+            let result = match &config.zone_type {
+                // Zones which need no cleanup work after expungement.
+                BlueprintZoneType::Nexus(_) => None,
+
+                // Zones which need cleanup after expungement.
+                BlueprintZoneType::CockroachDb(_) => Some(
+                    decommission_cockroachdb_node(
+                        opctx, datastore, resolver, config.id, &log,
+                    )
+                    .await,
+                ),
+
+                // Zones that may or may not need cleanup work - we haven't
+                // gotten to these yet!
+                BlueprintZoneType::BoundaryNtp(_)
+                | BlueprintZoneType::Clickhouse(_)
+                | BlueprintZoneType::ClickhouseKeeper(_)
+                | BlueprintZoneType::Crucible(_)
+                | BlueprintZoneType::CruciblePantry(_)
+                | BlueprintZoneType::ExternalDns(_)
+                | BlueprintZoneType::InternalDns(_)
+                | BlueprintZoneType::InternalNtp(_)
+                | BlueprintZoneType::Oximeter(_) => {
+                    warn!(
+                        log,
+                        "unsupported zone type for expungement cleanup; \
+                         not performing any cleanup";
+                    );
+                    None
+                }
+            }?;
+
+            match result {
+                Err(error) => {
+                    warn!(
+                        log, "failed to clean up expunged zone";
+                        "error" => #%error,
+                    );
+                    Some(error)
+                }
+                Ok(()) => {
+                    info!(log, "successfully cleaned up after expunged zone");
+                    None
+                }
+            }
+        })
+        .collect()
+        .await;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+async fn decommission_cockroachdb_node(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    resolver: &Resolver,
+    zone_id: OmicronZoneUuid,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    // We need the node ID of this zone. Check and see whether the
+    // crdb_node_id_collector RPW found the node ID for this zone. If it hasn't,
+    // we're in trouble: we don't know whether this zone came up far enough to
+    // join the cockroach cluster (and therefore needs decommissioning) but was
+    // expunged before the collector RPW could identify it, or if the zone never
+    // joined the cockroach cluster (and therefore doesn't have a node ID and
+    // doesn't need decommissioning).
+    //
+    // For now, we punt on this problem. If we were certain that the zone's
+    // socket address could never be reused, we could ask one of the running
+    // cockroach nodes for the status of all nodes, find the ID of the one with
+    // this zone's listening address (if one exists), and decommission that ID.
+    // But if the address could be reused, that risks decommissioning a live
+    // node! We'll just log a warning and require a human to figure out how to
+    // clean this up.
+    let Some(node_id) =
+        datastore.cockroachdb_node_id(opctx, zone_id).await.with_context(
+            || format!("failed to look up node ID of cockroach zone {zone_id}"),
+        )?
+    else {
+        warn!(
+            log,
+            "expunged cockroach zone has no known node ID; \
+             support intervention is required for zone cleanup"
+        );
+        return Ok(());
+    };
+
+    // To decommission a CRDB node, we need to talk to one of the still-running
+    // nodes; look one up in DNS and construct a client. We'll just do a DNS
+    // lookup and take the first result; this might fail (e.g., if DNS still has
+    // an entry for the expunged zone we're trying to decommission!), but we're
+    // running from an RPW so any failure will be retried soon.
+    //
+    // TODO-cleanup: Replace this with a qorb-based connection pool once it's
+    // ready.
+    let crdb_ip = resolver
+        .lookup_ipv6(ServiceName::Cockroach)
+        .await
+        .context("failed to resolve cockroach IP in internal DNS")?;
+    let crdb_addr = format!(
+        "http://{}",
+        SocketAddrV6::new(crdb_ip, COCKROACH_ADMIN_PORT, 0, 0)
+    );
+    let log = log.new(slog::o!("crdb_addr" => crdb_addr.clone()));
+    let client = cockroach_admin_client::Client::new(&crdb_addr, log.clone());
+
+    let body = NodeId { node_id: node_id.clone() };
+    let NodeDecommission {
+        is_decommissioning,
+        is_draining,
+        is_live,
+        membership,
+        node_id: _,
+        notes,
+        replicas,
+    } = client
+        .node_decommission(&body)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to decommission cockroach zone {zone_id} \
+            (node id {node_id})"
+            )
+        })?
+        .into_inner();
+
+    info!(
+        log, "successfully sent cockroach decommission request";
+        "is_decommissioning" => is_decommissioning,
+        "is_draining" => is_draining,
+        "is_live" => is_live,
+        "membership" => ?membership,
+        "notes" => ?notes,
+        "replicas" => replicas,
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]

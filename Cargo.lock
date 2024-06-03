@@ -4785,6 +4785,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "chrono",
+ "cockroach-admin-client",
  "diesel",
  "dns-service-client",
  "futures",

@@ -931,6 +931,7 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Expunged => false,
                 BlueprintZoneFilter::ShouldBeRunning => true,
                 BlueprintZoneFilter::ShouldBeExternallyReachable => true,
                 BlueprintZoneFilter::ShouldBeInInternalDns => true,
@@ -938,6 +939,7 @@ impl BlueprintZoneDisposition {
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Expunged => false,
 
                 // Quiesced zones are still running.
                 BlueprintZoneFilter::ShouldBeRunning => true,
@@ -954,6 +956,7 @@ impl BlueprintZoneDisposition {
             },
             Self::Expunged => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Expunged => true,
                 BlueprintZoneFilter::ShouldBeRunning => false,
                 BlueprintZoneFilter::ShouldBeExternallyReachable => false,
                 BlueprintZoneFilter::ShouldBeInInternalDns => false,
@@ -997,6 +1000,9 @@ pub enum BlueprintZoneFilter {
     // ---
     /// All zones.
     All,
+
+    /// Zones that have been expunged.
+    Expunged,
 
     /// Zones that are desired to be in the RUNNING state
     ShouldBeRunning,
