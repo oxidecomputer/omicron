@@ -57,7 +57,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
@@ -1722,7 +1721,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             name: non_default_subnet_name.clone(),
             description: String::from("A non-default subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
         custom_router: None,
     };
@@ -1869,7 +1868,7 @@ async fn test_instance_create_delete_network_interface(
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
         custom_router: None,
     };
@@ -2111,7 +2110,7 @@ async fn test_instance_update_network_interfaces(
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
         custom_router: None,
     };

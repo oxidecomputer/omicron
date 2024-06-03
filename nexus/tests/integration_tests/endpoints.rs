@@ -30,7 +30,6 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -201,7 +200,7 @@ pub static DEMO_VPC_SUBNET_CREATE: Lazy<params::VpcSubnetCreate> =
             name: DEMO_VPC_SUBNET_NAME.clone(),
             description: String::from(""),
         },
-        ipv4_block: Ipv4Net("10.1.2.3/8".parse().unwrap()),
+        ipv4_block: "10.1.2.3/8".parse().unwrap(),
         ipv6_block: None,
         custom_router: None,
     });

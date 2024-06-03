@@ -25,6 +25,7 @@ omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-vpc.workspace = true
 oxlog.workspace = true
+oxnet.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true

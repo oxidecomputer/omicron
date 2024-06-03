@@ -196,12 +196,10 @@ ERRORS:
                 ),
             ),
             subnet: V4(
-                Ipv4Net(
-                    Ipv4Network {
-                        addr: 172.30.2.0,
-                        prefix: 24,
-                    },
-                ),
+                Ipv4Net {
+                    addr: 172.30.2.0,
+                    width: 24,
+                },
             ),
             vni: Vni(
                 100,
@@ -217,6 +215,10 @@ ERRORS:
 
       zone id: 7f4e9f9f-08f8-4d14-885d-e977c05525ad
       reason: mismatched underlay address: before: fd00:1122:3344:105::21, after: fd01:1122:3344:105::21
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
     internal DNS version:   1 (unchanged)

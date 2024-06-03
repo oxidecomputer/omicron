@@ -12,6 +12,7 @@ futures.workspace = true
 ipnetwork.workspace = true
 nexus-db-queries.workspace = true
 omicron-common.workspace = true
+oxnet.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true

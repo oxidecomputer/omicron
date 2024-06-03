@@ -15,7 +15,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
 use crate::db::model::ApplyBlueprintZoneFilterExt;
 use crate::db::model::ApplySledFilterExt;
@@ -50,6 +49,7 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -58,7 +58,6 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -69,6 +68,7 @@ use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
 use omicron_common::api::internal::shared::RouterTarget;
+use oxnet::IpNet;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -82,10 +82,10 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
-        use crate::db::fixed_data::vpc::SERVICES_VPC;
-        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_V4_ROUTE_ID;
-        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_V6_ROUTE_ID;
+        use nexus_db_fixed_data::project::SERVICES_PROJECT_ID;
+        use nexus_db_fixed_data::vpc::SERVICES_VPC;
+        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_V4_ROUTE_ID;
+        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_V6_ROUTE_ID;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -200,8 +200,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
-        use db::fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
+        use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
+        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
 
@@ -255,13 +255,13 @@ impl DataStore {
         opctx: &OpContext,
         authz_router: &authz::VpcRouter,
     ) -> Result<(), Error> {
-        use crate::db::fixed_data::vpc::SERVICES_VPC;
-        use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
-        use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET_ROUTE_ID;
-        use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-        use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ROUTE_ID;
-        use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
-        use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET_ROUTE_ID;
+        use nexus_db_fixed_data::vpc::SERVICES_VPC;
+        use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+        use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET_ROUTE_ID;
+        use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+        use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ROUTE_ID;
+        use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+        use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET_ROUTE_ID;
 
         debug!(opctx.log, "attempting to create built-in VPC Subnets");
 
@@ -1337,8 +1337,8 @@ impl DataStore {
         let mut result = BTreeMap::new();
         for subnet in subnets {
             let entry = result.entry(subnet.name).or_insert_with(Vec::new);
-            entry.push(IpNetwork::V4(subnet.ipv4_block.0 .0));
-            entry.push(IpNetwork::V6(subnet.ipv6_block.0 .0));
+            entry.push(IpNetwork::V4(subnet.ipv4_block.0.into()));
+            entry.push(IpNetwork::V6(subnet.ipv6_block.0.into()));
         }
         Ok(result)
     }
@@ -1721,10 +1721,10 @@ impl DataStore {
             // around named entities here.
             let (v4_dest, v6_dest) = match rule.destination.0 {
                 RouteDestination::Ip(ip @ IpAddr::V4(_)) => {
-                    (Some(IpNet::single(ip)), None)
+                    (Some(IpNet::host_net(ip)), None)
                 }
                 RouteDestination::Ip(ip @ IpAddr::V6(_)) => {
-                    (None, Some(IpNet::single(ip)))
+                    (None, Some(IpNet::host_net(ip)))
                 }
                 RouteDestination::IpNet(ip @ IpNet::V4(_)) => (Some(ip), None),
                 RouteDestination::IpNet(ip @ IpNet::V6(_)) => (None, Some(ip)),
@@ -1861,11 +1861,10 @@ mod tests {
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
-    use crate::db::fixed_data::silo::DEFAULT_SILO;
-    use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
-    use ipnetwork::Ipv4Network;
+    use nexus_db_fixed_data::silo::DEFAULT_SILO;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -1883,6 +1882,8 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
     use slog::info;
 
     // Test that we detect the right error condition and return None when we
@@ -2468,7 +2469,9 @@ mod tests {
     ) -> (authz::VpcSubnet, VpcSubnet) {
         let ipv6_block = db_vpc
             .ipv6_prefix
-            .random_subnet(external::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
+            .random_subnet(
+                omicron_common::address::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+            )
             .map(|block| block.0)
             .unwrap();
 
@@ -2483,13 +2486,8 @@ mod tests {
                         name: name.parse().unwrap(),
                         description: "A subnet...".into(),
                     },
-                    external::Ipv4Net(
-                        Ipv4Network::new(
-                            core::net::Ipv4Addr::from(ip),
-                            prefix_len,
-                        )
+                    Ipv4Net::new(core::net::Ipv4Addr::from(ip), prefix_len)
                         .unwrap(),
-                    ),
                     ipv6_block,
                 ),
             )

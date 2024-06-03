@@ -32,7 +32,6 @@ use nexus_types::external_api::views::VpcRouterKind;
 use nexus_types::external_api::views::VpcSubnet;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
@@ -368,7 +367,7 @@ async fn test_vpc_routers_attach_to_subnet(
         &PROJECT_NAME,
         &VPC_NAME,
         &subnet2_name,
-        Ipv4Net("192.168.0.0/24".parse().unwrap()),
+        "192.168.0.0/24".parse().unwrap(),
         None,
         Some(router_name),
     )
@@ -382,7 +381,7 @@ async fn test_vpc_routers_attach_to_subnet(
         &PROJECT_NAME,
         &VPC_NAME,
         &subnet3_name,
-        Ipv4Net("192.168.1.0/24".parse().unwrap()),
+        "192.168.1.0/24".parse().unwrap(),
         None,
         None,
     )
@@ -487,7 +486,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
             PROJECT_NAME,
             VPC_NAME,
             subnet_name,
-            Ipv4Net(format!("192.168.{i}.0/24").parse().unwrap()),
+            format!("192.168.{i}.0/24").parse().unwrap(),
             None,
             None,
         )

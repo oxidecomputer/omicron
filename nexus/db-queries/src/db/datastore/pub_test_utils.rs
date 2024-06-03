@@ -39,7 +39,7 @@ pub async fn datastore_test(
         logctx.log.new(o!()),
         Arc::new(authz::Authz::new(&logctx.log)),
         authn::Context::internal_db_init(),
-        Arc::clone(&datastore),
+        Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
     );
 
     // TODO: Can we just call "Populate" instead of doing this?
@@ -59,8 +59,10 @@ pub async fn datastore_test(
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
-    let opctx =
-        OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
+    let opctx = OpContext::for_tests(
+        logctx.log.new(o!()),
+        Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
 
     (opctx, datastore)
 }

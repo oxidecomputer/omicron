@@ -6,10 +6,8 @@
 
 pub use gateway_client::types::SpIdentifier as GatewaySpIdentifier;
 pub use gateway_client::types::SpType as GatewaySpType;
-use ipnetwork::IpNetwork;
 use omicron_common::address;
 use omicron_common::api::external::ImportExportPolicy;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::AllowedSourceIps;
@@ -21,6 +19,7 @@ use omicron_common::api::internal::shared::RouteConfig;
 use omicron_common::update::ArtifactHash;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -182,7 +181,7 @@ impl UserSpecifiedRackNetworkConfig {
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
-    pub addresses: Vec<IpNetwork>,
+    pub addresses: Vec<IpNet>,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: PortFec,
     pub autoneg: bool,

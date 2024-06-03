@@ -11,9 +11,10 @@ use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net, LinkFec, LinkSpeed, Name,
-    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
+    InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
+    RouteDestination, RouteTarget, SemverVersion,
 };
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},

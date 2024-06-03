@@ -13,6 +13,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
@@ -162,6 +163,10 @@ impl super::Nexus {
                 "fetching external DNS version for blueprint planning",
             )?
             .version;
+        let cockroachdb_settings =
+            datastore.cockroachdb_settings(opctx).await.internal_context(
+                "fetching cockroachdb settings for blueprint planning",
+            )?;
 
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
@@ -170,9 +175,12 @@ impl super::Nexus {
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_cockroachdb_cluster_version:
+                CockroachDbClusterVersion::POLICY,
             log: &opctx.log,
             internal_dns_version,
             external_dns_version,
+            cockroachdb_settings: &cockroachdb_settings,
         }
         .build()?;
 

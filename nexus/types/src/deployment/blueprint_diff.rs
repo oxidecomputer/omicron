@@ -10,7 +10,7 @@ use super::blueprint_display::{
     BpSledSubtable, BpSledSubtableColumn, BpSledSubtableData,
     BpSledSubtableRow, KvListWithHeading, KvPair,
 };
-use super::zone_sort_key;
+use super::{zone_sort_key, CockroachDbPreserveDowngrade};
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -662,71 +662,75 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         Self { diff }
     }
 
-    pub fn make_metadata_diff_table(&self) -> KvListWithHeading {
-        let diff = self.diff;
-        let mut kv = vec![];
-        match &diff.before_meta {
-            DiffBeforeMetadata::Collection { .. } => {
-                // Collections don't have DNS versions, so this is new.
-                kv.push(KvPair::new(
-                    BpDiffState::Added,
-                    INTERNAL_DNS_VERSION,
-                    linear_table_modified(
-                        &NOT_PRESENT_IN_COLLECTION_PARENS,
-                        &diff.after_meta.internal_dns_version,
-                    ),
-                ));
-                kv.push(KvPair::new(
-                    BpDiffState::Added,
-                    EXTERNAL_DNS_VERSION,
-                    linear_table_modified(
-                        &NOT_PRESENT_IN_COLLECTION_PARENS,
-                        &diff.after_meta.external_dns_version,
-                    ),
-                ));
-            }
-            DiffBeforeMetadata::Blueprint(before) => {
-                if before.internal_dns_version
-                    != diff.after_meta.internal_dns_version
-                {
-                    kv.push(KvPair::new(
-                        BpDiffState::Modified,
-                        INTERNAL_DNS_VERSION,
-                        linear_table_modified(
-                            &before.internal_dns_version,
-                            &diff.after_meta.internal_dns_version,
-                        ),
-                    ));
-                } else {
-                    kv.push(KvPair::new(
-                        BpDiffState::Unchanged,
-                        INTERNAL_DNS_VERSION,
-                        linear_table_unchanged(&before.internal_dns_version),
-                    ));
-                };
+    pub fn make_metadata_diff_tables(
+        &self,
+    ) -> impl IntoIterator<Item = KvListWithHeading> {
+        macro_rules! diff_row {
+            ($member:ident, $label:expr) => {
+                diff_row!($member, $label, std::convert::identity)
+            };
 
-                if before.external_dns_version
-                    != diff.after_meta.external_dns_version
-                {
-                    kv.push(KvPair::new(
-                        BpDiffState::Modified,
-                        EXTERNAL_DNS_VERSION,
-                        linear_table_modified(
-                            &before.external_dns_version,
-                            &diff.after_meta.external_dns_version,
-                        ),
-                    ));
-                } else {
-                    kv.push(KvPair::new(
-                        BpDiffState::Unchanged,
-                        EXTERNAL_DNS_VERSION,
-                        linear_table_unchanged(&before.external_dns_version),
-                    ));
-                };
-            }
+            ($member:ident, $label:expr, $display:expr) => {
+                match &self.diff.before_meta {
+                    DiffBeforeMetadata::Collection { .. } => {
+                        // Collections have no metadata, so this is new
+                        KvPair::new(
+                            BpDiffState::Added,
+                            $label,
+                            linear_table_modified(
+                                &NOT_PRESENT_IN_COLLECTION_PARENS,
+                                &$display(&self.diff.after_meta.$member),
+                            ),
+                        )
+                    }
+                    DiffBeforeMetadata::Blueprint(before) => {
+                        if before.$member == self.diff.after_meta.$member {
+                            KvPair::new(
+                                BpDiffState::Unchanged,
+                                $label,
+                                linear_table_unchanged(&$display(
+                                    &self.diff.after_meta.$member,
+                                )),
+                            )
+                        } else {
+                            KvPair::new(
+                                BpDiffState::Modified,
+                                $label,
+                                linear_table_modified(
+                                    &$display(&before.$member),
+                                    &$display(&self.diff.after_meta.$member),
+                                ),
+                            )
+                        }
+                    }
+                }
+            };
         }
 
-        KvListWithHeading::new(METADATA_HEADING, kv)
+        [
+            KvListWithHeading::new(
+                COCKROACHDB_HEADING,
+                vec![
+                    diff_row!(
+                        cockroachdb_fingerprint,
+                        COCKROACHDB_FINGERPRINT,
+                        display_none_if_empty
+                    ),
+                    diff_row!(
+                        cockroachdb_setting_preserve_downgrade,
+                        COCKROACHDB_PRESERVE_DOWNGRADE,
+                        display_optional_preserve_downgrade
+                    ),
+                ],
+            ),
+            KvListWithHeading::new(
+                METADATA_HEADING,
+                vec![
+                    diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
+                    diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
+                ],
+            ),
+        ]
     }
 
     /// Write out physical disk and zone tables for a given `sled_id`
@@ -847,8 +851,27 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         }
 
         // Write out metadata diff table
-        writeln!(f, "{}", self.make_metadata_diff_table())?;
+        for table in self.make_metadata_diff_tables() {
+            writeln!(f, "{}", table)?;
+        }
 
         Ok(())
+    }
+}
+
+fn display_none_if_empty(value: &str) -> &str {
+    if value.is_empty() {
+        NONE_PARENS
+    } else {
+        value
+    }
+}
+
+fn display_optional_preserve_downgrade(
+    value: &Option<CockroachDbPreserveDowngrade>,
+) -> String {
+    match value {
+        Some(v) => v.to_string(),
+        None => INVALID_VALUE_PARENS.to_string(),
     }
 }

@@ -202,6 +202,11 @@ EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+task: "abandoned_vmm_reaper"
+    deletes sled reservations for VMMs that have been abandoned by their
+    instances
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -384,6 +389,16 @@ task: "blueprint_executor"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
+task: "abandoned_vmm_reaper"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total abandoned VMMs found: 0
+      VMM records deleted: 0
+      VMM records already deleted by another Nexus: 0
+    sled resource reservations deleted: 0
+
 task: "bfd_manager"
   configured period: every 30s
   currently executing: no
@@ -538,6 +553,10 @@ WARNING: Zones exist without physical disks!
 
 
 
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
+
  METADATA:
     created by:::::::::::   nexus-test-utils
     created at:::::::::::   <REDACTED     TIMESTAMP>
@@ -571,6 +590,10 @@ WARNING: Zones exist without physical disks!
     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
 
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -608,6 +631,10 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
 
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
+    cluster.preserve_downgrade_option:   "22.1" (unchanged)
 
  METADATA:
     internal DNS version:   1 (unchanged)

@@ -6,6 +6,7 @@
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 use oxlog::{Filter, LogFile, Zones};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Parser)]
 #[command(version)]
@@ -21,7 +22,7 @@ enum Commands {
 
     /// List logs for a given service
     Logs {
-        // The name of the zone
+        /// The name of the zone
         zone: String,
 
         /// The name of the service to list logs for
@@ -33,6 +34,14 @@ enum Commands {
 
         #[command(flatten)]
         filter: FilterArgs,
+    },
+
+    /// List the names of all services in a zone, from the perspective of oxlog.
+    /// Use these names with `oxlog logs` to filter output to logs from a
+    /// specific service.
+    Services {
+        /// The name of the zone
+        zone: String,
     },
 }
 
@@ -122,6 +131,29 @@ fn main() -> Result<(), anyhow::Error> {
                     }
                 }
             }
+            Ok(())
+        }
+        Commands::Services { zone } => {
+            let zones = Zones::load()?;
+
+            // We want all logs that exist, anywhere, so we can find their
+            // service names.
+            let filter = Filter {
+                current: true,
+                archived: true,
+                extra: true,
+                show_empty: true,
+            };
+
+            // Collect a unique set of services, based on the logs in the
+            // specified zone
+            let services: BTreeSet<String> =
+                zones.zone_logs(&zone, filter).into_keys().collect();
+
+            for svc in services {
+                println!("{}", svc);
+            }
+
             Ok(())
         }
     }

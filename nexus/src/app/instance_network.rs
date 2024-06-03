@@ -6,7 +6,6 @@
 
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
-use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatEntry;
@@ -18,11 +17,11 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use std::collections::HashSet;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -511,8 +510,7 @@ pub(crate) async fn instance_ensure_dpd_config(
         ));
     }
 
-    let sled_address =
-        Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
+    let sled_address = Ipv6Net::host_net(*sled_ip_address.ip());
 
     // If all of our IPs are attached or are guaranteed to be owned
     // by the saga calling this fn, then we need to disregard and
@@ -653,7 +651,7 @@ pub(crate) async fn probe_ensure_dpd_config(
         }
     }
 
-    let sled_address = Ipv6Net(Ipv6Network::new(sled_ip_address, 128).unwrap());
+    let sled_address = Ipv6Net::host_net(sled_ip_address);
 
     for target_ip in ips
         .iter()
@@ -1011,7 +1009,7 @@ async fn ensure_nat_entry(
     match target_ip.ip {
         IpNetwork::V4(v4net) => {
             let nat_entry = Ipv4NatValues {
-                external_address: Ipv4Net(v4net).into(),
+                external_address: Ipv4Net::from(v4net).into(),
                 first_port: target_ip.first_port,
                 last_port: target_ip.last_port,
                 sled_address: sled_address.into(),
