@@ -68,7 +68,7 @@ itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.153", features = ["extra_traits"] }
+libc = { version = "0.2.155", features = ["extra_traits"] }
 log = { version = "0.4.21", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.2" }
@@ -89,10 +89,10 @@ regex-automata = { version = "0.4.6", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
-schemars = { version = "0.8.19", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.20", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.202", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.203", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.117", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["inline", "unicode"] }
@@ -173,7 +173,7 @@ itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.153", features = ["extra_traits"] }
+libc = { version = "0.2.155", features = ["extra_traits"] }
 log = { version = "0.4.21", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.2" }
@@ -194,10 +194,10 @@ regex-automata = { version = "0.4.6", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
-schemars = { version = "0.8.19", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.20", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.202", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.203", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.117", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["inline", "unicode"] }
@@ -220,6 +220,7 @@ tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
+unicode-xid = { version = "0.2.4" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.8.0", features = ["serde", "v4"] }

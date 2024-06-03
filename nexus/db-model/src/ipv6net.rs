@@ -9,7 +9,6 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use omicron_common::api::external;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,10 +28,10 @@ use crate::RequestAddressError;
     Deserialize,
 )]
 #[diesel(sql_type = sql_types::Inet)]
-pub struct Ipv6Net(pub external::Ipv6Net);
+pub struct Ipv6Net(pub oxnet::Ipv6Net);
 
-NewtypeFrom! { () pub struct Ipv6Net(external::Ipv6Net); }
-NewtypeDeref! { () pub struct Ipv6Net(external::Ipv6Net); }
+NewtypeFrom! { () pub struct Ipv6Net(oxnet::Ipv6Net); }
+NewtypeDeref! { () pub struct Ipv6Net(oxnet::Ipv6Net); }
 
 impl Ipv6Net {
     /// Generate a random subnetwork from this one, of the given prefix length.
@@ -48,10 +47,10 @@ impl Ipv6Net {
         use rand::RngCore;
 
         const MAX_IPV6_SUBNET_PREFIX: u8 = 128;
-        if prefix < self.prefix() || prefix > MAX_IPV6_SUBNET_PREFIX {
+        if prefix < self.width() || prefix > MAX_IPV6_SUBNET_PREFIX {
             return None;
         }
-        if prefix == self.prefix() {
+        if prefix == self.width() {
             return Some(*self);
         }
 
@@ -72,17 +71,17 @@ impl Ipv6Net {
         let full_mask = !(u128::MAX >> prefix);
 
         // Get the existing network address and mask.
-        let network = u128::from_be_bytes(self.network().octets());
-        let network_mask = u128::from_be_bytes(self.mask().octets());
+        let network = u128::from(self.prefix());
+        let network_mask = u128::from(self.mask_addr());
 
         // Take random bits _only_ where the new mask is set.
         let random_mask = full_mask ^ network_mask;
 
         let out = (network & network_mask) | (random & random_mask);
-        let addr = std::net::Ipv6Addr::from(out.to_be_bytes());
-        let net = ipnetwork::Ipv6Network::new(addr, prefix)
+        let addr = std::net::Ipv6Addr::from(out);
+        let net = oxnet::Ipv6Net::new(addr, prefix)
             .expect("Failed to create random subnet");
-        Some(Self(external::Ipv6Net(net)))
+        Some(Self(net))
     }
 
     /// Check if an address is a valid user-requestable address for this subnet
@@ -93,7 +92,7 @@ impl Ipv6Net {
         if !self.contains(addr) {
             return Err(RequestAddressError::OutsideSubnet(
                 addr.into(),
-                self.0 .0.into(),
+                oxnet::IpNet::from(self.0).into(),
             ));
         }
         // Only the first N addresses are reserved
@@ -114,7 +113,7 @@ impl ToSql<sql_types::Inet, Pg> for Ipv6Net {
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         <IpNetwork as ToSql<sql_types::Inet, Pg>>::to_sql(
-            &IpNetwork::V6(self.0 .0),
+            &IpNetwork::V6(self.0.into()),
             &mut out.reborrow(),
         )
     }
@@ -128,7 +127,7 @@ where
     fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         let inet = IpNetwork::from_sql(bytes)?;
         match inet {
-            IpNetwork::V6(net) => Ok(Ipv6Net(external::Ipv6Net(net))),
+            IpNetwork::V6(net) => Ok(Ipv6Net(net.into())),
             _ => Err("Expected IPV6".into()),
         }
     }

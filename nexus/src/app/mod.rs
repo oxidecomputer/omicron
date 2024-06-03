@@ -44,6 +44,7 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
+mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
@@ -376,7 +377,7 @@ impl Nexus {
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let populate_args = PopulateArgs::new(rack_id);
@@ -390,7 +391,7 @@ impl Nexus {
             log.new(o!("component" => "BackgroundTasks")),
             Arc::clone(&authz),
             authn::Context::internal_api(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let v2p_watcher_channel = tokio::sync::watch::channel(());
@@ -439,13 +440,15 @@ impl Nexus {
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
                 authn::Context::internal_read(),
-                Arc::clone(&db_datastore),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
             ),
             opctx_external_authn: OpContext::for_background(
                 log.new(o!("component" => "ExternalAuthn")),
                 Arc::clone(&authz),
                 authn::Context::external_authn(),
-                Arc::clone(&db_datastore),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             internal_resolver: resolver,
@@ -468,7 +471,7 @@ impl Nexus {
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
@@ -700,7 +703,8 @@ impl Nexus {
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
             authn::Context::internal_service_balancer(),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         )
     }
 
@@ -710,7 +714,8 @@ impl Nexus {
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
             authn::Context::internal_api(),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         )
     }
 

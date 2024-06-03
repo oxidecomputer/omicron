@@ -692,9 +692,9 @@ dependencies = [
 name = "bootstrap-agent-client"
 version = "0.1.0"
 dependencies = [
- "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxnet",
  "progenitor",
  "regress",
  "reqwest",
@@ -2015,7 +2015,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#2fdf37183d2fac385e0f66f48903bc567f2e8e26"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0cd0e828d096578392b6a5524334d44fd10ef6da"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2061,7 +2061,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#2fdf37183d2fac385e0f66f48903bc567f2e8e26"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0cd0e828d096578392b6a5524334d44fd10ef6da"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3495,6 +3495,7 @@ dependencies = [
  "opte-ioctl",
  "oxide-vpc",
  "oxlog",
+ "oxnet",
  "regress",
  "schemars",
  "serde",
@@ -3944,9 +3945,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.153"
+version = "0.2.155"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
+checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 
 [[package]]
 name = "libdlpi-sys"
@@ -4473,17 +4474,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "authz-macros",
+ "base64 0.22.1",
+ "chrono",
+ "cookie 0.18.1",
+ "dropshot",
+ "futures",
+ "headers",
+ "http 0.2.12",
+ "hyper 0.14.28",
+ "newtype_derive",
+ "nexus-db-fixed-data",
+ "nexus-db-model",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "once_cell",
+ "openssl",
+ "oso",
+ "pq-sys",
+ "samael",
+ "serde",
+ "serde_urlencoded",
+ "slog",
+ "strum",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "ipnetwork",
  "nexus-types",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "progenitor",
  "regress",
  "reqwest",
@@ -4515,6 +4554,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-db-fixed-data"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-model",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "once_cell",
+ "pq-sys",
+ "strum",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-db-model"
 version = "0.1.0"
 dependencies = [
@@ -4540,6 +4594,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
+ "oxnet",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -4566,14 +4621,11 @@ dependencies = [
  "assert_matches",
  "async-bb8-diesel",
  "async-trait",
- "authz-macros",
- "base64 0.22.1",
  "bb8",
  "camino",
  "camino-tempfile",
  "chrono",
  "const_format",
- "cookie 0.18.1",
  "db-macros",
  "diesel",
  "diesel-dtrace",
@@ -4581,17 +4633,15 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
- "headers",
- "http 0.2.12",
- "hyper 0.14.28",
  "hyper-rustls 0.26.0",
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.1",
  "macaddr",
- "newtype_derive",
+ "nexus-auth",
  "nexus-config",
+ "nexus-db-fixed-data",
  "nexus-db-model",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
@@ -4606,9 +4656,9 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapiv3",
- "openssl",
  "oso",
  "oximeter",
+ "oxnet",
  "paste",
  "pem",
  "petgraph",
@@ -4620,12 +4670,10 @@ dependencies = [
  "ref-cast",
  "regex",
  "rustls 0.22.4",
- "samael",
  "schemars",
  "semver 1.0.23",
  "serde",
  "serde_json",
- "serde_urlencoded",
  "serde_with",
  "sled-agent-client",
  "slog",
@@ -4650,6 +4698,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "once_cell",
+ "oxnet",
  "rand 0.8.5",
  "serde_json",
 ]
@@ -4729,6 +4778,7 @@ dependencies = [
  "nexus-db-queries",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxnet",
  "reqwest",
  "sled-agent-client",
  "slog",
@@ -4764,6 +4814,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "pq-sys",
  "reqwest",
  "sled-agent-client",
@@ -4785,7 +4836,6 @@ dependencies = [
  "indexmap 2.2.6",
  "internal-dns",
  "ipnet",
- "ipnetwork",
  "maplit",
  "nexus-config",
  "nexus-inventory",
@@ -4794,6 +4844,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "proptest",
  "rand 0.8.5",
  "sled-agent-client",
@@ -4909,6 +4960,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
+ "oxnet",
  "parse-display",
  "proptest",
  "schemars",
@@ -5207,6 +5259,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-cockroach-admin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "csv",
+ "dropshot",
+ "http 0.2.12",
+ "illumos-utils",
+ "nexus-test-utils",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "schemars",
+ "serde",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "thiserror",
+ "tokio",
+ "toml 0.8.13",
+ "url",
+]
+
+[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [
@@ -5229,6 +5311,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
+ "oxnet",
  "parse-display",
  "progenitor",
  "progenitor-client",
@@ -5399,6 +5482,7 @@ dependencies = [
  "itertools 0.12.1",
  "macaddr",
  "mg-admin-client",
+ "nexus-auth",
  "nexus-client",
  "nexus-config",
  "nexus-db-model",
@@ -5433,6 +5517,7 @@ dependencies = [
  "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer",
+ "oxnet",
  "parse-display",
  "paste",
  "pem",
@@ -5503,6 +5588,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "humantime",
+ "indicatif",
  "internal-dns",
  "ipnetwork",
  "multimap",
@@ -5685,6 +5771,7 @@ dependencies = [
  "oximeter",
  "oximeter-instruments",
  "oximeter-producer",
+ "oxnet",
  "pretty_assertions",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
  "propolis-mock-server",
@@ -5880,6 +5967,7 @@ dependencies = [
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
+ "unicode-xid",
  "usdt 0.5.0",
  "usdt-impl 0.5.0",
  "uuid",
@@ -6314,6 +6402,17 @@ dependencies = [
  "omicron-workspace-hack",
  "sigpipe",
  "uuid",
+]
+
+[[package]]
+name = "oxnet"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/oxnet?branch=main#42b4d3c77c7f5f2636cd6c4bbf37ac3eada047e0"
+dependencies = [
+ "ipnetwork",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -8184,9 +8283,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.19"
+version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc6e7ed6919cb46507fb01ff1654309219f62b4d603822501b0b80d42f6f21ef"
+checksum = "b0218ceea14babe24a4a5836f86ade86c1effbc198164e619194cb5069187e29"
 dependencies = [
  "bytes",
  "chrono",
@@ -8199,9 +8298,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.19"
+version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "185f2b7aa7e02d418e453790dde16890256bbd2bcd04b7dc5348811052b53f49"
+checksum = "3ed5a1ccce8ff962e31a165d41f6e2a2dd1245099dc4d594f5574a86cd90f4d3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8308,9 +8407,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.202"
+version = "1.0.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "226b61a0d411b2ba5ff6d7f73a476ac4f8bb900373459cd00fab8512828ba395"
+checksum = "7253ab4de971e72fb7be983802300c30b5a7f0c2e56fab8abfc6a214307c0094"
 dependencies = [
  "serde_derive",
 ]
@@ -8355,9 +8454,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.202"
+version = "1.0.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6048858004bcff69094cd972ed40a32500f153bd3be9f716b2eed2e8217c4838"
+checksum = "500cbc0ebeb6f46627f50f3f5811ccf6bf00643be300b4c3eabc0ef55dc5b5ba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8681,10 +8780,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "ipnetwork",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "progenitor",
  "regress",
  "reqwest",
@@ -10955,11 +11054,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gateway-client",
- "ipnetwork",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
  "owo-colors",
+ "oxnet",
  "schemars",
  "serde",
  "serde_json",
@@ -11027,7 +11126,6 @@ dependencies = [
  "installinator-artifactd",
  "installinator-common",
  "internal-dns",
- "ipnetwork",
  "itertools 0.12.1",
  "maplit",
  "omicron-certificates",
@@ -11039,6 +11137,7 @@ dependencies = [
  "once_cell",
  "openapi-lint",
  "openapiv3",
+ "oxnet",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -11073,7 +11172,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "installinator-common",
- "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
@@ -11353,10 +11451,22 @@ dependencies = [
  "cargo_metadata",
  "cargo_toml",
  "clap",
+ "flate2",
  "fs-err",
+ "futures",
  "macaddr",
+ "md5",
+ "reqwest",
  "serde",
+ "sha2",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-term",
+ "strum",
  "swrite",
+ "tar",
+ "tokio",
  "toml 0.8.13",
 ]
 

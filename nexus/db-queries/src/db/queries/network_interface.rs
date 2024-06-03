@@ -1061,7 +1061,7 @@ impl InsertQuery {
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
-            interface.subnet.ipv4_block.0 .0,
+            interface.subnet.ipv4_block.0.into(),
             interface.subnet.identity.id,
         );
         let next_slot_subquery = NextNicSlot::new(interface.parent_id);
@@ -1859,8 +1859,6 @@ mod tests {
     use crate::db::queries::network_interface::NextMacShifts;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use model::NetworkInterfaceKind;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
@@ -1871,11 +1869,11 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceCpuCount;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
@@ -1995,25 +1993,13 @@ mod tests {
             let vpc_id = Uuid::new_v4();
             let mut subnets = Vec::with_capacity(n_subnets as _);
             for i in 0..n_subnets {
-                let ipv4net = Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap(),
-                );
-                let ipv6net = Ipv6Net(
-                    Ipv6Network::new(
-                        Ipv6Addr::new(
-                            0xfd12,
-                            0x3456,
-                            0x7890,
-                            i.into(),
-                            0,
-                            0,
-                            0,
-                            0,
-                        ),
-                        64,
-                    )
-                    .unwrap(),
-                );
+                let ipv4net =
+                    Ipv4Net::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap();
+                let ipv6net = Ipv6Net::new(
+                    Ipv6Addr::new(0xfd12, 0x3456, 0x7890, i.into(), 0, 0, 0, 0),
+                    64,
+                )
+                .unwrap();
                 let subnet = VpcSubnet::new(
                     Uuid::new_v4(),
                     vpc_id,
@@ -2033,9 +2019,11 @@ mod tests {
             self.subnets
                 .iter()
                 .map(|subnet| {
-                    subnet.ipv4_block.size() as usize
-                        - NUM_INITIAL_RESERVED_IP_ADDRESSES
-                        - 1
+                    let size_minus_1 = match subnet.ipv4_block.size() {
+                        Some(n) => n - 1,
+                        None => u32::MAX,
+                    } as usize;
+                    size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES
                 })
                 .collect()
         }
@@ -2148,7 +2136,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let interface = IncompleteNetworkInterface::new_service(
@@ -2316,7 +2304,7 @@ mod tests {
             TestContext::new("test_insert_sequential_ip_allocation", 2).await;
         let addresses = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
@@ -2412,7 +2400,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let mac = MacAddr::random_system();
@@ -2447,7 +2435,7 @@ mod tests {
         let mut used_macs = HashSet::new();
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
         for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
             let service_id = Uuid::new_v4();
@@ -2487,7 +2475,7 @@ mod tests {
 
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         // Insert a service NIC
@@ -2547,12 +2535,12 @@ mod tests {
 
         let ip0 = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let ip1 = context.net1.subnets[1]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
 

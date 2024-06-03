@@ -16,10 +16,6 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::error::MaybeRetryable::*;
-use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
-use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
-use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
@@ -37,6 +33,10 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
+use nexus_db_fixed_data::silo::INTERNAL_SILO_ID;
+use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
@@ -1013,6 +1013,7 @@ mod test {
     };
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,
@@ -1038,6 +1039,7 @@ mod test {
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
+    use oxnet::IpNet;
     use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -1055,9 +1057,12 @@ mod test {
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
                     sled_state: BTreeMap::new(),
+                    cockroachdb_setting_preserve_downgrade:
+                        CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
+                    cockroachdb_fingerprint: String::new(),
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
@@ -1334,22 +1339,22 @@ mod test {
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let external_dns_id = OmicronZoneUuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp1_pip = NTP_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let ntp1_id = OmicronZoneUuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp2_pip = NTP_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
         let ntp2_id = OmicronZoneUuid::new_v4();
         let ntp3_id = OmicronZoneUuid::new_v4();
@@ -1381,10 +1386,7 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **DNS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1410,10 +1412,7 @@ mod test {
                                     name: "ntp1".parse().unwrap(),
                                     ip: ntp1_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NTP_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1457,10 +1456,9 @@ mod test {
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1486,10 +1484,7 @@ mod test {
                                     name: "ntp2".parse().unwrap(),
                                     ip: ntp2_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NTP_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1534,9 +1529,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1677,10 +1675,10 @@ mod test {
         let nexus_id1 = OmicronZoneUuid::new_v4();
         let nexus_id2 = OmicronZoneUuid::new_v4();
         let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
@@ -1711,10 +1709,9 @@ mod test {
                                     name: "nexus1".parse().unwrap(),
                                     ip: nexus_pip1.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1743,10 +1740,9 @@ mod test {
                                     name: "nexus2".parse().unwrap(),
                                     ip: nexus_pip2.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: oxnet::IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -1790,9 +1786,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1951,7 +1950,7 @@ mod test {
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
@@ -1981,10 +1980,7 @@ mod test {
                                 name: "nexus".parse().unwrap(),
                                 ip: nexus_pip.into(),
                                 mac: macs.next().unwrap(),
-                                subnet: IpNetwork::from(
-                                    **NEXUS_OPTE_IPV4_SUBNET,
-                                )
-                                .into(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
@@ -2002,9 +1998,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2052,11 +2051,11 @@ mod test {
         // Request two services which happen to be using the same IP address.
         let external_dns_id = OmicronZoneUuid::new_v4();
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
@@ -2086,10 +2085,7 @@ mod test {
                                     name: "external-dns".parse().unwrap(),
                                     ip: external_dns_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **DNS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -2118,10 +2114,9 @@ mod test {
                                     name: "nexus".parse().unwrap(),
                                     ip: nexus_pip.into(),
                                     mac: macs.next().unwrap(),
-                                    subnet: IpNetwork::from(
-                                        **NEXUS_OPTE_IPV4_SUBNET,
-                                    )
-                                    .into(),
+                                    subnet: IpNet::from(
+                                        *NEXUS_OPTE_IPV4_SUBNET,
+                                    ),
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
@@ -2141,9 +2136,12 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),

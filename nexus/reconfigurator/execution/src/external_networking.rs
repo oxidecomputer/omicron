@@ -443,10 +443,10 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-    use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_uuid_kinds::ExternalIpUuid;
+    use oxnet::IpNet;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -491,7 +491,6 @@ mod tests {
                 },
                 name: "test-nexus".parse().expect("bad name"),
                 ip: NEXUS_OPTE_IPV4_SUBNET
-                    .iter()
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
@@ -517,7 +516,6 @@ mod tests {
                 },
                 name: "test-external-dns".parse().expect("bad name"),
                 ip: DNS_OPTE_IPV4_SUBNET
-                    .iter()
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
@@ -546,7 +544,6 @@ mod tests {
                 },
                 name: "test-external-ntp".parse().expect("bad name"),
                 ip: NTP_OPTE_IPV4_SUBNET
-                    .iter()
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),

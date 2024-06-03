@@ -430,6 +430,8 @@ table! {
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        updater_id -> Nullable<Uuid>,
+        updater_gen-> Int8,
     }
 }
 
@@ -1036,6 +1038,8 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(zpool, dataset);
+
 table! {
     region (id) {
         id -> Uuid,
@@ -1050,6 +1054,8 @@ table! {
         extent_count -> Int8,
     }
 }
+
+allow_tables_to_appear_in_same_query!(zpool, region);
 
 table! {
     region_snapshot (dataset_id, region_id, snapshot_id) {
@@ -1502,6 +1508,9 @@ table! {
 
         internal_dns_version -> Int8,
         external_dns_version -> Int8,
+        cockroachdb_fingerprint -> Text,
+
+        cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
     }
 }
 
@@ -1696,6 +1705,41 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         allowed_ips -> Nullable<Array<Inet>>,
+    }
+}
+
+table! {
+    region_replacement (id) {
+        id -> Uuid,
+        request_time -> Timestamptz,
+        old_region_id -> Uuid,
+        volume_id -> Uuid,
+        old_region_volume_id -> Nullable<Uuid>,
+        new_region_id -> Nullable<Uuid>,
+        replacement_state -> crate::RegionReplacementStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    volume_repair (volume_id) {
+        volume_id -> Uuid,
+        repair_id -> Uuid,
+    }
+}
+
+table! {
+    region_replacement_step (replacement_id, step_time, step_type) {
+        replacement_id -> Uuid,
+        step_time -> Timestamptz,
+        step_type -> crate::RegionReplacementStepTypeEnum,
+
+        step_associated_instance_id -> Nullable<Uuid>,
+        step_associated_vmm_id -> Nullable<Uuid>,
+
+        step_associated_pantry_ip -> Nullable<Inet>,
+        step_associated_pantry_port -> Nullable<Int4>,
+        step_associated_pantry_job_id -> Nullable<Uuid>,
     }
 }
 

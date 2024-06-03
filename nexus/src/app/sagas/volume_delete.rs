@@ -23,9 +23,6 @@
 //! resources, and when they are inserted or deleted the accounting needs to
 //! change. Saga nodes must be idempotent in order to work correctly.
 
-use super::common_storage::delete_crucible_regions;
-use super::common_storage::delete_crucible_running_snapshots;
-use super::common_storage::delete_crucible_snapshots;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
@@ -45,17 +42,11 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
+
 // volume delete saga: actions
 
 declare_saga_actions! {
     volume_delete;
-    // TODO(https://github.com/oxidecomputer/omicron/issues/612):
-    //
-    // We need a way to deal with this operation failing, aside from
-    // propagating the error to the user.
-    //
-    // What if the Sled goes offline? Nexus must ultimately be
-    // responsible for reconciling this scenario.
     DECREASE_CRUCIBLE_RESOURCE_COUNT -> "crucible_resources_to_delete" {
         + svd_decrease_crucible_resource_count
     }
@@ -169,14 +160,16 @@ async fn svd_delete_crucible_regions(
             ))
         })?;
 
-    delete_crucible_regions(log, datasets_and_regions.clone()).await.map_err(
-        |e| {
+    osagactx
+        .nexus()
+        .delete_crucible_regions(log, datasets_and_regions.clone())
+        .await
+        .map_err(|e| {
             ActionError::action_failed(format!(
                 "failed to delete_crucible_regions: {:?}",
                 e,
             ))
-        },
-    )?;
+        })?;
 
     // Remove DB records
     let region_ids_to_delete =
@@ -226,7 +219,9 @@ async fn svd_delete_crucible_running_snapshots(
             ))
         })?;
 
-    delete_crucible_running_snapshots(log, datasets_and_snapshots.clone())
+    osagactx
+        .nexus()
+        .delete_crucible_running_snapshots(log, datasets_and_snapshots.clone())
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(
@@ -267,7 +262,9 @@ async fn svd_delete_crucible_snapshots(
             ))
         })?;
 
-    delete_crucible_snapshots(log, datasets_and_snapshots.clone())
+    osagactx
+        .nexus()
+        .delete_crucible_snapshots(log, datasets_and_snapshots.clone())
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(
@@ -439,7 +436,12 @@ async fn svd_delete_freed_crucible_regions(
         }
 
         // Send DELETE calls to the corresponding Crucible agents
-        delete_crucible_regions(log, vec![(dataset.clone(), region.clone())])
+        osagactx
+            .nexus()
+            .delete_crucible_regions(
+                log,
+                vec![(dataset.clone(), region.clone())],
+            )
             .await
             .map_err(|e| {
                 ActionError::action_failed(format!(

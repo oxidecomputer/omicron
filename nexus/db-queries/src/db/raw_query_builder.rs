@@ -181,3 +181,18 @@ impl<T> RunQueryDsl<DbConnection> for TypedSqlQuery<T> {}
 impl<T> Query for TypedSqlQuery<T> {
     type SqlType = T;
 }
+
+#[cfg(test)]
+pub async fn expectorate_query_contents<T: QueryFragment<Pg>>(
+    query: T,
+    path: &str,
+) {
+    use omicron_test_utils::dev;
+
+    let s =
+        dev::db::format_sql(&diesel::debug_query::<Pg, _>(&query).to_string())
+            .await
+            .expect("Failed to format SQL");
+
+    expectorate::assert_contents(path, &s);
+}

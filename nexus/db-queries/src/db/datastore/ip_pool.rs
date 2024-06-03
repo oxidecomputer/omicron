@@ -426,7 +426,7 @@ impl DataStore {
 
         paginated(
             ip_pool_resource::table,
-            ip_pool_resource::ip_pool_id,
+            ip_pool_resource::resource_id,
             pagparams,
         )
         .inner_join(ip_pool::table)

@@ -212,7 +212,8 @@ impl ServerContext {
         // Set up DNS Client
         let resolver = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
-                let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().ip());
+                let az_subnet =
+                    Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
                 info!(
                     log,
                     "Setting up resolver using DNS servers for subnet: {:?}",

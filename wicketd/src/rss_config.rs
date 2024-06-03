@@ -631,8 +631,8 @@ fn validate_rack_network_config(
     for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
             // ... and check that it contains `uplink_ip`.
-            if addr.ip() < infra_ip_range.first
-                || addr.ip() > infra_ip_range.last
+            if addr.addr() < infra_ip_range.first
+                || addr.addr() > infra_ip_range.last
             {
                 bail!(
                 "`uplink_cidr`'s IP address must be in the range defined by \
@@ -704,7 +704,7 @@ fn build_port_config(
                 vlan_id: r.vlan_id,
             })
             .collect(),
-        addresses: config.addresses.clone(),
+        addresses: config.addresses.iter().cloned().map(Into::into).collect(),
         bgp_peers: config
             .bgp_peers
             .iter()

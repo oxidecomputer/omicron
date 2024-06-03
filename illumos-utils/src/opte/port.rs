@@ -8,8 +8,8 @@ use crate::opte::Gateway;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::internal::shared::RouterId;
+use oxnet::IpNet;
 use std::net::IpAddr;
 use std::sync::Arc;
 

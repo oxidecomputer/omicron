@@ -68,9 +68,9 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
         nic: NicInfo,
     ) -> omicron_common::api::internal::shared::NetworkInterface {
         let ip_subnet = if nic.ip.is_ipv4() {
-            external::IpNet::V4(nic.ipv4_block.0)
+            oxnet::IpNet::V4(nic.ipv4_block.0)
         } else {
-            external::IpNet::V6(nic.ipv6_block.0)
+            oxnet::IpNet::V6(nic.ipv6_block.0)
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
@@ -892,8 +892,8 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
@@ -932,8 +932,7 @@ mod tests {
 
         // Insert 10 Nexus NICs
         let ip_range = NEXUS_OPTE_IPV4_SUBNET
-            .0
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
         let mut macs = external::MacAddr::iter_system();

@@ -117,6 +117,7 @@ region_replacement.period_secs = 30
 instance_watcher.period_secs = 30
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
+abandoned_vmm_reaper.period_secs = 60
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

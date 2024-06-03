@@ -10,8 +10,8 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 installinator-common.workspace = true
-ipnetwork.workspace = true
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
@@ -23,4 +23,3 @@ slog.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
 wicket-common.workspace = true
-omicron-workspace-hack.workspace = true
