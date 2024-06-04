@@ -234,9 +234,11 @@ pub async fn instance_ip_get_instance_state(
         inst_and_vmm.instance().runtime_state.nexus_state;
     let mut sled_id = inst_and_vmm.sled_id();
 
-    slog::warn!(osagactx.log(), "instance_ip_get_instance_state";
-                "instance_state" => ?found_instance_state,
-                "vmm_state" => ?found_vmm_state);
+    slog::debug!(
+        osagactx.log(), "evaluating instance state for IP attach/detach";
+        "instance_state" => ?found_instance_state,
+        "vmm_state" => ?found_vmm_state
+    );
 
     // Arriving here means we started in a correct state (running/stopped).
     // We need to consider how we interact with the other sagas/ops:
