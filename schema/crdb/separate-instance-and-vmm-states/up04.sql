@@ -1,2 +1,1 @@
-SET LOCAL disallow_full_table_scans = off;
-UPDATE omicron.public.instance SET downlevel_state = state;
+ALTER TABLE omicron.public.instance ADD COLUMN IF NOT EXISTS downlevel_state omicron.public.instance_state;

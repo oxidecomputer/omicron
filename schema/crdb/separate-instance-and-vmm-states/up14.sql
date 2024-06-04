@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.vmm ADD COLUMN IF NOT EXISTS state omicron.public.vmm_state;
+ALTER TABLE omicron.public.vmm DROP COLUMN IF EXISTS state;

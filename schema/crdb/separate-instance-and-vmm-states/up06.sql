@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.instance ADD COLUMN IF NOT EXISTS state omicron.public.instance_state_v2;
+ALTER TABLE omicron.public.instance DROP COLUMN IF EXISTS state;

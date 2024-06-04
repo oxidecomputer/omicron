@@ -1,10 +1,1 @@
-CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
-    'starting',
-    'running',
-    'stopping',
-    'stopped',
-    'rebooting',
-    'migrating',
-    'failed',
-    'destroyed'
-);
+ALTER TABLE omicron.public.instance DROP COLUMN IF EXISTS downlevel_state;

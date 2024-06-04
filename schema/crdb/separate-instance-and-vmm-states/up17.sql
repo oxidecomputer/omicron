@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.vmm DROP COLUMN IF EXISTS downlevel_state;
+ALTER TABLE omicron.public.vmm ALTER COLUMN state SET NOT NULL;

@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.instance DROP COLUMN IF EXISTS downlevel_state;
+ALTER TABLE omicron.public.instance ALTER COLUMN state SET NOT NULL;

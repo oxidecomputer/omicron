@@ -1,1 +1,7 @@
-ALTER TABLE omicron.public.instance ADD COLUMN IF NOT EXISTS downlevel_state omicron.public.instance_state;
+CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
+    'creating',
+    'no_vmm',
+    'vmm',
+    'failed',
+    'destroyed'
+);

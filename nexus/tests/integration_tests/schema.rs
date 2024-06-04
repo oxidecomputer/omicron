@@ -1229,7 +1229,7 @@ fn after_37_0_1(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn before_68_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn before_69_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async move {
         client
             .batch_execute(&format!(
@@ -1270,7 +1270,7 @@ fn before_68_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn after_68_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn after_69_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         let rows = client
             .query("SELECT state FROM instance ORDER BY id", &[])
@@ -1338,8 +1338,8 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
         DataMigrationFns { before: None, after: after_37_0_1 },
     );
     map.insert(
-        SemverVersion(semver::Version::parse("68.0.0").unwrap()),
-        DataMigrationFns { before: Some(before_68_0_0), after: after_68_0_0 },
+        SemverVersion(semver::Version::parse("69.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_69_0_0), after: after_69_0_0 },
     );
 
     map

@@ -1,2 +1,1 @@
-SET LOCAL disallow_full_table_scans = off;
-UPDATE omicron.public.vmm SET state = downlevel_state::text::vmm_state;
+ALTER TABLE omicron.public.vmm ADD COLUMN IF NOT EXISTS state omicron.public.vmm_state;
