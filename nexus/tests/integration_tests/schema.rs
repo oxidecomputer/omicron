@@ -1021,7 +1021,6 @@ async fn dbinit_equals_sum_of_all_up() {
     observed_schema.pretty_assert_eq(&expected_schema);
 
     assert_eq!(observed_data, expected_data);
-
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();
 }
@@ -1053,6 +1052,17 @@ const SLED2: Uuid = Uuid::from_u128(0x2222513d_5c3d_4647_83b0_8f3515da7be1);
 
 // "7AC4" -> "Rack"
 const RACK1: Uuid = Uuid::from_u128(0x11117ac4_5c3d_4647_83b0_8f3515da7be1);
+
+// "6701" -> "Proj"ect
+const PROJECT: Uuid = Uuid::from_u128(0x11116701_5c3d_4647_83b0_8f3515da7be1);
+
+// "1257" -> "Inst"ance
+const INSTANCE1: Uuid = Uuid::from_u128(0x11111257_5c3d_4647_83b0_8f3515da7be1);
+const INSTANCE2: Uuid = Uuid::from_u128(0x22221257_5c3d_4647_83b0_8f3515da7be1);
+const INSTANCE3: Uuid = Uuid::from_u128(0x33331257_5c3d_4647_83b0_8f3515da7be1);
+
+// "67060115" -> "Prop"olis
+const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
 
 fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async move {
@@ -1219,6 +1229,93 @@ fn after_37_0_1(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
+fn before_68_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async move {
+        client
+            .batch_execute(&format!(
+                "
+        INSERT INTO instance (id, name, description, time_created,
+        time_modified, time_deleted, project_id, user_data, state,
+        time_state_updated, state_generation, active_propolis_id,
+        target_propolis_id, migration_id, ncpus, memory, hostname,
+        boot_on_fault, updater_id, updater_gen) VALUES
+
+        ('{INSTANCE1}', 'inst1', '', now(), now(), NULL, '{PROJECT}', '',
+        'stopped', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst1', false,
+        NULL, 1),
+        ('{INSTANCE2}', 'inst2', '', now(), now(), NULL, '{PROJECT}', '',
+        'running', now(), 1, '{PROPOLIS}', NULL, NULL, 2, 1073741824, 'inst2',
+        false, NULL, 1),
+        ('{INSTANCE3}', 'inst3', '', now(), now(), NULL, '{PROJECT}', '',
+        'failed', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst3', false,
+        NULL, 1);
+        "
+            ))
+            .await
+            .expect("failed to create instances");
+
+        client
+            .batch_execute(&format!(
+                "
+        INSERT INTO vmm (id, time_created, time_deleted, instance_id, state,
+        time_state_updated, state_generation, sled_id, propolis_ip,
+        propolis_port) VALUES
+
+        ('{PROPOLIS}', now(), NULL, '{INSTANCE2}', 'running', now(), 1,
+        '{SLED1}', 'fd00:1122:3344:200::1', '12400');
+                "
+            ))
+            .await
+            .expect("failed to create VMMs");
+    })
+}
+
+fn after_68_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        let rows = client
+            .query("SELECT state FROM instance ORDER BY id", &[])
+            .await
+            .expect("failed to load instance states");
+        let instance_states = process_rows(&rows);
+
+        assert_eq!(
+            instance_states[0].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("instance_state_v2", "no_vmm"))
+            )]
+        );
+        assert_eq!(
+            instance_states[1].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("instance_state_v2", "vmm"))
+            )]
+        );
+        assert_eq!(
+            instance_states[2].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("instance_state_v2", "failed"))
+            )]
+        );
+
+        let rows = client
+            .query("SELECT state FROM vmm ORDER BY id", &[])
+            .await
+            .expect("failed to load VMM states");
+        let vmm_states = process_rows(&rows);
+
+        assert_eq!(
+            vmm_states[0].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("vmm_state", "running"))
+            )]
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1239,6 +1336,10 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("37.0.1").unwrap()),
         DataMigrationFns { before: None, after: after_37_0_1 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("68.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_68_0_0), after: after_68_0_0 },
     );
 
     map
