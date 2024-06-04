@@ -1938,8 +1938,14 @@ mod tests {
         mut instance: Instance,
         state: InstanceState,
     ) -> Instance {
+        let propolis_id = match state {
+            InstanceState::Vmm => Some(Uuid::new_v4()),
+            _ => None,
+        };
+
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
+            propolis_id,
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
@@ -1947,33 +1953,6 @@ mod tests {
             .instance_update_runtime(&instance.id(), &new_runtime)
             .await;
         assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
-        instance
-    }
-
-    /// Sets or clears the active Propolis ID in the supplied instance record.
-    /// This can be used to exercise the "does this instance have an active
-    /// VMM?" test that determines in part whether an instance's network
-    /// interfaces can change.
-    ///
-    /// Note that this routine does not construct a VMM record for the
-    /// corresponding ID, so any functions that expect such a record to exist
-    /// will fail in strange and exciting ways.
-    async fn instance_set_active_vmm(
-        db_datastore: &DataStore,
-        mut instance: Instance,
-        propolis_id: Option<Uuid>,
-    ) -> Instance {
-        let new_runtime = model::InstanceRuntimeState {
-            propolis_id,
-            gen: instance.runtime_state.gen.next().into(),
-            ..instance.runtime_state.clone()
-        };
-
-        let res = db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime)
-            .await;
-        assert!(matches!(res, Ok(true)), "Failed to change instance VMM ref");
         instance.runtime_state = new_runtime;
         instance
     }
@@ -2104,7 +2083,7 @@ mod tests {
         }
 
         async fn create_running_instance(&self) -> Instance {
-            let instance = instance_set_state(
+            instance_set_state(
                 &self.db_datastore,
                 create_instance(
                     &self.opctx,
@@ -2113,13 +2092,6 @@ mod tests {
                 )
                 .await,
                 InstanceState::Vmm,
-            )
-            .await;
-
-            instance_set_active_vmm(
-                &self.db_datastore,
-                instance,
-                Some(Uuid::new_v4()),
             )
             .await
         }
