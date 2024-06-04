@@ -17,6 +17,7 @@ dropshot.workspace = true
 http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
+once_cell.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 schemars.workspace = true
@@ -27,6 +28,7 @@ slog-error-chain.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-postgres.workspace = true
 toml.workspace = true
 
 omicron-workspace-hack.workspace = true

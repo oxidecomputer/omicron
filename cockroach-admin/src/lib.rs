@@ -72,7 +72,10 @@ pub async fn start_server(
         }
     }
 
-    let context = ServerContext { cockroach_cli };
+    let context = ServerContext::new(
+        cockroach_cli,
+        log.new(slog::o!("component" => "ServerContext")),
+    );
     let http_server_starter = dropshot::HttpServerStarter::new(
         &server_config.dropshot,
         http_entrypoints::api(),

@@ -17,6 +17,7 @@ type CrdbApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
 
 pub fn api() -> CrdbApiDescription {
     fn register_endpoints(api: &mut CrdbApiDescription) -> Result<(), String> {
+        api.register(node_id)?;
         api.register(node_status)?;
         Ok(())
     }
@@ -46,4 +47,29 @@ async fn node_status(
     let all_nodes =
         ctx.cockroach_cli.node_status().await.map_err(HttpError::from)?;
     Ok(HttpResponseOk(ClusterNodeStatus { all_nodes }))
+}
+
+/// CockroachDB Node ID
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct NodeId {
+    // CockroachDB node IDs are integers, in practice, but our use of them is as
+    // input and output to the `cockroach` CLI. We use a string which is a bit
+    // more natural (no need to parse CLI output or stringify an ID to send it
+    // as input) and leaves open the door for the format to change in the
+    // future.
+    pub id: String,
+}
+
+/// Get the CockroachDB node ID of the local cockroach instance.
+#[endpoint {
+    method = GET,
+    path = "/node/id",
+}]
+async fn node_id(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<NodeId>, HttpError> {
+    let ctx = rqctx.context();
+    let id = ctx.node_id().await?.to_string();
+    Ok(HttpResponseOk(NodeId { id }))
 }

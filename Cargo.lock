@@ -5254,6 +5254,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "once_cell",
  "pq-sys",
  "schemars",
  "serde",
@@ -5263,6 +5264,7 @@ dependencies = [
  "slog-error-chain",
  "thiserror",
  "tokio",
+ "tokio-postgres",
  "toml 0.8.13",
  "url",
 ]
