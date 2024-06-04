@@ -111,19 +111,22 @@ pub async fn create_and_insert_vmm_record(
     Ok(vmm)
 }
 
-/// Given a previously-inserted VMM record, set its state to Destroyed and then
-/// delete it.
+/// Given a previously-inserted VMM record, set its state to `SagaUnwound` and
+/// then delete it.
 ///
 /// This function succeeds idempotently if called with the same parameters,
 /// provided that the VMM record was not changed by some other actor after the
 /// calling saga inserted it.
-pub async fn destroy_vmm_record(
+///
+/// This function is intended to be called when a saga which created a VMM
+/// record unwinds.
+pub async fn unwind_vmm_record(
     datastore: &DataStore,
     opctx: &OpContext,
     prev_record: &db::model::Vmm,
 ) -> Result<(), anyhow::Error> {
     let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::VmmState::Destroyed,
+        state: db::model::VmmState::SagaUnwound,
         time_state_updated: Utc::now(),
         gen: prev_record.runtime.gen.next().into(),
     };
@@ -326,7 +329,10 @@ pub async fn instance_ip_get_instance_state(
                 ),
             )));
         }
-        (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
+        (
+            InstanceState::Vmm,
+            Some(VmmState::Destroyed | VmmState::SagaUnwound),
+        ) => {
             return Err(ActionError::action_failed(Error::internal_error(
                 &format!(
                     "instance {} points to destroyed VMM",

@@ -24,6 +24,7 @@ impl_enum_type!(
     Migrating => b"migrating"
     Failed => b"failed"
     Destroyed => b"destroyed"
+    SagaUnwound => b"saga_unwound"
 );
 
 impl VmmState {
@@ -37,6 +38,7 @@ impl VmmState {
             VmmState::Migrating => "migrating",
             VmmState::Failed => "failed",
             VmmState::Destroyed => "destroyed",
+            VmmState::SagaUnwound => "saga_unwound",
         }
     }
 }
@@ -58,7 +60,7 @@ impl From<VmmState> for omicron_common::api::internal::nexus::VmmState {
             VmmState::Rebooting => Output::Rebooting,
             VmmState::Migrating => Output::Migrating,
             VmmState::Failed => Output::Failed,
-            VmmState::Destroyed => Output::Destroyed,
+            VmmState::Destroyed | VmmState::SagaUnwound => Output::Destroyed,
         }
     }
 }
@@ -74,7 +76,7 @@ impl From<VmmState> for sled_agent_client::types::VmmState {
             VmmState::Rebooting => Output::Rebooting,
             VmmState::Migrating => Output::Migrating,
             VmmState::Failed => Output::Failed,
-            VmmState::Destroyed => Output::Destroyed,
+            VmmState::Destroyed | VmmState::SagaUnwound => Output::Destroyed,
         }
     }
 }
@@ -108,7 +110,7 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
             VmmState::Rebooting => Output::Rebooting,
             VmmState::Migrating => Output::Migrating,
             VmmState::Failed => Output::Failed,
-            VmmState::Destroyed => Output::Destroyed,
+            VmmState::Destroyed | VmmState::SagaUnwound => Output::Destroyed,
         }
     }
 }
