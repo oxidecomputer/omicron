@@ -983,7 +983,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'migrating',
     'failed',
     'destroyed',
-    'saga_unwound',
+    'saga_unwound'
 );
 
 /*
