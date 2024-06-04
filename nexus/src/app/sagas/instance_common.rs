@@ -261,11 +261,14 @@ pub async fn instance_ip_get_instance_state(
             Some(VmmState::Running) | Some(VmmState::Rebooting),
         ) => {}
 
-        // If the VMM is stopping or migrating, its sled assignment is in doubt,
-        // so report a transient state error and ask the caller to retry.
+        // If the VMM is in the Stopping, Migrating, or Starting states, its
+        // sled assignment is in doubt, so report a transient state error and
+        // ask the caller to retry.
         //
-        // Also report an error if the VMM is Starting. There are two
-        // conflicting cases here:
+        // Although an instance with a Starting VMM has a sled assignment,
+        // there's no way to tell at this point whether or not there's a
+        // concurrent instance-start saga that has passed the point where it
+        // sends IP assignments to the instance's new sled:
         //
         // - If the start saga is still in progress and hasn't pushed any IP
         //   information to the instance's new sled yet, then either of two
@@ -280,8 +283,8 @@ pub async fn instance_ip_get_instance_state(
         //    the VMM to report that it's Running, the calling saga needs to
         //    send the IP change to the instance's sled.
         //
-        // There's no way to distinguish these cases, so return an error if the
-        // VMM is still Starting.
+        // There's no way to distinguish these cases, so if a VMM is Starting,
+        // block the attach/detach.
         (
             InstanceState::Vmm,
             Some(VmmState::Starting)
