@@ -4898,7 +4898,7 @@
           },
           "vlan_id": {
             "nullable": true,
-            "description": "The VLAN id associated with this route.",
+            "description": "The VLAN id (if any) associated with this address.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0

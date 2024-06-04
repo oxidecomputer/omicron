@@ -993,11 +993,10 @@
       ],
       "properties": {
         "address": {
-          "$ref": "#/definitions/IpNetwork"
+          "$ref": "#/definitions/IpNet"
         },
         "vlan_id": {
-          "description": "The VLAN id associated with this route.",
-          "default": null,
+          "description": "The VLAN id (if any) associated with this address.",
           "type": [
             "integer",
             "null"
