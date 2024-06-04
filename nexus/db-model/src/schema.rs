@@ -1616,6 +1616,13 @@ table! {
 }
 
 table! {
+    cockroachdb_zone_id_to_node_id (omicron_zone_id) {
+        omicron_zone_id -> Uuid,
+        crdb_node_id -> Text,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
