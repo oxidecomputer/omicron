@@ -12,7 +12,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
 use crate::db::model::ApplyBlueprintZoneFilterExt;
 use crate::db::model::ApplySledFilterExt;
@@ -45,6 +44,7 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -72,9 +72,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
-        use crate::db::fixed_data::vpc::SERVICES_VPC;
-        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_ROUTE_ID;
+        use nexus_db_fixed_data::project::SERVICES_PROJECT_ID;
+        use nexus_db_fixed_data::vpc::SERVICES_VPC;
+        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_ROUTE_ID;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -175,8 +175,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
-        use db::fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
+        use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
+        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
 
@@ -229,9 +229,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
-        use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-        use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+        use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+        use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+        use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 
         debug!(opctx.log, "attempting to create built-in VPC Subnets");
 
@@ -1230,9 +1230,9 @@ mod tests {
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
-    use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;

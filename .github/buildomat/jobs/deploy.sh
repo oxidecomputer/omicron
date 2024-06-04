@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.29"
+#: target = "lab-2.0-opte-0.31"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -50,6 +50,7 @@ _exit_trap() {
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
 	pfexec /opt/oxide/opte/bin/opteadm dump-v2b
+	pfexec /opt/oxide/opte/bin/opteadm dump-v2p
 	z_swadm link ls
 	z_swadm addr list
 	z_swadm route list

@@ -1,0 +1,48 @@
+[package]
+name = "nexus-auth"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+cookie.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+headers.workspace = true
+http.workspace = true
+hyper.workspace = true
+newtype_derive.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+once_cell.workspace = true
+openssl.workspace = true
+oso.workspace = true
+samael.workspace = true
+serde.workspace = true
+serde_urlencoded.workspace = true
+slog.workspace = true
+strum.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+uuid.workspace = true
+
+authz-macros.workspace = true
+nexus-db-fixed-data.workspace = true
+nexus-db-model.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true

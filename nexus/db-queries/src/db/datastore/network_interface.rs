@@ -854,8 +854,8 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;

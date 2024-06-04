@@ -147,8 +147,10 @@ mod test {
         let (_, datastore) =
             crate::db::datastore::test_utils::datastore_test(&logctx, &db)
                 .await;
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
+        let opctx = OpContext::for_tests(
+            logctx.log.new(o!()),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
 
         let settings = datastore.cockroachdb_settings(&opctx).await.unwrap();
         // With a fresh cluster, this is the expected state

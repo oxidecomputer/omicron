@@ -270,13 +270,14 @@ pub(crate) async fn login_saml_redirect(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let (.., identity_provider) = IdentityProviderType::lookup(
-            &nexus.datastore(),
-            &opctx,
-            &path_params.silo_name,
-            &path_params.provider_name,
-        )
-        .await?;
+        let (.., identity_provider) = nexus
+            .datastore()
+            .identity_provider_lookup(
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
 
         match identity_provider {
             IdentityProviderType::Saml(saml_identity_provider) => {
@@ -330,9 +331,9 @@ pub(crate) async fn login_saml(
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
 
-        let (authz_silo, db_silo, identity_provider) =
-            IdentityProviderType::lookup(
-                &nexus.datastore(),
+        let (authz_silo, db_silo, identity_provider) = nexus
+            .datastore()
+            .identity_provider_lookup(
                 &opctx,
                 &path_params.silo_name,
                 &path_params.provider_name,
