@@ -1370,6 +1370,13 @@ table! {
         slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
         slot_a_sha3_256 -> Nullable<Text>,
         slot_b_sha3_256 -> Nullable<Text>,
+        stage0_fwid -> Nullable<Text>,
+        stage0next_fwid -> Nullable<Text>,
+
+        slot_a_error -> Nullable<crate::RotImageErrorEnum>,
+        slot_b_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0next_error -> Nullable<crate::RotImageErrorEnum>,
     }
 }
 
