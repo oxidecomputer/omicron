@@ -1028,8 +1028,6 @@ async fn sic_move_to_stopped(
     let instance_record =
         sagactx.lookup::<db::model::Instance>("instance_record")?;
 
-    warn!(osagactx.log(), "in sic_move_to_stopped");
-
     // Create a new generation of the instance record with the no-VMM state and
     // try to write it back to the database. If this node is replayed, or the
     // instance has already changed state by the time this step is reached, this

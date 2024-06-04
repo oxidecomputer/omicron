@@ -199,6 +199,16 @@ pub async fn instance_ip_move_state(
     }
 }
 
+/// Yields the sled on which an instance is found to be running so that IP
+/// attachment and detachment operations can be propagated there.
+///
+/// # Preconditions
+///
+/// To synchronize correctly with other concurrent operations on an instance,
+/// the calling saga must have placed the IP it is attaching or detaching into
+/// the Attaching or Detaching state so that concurrent attempts to start the
+/// instance will notice that the IP state is in flux and ask the caller to
+/// retry.
 pub async fn instance_ip_get_instance_state(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
@@ -224,12 +234,12 @@ pub async fn instance_ip_get_instance_state(
         inst_and_vmm.instance().runtime_state.nexus_state;
     let mut sled_id = inst_and_vmm.sled_id();
 
+    slog::warn!(osagactx.log(), "instance_ip_get_instance_state";
+                "instance_state" => ?found_instance_state,
+                "vmm_state" => ?found_vmm_state);
+
     // Arriving here means we started in a correct state (running/stopped).
     // We need to consider how we interact with the other sagas/ops:
-    // - starting: our claim on an IP will block it from moving past
-    //             DPD_ensure and instance_start will undo. If we complete
-    //             before then, it can move past and will fill in routes/opte.
-    //             Act as though we have no sled_id.
     // - stopping: this is not sagaized, and the propolis/sled-agent might
     //             go away. Act as though stopped if we catch it here,
     //             otherwise convert OPTE ensure to 'service unavailable'
@@ -237,22 +247,49 @@ pub async fn instance_ip_get_instance_state(
     // - deleting: can only be called from stopped -- we won't push to dpd
     //             or sled-agent, and IP record might be deleted or forcibly
     //             detached. Catch here just in case.
-    //
-    // REVIEW(gjc) did I change the semantics of this?
+    // - starting: see below.
     match (found_instance_state, found_vmm_state) {
-        (InstanceState::NoVmm, _)
-        | (InstanceState::Vmm, Some(VmmState::Starting)) => {
+        // If there's no VMM, the instance is definitely not on any sled.
+        (InstanceState::NoVmm, _) => {
             sled_id = None;
         }
-        (InstanceState::Vmm, Some(VmmState::Running)) => {}
+
+        // If the instance is running normally or rebooting, it's resident on
+        // the sled given by its VMM record.
         (
             InstanceState::Vmm,
-            Some(VmmState::Rebooting)
+            Some(VmmState::Running) | Some(VmmState::Rebooting),
+        ) => {}
+
+        // If the VMM is stopping or migrating, its sled assignment is in doubt,
+        // so report a transient state error and ask the caller to retry.
+        //
+        // Also report an error if the VMM is Starting. There are two
+        // conflicting cases here:
+        //
+        // - If the start saga is still in progress and hasn't pushed any IP
+        //   information to the instance's new sled yet, then either of two
+        //   things can happen:
+        //   - This function's caller can finish modifying IPs before the start
+        //     saga propagates IP information to the sled. In this case the
+        //     calling saga should do nothing--the start saga will send the
+        //     right IP set to the sled.
+        //   - If the start saga "wins" the race, it will see that the instance
+        //     still has an attaching/detaching IP and bail out.
+        //  - If the start saga is already done, and Nexus is just waiting for
+        //    the VMM to report that it's Running, the calling saga needs to
+        //    send the IP change to the instance's sled.
+        //
+        // There's no way to distinguish these cases, so return an error if the
+        // VMM is still Starting.
+        (
+            InstanceState::Vmm,
+            Some(VmmState::Starting)
             | Some(VmmState::Migrating)
             | Some(VmmState::Stopping)
             | Some(VmmState::Stopped),
         ) => {
-            // Unwrapping is safe since all the matched states are Some.
+            // Unwrapping is safe since all the matched VMM states are Some.
             let found_vmm_state = found_vmm_state.unwrap();
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {found_vmm_state}"
@@ -275,6 +312,9 @@ pub async fn instance_ip_get_instance_state(
                 "cannot modify instance IPs, instance is in unhealthy state",
             )))
         }
+
+        // This case represents an inconsistency in the database. It should
+        // never happen, but don't blow up Nexus if it somehow does.
         (InstanceState::Vmm, None) => {
             return Err(ActionError::action_failed(Error::internal_error(
                 &format!(
