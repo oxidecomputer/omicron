@@ -319,7 +319,7 @@ pub async fn instance_ip_get_instance_state(
         (InstanceState::Vmm, None) => {
             return Err(ActionError::action_failed(Error::internal_error(
                 &format!(
-                    "instance {} is in vmm state but has no valid vmm id",
+                    "instance {} is in the 'VMM' state but has no VMM ID",
                     authz_instance.id(),
                 ),
             )));
@@ -327,7 +327,7 @@ pub async fn instance_ip_get_instance_state(
         (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
             return Err(ActionError::action_failed(Error::internal_error(
                 &format!(
-                    "instance {} points to destroyed vmm",
+                    "instance {} points to destroyed VMM",
                     authz_instance.id(),
                 ),
             )));
