@@ -191,30 +191,14 @@ retry install_packages
 # - Packaging: When constructing packages on Helios, these utilities
 # are packaged into zones which may be launched by the sled agent.
 
-retry ./tools/ci_download_cockroachdb
-retry ./tools/ci_download_clickhouse
-
-# Install static console assets. These are used when packaging Nexus.
-retry ./tools/ci_download_console
-
-# Download the OpenAPI spec for dendrite. This is required to build the
-# dpd-client crate.
-retry ./tools/ci_download_dendrite_openapi
-
-# Download dendrite-stub. This is required to run tests without a live
-# asic and running dendrite instance
-retry ./tools/ci_download_dendrite_stub
-
-# Download mgd. This is required to run tests that invovle dynamic external
-# routing
-retry ./tools/ci_download_maghemite_mgd
-
-# Download transceiver-control. This is used as the source for the
-# xcvradm binary which is bundled with the switch zone.
-retry ./tools/ci_download_transceiver_control
-
-# Download thundermuffin. This is required to launch network probes.
-retry ./tools/ci_download_thundermuffin
+retry cargo xtask download \
+    cockroach \
+    clickhouse \
+    console \
+    dendrite-openapi \
+    dendrite-stub \
+    maghemite-mgd \
+    transceiver-control
 
 # Validate the PATH:
 expected_in_path=(
