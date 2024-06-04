@@ -1,3 +1,5 @@
+# Overview
+
 This schema change splits the "instance state" enum that instances and VMMs
 share into two enums, one for instance states and one for VMM states. Variants
 used by only one of these objects only appear in the corresponding enum. This
@@ -14,7 +16,8 @@ Second, Postgres and/or CRDB don't support all the schema change primitives we
 might use to deprecate the old state column. Specifically:
 
 * CockroachDB doesn't support altering column types without enabling an
-  experimental flag (cockroachdb#49329).
+  experimental flag
+  (see https://github.com/cockroachdb/cockroach/issues/49329?version=v22.1).
 * Postgres doesn't support removing enum variants (adding and renaming are OK),
   so we can't shrink and directly reuse the existing instance state enum without
   leaving a set of "reserved"/"unused" variants around.
@@ -26,28 +29,36 @@ might use to deprecate the old state column. Specifically:
   was added in v22.2).
 
 These limitations make it hard to change the schema idempotently. To get around
-this for instances, do the following:
+this, the change uses the following general procedure to change a column's type
+from one enum to another:
 
-. Create an `instance_state_v2` enum with the variants of interest.
-. Create a new `downlevel_state` column in the instance table (`ALTER TABLE ADD
-  COLUMN` supports `IF NOT EXISTS`).
-. Copy all existing instance states to that column.
-. Drop the existing `state` column (`ALTER TABLE DROP COLUMN` supports `IF
-  EXISTS`).
-. Recreate the `state` column with the new type.
-. Populate the column's values based on what was saved in the `downlevel_state`
-  column.
-. Add a `NOT NULL` qualifier to the new `state` column.
-. Drop the `downlevel_state` column.
+. Create a new enum with the variants of interest.
+. Create a new temporary column to hold the old object state. (Adding a column
+  supports `IF NOT EXISTS`).
+. Copy the old object state to the temporary column.
+. Drop the old column (this supports `IF EXISTS`).
+. Recreate the state column with the new type.
+. Populate the column's values using the data saved in the temporary column.
+. Add a `NOT NULL` qualifier to the new column.
+. Drop the temporary column.
 
-VMMs are similar, except that the new enum is called `vmm_state`.
+Note that deleting and recreating columns this way (instead of modfying them in
+place) changes their column indices in the affected table. These columns need to
+be moved to the (current) ends of the table definitions in dbinit.sql, or the
+schema upgrade tests will fail.
 
-Once all this work is done the original `instance_state` enum can be dropped.
+# Upgrade steps
 
-There are two other small details to keep in mind:
+The individual transactions in this upgrade do the following:
 
-- Any views that depend on the affected state columns need to be dropped before
-  removing the old columns and recreated after the migration is done.
-- Deleting and recreating a state column (instead of modifying it in place)
-  changes its column index in its table, so these columns need to be moved
-  to the (current) ends of the table definitions in dbinit.sql.
+* `up01` and `up02` drop views that depend on the `state` column in the `vmm`
+  table.
+* `up03` through `up10` change the `instance` table's state enum using the
+  procedure described above.
+* `up11` through `up18` upgrade the `vmm` table.
+* `up19` and `up21` recreate the views deleted at the beginning of this
+  procedure.
+* `up20` deletes the now-unused `instance_state` enum.
+* `up22` adds a constraint to the `instance` table that requires that an
+  instance be in the `vmm` state if and only if it has a non-NULL active
+  Propolis ID.
