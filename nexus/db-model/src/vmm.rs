@@ -104,16 +104,16 @@ impl Vmm {
 )]
 #[diesel(table_name = vmm)]
 pub struct VmmRuntimeState {
-    /// The state of this VMM. If this VMM is the active VMM for a given
-    /// instance, this state is the instance's logical state.
-    pub state: VmmState,
-
     /// The time at which this state was most recently updated.
     pub time_state_updated: DateTime<Utc>,
 
     /// The generation number protecting this VMM's state and update time.
     #[diesel(column_name = state_generation)]
     pub gen: Generation,
+
+    /// The state of this VMM. If this VMM is the active VMM for a given
+    /// instance, this state is the instance's logical state.
+    pub state: VmmState,
 }
 
 impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
