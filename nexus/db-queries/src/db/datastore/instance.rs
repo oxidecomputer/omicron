@@ -805,7 +805,6 @@ impl DataStore {
                         "updater_id" => %updater_id,
                         "locked_gen" => ?locked_gen,
                         "already_locked" => !did_lock,
-                        "locked_gen" => ?locked_gen,
                     );
                     return Ok(UpdaterLock { updater_id, locked_gen });
                 }
