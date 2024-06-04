@@ -5452,6 +5452,7 @@ dependencies = [
  "cancel-safe-futures",
  "chrono",
  "clap",
+ "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",

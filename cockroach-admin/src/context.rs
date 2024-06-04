@@ -47,7 +47,7 @@ impl ServerContext {
 
     async fn read_node_id_from_cockroach(&self) -> anyhow::Result<String> {
         // TODO-cleanup This connection string is duplicated in Nexus - maybe we
-        // should centralize it? I'm not sure where we could put it -
+        // should centralize it? I'm not sure where we could put it;
         // omicron_common, perhaps?
         let connect_url = format!(
             "postgresql://root@{}/omicron?sslmode=disable",
