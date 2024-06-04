@@ -1012,7 +1012,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     state_generation INT NOT NULL,
 
     /* FK into `vmm` for the Propolis server that's backing this instance. */
-    /* TODO(gjc): add constraint that state = 'active' iff this is not NULL */
     active_propolis_id UUID,
 
     /* FK into `vmm` for the migration target Propolis server, if one exists. */
@@ -1041,7 +1040,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * deleted and recreated by the schema upgrade process; see the
      * `separate-instance-and-vmm-states` schema change for details.
      */
-    state omicron.public.instance_state_v2 NOT NULL
+    state omicron.public.instance_state_v2 NOT NULL,
+
+    CONSTRAINT vmm_iff_active_propolis CHECK (
+        ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
+        ((state != 'vmm') AND (active_propolis_id IS NULL))
+    )
 );
 
 -- Names for instances within a project should be unique

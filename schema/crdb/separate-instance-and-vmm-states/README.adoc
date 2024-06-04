@@ -1,6 +1,9 @@
 This schema change splits the "instance state" enum that instances and VMMs
 share into two enums, one for instance states and one for VMM states. Variants
-used by only one of these objects only appear in the corresponding enum.
+used by only one of these objects only appear in the corresponding enum. This
+upgrade also adds a database-level constraint that requires that an instance's
+state reports that it has an active VMM if and only if it has an active Propolis
+ID.
 
 This change is mechanically tricky for two reasons. First, the states instances
 and VMMs have after an upgrade depends on the state that they have before the
@@ -43,8 +46,8 @@ Once all this work is done the original `instance_state` enum can be dropped.
 
 There are two other small details to keep in mind:
 
-- The upgrade process needs to delete and recreate the `sled_instance` view
-  because it depends on the instance and VMM state columns.
+- Any views that depend on the affected state columns need to be dropped before
+  removing the old columns and recreated after the migration is done.
 - Deleting and recreating a state column (instead of modifying it in place)
   changes its column index in its table, so these columns need to be moved
   to the (current) ends of the table definitions in dbinit.sql.
