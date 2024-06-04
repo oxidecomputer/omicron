@@ -287,15 +287,13 @@ pub async fn instance_ip_get_instance_state(
         // block the attach/detach.
         (
             InstanceState::Vmm,
-            Some(VmmState::Starting)
-            | Some(VmmState::Migrating)
-            | Some(VmmState::Stopping)
-            | Some(VmmState::Stopped),
+            Some(state @ VmmState::Starting)
+            | Some(state @ VmmState::Migrating)
+            | Some(state @ VmmState::Stopping)
+            | Some(state @ VmmState::Stopped),
         ) => {
-            // Unwrapping is safe since all the matched VMM states are Some.
-            let found_vmm_state = found_vmm_state.unwrap();
             return Err(ActionError::action_failed(Error::unavail(&format!(
-                "can't {verb} in transient state {found_vmm_state}"
+                "can't {verb} in transient state {state}"
             ))));
         }
         (InstanceState::Destroyed, _) => {
