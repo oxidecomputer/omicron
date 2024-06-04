@@ -304,7 +304,7 @@ pub struct RouteConfig {
 )]
 pub struct UplinkAddressConfig {
     pub address: IpNet,
-    /// The VLAN id associated with this route.
+    /// The VLAN id (if any) associated with this address.
     #[serde(default)]
     pub vlan_id: Option<u16>,
 }
