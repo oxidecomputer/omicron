@@ -1616,7 +1616,7 @@ table! {
 }
 
 table! {
-    cockroachdb_zone_id_to_node_id (omicron_zone_id) {
+    cockroachdb_zone_id_to_node_id (omicron_zone_id, crdb_node_id) {
         omicron_zone_id -> Uuid,
         crdb_node_id -> Text,
     }

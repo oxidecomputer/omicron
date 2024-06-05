@@ -3465,19 +3465,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
 -- by the blueprint tables above, but is used by the more general Reconfigurator
 -- system along with them (e.g., to decommission expunged CRDB nodes).
 CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
-    omicron_zone_id UUID NOT NULL PRIMARY KEY,
-    crdb_node_id TEXT NOT NULL
+    omicron_zone_id UUID NOT NULL UNIQUE,
+    crdb_node_id TEXT NOT NULL UNIQUE,
+
+    -- We require the pair to be unique, and also require each column to be
+    -- unique: there should only be one entry for a given zone ID, one entry for
+    -- a given node ID, and we need a unique requirement on the pair (via this
+    -- primary key) to support `ON CONFLICT DO NOTHING` idempotent inserts.
+    PRIMARY KEY (omicron_zone_id, crdb_node_id)
 );
-
--- We already effectively have a unique crdb_node_id for each omicron_zone_id
--- because it's the primary key; however, an insert query that uses `ON CONFLICT
--- DO NOTHING` for idempotency requires a UNIQUE constraint on the pair.
-CREATE UNIQUE INDEX IF NOT EXISTS cockroachdb_zone_id_to_node_id_unique_pair ON
-    omicron.public.cockroachdb_zone_id_to_node_id (
-        omicron_zone_id,
-        crdb_node_id
-    );
-
 
 /*******************************************************************/
 

@@ -132,6 +132,17 @@ mod tests {
             .await
             .expect_err("failed to set node ID");
 
+        // We can't assign the same node ID to a different zone, either.
+        let different_zone_id = OmicronZoneUuid::new_v4();
+        datastore
+            .set_cockroachdb_node_id(
+                &opctx,
+                different_zone_id,
+                fake_node_id.to_string(),
+            )
+            .await
+            .expect_err("failed to set node ID");
+
         // We can reassign the same node ID (i.e., setting is idempotent).
         datastore
             .set_cockroachdb_node_id(
