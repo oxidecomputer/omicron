@@ -1338,7 +1338,7 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
         DataMigrationFns { before: None, after: after_37_0_1 },
     );
     map.insert(
-        SemverVersion(semver::Version::parse("69.0.0").unwrap()),
+        SemverVersion(semver::Version::parse("70.0.0").unwrap()),
         DataMigrationFns { before: Some(before_70_0_0), after: after_70_0_0 },
     );
 
