@@ -986,10 +986,7 @@ impl From<PortConfigV1> for PortConfigV2 {
             addresses: value
                 .addresses
                 .iter()
-                .map(|a| UplinkAddressConfig {
-                    address: a.clone(),
-                    vlan_id: None,
-                })
+                .map(|a| UplinkAddressConfig { address: *a, vlan_id: None })
                 .collect(),
             switch: value.switch,
             port: value.port,
@@ -1076,7 +1073,7 @@ impl RackNetworkConfigV1 {
     /// contains the `RackNetworkConfivV0` struct.
     pub fn to_v2(v1: RackNetworkConfigV1) -> RackNetworkConfigV2 {
         RackNetworkConfigV2 {
-            rack_subnet: v1.rack_subnet.clone(),
+            rack_subnet: v1.rack_subnet,
             infra_ip_first: v1.infra_ip_first,
             infra_ip_last: v1.infra_ip_last,
             ports: v1
@@ -1203,29 +1200,32 @@ mod tests {
 
         let v1 = EarlyNetworkConfigV1 {
             generation: 1,
-            rack_subnet: Ipv6Addr::UNSPECIFIED,
-            ntp_servers: Vec::new(),
-            rack_network_config: Some(RackNetworkConfigV1 {
-                rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
-                infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                ports: vec![PortConfigV1 {
-                    routes: vec![RouteConfig {
-                        destination: "0.0.0.0/0".parse().unwrap(),
-                        nexthop: "192.168.0.2".parse().unwrap(),
-                        vlan_id: None,
+            schema_version: 1,
+            body: EarlyNetworkConfigBodyV1 {
+                ntp_servers: Vec::new(),
+                rack_network_config: Some(RackNetworkConfigV1 {
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    ports: vec![PortConfigV1 {
+                        routes: vec![RouteConfig {
+                            destination: "0.0.0.0/0".parse().unwrap(),
+                            nexthop: "192.168.0.2".parse().unwrap(),
+                            vlan_id: None,
+                        }],
+                        addresses: vec!["192.168.0.1/16".parse().unwrap()],
+                        switch: SwitchLocation::Switch0,
+                        port: "Port0".to_string(),
+                        uplink_port_speed: PortSpeed::Speed100G,
+                        uplink_port_fec: PortFec::None,
+                        bgp_peers: Vec::new(),
+                        autoneg: false,
                     }],
-                    addresses: vec!["192.168.0.1/16".parse().unwrap()],
-                    switch: SwitchLocation::Switch0,
-                    port: "Port0".to_string(),
-                    uplink_port_speed: PortSpeed::Speed100G,
-                    uplink_port_fec: PortFec::None,
-                    bgp_peers: Vec::new(),
-                    autoneg: false,
-                }],
-                bgp: Vec::new(),
-                bfd: Vec::new(),
-            }),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                }),
+            },
         };
 
         let v1_serialized = serde_json::to_vec(&v1).unwrap();
@@ -1237,21 +1237,21 @@ mod tests {
             &bootstore_conf,
         )
         .unwrap();
-        let v1_rack_network_config = v1.rack_network_config.unwrap();
+        let v1_rack_network_config = v1.body.rack_network_config.unwrap();
         let port = v1_rack_network_config.ports[0].clone();
         let expected = EarlyNetworkConfig {
             generation: 1,
             schema_version: 2,
             body: EarlyNetworkConfigBody {
-                ntp_servers: v1.ntp_servers.clone(),
+                ntp_servers: v1.body.ntp_servers.clone(),
                 rack_network_config: Some(RackNetworkConfigV2 {
-                    rack_subnet: Ipv6Net::new(v1.rack_subnet, 56).unwrap(),
+                    rack_subnet: v1_rack_network_config.rack_subnet,
                     infra_ip_first: v1_rack_network_config.infra_ip_first,
                     infra_ip_last: v1_rack_network_config.infra_ip_last,
                     ports: vec![PortConfigV2 {
                         routes: port.routes.clone(),
                         addresses: vec![UplinkAddressConfig {
-                            address: port.addresses[0].clone(),
+                            address: port.addresses[0],
                             vlan_id: None,
                         }],
                         switch: port.switch,
