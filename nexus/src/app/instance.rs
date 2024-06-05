@@ -563,9 +563,12 @@ impl super::Nexus {
         // outright fails, this operation fails. If the operation nominally
         // succeeds but nothing was updated, this action is outdated and the
         // caller should not proceed with migration.
-        let (updated, _) = match instance_put_result {
+        let (updated, _, _) = match instance_put_result {
             Ok(state) => {
                 self.write_returned_instance_state(&instance_id, state).await?
+
+                // TODO(eliza): this is where we would also want to insert to the
+                // migration table...
             }
             Err(e) => {
                 if e.instance_unhealthy() {
@@ -1321,7 +1324,7 @@ impl super::Nexus {
         &self,
         instance_id: &Uuid,
         state: Option<nexus::SledInstanceState>,
-    ) -> Result<(bool, bool), Error> {
+    ) -> Result<(bool, bool, Option<bool>), Error> {
         slog::debug!(&self.log,
                      "writing instance state returned from sled agent";
                      "instance_id" => %instance_id,
@@ -1335,6 +1338,7 @@ impl super::Nexus {
                     &state.instance_state.into(),
                     &state.propolis_id,
                     &state.vmm_state.into(),
+                    &state.migration_state,
                 )
                 .await;
 
@@ -1346,7 +1350,7 @@ impl super::Nexus {
 
             update_result
         } else {
-            Ok((false, false))
+            Ok((false, false, None))
         }
     }
 
@@ -1983,7 +1987,8 @@ pub(crate) async fn notify_instance_updated(
             "instance_id" => %instance_id,
             "instance_state" => ?new_runtime_state.instance_state,
             "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state);
+            "vmm_state" => ?new_runtime_state.vmm_state,
+            "migration_state" => ?new_runtime_state.migration_state);
 
     // Grab the current state of the instance in the DB to reason about
     // whether this update is stale or not.
@@ -2071,6 +2076,7 @@ pub(crate) async fn notify_instance_updated(
             &db::model::VmmRuntimeState::from(
                 new_runtime_state.vmm_state.clone(),
             ),
+            &new_runtime_state.migration_state,
         )
         .await;
 
@@ -2112,12 +2118,13 @@ pub(crate) async fn notify_instance_updated(
     }
 
     match result {
-        Ok((instance_updated, vmm_updated)) => {
+        Ok((instance_updated, vmm_updated, migration_updated)) => {
             info!(log, "instance and vmm updated by sled agent";
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id,
                     "instance_updated" => instance_updated,
-                    "vmm_updated" => vmm_updated);
+                    "vmm_updated" => vmm_updated,
+                    "migration_updated" => ?migration_updated);
             Ok(Some(InstanceUpdated { instance_updated, vmm_updated }))
         }
 

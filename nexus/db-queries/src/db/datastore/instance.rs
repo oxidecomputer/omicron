@@ -46,6 +46,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::MigrationRuntimeState;
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use uuid::Uuid;
@@ -385,13 +386,14 @@ impl DataStore {
         new_instance: &InstanceRuntimeState,
         vmm_id: &Uuid,
         new_vmm: &VmmRuntimeState,
-    ) -> Result<(bool, bool), Error> {
+        migration: &Option<MigrationRuntimeState>,
+    ) -> Result<(bool, bool, Option<bool>), Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             *instance_id,
             new_instance.clone(),
             *vmm_id,
             new_vmm.clone(),
-            None, // TODO: ELIZA ADD THIS
+            migration.clone(),
         );
 
         // The InstanceAndVmmUpdate query handles and indicates failure to find
@@ -414,7 +416,18 @@ impl DataStore {
             None => false,
         };
 
-        Ok((instance_updated, vmm_updated))
+        let migration_updated = if migration.is_some() {
+            Some(match result.migration_status {
+                Some(UpdateStatus::Updated) => true,
+                Some(UpdateStatus::NotUpdatedButExists) => false,
+                None => false,
+            })
+        } else {
+            debug_assert_eq!(result.migration_status, None);
+            None
+        };
+
+        Ok((instance_updated, vmm_updated, migration_updated))
     }
 
     /// Lists all instances on in-service sleds with active Propolis VMM

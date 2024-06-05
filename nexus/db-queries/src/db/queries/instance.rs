@@ -365,9 +365,9 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
         out.push_sql("instance_result.found, instance_result.updated, ");
         if self.migration.is_some() {
-            out.push_sql("migration_result.found, migration_result.updated");
+            out.push_sql("migration_result.found, migration_result.updated ");
         } else {
-            out.push_sql("NULL, NULL");
+            out.push_sql("NULL, NULL ");
         }
         out.push_sql("FROM vmm_result, instance_result");
         if self.migration.is_some() {
