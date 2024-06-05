@@ -487,28 +487,31 @@ via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
 
 === Using the CLI
 
-To authenticate, you'll need to generate a 8 character pass phrase with the CLI 
-and enter it into the web interface.
+Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[Oxide CLI]. See the previous section to find the URL for the API. Then you can start the login flow with:
 
 [source,console]
 ----
-oxide auth login --host http://192.168.1.22
+$ oxide auth login --host http://192.168.1.22
+
+Opened this URL in your browser:
+  http://192.168.1.22/device/verify
+
+Enter the code: CXKX-KPBK
 ----
 
-This generates the 8 character confirmation code to use with the web interface to authenticate. 
-If you're using an ssh tunnel, you'll need to use this instead of the suggested url:
-
-```
-http://127.0.0.1:1234/device/verify
-```
-
-Which will bring you to the recovery silo login. The login parameters are defined in 'config-rss.toml'
-and default to:
+Assuming you haven't already logged in, this page will bring you to the recovery silo login. The username and password are defined in `config-rss.toml` and default to:
 
 ```
 username: recovery
 password: oxide
 ```
+
+Once logged in, enter the 8-character code to complete the login flow. In a few moments the CLI should show you're logged in.
+
+[NOTE]
+====
+If you're using an SSH tunnel, you will either need to change the `device/verify` URL (if running the CLI on the same host as the control plane) or the `--host` URL (if running the CLI on a different host) to point to your tunnel. In the previous section's example, the URL is `http://127.0.0.1:1234`.
+====
 
 === Configure quotas for your silo
 
