@@ -12,7 +12,6 @@ use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
-use nexus_db_queries::db::datastore::instance;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
