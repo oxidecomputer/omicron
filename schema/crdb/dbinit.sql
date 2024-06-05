@@ -3512,10 +3512,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
-
-    /*
-     * N.B. This column's
-     */
     state omicron.public.vmm_state NOT NULL
 );
 
