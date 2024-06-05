@@ -517,6 +517,11 @@ pub struct BlueprintTasksConfig {
     /// executes the latest target blueprint
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_execute: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// collects the node IDs of CockroachDB zones
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_collect_crdb_node_ids: Duration,
 }
 
 #[serde_as]

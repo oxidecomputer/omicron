@@ -279,7 +279,7 @@ impl BackgroundTasks {
         let task_crdb_node_id_collector = driver.register(
             String::from("crdb_node_id_collector"),
             String::from("Collects node IDs of running CockroachDB zones"),
-            config.blueprints.period_secs_execute, // TODO-john FIXME
+            config.blueprints.period_secs_collect_crdb_node_ids,
             Box::new(crdb_node_id_collector),
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
