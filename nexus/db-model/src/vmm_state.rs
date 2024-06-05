@@ -106,6 +106,11 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
             VmmState::Starting => Output::Starting,
             VmmState::Running => Output::Running,
             VmmState::Stopping => Output::Stopping,
+            // `SagaUnwound` should map to `Stopped` so that an `instance_view`
+            // API call that produces an instance with an unwound VMM will appear to
+            // be `Stopped`. This is because we instances with unwound VMMs can
+            // be started by a subsequent instance-start saga, just like
+            // instances whose internal state actually is `Stopped`.
             VmmState::Stopped | VmmState::SagaUnwound => Output::Stopped,
             VmmState::Rebooting => Output::Rebooting,
             VmmState::Migrating => Output::Migrating,
