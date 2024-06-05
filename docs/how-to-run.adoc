@@ -543,7 +543,7 @@ An IP pool is needed to provide external connectivity to Instances.  The address
 
 Here we will first create an ip pool for the recovery silo:
 [source,console]
----
+----
 $ oxide api /v1/system/ip-pools --method POST --input - <<EOF
 {
   "name": "default",
@@ -559,11 +559,11 @@ EOF
   "time_created": "2024-01-16T22:51:54.679751Z",
   "time_modified": "2024-01-16T22:51:54.679751Z"
 }
----
+----
 
 Now we will associate the pool with the recovery silo.
 [source,console]
----
+----
 $ oxide api /v1/system/ip-pools/default/silos --method POST --input - <<EOF
 {
   "silo": "recovery",
@@ -577,7 +577,7 @@ EOF
   "is_default": true,
   "silo_id": "5c0aca09-d7ee-4be6-b7b1-060655659f74"
 }
----
+----
 
 Now we will add an address range to the recovery silo:
 
