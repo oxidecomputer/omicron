@@ -4063,6 +4063,20 @@ VALUES (
 ON CONFLICT (id)
 DO NOTHING;
 
+CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
+  'in_progress',
+  'failed',
+  'completed'
+);
+
+-- A table of the states of current migrations.
+CREATE TABLE IF NOT EXISTS omicron.public.migration (
+    id UUID PRIMARY KEY,
+    source_state omicron.public.migration_state NOT NULL,
+    source_propolis_id UUID NOT NULL,
+    target_state omicron.public.migration_state NOT NULL,
+    target_propolis_id UUID NOT NULL
+);
 
 /*
  * Keep this at the end of file so that the database does not contain a version
@@ -4075,7 +4089,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '70.0.0', NULL)
+    (TRUE, NOW(), NOW(), '71.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

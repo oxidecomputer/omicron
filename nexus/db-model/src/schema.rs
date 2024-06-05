@@ -1758,6 +1758,19 @@ table! {
     }
 }
 
+table! {
+    migration (id) {
+        id -> Uuid,
+        source_state -> crate::MigrationStateEnum,
+        source_propolis_id -> Uuid,
+        target_state -> crate::MigrationStateEnum,
+        target_propolis_id -> Uuid,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(instance, migration);
+joinable!(instance -> migration (migration_id));
+
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,
     ip_pool,
