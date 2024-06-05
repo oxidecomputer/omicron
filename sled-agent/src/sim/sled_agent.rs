@@ -26,10 +26,7 @@ use anyhow::bail;
 use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
-use ipnetwork::Ipv6Network;
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -42,13 +39,14 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -74,7 +72,7 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
-    pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
+    pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
@@ -95,40 +93,33 @@ fn extract_targets_from_volume_construction_request(
     // flush.
 
     let mut res = vec![];
-    match vcr {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size: _,
-            sub_volumes,
-            read_only_parent: _,
-        } => {
-            for sub_volume in sub_volumes.iter() {
-                res.extend(extract_targets_from_volume_construction_request(
-                    sub_volume,
-                )?);
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(&vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
             }
-        }
 
-        VolumeConstructionRequest::Url { .. } => {
-            // noop
-        }
-
-        VolumeConstructionRequest::Region {
-            block_size: _,
-            blocks_per_extent: _,
-            extent_count: _,
-            opts,
-            gen: _,
-        } => {
-            for target in &opts.target {
-                res.push(SocketAddr::from_str(target)?);
+            VolumeConstructionRequest::Url { .. } => {
+                // noop
             }
-        }
 
-        VolumeConstructionRequest::File { .. } => {
-            // noop
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    res.push(SocketAddr::from_str(&target)?);
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // noop
+            }
         }
     }
+
     Ok(res)
 }
 
@@ -156,7 +147,7 @@ impl SledAgent {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
                 rack_network_config: Some(RackNetworkConfig {
-                    rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56)
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: Ipv4Addr::UNSPECIFIED,
                     infra_ip_last: Ipv4Addr::UNSPECIFIED,
@@ -189,7 +180,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
-            v2p_mappings: Mutex::new(HashMap::new()),
+            v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
@@ -672,34 +663,27 @@ impl SledAgent {
 
     pub async fn set_virtual_nic_host(
         &self,
-        interface_id: Uuid,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.push(mapping.clone());
+        v2p_mappings.insert(mapping.clone());
         Ok(())
     }
 
     pub async fn unset_virtual_nic_host(
         &self,
-        interface_id: Uuid,
-        mapping: &DeleteVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.retain(|x| {
-            x.virtual_ip != mapping.virtual_ip || x.vni != mapping.vni
-        });
-
-        // If the last entry was removed, remove the entire interface ID so that
-        // tests don't have to distinguish never-created entries from
-        // previously-extant-but-now-empty entries.
-        if vec.is_empty() {
-            v2p_mappings.remove(&interface_id);
-        }
-
+        v2p_mappings.remove(mapping);
         Ok(())
+    }
+
+    pub async fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        let v2p_mappings = self.v2p_mappings.lock().await;
+        Ok(Vec::from_iter(v2p_mappings.clone()))
     }
 
     pub async fn instance_put_external_ip(
@@ -869,5 +853,9 @@ impl SledAgent {
         requested_zones: OmicronZonesConfig,
     ) {
         *self.fake_zones.lock().await = requested_zones;
+    }
+
+    pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+        self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
     }
 }

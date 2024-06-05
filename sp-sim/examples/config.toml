@@ -9,7 +9,6 @@ serial_number = "SimSidecar0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
 
-
 [[simulated_sps.gimlet]]
 multicast_addr = "ff15:0:1de::1"
 bind_addrs = ["[::]:33310", "[::]:33311"]
@@ -21,7 +20,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33312"
 
@@ -36,7 +35,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33322"
 

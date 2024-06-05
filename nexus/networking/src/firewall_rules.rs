@@ -19,10 +19,10 @@ use nexus_db_queries::db::DataStore;
 use omicron_common::api::external;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::NetworkInterface;
+use oxnet::IpNet;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -353,7 +353,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                                 .unwrap_or(&no_interfaces)
                             {
                                 host_addrs.push(
-                                    HostIdentifier::Ip(IpNet::single(
+                                    HostIdentifier::Ip(IpNet::host_net(
                                         interface.ip,
                                     ))
                                     .into(),
@@ -362,7 +362,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         }
                         external::VpcFirewallRuleHostFilter::Subnet(name) => {
                             for subnet in subnet_networks
-                                .get(&name)
+                                .get(name)
                                 .unwrap_or(&no_networks)
                             {
                                 host_addrs.push(
@@ -373,7 +373,8 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         }
                         external::VpcFirewallRuleHostFilter::Ip(addr) => {
                             host_addrs.push(
-                                HostIdentifier::Ip(IpNet::single(*addr)).into(),
+                                HostIdentifier::Ip(IpNet::host_net(*addr))
+                                    .into(),
                             )
                         }
                         external::VpcFirewallRuleHostFilter::IpNet(net) => {
@@ -381,7 +382,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         }
                         external::VpcFirewallRuleHostFilter::Vpc(name) => {
                             for interface in vpc_interfaces
-                                .get(&name)
+                                .get(name)
                                 .unwrap_or(&no_interfaces)
                             {
                                 host_addrs.push(

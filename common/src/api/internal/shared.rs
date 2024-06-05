@@ -6,9 +6,9 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, Name},
 };
-use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -53,7 +53,7 @@ pub struct NetworkInterface {
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
+    pub subnet: IpNet,
     pub vni: external::Vni,
     pub primary: bool,
     pub slot: u8,
@@ -159,7 +159,7 @@ pub type RackNetworkConfig = RackNetworkConfigV1;
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfigV1 {
-    pub rack_subnet: Ipv6Network,
+    pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,
@@ -179,7 +179,7 @@ pub struct BgpConfig {
     /// The autonomous system number for the BGP configuration.
     pub asn: u32,
     /// The set of prefixes for the BGP router to originate.
-    pub originate: Vec<Ipv4Network>,
+    pub originate: Vec<Ipv4Net>,
 
     /// Shaper to apply to outgoing messages.
     #[serde(default)]
@@ -291,7 +291,7 @@ pub struct BfdPeerConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RouteConfig {
     /// The destination of the route.
-    pub destination: IpNetwork,
+    pub destination: IpNet,
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
     /// The VLAN id associated with this route.
@@ -304,7 +304,7 @@ pub struct PortConfigV1 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
     /// This port's addresses.
-    pub addresses: Vec<IpNetwork>,
+    pub addresses: Vec<IpNet>,
     /// Switch the port belongs to.
     pub switch: SwitchLocation,
     /// Nmae of the port this config applies to.
@@ -355,7 +355,7 @@ pub struct UplinkConfig {
     pub uplink_port_fec: PortFec,
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool)
-    pub uplink_cidr: Ipv4Network,
+    pub uplink_cidr: Ipv4Net,
     /// VLAN id to use for uplink
     pub uplink_vid: Option<u16>,
 }
@@ -373,7 +373,7 @@ pub struct HostPortConfig {
 
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool)
-    pub addrs: Vec<IpNetwork>,
+    pub addrs: Vec<IpNet>,
 }
 
 impl From<PortConfigV1> for HostPortConfig {
@@ -527,9 +527,9 @@ impl TryFrom<Vec<IpNet>> for AllowedSourceIps {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for AllowedSourceIps {
+impl TryFrom<&[ipnetwork::IpNetwork]> for AllowedSourceIps {
     type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
         IpAllowList::try_from(list).map(Self::List)
     }
 }
@@ -580,45 +580,43 @@ impl TryFrom<Vec<IpNet>> for IpAllowList {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for IpAllowList {
+impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
         if list.is_empty() {
             return Err("IP allowlist must not be empty");
         }
-        Ok(Self(list.iter().copied().map(Into::into).collect()))
+        Ok(Self(list.into_iter().map(|net| (*net).into()).collect()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::api::{
-        external::{IpNet, Ipv4Net, Ipv6Net},
-        internal::shared::AllowedSourceIps,
-    };
-    use ipnetwork::{Ipv4Network, Ipv6Network};
+    use crate::api::internal::shared::AllowedSourceIps;
+    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn test_deserialize_allowed_source_ips() {
         let parsed: AllowedSourceIps = serde_json::from_str(
-            r#"{"allow":"list","ips":["127.0.0.1","10.0.0.0/24","fd00::1/64"]}"#,
+            r#"{"allow":"list","ips":["127.0.0.1/32","10.0.0.0/24","fd00::1/64"]}"#,
         )
         .unwrap();
         assert_eq!(
             parsed,
             AllowedSourceIps::try_from(vec![
-                IpNet::V4(Ipv4Net::single(Ipv4Addr::LOCALHOST)),
-                IpNet::V4(Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
-                )),
-                IpNet::V6(Ipv6Net(
-                    Ipv6Network::new(
+                Ipv4Net::host_net(Ipv4Addr::LOCALHOST).into(),
+                IpNet::V4(
+                    Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
+                ),
+                IpNet::V6(
+                    Ipv6Net::new(
                         Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
                         64
                     )
                     .unwrap()
-                )),
+                ),
             ])
             .unwrap()
         );

@@ -46,17 +46,10 @@ https://github.com/oxidecomputer/console[console]).
 There are many scripts here related to each other, but they share some common
 naming. At a high-level:
 
-- scripts with names of the form `ci_download_*` are intended to install a
-  single dependency. This typically involves installing a tarfile and unpacking
-  into a known location (such as `out/` from the root of the source tree). They
-  may also fetch artifacts from buildomat.  Some of these tools will verify the
-  download binary against a checksum. Despite their name, these
-  scripts are not exclusively used in CI (they are suggested to be run by
-  developers in hint messages of other tools).
-- `\*\_checksums` contain known checksums against which `ci_download_*` will
+- `\*\_checksums` contain known checksums against which `cargo xtask download` will
   verify a dependency when it is downloaded.
 - `\*\_version` files (such as `console_version`) specify a version that is used
-  by the `ci_download_*` scripts.
+  by the `cargo xtask download` scripts.
 - scripts of the form `install_*.sh` are intended to install specific
   dependencies (or collections of dependencies) onto a development machine of
   some kind, for running or deploying Omicron. A current example is
@@ -71,4 +64,11 @@ The `update_*.sh` scripts are intended to help update the current supported
 version of a specific dependency. Some of these operate on Rust dependencies
 (such as https://github.com/oxidecomputer/propolis[propolis] and
 https://github.com/oxidecomputer/crucible[crucible]), while others are related
-to the binaries downloaded by the `ci_download_*` scripts.
+to the binaries downloaded by the `cargo xtask download` scripts.
+
+== "Virtual Hardware" Management
+
+Another class of scripts is related to the setup and teardown of "virtual
+hardware", which can be useful when deploying omicron with a real sled agent.
+Current examples includes the `cargo xtask virtual-hardware` task.
+See xref:docs/how-to-run.adoc[] for details.

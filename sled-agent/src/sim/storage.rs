@@ -543,6 +543,10 @@ impl Zpool {
 
         None
     }
+
+    pub fn drop_dataset(&mut self, id: Uuid) {
+        let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
+    }
 }
 
 /// Simulated representation of all storage on a sled.
@@ -642,6 +646,7 @@ impl Storage {
     pub fn zpools(&self) -> &HashMap<ZpoolUuid, Zpool> {
         &self.zpools
     }
+
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,
@@ -756,6 +761,13 @@ impl Storage {
         }
 
         None
+    }
+
+    pub fn drop_dataset(&mut self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+        self.zpools
+            .get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .drop_dataset(dataset_id)
     }
 }
 

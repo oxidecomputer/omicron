@@ -16,8 +16,8 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
+use oxnet::IpNet;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -191,14 +191,12 @@ impl<'a> BuilderExternalNetworking<'a> {
         // of used resources we built above if needed.
         let nexus_v4_ips = AvailableIterator::new(
             NEXUS_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_nexus_v4_ips,
         );
         let nexus_v6_ips = AvailableIterator::new(
             NEXUS_OPTE_IPV6_SUBNET
-                .0
                 .iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_nexus_v6_ips,

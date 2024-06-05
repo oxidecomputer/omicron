@@ -4,6 +4,7 @@
 
 //! Background tasks
 
+mod abandoned_vmm_reaper;
 mod bfd;
 mod blueprint_execution;
 mod blueprint_load;
@@ -25,5 +26,6 @@ mod service_firewall_rules;
 mod status;
 mod sync_service_zone_nat;
 mod sync_switch_configuration;
+mod v2p_mappings;
 
 pub use init::BackgroundTasks;

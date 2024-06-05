@@ -72,9 +72,37 @@ pub struct SpState {
     Serialize,
     JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
+pub enum RotImageError {
+    Unchecked,
+    FirstPageErased,
+    PartiallyProgrammed,
+    InvalidLength,
+    HeaderNotProgrammed,
+    BootloaderTooSmall,
+    BadMagic,
+    HeaderImageSize,
+    UnalignedLength,
+    UnsupportedType,
+    ResetVectorNotThumb2,
+    ResetVector,
+    Signature,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum RotState {
-    Enabled {
+    V2 {
         active: RotSlot,
         persistent_boot_preference: RotSlot,
         pending_persistent_boot_preference: Option<RotSlot>,
@@ -84,6 +112,22 @@ pub enum RotState {
     },
     CommunicationFailed {
         message: String,
+    },
+    V3 {
+        active: RotSlot,
+        persistent_boot_preference: RotSlot,
+        pending_persistent_boot_preference: Option<RotSlot>,
+        transient_boot_preference: Option<RotSlot>,
+
+        slot_a_fwid: String,
+        slot_b_fwid: String,
+        stage0_fwid: String,
+        stage0next_fwid: String,
+
+        slot_a_error: Option<RotImageError>,
+        slot_b_error: Option<RotImageError>,
+        stage0_error: Option<RotImageError>,
+        stage0next_error: Option<RotImageError>,
     },
 }
 
@@ -182,6 +226,21 @@ pub struct GetCfpaParams {
 pub struct RotCfpa {
     pub base64_data: String,
     pub slot: RotCfpaSlot,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct GetRotBootInfoParams {
+    pub version: u8,
 }
 
 #[derive(
@@ -626,7 +685,12 @@ async fn sp_get(
         SpCommsError::SpCommunicationFailed { sp: sp_id, err }
     })?;
 
-    Ok(HttpResponseOk(state.into()))
+    let rot_state = sp
+        .rot_state(gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION)
+        .await;
+
+    let final_state = SpState::from((state, rot_state));
+    Ok(HttpResponseOk(final_state))
 }
 
 /// Get host startup options for a sled
@@ -1044,7 +1108,9 @@ async fn sp_component_reset(
     let component = component_from_str(&component)?;
 
     sp.reset_component_prepare(component)
-        .and_then(|()| sp.reset_component_trigger(component))
+        // We always want to run with the watchdog when resetting as
+        // disabling the watchdog should be considered a debug only feature
+        .and_then(|()| sp.reset_component_trigger(component, false))
         .await
         .map_err(|err| SpCommsError::SpCommunicationFailed {
             sp: sp_id,
@@ -1222,6 +1288,40 @@ async fn sp_rot_cfpa_get(
     let base64_data = base64::engine::general_purpose::STANDARD.encode(data);
 
     Ok(HttpResponseOk(RotCfpa { base64_data, slot }))
+}
+
+/// Read the RoT boot state from a root of trust
+///
+/// This endpoint is only valid for the `rot` component.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/rot-boot-info",
+}]
+async fn sp_rot_boot_info(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+    params: TypedBody<GetRotBootInfoParams>,
+) -> Result<HttpResponseOk<RotState>, HttpError> {
+    let apictx = rqctx.context();
+
+    let PathSpComponent { sp, component } = path.into_inner();
+    let GetRotBootInfoParams { version } = params.into_inner();
+    let sp_id = sp.into();
+
+    // Ensure the caller knows they're asking for the RoT
+    if component_from_str(&component)? != SpComponent::ROT {
+        return Err(HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            "rot_boot_info only makes sent for a RoT".into(),
+        ));
+    }
+
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
+    let state = sp.rot_state(version).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
+
+    Ok(HttpResponseOk(state.into()))
 }
 
 /// List SPs via Ignition
@@ -1600,6 +1700,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_update_abort)?;
         api.register(sp_rot_cmpa_get)?;
         api.register(sp_rot_cfpa_get)?;
+        api.register(sp_rot_boot_info)?;
         api.register(sp_host_phase2_progress_get)?;
         api.register(sp_host_phase2_progress_delete)?;
         api.register(ignition_list)?;

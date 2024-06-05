@@ -93,7 +93,8 @@ use nexus_client::{
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig, InvalidOmicronZoneType,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -751,7 +752,7 @@ impl ServiceInner {
                                 vlan_id: r.vlan_id,
                             })
                             .collect(),
-                        addresses: config.addresses.clone(),
+                        addresses: config.addresses.iter().cloned().map(Into::into).collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
@@ -787,7 +788,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config.originate.clone(),
+                        originate: config.originate.iter().cloned().map(Into::into).collect(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                     })
@@ -1435,6 +1436,10 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // generation of 1. Nexus will bump this up when it updates external DNS
         // (including creating the recovery silo).
         external_dns_version: Generation::new(),
+        // Nexus will fill in the CockroachDB values during initialization.
+        cockroachdb_fingerprint: String::new(),
+        cockroachdb_setting_preserve_downgrade:
+            CockroachDbPreserveDowngrade::DoNotModify,
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

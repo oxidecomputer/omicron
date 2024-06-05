@@ -384,11 +384,11 @@ impl Plan {
             &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
             .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().ip().into())
+            .map(|dns_subnet| dns_subnet.dns_address().into())
             .collect::<Vec<IpAddr>>();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
-            let ip = dns_subnet.dns_address().ip();
+            let ip = dns_subnet.dns_address();
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -419,7 +419,7 @@ impl Plan {
                     },
                     http_address,
                     dns_address,
-                    gz_address: dns_subnet.gz_address().ip(),
+                    gz_address: dns_subnet.gz_address(),
                     gz_address_index: i.try_into().expect("Giant indices?"),
                 },
             });
@@ -961,39 +961,29 @@ impl ServicePortBuilder {
 
         let dns_v4_ips = Box::new(
             DNS_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let dns_v6_ips = Box::new(
-            DNS_OPTE_IPV6_SUBNET
-                .0
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            DNS_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let nexus_v4_ips = Box::new(
             NEXUS_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let nexus_v6_ips = Box::new(
             NEXUS_OPTE_IPV6_SUBNET
-                .0
                 .iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let ntp_v4_ips = Box::new(
             NTP_OPTE_IPV4_SUBNET
-                .0
-                .iter()
+                .addr_iter()
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         let ntp_v6_ips = Box::new(
-            NTP_OPTE_IPV6_SUBNET
-                .0
-                .iter()
-                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            NTP_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         Self {
             internal_services_ip_pool,
@@ -1166,6 +1156,7 @@ mod tests {
     use omicron_common::address::IpRange;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use oxnet::Ipv6Net;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1261,7 +1252,7 @@ mod tests {
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
             rack_network_config: RackNetworkConfig {
-                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
                 infra_ip_first: Ipv4Addr::LOCALHOST,
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),

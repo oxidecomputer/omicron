@@ -104,6 +104,7 @@ const IPADM: &'static str = "/usr/sbin/ipadm";
 const MODINFO: &'static str = "/usr/sbin/modinfo";
 const MODUNLOAD: &'static str = "/usr/sbin/modunload";
 const NETSTAT: &'static str = "/usr/bin/netstat";
+const OPTEADM: &'static str = "/opt/oxide/opte/bin/opteadm";
 const PFEXEC: &'static str = "/usr/bin/pfexec";
 const PING: &'static str = "/usr/sbin/ping";
 const SWAP: &'static str = "/usr/sbin/swap";
@@ -247,8 +248,17 @@ fn unload_xde_driver() -> Result<()> {
         println!("xde driver already unloaded");
         return Ok(());
     };
-    println!("unloading xde driver");
+    println!("unloading xde driver:\na) clearing underlay...");
+    let mut cmd = Command::new(PFEXEC);
+    cmd.args([OPTEADM, "clear-xde-underlay"]);
+    if let Err(e) = execute(cmd) {
+        // This is explicitly non-fatal: the underlay is only set when
+        // sled-agent is running. We still need to be able to tear
+        // down the driver if we immediately call create->destroy.
+        println!("\tFailed or already unset: {e}");
+    }
 
+    println!("b) unloading module...");
     let mut cmd = Command::new(PFEXEC);
     cmd.arg(MODUNLOAD);
     cmd.arg("-i");

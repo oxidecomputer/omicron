@@ -36,6 +36,13 @@ pub struct SpCommonConfig {
     /// Fake components.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub components: Vec<SpComponentConfig>,
+    /// Return errors for `versioned_rot_boot_info` simulating
+    /// an older RoT
+    #[serde(default)]
+    pub old_rot_state: bool,
+    /// Simulate a RoT stage0 with no caboose
+    #[serde(default)]
+    pub no_stage0_caboose: bool,
 }
 
 /// Configuration of a simulated SP component

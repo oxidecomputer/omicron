@@ -95,7 +95,8 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        blueprint_zone_type, BlueprintZoneType, OmicronZonesConfig,
+        blueprint_zone_type, BlueprintZoneType, CockroachDbPreserveDowngrade,
+        OmicronZonesConfig,
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintTarget, BlueprintZoneConfig,
@@ -127,9 +128,12 @@ mod test {
                 blueprint_zones,
                 blueprint_disks: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
+                cockroachdb_fingerprint: String::new(),
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
