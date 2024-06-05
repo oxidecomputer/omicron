@@ -5642,7 +5642,9 @@ dependencies = [
 name = "omicron-passwords"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "argon2",
+ "clap",
  "criterion",
  "omicron-workspace-hack",
  "rand 0.8.5",
