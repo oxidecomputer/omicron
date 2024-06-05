@@ -195,6 +195,7 @@
         },
         "checker": {
           "description": "Checker to apply to incoming messages.",
+          "default": null,
           "type": [
             "string",
             "null"
@@ -209,6 +210,7 @@
         },
         "shaper": {
           "description": "Shaper to apply to outgoing messages.",
+          "default": null,
           "type": [
             "string",
             "null"
@@ -319,6 +321,7 @@
         },
         "local_pref": {
           "description": "Apply a local preference to routes received from this peer.",
+          "default": null,
           "type": [
             "integer",
             "null"
@@ -328,6 +331,7 @@
         },
         "md5_auth_key": {
           "description": "Use the given key for TCP-MD5 authentication with the peer.",
+          "default": null,
           "type": [
             "string",
             "null"
@@ -335,6 +339,7 @@
         },
         "min_ttl": {
           "description": "Require messages from a peer have a minimum IP time to live field.",
+          "default": null,
           "type": [
             "integer",
             "null"
@@ -344,6 +349,7 @@
         },
         "multi_exit_discriminator": {
           "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+          "default": null,
           "type": [
             "integer",
             "null"
@@ -357,6 +363,7 @@
         },
         "remote_asn": {
           "description": "Require that a peer has a specified ASN.",
+          "default": null,
           "type": [
             "integer",
             "null"
@@ -366,6 +373,7 @@
         },
         "vlan_id": {
           "description": "Associate a VLAN ID with a BGP peer session.",
+          "default": null,
           "type": [
             "integer",
             "null"
@@ -894,6 +902,7 @@
         },
         "vlan_id": {
           "description": "The VLAN id associated with this route.",
+          "default": null,
           "type": [
             "integer",
             "null"
@@ -997,6 +1006,7 @@
         },
         "vlan_id": {
           "description": "The VLAN id (if any) associated with this address.",
+          "default": null,
           "type": [
             "integer",
             "null"

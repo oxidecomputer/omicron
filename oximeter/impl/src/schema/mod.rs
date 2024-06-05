@@ -2,9 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Tools for working with schema for fields and timeseries.
+
+pub mod codegen;
+pub mod ir;
 
 use crate::types::DatumType;
 use crate::types::FieldType;
@@ -21,7 +24,16 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Write;
+use std::num::NonZeroU8;
 use std::path::Path;
+
+/// Full path to the directory containing all schema.
+///
+/// This is defined in this crate as the single source of truth, but not
+/// re-exported outside implementation crates (e.g., not via `oximeter` or
+/// `oximeter-collector`.
+pub const SCHEMA_DIRECTORY: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../oximeter/schema");
 
 /// The name and type information for a field of a timeseries schema.
 #[derive(
@@ -39,6 +51,7 @@ pub struct FieldSchema {
     pub name: String,
     pub field_type: FieldType,
     pub source: FieldSource,
+    pub description: String,
 }
 
 /// The source from which a field is derived, the target or metric.
@@ -68,7 +81,7 @@ pub enum FieldSource {
     Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
 )]
 #[serde(try_from = "&str")]
-pub struct TimeseriesName(String);
+pub struct TimeseriesName(pub(crate) String);
 
 impl JsonSchema for TimeseriesName {
     fn schema_name() -> String {
@@ -153,6 +166,24 @@ fn validate_timeseries_name(s: &str) -> Result<&str, MetricsError> {
     }
 }
 
+/// Text descriptions for the target and metric of a timeseries.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct TimeseriesDescription {
+    pub target: String,
+    pub metric: String,
+}
+
+/// Measurement units for timeseries samples.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+// TODO-completeness: Include more units, such as power / temperature.
+// TODO-completeness: Decide whether and how to handle dimensional analysis
+// during queries, if needed.
+pub enum Units {
+    Count,
+    Bytes,
+}
+
 /// The schema for a timeseries.
 ///
 /// This includes the name of the timeseries, as well as the datum type of its metric and the
@@ -160,20 +191,33 @@ fn validate_timeseries_name(s: &str) -> Result<&str, MetricsError> {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TimeseriesSchema {
     pub timeseries_name: TimeseriesName,
+    pub description: TimeseriesDescription,
     pub field_schema: BTreeSet<FieldSchema>,
     pub datum_type: DatumType,
+    pub version: NonZeroU8,
+    pub authz_scope: AuthzScope,
+    pub units: Units,
     pub created: DateTime<Utc>,
+}
+
+/// Default version for timeseries schema, 1.
+pub const fn default_schema_version() -> NonZeroU8 {
+    unsafe { NonZeroU8::new_unchecked(1) }
 }
 
 impl From<&Sample> for TimeseriesSchema {
     fn from(sample: &Sample) -> Self {
-        let timeseries_name = sample.timeseries_name.parse().unwrap();
+        let timeseries_name = sample
+            .timeseries_name
+            .parse()
+            .expect("expected a legal timeseries name in a sample");
         let mut field_schema = BTreeSet::new();
         for field in sample.target_fields() {
             let schema = FieldSchema {
                 name: field.name.clone(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Target,
+                description: String::new(),
             };
             field_schema.insert(schema);
         }
@@ -182,30 +226,39 @@ impl From<&Sample> for TimeseriesSchema {
                 name: field.name.clone(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Metric,
+                description: String::new(),
             };
             field_schema.insert(schema);
         }
         let datum_type = sample.measurement.datum_type();
-        Self { timeseries_name, field_schema, datum_type, created: Utc::now() }
+        Self {
+            timeseries_name,
+            description: Default::default(),
+            field_schema,
+            datum_type,
+            version: default_schema_version(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Count,
+            created: Utc::now(),
+        }
     }
 }
 
 impl TimeseriesSchema {
     /// Construct a timeseries schema from a target and metric.
-    pub fn new<T, M>(target: &T, metric: &M) -> Self
+    pub fn new<T, M>(target: &T, metric: &M) -> Result<Self, MetricsError>
     where
         T: Target,
         M: Metric,
     {
-        let timeseries_name =
-            TimeseriesName::try_from(crate::timeseries_name(target, metric))
-                .unwrap();
+        let timeseries_name = crate::timeseries_name(target, metric)?;
         let mut field_schema = BTreeSet::new();
         for field in target.fields() {
             let schema = FieldSchema {
                 name: field.name.clone(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Target,
+                description: String::new(),
             };
             field_schema.insert(schema);
         }
@@ -214,11 +267,21 @@ impl TimeseriesSchema {
                 name: field.name.clone(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Metric,
+                description: String::new(),
             };
             field_schema.insert(schema);
         }
         let datum_type = metric.datum_type();
-        Self { timeseries_name, field_schema, datum_type, created: Utc::now() }
+        Ok(Self {
+            timeseries_name,
+            description: Default::default(),
+            field_schema,
+            datum_type,
+            version: default_schema_version(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Count,
+            created: Utc::now(),
+        })
     }
 
     /// Construct a timeseries schema from a sample
@@ -240,11 +303,22 @@ impl TimeseriesSchema {
             .split_once(':')
             .expect("Incorrectly formatted timseries name")
     }
+
+    /// Return the name of the target for this timeseries.
+    pub fn target_name(&self) -> &str {
+        self.component_names().0
+    }
+
+    /// Return the name of the metric for this timeseries.
+    pub fn metric_name(&self) -> &str {
+        self.component_names().1
+    }
 }
 
 impl PartialEq for TimeseriesSchema {
     fn eq(&self, other: &TimeseriesSchema) -> bool {
         self.timeseries_name == other.timeseries_name
+            && self.version == other.version
             && self.datum_type == other.datum_type
             && self.field_schema == other.field_schema
     }
@@ -262,6 +336,38 @@ impl PartialEq for TimeseriesSchema {
 // That describes the target/metric name, and the timeseries is two of those, joined with ':'.
 const TIMESERIES_NAME_REGEX: &str =
     "^(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)$";
+
+/// Authorization scope for a timeseries.
+///
+/// This describes the level at which a user must be authorized to read data
+/// from a timeseries. For example, fleet-scoping means the data is only visible
+/// to an operator or fleet reader. Project-scoped, on the other hand, indicates
+/// that a user will see data limited to the projects on which they have read
+/// permissions.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthzScope {
+    /// Timeseries data is limited to fleet readers.
+    Fleet,
+    /// Timeseries data is limited to the authorized silo for a user.
+    Silo,
+    /// Timeseries data is limited to the authorized projects for a user.
+    Project,
+    /// The timeseries is viewable to all without limitation.
+    ViewableToAll,
+}
 
 /// A set of timeseries schema, useful for testing changes to targets or
 /// metrics.
@@ -284,24 +390,24 @@ impl SchemaSet {
         &mut self,
         target: &T,
         metric: &M,
-    ) -> Option<TimeseriesSchema>
+    ) -> Result<Option<TimeseriesSchema>, MetricsError>
     where
         T: Target,
         M: Metric,
     {
-        let new = TimeseriesSchema::new(target, metric);
+        let new = TimeseriesSchema::new(target, metric)?;
         let name = new.timeseries_name.clone();
         match self.inner.entry(name) {
             Entry::Vacant(entry) => {
                 entry.insert(new);
-                None
+                Ok(None)
             }
             Entry::Occupied(entry) => {
                 let existing = entry.get();
                 if existing == &new {
-                    None
+                    Ok(None)
                 } else {
-                    Some(existing.clone())
+                    Ok(Some(existing.clone()))
                 }
             }
         }
@@ -535,7 +641,7 @@ mod tests {
     fn test_timeseries_schema_from_parts() {
         let target = MyTarget::default();
         let metric = MyMetric::default();
-        let schema = TimeseriesSchema::new(&target, &metric);
+        let schema = TimeseriesSchema::new(&target, &metric).unwrap();
 
         assert_eq!(schema.timeseries_name, "my_target:my_metric");
         let f = schema.schema_for_field("id").unwrap();
@@ -560,7 +666,7 @@ mod tests {
         let target = MyTarget::default();
         let metric = MyMetric::default();
         let sample = Sample::new(&target, &metric).unwrap();
-        let schema = TimeseriesSchema::new(&target, &metric);
+        let schema = TimeseriesSchema::new(&target, &metric).unwrap();
         let schema_from_sample = TimeseriesSchema::from(&sample);
         assert_eq!(schema, schema_from_sample);
     }
@@ -586,11 +692,13 @@ mod tests {
             name: String::from("later"),
             field_type: FieldType::U64,
             source: FieldSource::Target,
+            description: String::new(),
         };
         let metric_field = FieldSchema {
             name: String::from("earlier"),
             field_type: FieldType::U64,
             source: FieldSource::Metric,
+            description: String::new(),
         };
         let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
         let datum_type = DatumType::U64;
@@ -598,8 +706,12 @@ mod tests {
             [target_field.clone(), metric_field.clone()].into_iter().collect();
         let expected_schema = TimeseriesSchema {
             timeseries_name,
+            description: Default::default(),
             field_schema,
             datum_type,
+            version: default_schema_version(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Count,
             created: Utc::now(),
         };
 
@@ -627,11 +739,13 @@ mod tests {
             name: String::from("second"),
             field_type: FieldType::U64,
             source: FieldSource::Target,
+            description: String::new(),
         });
         fields.insert(FieldSchema {
             name: String::from("first"),
             field_type: FieldType::U64,
             source: FieldSource::Target,
+            description: String::new(),
         });
         let mut iter = fields.iter();
         assert_eq!(iter.next().unwrap().name, "first");
