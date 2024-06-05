@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
-    InstanceState, SemverVersion, Vni,
+    SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
@@ -60,11 +60,36 @@ pub struct InstanceRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
+/// One of the states that a VMM can be in.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VmmState {
+    /// The VMM is initializing and has not started running guest CPUs yet.
+    Starting,
+    /// The VMM has finished initializing and may be running guest CPUs.
+    Running,
+    /// The VMM is shutting down.
+    Stopping,
+    /// The VMM's guest has stopped, and the guest will not run again, but the
+    /// VMM process may not have released all of its resources yet.
+    Stopped,
+    /// The VMM is being restarted or its guest OS is rebooting.
+    Rebooting,
+    /// The VMM is part of a live migration.
+    Migrating,
+    /// The VMM process reported an internal failure.
+    Failed,
+    /// The VMM process has been destroyed and its resources have been released.
+    Destroyed,
+}
+
 /// The dynamic runtime properties of an individual VMM process.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VmmRuntimeState {
     /// The last state reported by this VMM.
-    pub state: InstanceState,
+    pub state: VmmState,
     /// The generation number for this VMM's state.
     pub gen: Generation,
     /// Timestamp for the VMM's state.

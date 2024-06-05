@@ -29,34 +29,28 @@ use diesel::RunQueryDsl;
 use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpAttachStateEnum;
+use nexus_db_model::VmmState as DbVmmState;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use uuid::Uuid;
 
 // Broadly, we want users to be able to attach/detach at will
 // once an instance is created and functional.
-pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-    DbInstanceState(ApiInstanceState::Creating),
-];
-pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-];
+pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] =
+    [DbInstanceState::NoVmm, DbInstanceState::Vmm, DbInstanceState::Creating];
+pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] =
+    [DbInstanceState::NoVmm, DbInstanceState::Vmm];
 // If we're in a state which will naturally resolve to either
 // stopped/running, we want users to know that the request can be
 // retried safely via Error::unavail.
 // TODO: We currently stop if there's a migration or other state change.
 //       There may be a good case for RPWing
 //       external_ip_state -> { NAT RPW, sled-agent } in future.
-pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
-    DbInstanceState(ApiInstanceState::Starting),
-    DbInstanceState(ApiInstanceState::Stopping),
-    DbInstanceState(ApiInstanceState::Creating),
-    DbInstanceState(ApiInstanceState::Rebooting),
-    DbInstanceState(ApiInstanceState::Migrating),
+pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbVmmState; 4] = [
+    DbVmmState::Starting,
+    DbVmmState::Stopping,
+    DbVmmState::Rebooting,
+    DbVmmState::Migrating,
 ];
 
 /// The maximum number of disks that can be attached to an instance.
