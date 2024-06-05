@@ -152,6 +152,10 @@ pub enum SourceNatConfigError {
     UnalignedPortPair { first_port: u16, last_port: u16 },
 }
 
+// We alias [`PortConfig`] to the current version of the protocol, so
+// that we can convert between versions as necessary.
+pub type PortConfig = PortConfigV2;
+
 // We alias [`RackNetworkConfig`] to the current version of the protocol, so
 // that we can convert between versions as necessary.
 pub type RackNetworkConfig = RackNetworkConfigV2;
@@ -166,26 +170,7 @@ pub struct RackNetworkConfigV2 {
     /// Last ip address to be used for configuring network infrastructure
     pub infra_ip_last: Ipv4Addr,
     /// Uplinks for connecting the rack to external networks
-    pub ports: Vec<PortConfigV2>,
-    /// BGP configurations for connecting the rack to external networks
-    pub bgp: Vec<BgpConfig>,
-    /// BFD configuration for connecting the rack to external networks
-    #[serde(default)]
-    pub bfd: Vec<BfdPeerConfig>,
-}
-
-/// Initial network configuration
-/// Deprecated - still present to support importing older bootstores
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfigV1 {
-    pub rack_subnet: Ipv6Net,
-    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
-    /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
-    /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
-    /// Uplinks for connecting the rack to external networks
-    pub ports: Vec<PortConfigV1>,
+    pub ports: Vec<PortConfig>,
     /// BGP configurations for connecting the rack to external networks
     pub bgp: Vec<BgpConfig>,
     /// BFD configuration for connecting the rack to external networks
@@ -406,71 +391,6 @@ pub struct PortConfigV2 {
     /// Whether or not to set autonegotiation
     #[serde(default)]
     pub autoneg: bool,
-}
-
-impl From<UplinkConfig> for PortConfigV2 {
-    fn from(value: UplinkConfig) -> Self {
-        PortConfigV2 {
-            routes: vec![RouteConfig {
-                destination: "0.0.0.0/0".parse().unwrap(),
-                nexthop: value.gateway_ip.into(),
-                vlan_id: value.uplink_vid,
-            }],
-            addresses: vec![UplinkAddressConfig {
-                address: value.uplink_cidr.into(),
-                vlan_id: value.uplink_vid,
-            }],
-            switch: value.switch,
-            port: value.uplink_port,
-            uplink_port_speed: value.uplink_port_speed,
-            uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: vec![],
-            autoneg: false,
-        }
-    }
-}
-
-// Deprecated - still present to support importing from older bootstores
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct PortConfigV1 {
-    /// The set of routes associated with this port.
-    pub routes: Vec<RouteConfig>,
-    /// This port's addresses and optional vlan IDs
-    pub addresses: Vec<IpNet>,
-    /// Switch the port belongs to.
-    pub switch: SwitchLocation,
-    /// Nmae of the port this config applies to.
-    pub port: String,
-    /// Port speed.
-    pub uplink_port_speed: PortSpeed,
-    /// Port forward error correction type.
-    pub uplink_port_fec: PortFec,
-    /// BGP peers on this port
-    pub bgp_peers: Vec<BgpPeerConfig>,
-    /// Whether or not to set autonegotiation
-    #[serde(default)]
-    pub autoneg: bool,
-}
-
-/// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct UplinkConfig {
-    /// Gateway address
-    pub gateway_ip: Ipv4Addr,
-    /// Switch to use for uplink
-    pub switch: SwitchLocation,
-    /// Switchport to use for external connectivity
-    pub uplink_port: String,
-    /// Speed for the Switchport
-    pub uplink_port_speed: PortSpeed,
-    /// Forward Error Correction setting for the uplink port
-    pub uplink_port_fec: PortFec,
-    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub uplink_cidr: Ipv4Net,
-    /// VLAN id to use for uplink
-    pub uplink_vid: Option<u16>,
 }
 
 /// A set of switch uplinks.
