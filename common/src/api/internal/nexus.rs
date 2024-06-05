@@ -122,6 +122,7 @@ pub struct MigrationRuntimeState {
     pub migration_id: Uuid,
     pub state: MigrationState,
     pub role: MigrationRole,
+    pub gen: Generation,
 }
 
 /// The state of an instance's live migration.

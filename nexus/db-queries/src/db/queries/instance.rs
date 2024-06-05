@@ -16,7 +16,7 @@ use nexus_db_model::{
         instance::dsl as instance_dsl, migration::dsl as migration_dsl,
         vmm::dsl as vmm_dsl,
     },
-    InstanceRuntimeState, MigrationState, VmmRuntimeState,
+    Generation, InstanceRuntimeState, MigrationState, VmmRuntimeState,
 };
 use omicron_common::api::internal::nexus::{
     MigrationRole, MigrationRuntimeState,
@@ -184,52 +184,35 @@ impl InstanceAndVmmUpdate {
         );
 
         let migration = migration.map(
-            |MigrationRuntimeState { role, migration_id, state }| {
+            |MigrationRuntimeState { role, migration_id, state, gen }| {
                 let state = MigrationState::from(state);
-                match role {
-                    MigrationRole::Target => {
-                        let find = Box::new(
-                            migration_dsl::migration
-                                .filter(migration_dsl::id.eq(migration_id))
-                                .filter(
-                                    migration_dsl::target_propolis_id
-                                        .eq(vmm_id),
-                                )
-                                .select(migration_dsl::id),
-                        );
-                        let update = Box::new(
-                            diesel::update(migration_dsl::migration)
-                                .filter(migration_dsl::id.eq(migration_id))
-                                .filter(
-                                    migration_dsl::target_propolis_id
-                                        .eq(vmm_id),
-                                )
-                                .set(migration_dsl::target_state.eq(state)),
-                        );
-                        MigrationUpdate { find, update }
-                    }
-                    MigrationRole::Source => {
-                        let find = Box::new(
-                            migration_dsl::migration
-                                .filter(migration_dsl::id.eq(migration_id))
-                                .filter(
-                                    migration_dsl::source_propolis_id
-                                        .eq(vmm_id),
-                                )
-                                .select(migration_dsl::id),
-                        );
-                        let update = Box::new(
-                            diesel::update(migration_dsl::migration)
-                                .filter(migration_dsl::id.eq(migration_id))
-                                .filter(
-                                    migration_dsl::source_propolis_id
-                                        .eq(vmm_id),
-                                )
-                                .set(migration_dsl::source_state.eq(state)),
-                        );
-                        MigrationUpdate { find, update }
-                    }
-                }
+                let find = Box::new(
+                    migration_dsl::migration
+                        .filter(migration_dsl::id.eq(migration_id))
+                        .select(migration_dsl::id),
+                );
+                let gen = Generation::from(gen);
+                let update: Box<dyn QueryFragment<Pg> + Send> = match role {
+                    MigrationRole::Target => Box::new(
+                        diesel::update(migration_dsl::migration)
+                            .filter(migration_dsl::id.eq(migration_id))
+                            .filter(
+                                migration_dsl::target_propolis_id.eq(vmm_id),
+                            )
+                            .filter(migration_dsl::target_gen.lt(gen))
+                            .set(migration_dsl::target_state.eq(state)),
+                    ),
+                    MigrationRole::Source => Box::new(
+                        diesel::update(migration_dsl::migration)
+                            .filter(migration_dsl::id.eq(migration_id))
+                            .filter(
+                                migration_dsl::source_propolis_id.eq(vmm_id),
+                            )
+                            .filter(migration_dsl::source_gen.lt(gen))
+                            .set(migration_dsl::source_state.eq(state)),
+                    ),
+                };
+                MigrationUpdate { find, update }
             },
         );
 

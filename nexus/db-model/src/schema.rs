@@ -1763,8 +1763,10 @@ table! {
         id -> Uuid,
         source_state -> crate::MigrationStateEnum,
         source_propolis_id -> Uuid,
+        source_gen -> Int8,
         target_state -> crate::MigrationStateEnum,
         target_propolis_id -> Uuid,
+        target_gen -> Int8,
     }
 }
 

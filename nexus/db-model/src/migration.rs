@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::Generation;
 use crate::schema::migration;
 use crate::MigrationState;
 use serde::Deserialize;
@@ -26,9 +27,15 @@ pub struct Migration {
     /// The ID of the migration source VMM.
     pub source_propolis_id: Uuid,
 
+    /// The generation number for the source state.
+    pub source_gen: Generation,
+
     /// The state of the migration target VMM.
     pub target_state: MigrationState,
 
     /// The ID of the migration target VMM.
     pub target_propolis_id: Uuid,
+
+    /// The generation number for the target state.
+    pub target_gen: Generation,
 }
