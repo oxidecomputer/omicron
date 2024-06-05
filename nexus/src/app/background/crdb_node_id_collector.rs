@@ -129,7 +129,7 @@ impl CockroachNodeIdCollector {
 // `COCKROACH_ADMIN_PORT`.
 trait CockroachAdminFromBlueprint {
     fn cockroach_admin_addrs<'a>(
-        &self,
+        &'a self,
         blueprint: &'a Blueprint,
     ) -> impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + 'a;
 }
@@ -138,7 +138,7 @@ struct CockroachAdminFromBlueprintViaFixedPort;
 
 impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
     fn cockroach_admin_addrs<'a>(
-        &self,
+        &'a self,
         blueprint: &'a Blueprint,
     ) -> impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + 'a {
         // We can only actively collect from zones that should be running; if
@@ -217,10 +217,15 @@ impl BackgroundTask for CockroachNodeIdCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use nexus_db_queries::db::datastore::pub_test_utils::datastore_test;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
+    use std::iter;
     use uuid::Uuid;
 
     // The `CockroachAdminFromBlueprintViaFixedPort` type above is the standard
@@ -232,7 +237,7 @@ mod tests {
         // Construct an empty blueprint with one sled.
         let sled_id = SledUuid::new_v4();
         let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::once(sled_id),
+            iter::once(sled_id),
             "test",
         );
         let bp_zones = blueprint
@@ -311,5 +316,99 @@ mod tests {
             .cockroach_admin_addrs(&blueprint)
             .collect::<Vec<_>>();
         assert_eq!(expected, admin_addrs);
+    }
+
+    #[tokio::test]
+    async fn test_activate_fails_if_no_blueprint() {
+        let logctx = dev::test_setup_log("test_activate_fails_if_no_blueprint");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        let (_tx_blueprint, rx_blueprint) = watch::channel(None);
+        let mut collector =
+            CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
+        let result = collector.activate(&opctx).await;
+
+        assert_eq!(result, json!({"error": "no blueprint"}));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    struct FakeCockroachAdminAddrs(Vec<(OmicronZoneUuid, SocketAddrV6)>);
+
+    impl CockroachAdminFromBlueprint for FakeCockroachAdminAddrs {
+        fn cockroach_admin_addrs<'a>(
+            &'a self,
+            _blueprint: &'a Blueprint,
+        ) -> impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + 'a
+        {
+            self.0.iter().copied()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_activate_with_no_unknown_node_ids() {
+        let logctx =
+            dev::test_setup_log("test_activate_with_no_unknown_node_ids");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        let blueprint = BlueprintBuilder::build_empty_with_sleds(
+            iter::once(SledUuid::new_v4()),
+            "test",
+        );
+        let blueprint_target = BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: true,
+            time_made_target: Utc::now(),
+        };
+
+        let (_tx_blueprint, rx_blueprint) =
+            watch::channel(Some(Arc::new((blueprint_target, blueprint))));
+        let mut collector =
+            CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
+
+        // The blueprint is empty. This should be fine: we should get no
+        // successes and no errors.
+        let result = collector.activate(&opctx).await;
+        assert_eq!(result, json!({"nsuccess": 0}));
+
+        // Create a few fake CRDB zones, and assign them node IDs in the
+        // datastore.
+        let crdb_zones =
+            (0..5).map(|_| OmicronZoneUuid::new_v4()).collect::<Vec<_>>();
+        for (i, zone_id) in crdb_zones.iter().copied().enumerate() {
+            datastore
+                .set_cockroachdb_node_id(
+                    &opctx,
+                    zone_id,
+                    format!("test-node-{i}"),
+                )
+                .await
+                .expect("assigned fake node ID");
+        }
+
+        // Activate again, injecting our fake CRDB zones with arbitrary
+        // cockroach-admin addresses. Because the node IDs are already in the
+        // datastore, the collector shouldn't try to contact these addresses and
+        // should instead report that all nodes are recorded successfully.
+        let result = collector
+            .activate_impl(
+                &opctx,
+                &FakeCockroachAdminAddrs(
+                    crdb_zones
+                        .iter()
+                        .map(|&zone_id| (zone_id, "[::1]:0".parse().unwrap()))
+                        .collect(),
+                ),
+            )
+            .await;
+        assert_eq!(result, json!({"nsuccess": crdb_zones.len()}));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
