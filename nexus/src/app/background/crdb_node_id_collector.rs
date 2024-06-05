@@ -24,6 +24,7 @@
 //! whether a zone without a known node ID ever existed.
 
 use super::common::BackgroundTask;
+use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::stream;
@@ -183,24 +184,37 @@ async fn ensure_node_id_known(
     let admin_url = format!("http://{admin_addr}");
     let admin_client =
         cockroach_admin_client::Client::new(&admin_url, opctx.log.clone());
-    let node_id = admin_client
+    let node = admin_client
         .node_id()
         .await
         .with_context(|| {
             format!("failed to fetch node ID for zone {zone_id} at {admin_url}")
         })?
-        .into_inner()
-        .id;
+        .into_inner();
+
+    // Ensure the address we have for this zone is the zone we think it is.
+    // Absent bugs, the only way this can fail is if our blueprint is out of
+    // date, and there's now a new zone running at `admin_addr`; we _should_
+    // fail in that case, and we'll catch up to reality when we reload the
+    // target blueprint.
+    ensure!(
+        zone_id == node.zone_id,
+        "expected cockroach zone {zone_id} at {admin_url}, but found zone {}",
+        node.zone_id
+    );
 
     // Record this value. We have a harmless TOCTOU here; if multiple Nexus
     // instances all checked for a node ID, found none, and get here, this call
     // is idempotent (as long as they all are inserting the same node ID, which
     // they certainly should be!).
     datastore
-        .set_cockroachdb_node_id(opctx, zone_id, node_id.clone())
+        .set_cockroachdb_node_id(opctx, zone_id, node.node_id.clone())
         .await
         .with_context(|| {
-            format!("failed to record node ID {node_id} for zone {zone_id}")
+            format!(
+                "failed to record node ID {} for zone {zone_id}",
+                node.node_id
+            )
         })
 }
 

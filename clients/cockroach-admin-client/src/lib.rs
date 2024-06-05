@@ -18,4 +18,7 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    replace = {
+        TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
+    }
 );

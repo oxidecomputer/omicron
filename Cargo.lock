@@ -1067,6 +1067,7 @@ name = "cockroach-admin-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "omicron-uuid-kinds",
  "progenitor",
  "reqwest",
  "schemars",
@@ -5266,6 +5267,7 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",

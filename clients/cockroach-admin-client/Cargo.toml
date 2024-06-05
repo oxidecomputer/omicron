@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 schemars.workspace = true

@@ -98,12 +98,21 @@
         "description": "CockroachDB Node ID",
         "type": "object",
         "properties": {
-          "id": {
+          "node_id": {
             "type": "string"
+          },
+          "zone_id": {
+            "description": "The ID of this Omicron zone.\n\nThis is included to ensure correctness even if a socket address on a sled is reused for a different zone; if our caller is trying to determine the node ID for a particular Omicron CockroachDB zone, they'll contact us by socket address. We include our zone ID in the response for their confirmation that we are the zone they intended to contact.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+              }
+            ]
           }
         },
         "required": [
-          "id"
+          "node_id",
+          "zone_id"
         ]
       },
       "NodeStatus": {
@@ -150,6 +159,10 @@
           "started_at",
           "updated_at"
         ]
+      },
+      "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

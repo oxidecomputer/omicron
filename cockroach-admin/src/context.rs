@@ -5,12 +5,14 @@
 use crate::CockroachCli;
 use anyhow::Context;
 use dropshot::HttpError;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::OnceCell;
 
 pub struct ServerContext {
-    pub cockroach_cli: CockroachCli,
+    zone_id: OmicronZoneUuid,
+    cockroach_cli: CockroachCli,
     // Cockroach node IDs never change; we defer contacting our local node to
     // ask for its ID until we need to, but once we have it we don't need to ask
     // again.
@@ -19,8 +21,20 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
-    pub fn new(cockroach_cli: CockroachCli, log: Logger) -> Self {
-        Self { cockroach_cli, node_id: OnceCell::new(), log }
+    pub fn new(
+        zone_id: OmicronZoneUuid,
+        cockroach_cli: CockroachCli,
+        log: Logger,
+    ) -> Self {
+        Self { zone_id, cockroach_cli, node_id: OnceCell::new(), log }
+    }
+
+    pub fn cockroach_cli(&self) -> &CockroachCli {
+        &self.cockroach_cli
+    }
+
+    pub fn zone_id(&self) -> OmicronZoneUuid {
+        self.zone_id
     }
 
     pub async fn node_id(&self) -> Result<&str, HttpError> {
@@ -107,7 +121,11 @@ mod tests {
         .parse()
         .expect("valid SocketAddrV6");
         let cli = CockroachCli::new("cockroach".into(), cockroach_address);
-        let context = ServerContext::new(cli, logctx.log.clone());
+        let context = ServerContext::new(
+            OmicronZoneUuid::new_v4(),
+            cli,
+            logctx.log.clone(),
+        );
 
         // We should be able to fetch a node id, and it should be `1` (since we
         // have a single-node test cockroach instance).

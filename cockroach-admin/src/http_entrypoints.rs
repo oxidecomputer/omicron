@@ -8,6 +8,7 @@ use dropshot::endpoint;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -45,7 +46,7 @@ async fn node_status(
 ) -> Result<HttpResponseOk<ClusterNodeStatus>, HttpError> {
     let ctx = rqctx.context();
     let all_nodes =
-        ctx.cockroach_cli.node_status().await.map_err(HttpError::from)?;
+        ctx.cockroach_cli().node_status().await.map_err(HttpError::from)?;
     Ok(HttpResponseOk(ClusterNodeStatus { all_nodes }))
 }
 
@@ -53,12 +54,20 @@ async fn node_status(
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeId {
+    /// The ID of this Omicron zone.
+    ///
+    /// This is included to ensure correctness even if a socket address on a
+    /// sled is reused for a different zone; if our caller is trying to
+    /// determine the node ID for a particular Omicron CockroachDB zone, they'll
+    /// contact us by socket address. We include our zone ID in the response for
+    /// their confirmation that we are the zone they intended to contact.
+    pub zone_id: OmicronZoneUuid,
     // CockroachDB node IDs are integers, in practice, but our use of them is as
     // input and output to the `cockroach` CLI. We use a string which is a bit
     // more natural (no need to parse CLI output or stringify an ID to send it
     // as input) and leaves open the door for the format to change in the
     // future.
-    pub id: String,
+    pub node_id: String,
 }
 
 /// Get the CockroachDB node ID of the local cockroach instance.
@@ -70,6 +79,7 @@ async fn node_id(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<NodeId>, HttpError> {
     let ctx = rqctx.context();
-    let id = ctx.node_id().await?.to_string();
-    Ok(HttpResponseOk(NodeId { id }))
+    let node_id = ctx.node_id().await?.to_string();
+    let zone_id = ctx.zone_id();
+    Ok(HttpResponseOk(NodeId { zone_id, node_id }))
 }
