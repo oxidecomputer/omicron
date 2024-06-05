@@ -232,6 +232,10 @@ impl BackgroundTask for CockroachNodeIdCollector {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use httptest::matchers::any;
+    use httptest::responders::json_encoded;
+    use httptest::responders::status_code;
+    use httptest::Expectation;
     use nexus_db_queries::db::datastore::pub_test_utils::datastore_test;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_test_utils::db::test_setup_database;
@@ -239,7 +243,9 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
+    use std::collections::BTreeMap;
     use std::iter;
+    use std::net::SocketAddr;
     use uuid::Uuid;
 
     // The `CockroachAdminFromBlueprintViaFixedPort` type above is the standard
@@ -421,6 +427,145 @@ mod tests {
             )
             .await;
         assert_eq!(result, json!({"nsuccess": crdb_zones.len()}));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_activate_with_unknown_node_ids() {
+        // Test setup.
+        let logctx = dev::test_setup_log("test_activate_with_unknown_node_ids");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        let blueprint = BlueprintBuilder::build_empty_with_sleds(
+            iter::once(SledUuid::new_v4()),
+            "test",
+        );
+        let blueprint_target = BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: true,
+            time_made_target: Utc::now(),
+        };
+
+        let (_tx_blueprint, rx_blueprint) =
+            watch::channel(Some(Arc::new((blueprint_target, blueprint))));
+        let mut collector =
+            CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
+
+        // We'll send in three Cockroach nodes for the collector to gather:
+        //
+        // 1. Node 1 will succeed
+        // 2. Node 2 will fail
+        // 3. Node 3 will succeed, but will report an unexpeted zone ID
+        //
+        // We should see one success and two errors in the activation result. We
+        // need to start three fake cockroach-admin servers to handle the
+        // requests.
+        let make_httptest_server = || {
+            httptest::ServerBuilder::new()
+                .bind_addr("[::1]:0".parse().unwrap())
+                .run()
+                .expect("started httptest server")
+        };
+        let crdb_zone_id1 = OmicronZoneUuid::new_v4();
+        let crdb_zone_id2 = OmicronZoneUuid::new_v4();
+        let crdb_zone_id3 = OmicronZoneUuid::new_v4();
+        let crdb_zone_id4 = OmicronZoneUuid::new_v4();
+        let crdb_node_id1 = "fake-node-1";
+        let crdb_node_id3 = "fake-node-3";
+        let mut admin1 = make_httptest_server();
+        let mut admin2 = make_httptest_server();
+        let mut admin3 = make_httptest_server();
+        let crdb_admin_addrs = FakeCockroachAdminAddrs(
+            vec![
+                (crdb_zone_id1, admin1.addr()),
+                (crdb_zone_id2, admin2.addr()),
+                (crdb_zone_id3, admin3.addr()),
+            ]
+            .into_iter()
+            .map(|(zone_id, addr)| {
+                let SocketAddr::V6(addr6) = addr else {
+                    panic!("expected IPv6 addr; got {addr}");
+                };
+                (zone_id, addr6)
+            })
+            .collect(),
+        );
+
+        // Node 1 succeeds.
+        admin1.expect(Expectation::matching(any()).times(1).respond_with(
+            json_encoded(cockroach_admin_client::types::NodeId {
+                zone_id: crdb_zone_id1,
+                node_id: crdb_node_id1.to_string(),
+            }),
+        ));
+        // Node 2 fails.
+        admin2.expect(
+            Expectation::matching(any())
+                .times(1)
+                .respond_with(status_code(503)),
+        );
+        // Node 3 succeeds, but with an unexpected zone_id.
+        admin3.expect(Expectation::matching(any()).times(1).respond_with(
+            json_encoded(cockroach_admin_client::types::NodeId {
+                zone_id: crdb_zone_id4,
+                node_id: crdb_node_id3.to_string(),
+            }),
+        ));
+
+        let result = collector.activate_impl(&opctx, &crdb_admin_addrs).await;
+
+        admin1.verify_and_clear();
+        admin2.verify_and_clear();
+        admin3.verify_and_clear();
+
+        let result = result.as_object().expect("JSON object");
+
+        // We should have one success (node 1).
+        assert_eq!(
+            result.get("nsuccess").expect("nsuccess key").as_number(),
+            Some(&serde_json::Number::from(1))
+        );
+        let errors = result
+            .get("errors")
+            .expect("errors key")
+            .as_array()
+            .expect("errors array")
+            .iter()
+            .map(|val| {
+                let error = val.as_object().expect("error object");
+                let zone_id = error
+                    .get("zone_id")
+                    .expect("zone_id key")
+                    .as_str()
+                    .expect("zone_id string");
+                let err = error
+                    .get("err")
+                    .expect("err key")
+                    .as_str()
+                    .expect("err string");
+                (zone_id, err)
+            })
+            .collect::<BTreeMap<_, _>>();
+        println!("errors: {errors:?}");
+        assert_eq!(errors.len(), 2);
+
+        // We should have an error for node 2. We don't check the specific
+        // message because it may change if progenitor changes how it reports a
+        // 503 with no body.
+        assert!(errors.contains_key(crdb_zone_id2.to_string().as_str()));
+
+        // The error message for node 3 should contain both the expected and
+        // unexpected zone IDs.
+        let crdb_zone_id3 = crdb_zone_id3.to_string();
+        let crdb_zone_id4 = crdb_zone_id4.to_string();
+        let crdb_err3 =
+            errors.get(crdb_zone_id3.as_str()).expect("error for zone 3");
+        assert!(crdb_err3.contains(&crdb_zone_id3));
+        assert!(crdb_err3.contains(&crdb_zone_id4));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
