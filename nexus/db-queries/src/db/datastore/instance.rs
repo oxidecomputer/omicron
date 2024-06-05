@@ -391,6 +391,7 @@ impl DataStore {
             new_instance.clone(),
             *vmm_id,
             new_vmm.clone(),
+            None, // TODO: ELIZA ADD THIS
         );
 
         // The InstanceAndVmmUpdate query handles and indicates failure to find

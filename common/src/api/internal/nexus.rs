@@ -115,11 +115,13 @@ pub struct SledInstanceState {
     pub migration_state: Option<MigrationRuntimeState>,
 }
 
+/// An update from a sled regarding the state of a migration, indicating the
+/// role of the VMM whose migration state was updated.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MigrationRuntimeState {
     pub migration_id: Uuid,
-
     pub state: MigrationState,
+    pub role: MigrationRole,
 }
 
 /// The state of an instance's live migration.
@@ -147,6 +149,32 @@ impl MigrationState {
 }
 
 impl fmt::Display for MigrationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationRole {
+    /// This update concerns the source VMM of a migration.
+    Source,
+    /// This update concerns the target VMM of a migration.
+    Target,
+}
+
+impl MigrationRole {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Target => "target",
+        }
+    }
+}
+
+impl fmt::Display for MigrationRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.label())
     }

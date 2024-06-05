@@ -149,6 +149,7 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
             instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
+            migration_state: None,
         }
     }
 }
