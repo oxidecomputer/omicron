@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(71, "add-migration-state-enum"),
+        KnownVersion::new(71, "add-migration-table"),
         KnownVersion::new(70, "separate-instance-and-vmm-states"),
         KnownVersion::new(69, "expose-stage0"),
         KnownVersion::new(68, "filter-v2p-mapping-by-instance-state"),
