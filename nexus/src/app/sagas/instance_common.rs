@@ -255,7 +255,7 @@ pub async fn instance_ip_get_instance_state(
     // - starting: see below.
     match (found_instance_state, found_vmm_state) {
         // If there's no VMM, the instance is definitely not on any sled.
-        (InstanceState::NoVmm, _) => {
+        (InstanceState::NoVmm, _) | (_, Some(VmmState::SagaUnwound)) => {
             sled_id = None;
         }
 
@@ -329,10 +329,7 @@ pub async fn instance_ip_get_instance_state(
                 ),
             )));
         }
-        (
-            InstanceState::Vmm,
-            Some(VmmState::Destroyed | VmmState::SagaUnwound),
-        ) => {
+        (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
             return Err(ActionError::action_failed(Error::internal_error(
                 &format!(
                     "instance {} points to destroyed VMM",
