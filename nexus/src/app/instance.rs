@@ -1664,8 +1664,8 @@ impl super::Nexus {
                         vmm.runtime.state,
                     )))
                 }
-                DbVmmState::Destroyed => Err(Error::invalid_request(
-                    "cannot connect to serial console of destroyed instance",
+                DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
+                    "cannot connect to serial console of instance in state \"Stopped\"",
                 )),
             }
         } else {

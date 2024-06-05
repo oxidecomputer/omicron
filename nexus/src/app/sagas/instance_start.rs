@@ -200,7 +200,7 @@ async fn sis_destroy_vmm_record(
     );
 
     let vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    super::instance_common::destroy_vmm_record(
+    super::instance_common::unwind_vmm_record(
         osagactx.datastore(),
         &opctx,
         &vmm,

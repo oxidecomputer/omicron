@@ -235,7 +235,7 @@ async fn sim_destroy_vmm_record(
     info!(osagactx.log(), "destroying vmm record for migration unwind";
           "propolis_id" => %vmm.id);
 
-    super::instance_common::destroy_vmm_record(
+    super::instance_common::unwind_vmm_record(
         osagactx.datastore(),
         &opctx,
         &vmm,
