@@ -609,7 +609,7 @@
       "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
       "type": "string"
     },
-    "PortConfigV1": {
+    "PortConfigV2": {
       "type": "object",
       "required": [
         "addresses",
@@ -780,7 +780,7 @@
           "description": "Initial rack network configuration",
           "allOf": [
             {
-              "$ref": "#/definitions/RackNetworkConfigV1"
+              "$ref": "#/definitions/RackNetworkConfigV2"
             }
           ]
         },
@@ -804,7 +804,7 @@
         }
       }
     },
-    "RackNetworkConfigV1": {
+    "RackNetworkConfigV2": {
       "description": "Initial network configuration",
       "type": "object",
       "required": [
@@ -844,7 +844,7 @@
           "description": "Uplinks for connecting the rack to external networks",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PortConfigV1"
+            "$ref": "#/definitions/PortConfigV2"
           }
         },
         "rack_subnet": {

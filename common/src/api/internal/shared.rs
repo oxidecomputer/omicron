@@ -154,9 +154,28 @@ pub enum SourceNatConfigError {
 
 // We alias [`RackNetworkConfig`] to the current version of the protocol, so
 // that we can convert between versions as necessary.
-pub type RackNetworkConfig = RackNetworkConfigV1;
+pub type RackNetworkConfig = RackNetworkConfigV2;
 
 /// Initial network configuration
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackNetworkConfigV2 {
+    pub rack_subnet: Ipv6Net,
+    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
+    /// First ip address to be used for configuring network infrastructure
+    pub infra_ip_first: Ipv4Addr,
+    /// Last ip address to be used for configuring network infrastructure
+    pub infra_ip_last: Ipv4Addr,
+    /// Uplinks for connecting the rack to external networks
+    pub ports: Vec<PortConfigV2>,
+    /// BGP configurations for connecting the rack to external networks
+    pub bgp: Vec<BgpConfig>,
+    /// BFD configuration for connecting the rack to external networks
+    #[serde(default)]
+    pub bfd: Vec<BfdPeerConfig>,
+}
+
+/// Initial network configuration
+/// Deprecated - still present to support importing older bootstores
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfigV1 {
     pub rack_subnet: Ipv6Net,
@@ -369,7 +388,7 @@ impl FromStr for UplinkAddressConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct PortConfigV1 {
+pub struct PortConfigV2 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
     /// This port's addresses and optional vlan IDs
@@ -389,9 +408,9 @@ pub struct PortConfigV1 {
     pub autoneg: bool,
 }
 
-impl From<UplinkConfig> for PortConfigV1 {
+impl From<UplinkConfig> for PortConfigV2 {
     fn from(value: UplinkConfig) -> Self {
-        PortConfigV1 {
+        PortConfigV2 {
             routes: vec![RouteConfig {
                 destination: "0.0.0.0/0".parse().unwrap(),
                 nexthop: value.gateway_ip.into(),
@@ -411,7 +430,29 @@ impl From<UplinkConfig> for PortConfigV1 {
     }
 }
 
-/// Deprecated, use PortConfigV1 instead. Cannot actually deprecate due to
+// Deprecated - still present to support importing from older bootstores
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+pub struct PortConfigV1 {
+    /// The set of routes associated with this port.
+    pub routes: Vec<RouteConfig>,
+    /// This port's addresses and optional vlan IDs
+    pub addresses: Vec<IpNet>,
+    /// Switch the port belongs to.
+    pub switch: SwitchLocation,
+    /// Nmae of the port this config applies to.
+    pub port: String,
+    /// Port speed.
+    pub uplink_port_speed: PortSpeed,
+    /// Port forward error correction type.
+    pub uplink_port_fec: PortFec,
+    /// BGP peers on this port
+    pub bgp_peers: Vec<BgpPeerConfig>,
+    /// Whether or not to set autonegotiation
+    #[serde(default)]
+    pub autoneg: bool,
+}
+
+/// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
 /// <https://github.com/serde-rs/serde/issues/2195>
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct UplinkConfig {
@@ -448,8 +489,8 @@ pub struct HostPortConfig {
     pub addrs: Vec<UplinkAddressConfig>,
 }
 
-impl From<PortConfigV1> for HostPortConfig {
-    fn from(x: PortConfigV1) -> Self {
+impl From<PortConfigV2> for HostPortConfig {
+    fn from(x: PortConfigV2) -> Self {
         Self { port: x.port, addrs: x.addresses }
     }
 }

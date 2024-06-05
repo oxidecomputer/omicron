@@ -734,14 +734,14 @@ impl ServiceInner {
 
         let rack_network_config = {
             let config = &config.rack_network_config;
-            NexusTypes::RackNetworkConfigV1 {
+            NexusTypes::RackNetworkConfigV2 {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
                 ports: config
                     .ports
                     .iter()
-                    .map(|config| NexusTypes::PortConfigV1 {
+                    .map(|config| NexusTypes::PortConfigV2 {
                         port: config.port.clone(),
 			routes: config
                             .routes

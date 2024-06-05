@@ -2613,7 +2613,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           }
@@ -3974,7 +3974,7 @@
           "zones"
         ]
       },
-      "PortConfigV1": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
@@ -4094,7 +4094,7 @@
         "minItems": 2,
         "maxItems": 2
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -4127,7 +4127,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
