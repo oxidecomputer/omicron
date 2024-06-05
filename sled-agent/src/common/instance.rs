@@ -231,6 +231,7 @@ impl InstanceStates {
             instance_state: self.instance.clone(),
             vmm_state: self.vmm.clone(),
             propolis_id: self.propolis_id,
+            migration_state: None, // TODO(eliza): add this
         }
     }
 

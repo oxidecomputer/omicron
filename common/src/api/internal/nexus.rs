@@ -16,6 +16,7 @@ use omicron_uuid_kinds::UpstairsSessionKind;
 use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
 use strum::{EnumIter, IntoEnumIterator};
@@ -108,6 +109,47 @@ pub struct SledInstanceState {
 
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
+
+    /// The current state of any in-progress migration for this instance, as
+    /// understood by this sled.
+    pub migration_state: Option<MigrationRuntimeState>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MigrationRuntimeState {
+    pub migration_id: Uuid,
+
+    pub state: MigrationState,
+}
+
+/// The state of an instance's live migration.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationState {
+    /// The migration is in progress.
+    InProgress,
+    /// The migration has failed.
+    Failed,
+    /// The migration has completed.
+    Completed,
+}
+
+impl MigrationState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for MigrationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 // Oximeter producer/collector objects.

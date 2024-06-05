@@ -4,20 +4,21 @@
 
 //! Database representation of a migration's state as understood by Nexus.
 
-use super::impl_enum_type;
-use serde::{Deserialize, Serialize};
+use super::impl_enum_wrapper;
+use omicron_common::api::internal::nexus;
+use serde::Deserialize;
+use serde::Serialize;
 use std::fmt;
+use std::io::Write;
 
-impl_enum_type!(
+impl_enum_wrapper!(
     #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "migration_state", schema = "public"))]
     pub struct MigrationStateEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
     #[diesel(sql_type = MigrationStateEnum)]
-     // match the database representation when serializing
-    #[serde(rename_all = "snake_case")]
-    pub enum MigrationState;
+    pub struct MigrationState(pub nexus::MigrationState);
 
     // Enum values
     InProgress => b"in_progress"
@@ -25,18 +26,14 @@ impl_enum_type!(
     Failed => b"failed"
 );
 
-impl MigrationState {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::InProgress => "in_progress",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
+impl fmt::Display for MigrationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
-impl fmt::Display for MigrationState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.label())
+impl From<nexus::MigrationState> for MigrationState {
+    fn from(s: nexus::MigrationState) -> Self {
+        Self(s)
     }
 }

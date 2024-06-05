@@ -327,6 +327,7 @@ impl From<types::SledInstanceState>
             instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
+            migration_state: None,
         }
     }
 }
