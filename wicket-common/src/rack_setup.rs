@@ -173,11 +173,11 @@ impl UserSpecifiedRackNetworkConfig {
 
 /// User-specified version of [`PortConfigV1`].
 ///
-/// All of [`PortConfigV1`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfigV1`]. So this has all of
+/// All of [`PortConfigV2`] is user-specified. But we expect the port name to
+/// be a key, rather than a field as in [`PortConfigV2`]. So this has all of
 /// the fields other than the port name.
 ///
-/// [`PortConfigV1`]: omicron_common::api::internal::shared::PortConfigV1
+/// [`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
