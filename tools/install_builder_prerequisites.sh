@@ -85,6 +85,15 @@ function retry
   exit $retry_rc
 }
 
+function xtask
+{
+  if [ -z ${XTASK_BIN+x} ]; then
+    cargo xtask "$@"
+  else
+    "$XTASK_BIN" "$@"
+  fi
+}
+
 # Packages to be installed on all OSes:
 #
 # - libpq, the PostgreSQL client lib.
@@ -191,7 +200,7 @@ retry install_packages
 # - Packaging: When constructing packages on Helios, these utilities
 # are packaged into zones which may be launched by the sled agent.
 
-retry cargo xtask download \
+retry xtask download \
     cockroach \
     clickhouse \
     console \
