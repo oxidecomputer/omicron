@@ -60,6 +60,11 @@ declare_saga_actions! {
         + sim_allocate_propolis_ip
     }
 
+    CREATE_MIGRATION_RECORD -> "migration_record" {
+        + sim_create_migration_record
+        - sim_delete_migration_record
+    }
+
     CREATE_VMM_RECORD -> "dst_vmm_record" {
         + sim_create_vmm_record
         - sim_destroy_vmm_record
@@ -127,6 +132,7 @@ impl NexusSaga for SagaInstanceMigrate {
 
         builder.append(reserve_resources_action());
         builder.append(allocate_propolis_ip_action());
+        builder.append(create_migration_record_action());
         builder.append(create_vmm_record_action());
         builder.append(set_migration_ids_action());
         builder.append(ensure_destination_propolis_action());
@@ -187,6 +193,54 @@ async fn sim_allocate_propolis_ip(
         params.migrate_params.dst_sled_id,
     )
     .await
+}
+
+async fn sim_create_migration_record(
+    sagactx: NexusActionContext,
+) -> Result<db::model::Migration, ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let source_propolis_id = params.src_vmm.id;
+    let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
+    let target_propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
+
+    info!(osagactx.log(), "creating migration record";
+          "migration_id" => %migration_id,
+          "source_propolis_id" => %source_propolis_id,
+          "target_propolis_id" => %target_propolis_id);
+
+    osagactx
+        .datastore()
+        .migration_insert(db::model::Migration::new(
+            migration_id,
+            source_propolis_id,
+            target_propolis_id,
+        ))
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+async fn sim_delete_migration_record(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx: &std::sync::Arc<crate::saga_interface::SagaContext> =
+        sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
+
+    info!(osagactx.log(), "deleting migration record";
+          "migration_id" => %migration_id);
+    osagactx.datastore().migration_mark_deleted(migration_id).await?;
+    Ok(())
 }
 
 async fn sim_create_vmm_record(

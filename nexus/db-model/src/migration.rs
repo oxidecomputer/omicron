@@ -52,3 +52,24 @@ pub struct Migration {
     /// The time the target VMM state was most recently updated.
     pub time_target_updated: Option<DateTime<Utc>>,
 }
+
+impl Migration {
+    pub fn new(
+        migration_id: Uuid,
+        source_propolis_id: Uuid,
+        target_propolis_id: Uuid,
+    ) -> Self {
+        Self {
+            id: migration_id,
+            time_created: Utc::now(),
+            source_state: MigrationState::InProgress,
+            source_propolis_id,
+            source_gen: Generation::new(),
+            time_source_updated: None,
+            target_state: MigrationState::InProgress,
+            target_propolis_id,
+            target_gen: Generation::new(),
+            time_target_updated: None,
+        }
+    }
+}
