@@ -184,11 +184,18 @@ impl InstanceAndVmmUpdate {
         );
 
         let migration = migration.map(
-            |MigrationRuntimeState { role, migration_id, state, gen }| {
+            |MigrationRuntimeState {
+                 role,
+                 migration_id,
+                 state,
+                 gen,
+                 time_updated,
+             }| {
                 let state = MigrationState::from(state);
                 let find = Box::new(
                     migration_dsl::migration
                         .filter(migration_dsl::id.eq(migration_id))
+                        .filter(migration_dsl::time_deleted.is_null())
                         .select(migration_dsl::id),
                 );
                 let gen = Generation::from(gen);
@@ -200,7 +207,11 @@ impl InstanceAndVmmUpdate {
                                 migration_dsl::target_propolis_id.eq(vmm_id),
                             )
                             .filter(migration_dsl::target_gen.lt(gen))
-                            .set(migration_dsl::target_state.eq(state)),
+                            .set((
+                                migration_dsl::target_state.eq(state),
+                                migration_dsl::time_target_updated
+                                    .eq(time_updated),
+                            )),
                     ),
                     MigrationRole::Source => Box::new(
                         diesel::update(migration_dsl::migration)
@@ -209,7 +220,11 @@ impl InstanceAndVmmUpdate {
                                 migration_dsl::source_propolis_id.eq(vmm_id),
                             )
                             .filter(migration_dsl::source_gen.lt(gen))
-                            .set(migration_dsl::source_state.eq(state)),
+                            .set((
+                                migration_dsl::source_state.eq(state),
+                                migration_dsl::time_target_updated
+                                    .eq(time_updated),
+                            )),
                     ),
                 };
                 MigrationUpdate { find, update }

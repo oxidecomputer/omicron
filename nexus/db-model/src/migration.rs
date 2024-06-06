@@ -5,6 +5,8 @@
 use super::Generation;
 use crate::schema::migration;
 use crate::MigrationState;
+use chrono::DateTime;
+use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -21,6 +23,11 @@ pub struct Migration {
     /// `instance` table's `migration_id` field.
     pub id: Uuid,
 
+    /// The time at which this migration record was created.
+    pub time_created: DateTime<Utc>,
+
+    /// The time at which the source VMM state was last updated.
+
     /// The state of the migration source VMM.
     pub source_state: MigrationState,
 
@@ -30,6 +37,9 @@ pub struct Migration {
     /// The generation number for the source state.
     pub source_gen: Generation,
 
+    /// The time the source VMM state was most recently updated.
+    pub time_source_updated: Option<DateTime<Utc>>,
+
     /// The state of the migration target VMM.
     pub target_state: MigrationState,
 
@@ -38,4 +48,7 @@ pub struct Migration {
 
     /// The generation number for the target state.
     pub target_gen: Generation,
+
+    /// The time the target VMM state was most recently updated.
+    pub time_target_updated: Option<DateTime<Utc>>,
 }

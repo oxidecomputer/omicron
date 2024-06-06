@@ -3440,13 +3440,19 @@
           },
           "state": {
             "$ref": "#/components/schemas/MigrationState"
+          },
+          "time_updated": {
+            "description": "Timestamp for the migration state update.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "gen",
           "migration_id",
           "role",
-          "state"
+          "state",
+          "time_updated"
         ]
       },
       "MigrationState": {
