@@ -7,6 +7,7 @@ use crate::schema::migration;
 use crate::MigrationState;
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_common::api::internal::nexus;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -62,11 +63,11 @@ impl Migration {
         Self {
             id: migration_id,
             time_created: Utc::now(),
-            source_state: MigrationState::InProgress,
+            source_state: nexus::MigrationState::InProgress.into(),
             source_propolis_id,
             source_gen: Generation::new(),
             time_source_updated: None,
-            target_state: MigrationState::InProgress,
+            target_state: nexus::MigrationState::InProgress.into(),
             target_propolis_id,
             target_gen: Generation::new(),
             time_target_updated: None,

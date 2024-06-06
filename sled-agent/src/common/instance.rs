@@ -6,12 +6,14 @@
 
 use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState, VmmState,
+    InstanceRuntimeState, MigrationRole, MigrationRuntimeState, MigrationState,
+    SledInstanceState, VmmRuntimeState, VmmState,
 };
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
-    MigrationState,
+    MigrationState as PropolisMigrationState,
 };
 use uuid::Uuid;
 
@@ -21,6 +23,7 @@ pub struct InstanceStates {
     instance: InstanceRuntimeState,
     vmm: VmmRuntimeState,
     propolis_id: Uuid,
+    migration: Option<MigrationRuntimeState>,
 }
 
 /// Newtype to allow conversion from Propolis API states (returned by the
@@ -123,10 +126,10 @@ impl ObservedPropolisState {
                     if this_id == propolis_migration.migration_id =>
                 {
                     match propolis_migration.state {
-                        MigrationState::Finish => {
+                        PropolisMigrationState::Finish => {
                             ObservedMigrationStatus::Succeeded
                         }
-                        MigrationState::Error => {
+                        PropolisMigrationState::Error => {
                             ObservedMigrationStatus::Failed
                         }
                         _ => ObservedMigrationStatus::InProgress,
@@ -208,7 +211,7 @@ impl InstanceStates {
         vmm: VmmRuntimeState,
         propolis_id: Uuid,
     ) -> Self {
-        InstanceStates { instance, vmm, propolis_id }
+        InstanceStates { instance, vmm, propolis_id, migration: None }
     }
 
     pub fn instance(&self) -> &InstanceRuntimeState {
@@ -231,7 +234,7 @@ impl InstanceStates {
             instance_state: self.instance.clone(),
             vmm_state: self.vmm.clone(),
             propolis_id: self.propolis_id,
-            migration_state: None, // TODO(eliza): add this
+            migration_state: self.migration.clone(),
         }
     }
 
@@ -257,56 +260,82 @@ impl InstanceStates {
         // Update the instance record to reflect the result of any completed
         // migration.
         match observed.migration_status {
-            ObservedMigrationStatus::Succeeded => match self.propolis_role() {
-                // This is a successful migration out. Point the instance to the
-                // target VMM, but don't clear migration IDs; let the target do
-                // that so that the instance will continue to appear to be
-                // migrating until it is safe to migrate again.
-                PropolisRole::Active => {
-                    self.switch_propolis_id_to_target(observed.time);
-
-                    assert_eq!(self.propolis_role(), PropolisRole::Retired);
+            ObservedMigrationStatus::Succeeded => {
+                if let Some(ref mut migration) = self.migration {
+                    migration.state = MigrationState::Completed;
+                    migration.gen = migration.gen.next();
+                    migration.time_updated = observed.time;
+                } else {
+                    // XXX(eliza): we don't have an active migration state, but
+                    // we saw a migration succeed. this is almost certainly a
+                    // bug, but i don't *really* want to panic here...but, we
+                    // also don't have a `slog` logger in this function, so ...
+                    // what do.
                 }
+                match self.propolis_role() {
+                    // This is a successful migration out. Point the instance to the
+                    // target VMM, but don't clear migration IDs; let the target do
+                    // that so that the instance will continue to appear to be
+                    // migrating until it is safe to migrate again.
+                    PropolisRole::Active => {
+                        self.switch_propolis_id_to_target(observed.time);
 
-                // This is a successful migration in. Point the instance to the
-                // target VMM and clear migration IDs so that another migration
-                // in can begin. Propolis will continue reporting that this
-                // migration was successful, but because its ID has been
-                // discarded the observed migration status will change from
-                // Succeeded to NoMigration.
-                //
-                // Note that these calls increment the instance's generation
-                // number twice. This is by design and allows the target's
-                // migration-ID-clearing update to overtake the source's update.
-                PropolisRole::MigrationTarget => {
-                    self.switch_propolis_id_to_target(observed.time);
-                    self.clear_migration_ids(observed.time);
+                        assert_eq!(self.propolis_role(), PropolisRole::Retired);
+                    }
 
-                    assert_eq!(self.propolis_role(), PropolisRole::Active);
+                    // This is a successful migration in. Point the instance to the
+                    // target VMM and clear migration IDs so that another migration
+                    // in can begin. Propolis will continue reporting that this
+                    // migration was successful, but because its ID has been
+                    // discarded the observed migration status will change from
+                    // Succeeded to NoMigration.
+                    //
+                    // Note that these calls increment the instance's generation
+                    // number twice. This is by design and allows the target's
+                    // migration-ID-clearing update to overtake the source's update.
+                    PropolisRole::MigrationTarget => {
+                        self.switch_propolis_id_to_target(observed.time);
+                        self.clear_migration_ids(observed.time);
+
+                        assert_eq!(self.propolis_role(), PropolisRole::Active);
+                    }
+
+                    // This is a migration source that previously reported success
+                    // and removed itself from the active Propolis position. Don't
+                    // touch the instance.
+                    PropolisRole::Retired => {}
                 }
-
-                // This is a migration source that previously reported success
-                // and removed itself from the active Propolis position. Don't
-                // touch the instance.
-                PropolisRole::Retired => {}
-            },
-            ObservedMigrationStatus::Failed => match self.propolis_role() {
-                // This is a failed migration out. CLear migration IDs so that
-                // Nexus can try again.
-                PropolisRole::Active => {
-                    self.clear_migration_ids(observed.time);
+            }
+            ObservedMigrationStatus::Failed => {
+                if let Some(ref mut migration) = self.migration {
+                    migration.state = MigrationState::Failed;
+                    migration.gen = migration.gen.next();
+                    migration.time_updated = observed.time;
+                } else {
+                    // XXX(eliza): we don't have an active migration state, but
+                    // we saw a migration succeed. this is almost certainly a
+                    // bug, but i don't *really* want to panic here...but, we
+                    // also don't have a `slog` logger in this function, so ...
+                    // what do.
                 }
+                match self.propolis_role() {
+                    // This is a failed migration out. CLear migration IDs so that
+                    // Nexus can try again.
+                    PropolisRole::Active => {
+                        self.clear_migration_ids(observed.time);
+                    }
 
-                // This is a failed migration in. Leave the migration IDs alone
-                // so that the migration won't appear to have concluded until
-                // the source is ready to start a new one.
-                PropolisRole::MigrationTarget => {}
+                    // This is a failed migration in. Leave the migration IDs alone
+                    // so that the migration won't appear to have concluded until
+                    // the source is ready to start a new one.
+                    PropolisRole::MigrationTarget => {}
 
-                // This VMM was part of a failed migration and was subsequently
-                // removed from the instance record entirely. There's nothing to
-                // update.
-                PropolisRole::Retired => {}
-            },
+                    // This VMM was part of a failed migration and was subsequently
+                    // removed from the instance record entirely. There's nothing to
+                    // update.
+                    PropolisRole::Retired => {}
+                }
+            }
             ObservedMigrationStatus::NoMigration
             | ObservedMigrationStatus::InProgress
             | ObservedMigrationStatus::Pending => {}
@@ -432,12 +461,29 @@ impl InstanceStates {
         ids: &Option<InstanceMigrationSourceParams>,
         now: DateTime<Utc>,
     ) {
-        if let Some(ids) = ids {
-            self.instance.migration_id = Some(ids.migration_id);
-            self.instance.dst_propolis_id = Some(ids.dst_propolis_id);
+        if let Some(InstanceMigrationSourceParams {
+            migration_id,
+            dst_propolis_id,
+        }) = *ids
+        {
+            self.instance.migration_id = Some(migration_id);
+            self.instance.dst_propolis_id = Some(dst_propolis_id);
+            let role = if dst_propolis_id == self.propolis_id {
+                MigrationRole::Target
+            } else {
+                MigrationRole::Source
+            };
+            self.migration = Some(MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::InProgress,
+                role,
+                gen: Generation::new(),
+                time_updated: now,
+            })
         } else {
             self.instance.migration_id = None;
             self.instance.dst_propolis_id = None;
+            self.migration = None;
         }
 
         self.instance.gen = self.instance.gen.next();

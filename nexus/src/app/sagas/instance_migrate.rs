@@ -216,11 +216,14 @@ async fn sim_create_migration_record(
 
     osagactx
         .datastore()
-        .migration_insert(db::model::Migration::new(
-            migration_id,
-            source_propolis_id,
-            target_propolis_id,
-        ))
+        .migration_insert(
+            &opctx,
+            db::model::Migration::new(
+                migration_id,
+                source_propolis_id,
+                target_propolis_id,
+            ),
+        )
         .await
         .map_err(ActionError::action_failed)
 }
@@ -239,7 +242,7 @@ async fn sim_delete_migration_record(
 
     info!(osagactx.log(), "deleting migration record";
           "migration_id" => %migration_id);
-    osagactx.datastore().migration_mark_deleted(migration_id).await?;
+    osagactx.datastore().migration_mark_deleted(&opctx, migration_id).await?;
     Ok(())
 }
 

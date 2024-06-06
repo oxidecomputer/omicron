@@ -14,8 +14,8 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
@@ -30,6 +30,8 @@ impl DataStore {
             .values(migration)
             .on_conflict(dsl::id)
             .do_update()
+            // I don't know what this does but it somehow
+            .set(dsl::time_created.eq(dsl::time_created))
             .returning(Migration::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
