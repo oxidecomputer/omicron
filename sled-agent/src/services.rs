@@ -3024,7 +3024,6 @@ impl ServiceManager {
                             .add_property_group(switch_zone_setup_config),
                     );
 
-                // What happens if I change this to "switch"?
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_dns_client_service)
@@ -3037,6 +3036,8 @@ impl ServiceManager {
                     .add_service(pumpkind_service)
                     .add_service(mgd_service)
                     .add_service(mg_ddm_service)
+                    // TODO: I am unsure if I should add this service to the property builder
+                    .add_service(sp_sim_service)
                     .add_service(uplink_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
