@@ -669,6 +669,12 @@ impl Nexus {
             Arc::clone(&background_tasks),
         );
 
+        // Initialize a global `SagaContext`. This provides access to
+        // background tasks.
+        saga_interface::SAGA_CONTEXT
+            .set(saga_context.clone())
+            .expect("SAGA_CONTEXT already initialized");
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,

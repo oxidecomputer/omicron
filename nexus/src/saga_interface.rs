@@ -16,6 +16,11 @@ use nexus_db_queries::{authz, db};
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::OnceLock;
+
+/// Callers that want to execute a saga can clone a context from here,  and
+/// modify the logger if desired.
+pub static SAGA_CONTEXT: OnceLock<SagaContext> = OnceLock::new();
 
 /// A type accessible to all saga methods
 #[derive(Clone)]
