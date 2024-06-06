@@ -3450,6 +3450,9 @@
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
         "type": "object",
         "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
           "migration_id": {
             "type": "string",
             "format": "uuid"
@@ -3462,6 +3465,7 @@
           }
         },
         "required": [
+          "gen",
           "migration_id",
           "role",
           "state"
