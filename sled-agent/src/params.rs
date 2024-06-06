@@ -588,9 +588,9 @@ impl crate::smf_helper::Service for OmicronZoneType {
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())
     }
-    fn should_import(&self) -> bool {
-        true
-    }
+    //  fn should_import(&self) -> bool {
+    //      true
+    //  }
 }
 
 impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {

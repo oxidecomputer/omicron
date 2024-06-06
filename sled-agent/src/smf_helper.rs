@@ -17,7 +17,7 @@ pub enum Error {
 pub trait Service {
     fn service_name(&self) -> String;
     fn smf_name(&self) -> String;
-    fn should_import(&self) -> bool;
+    // fn should_import(&self) -> bool;
 }
 
 pub struct SmfHelper<'t> {
@@ -272,23 +272,23 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
-//    pub fn restart(&self) -> Result<(), Error> {
-//        self.running_zone
-//            .run_cmd(&[
-//                illumos_utils::zone::SVCADM,
-//                "restart",
-//                "-s",
-//                &self.default_smf_name,
-//            ])
-//            .map_err(|err| Error::ZoneCommand {
-//                intent: format!(
-//                    "Restart SMF service instance {}",
-//                    self.default_smf_name
-//                ),
-//                err,
-//            })?;
-//        Ok(())
-//    }
+    //    pub fn restart(&self) -> Result<(), Error> {
+    //        self.running_zone
+    //            .run_cmd(&[
+    //                illumos_utils::zone::SVCADM,
+    //                "restart",
+    //                "-s",
+    //                &self.default_smf_name,
+    //            ])
+    //            .map_err(|err| Error::ZoneCommand {
+    //                intent: format!(
+    //                    "Restart SMF service instance {}",
+    //                    self.default_smf_name
+    //                ),
+    //                err,
+    //            })?;
+    //        Ok(())
+    //    }
 
     //    pub fn enable(&self) -> Result<(), Error> {
     //        self.running_zone

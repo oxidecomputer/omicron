@@ -509,9 +509,9 @@ impl crate::smf_helper::Service for SwitchService {
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())
     }
-    fn should_import(&self) -> bool {
-        true
-    }
+    //   fn should_import(&self) -> bool {
+    //       true
+    //   }
 }
 
 /// Combines the generic `SwitchZoneConfig` with other locally-determined
@@ -1428,7 +1428,6 @@ impl ServiceManager {
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
         let gateway = &gw_addr.to_string();
-        let static_addr = &static_addr.to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1724,7 +1723,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![&crdb_listen_ip],
+                    &vec![crdb_listen_ip],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -2388,7 +2387,7 @@ impl ServiceManager {
                         .add_property(
                             "zone_name",
                             "astring",
-                            &installed_zone.name(),
+                            installed_zone.name(),
                         )
                         .add_property(
                             "bootstrap_addr",
@@ -2744,7 +2743,7 @@ impl ServiceManager {
                                     tfport_config = tfport_config.add_property(
                                         &format!("techport{i}_prefix"),
                                         "astring",
-                                        prefix.net().addr(),
+                                        prefix.net().addr().to_string(),
                                     )
                                 }
                             };
@@ -2755,7 +2754,7 @@ impl ServiceManager {
                                 tfport_config = tfport_config.add_property(
                                     "pkt_source",
                                     "astring",
-                                    &pkt_source,
+                                    pkt_source,
                                 );
                             };
 
@@ -2795,12 +2794,12 @@ impl ServiceManager {
                                         .add_property(
                                             "scrimlet_id",
                                             "astring",
-                                            &identifier,
+                                            identifier,
                                         )
                                         .add_property(
                                             "scrimlet_model",
                                             "astring",
-                                            &model,
+                                            model,
                                         );
                                 }
                                 Baseboard::Unknown => {}
@@ -4730,10 +4729,7 @@ impl ServiceManager {
 
                     match service {
                         SwitchService::ManagementGatewayService => {
-                            info!(
-                                self.inner.log,
-                                "configuring MGS service"
-                            );
+                            info!(self.inner.log, "configuring MGS service");
                             // TODO: Make sure all services use delpropvalue_default_instance
                             // and addpropvalue_default_instance instead of delpropvalue
                             // and addpropvalue. Verify property values are correct
@@ -4774,7 +4770,10 @@ impl ServiceManager {
                             }
 
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed MGS service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed MGS service with new configuration"
+                            )
                             //smfh.restart()?;
                         }
                         SwitchService::Dendrite { .. } => {
@@ -4904,7 +4903,10 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed mgd service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed mgd service with new configuration"
+                            )
                             //smfh.restart()?;
                         }
                         SwitchService::MgDdm { mode } => {
