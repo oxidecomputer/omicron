@@ -1863,7 +1863,7 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // existing volume was deleted, so return an error, we
+                        // Existing volume was deleted, so return an error. We
                         // can't perform the region replacement now!
                         return Err(err.bail(VolumeReplaceRegionError::TargetVolumeDeleted));
                     };
