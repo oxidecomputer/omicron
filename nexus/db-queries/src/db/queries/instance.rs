@@ -342,9 +342,10 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         out.push_identifier(instance_dsl::id::NAME)?;
         out.push_sql(" = instance_updated.");
         out.push_identifier(instance_dsl::id::NAME)?;
-        out.push_sql(") ");
+        out.push_sql(")");
 
         if self.migration.is_some() {
+            out.push_sql(", ");
             out.push_sql("migration_result AS (");
             out.push_sql("SELECT migration_found.");
             out.push_identifier(migration_dsl::id::NAME)?;
@@ -357,8 +358,9 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
             out.push_identifier(migration_dsl::id::NAME)?;
             out.push_sql(" = migration_updated.");
             out.push_identifier(migration_dsl::id::NAME)?;
-            out.push_sql(") ");
+            out.push_sql(")");
         }
+        out.push_sql(" ");
 
         out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
         out.push_sql("instance_result.found, instance_result.updated, ");
