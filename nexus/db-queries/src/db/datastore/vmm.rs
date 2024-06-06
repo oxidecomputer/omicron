@@ -9,9 +9,9 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::InstanceState as DbInstanceState;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
+use crate::db::model::VmmState as DbVmmState;
 use crate::db::pagination::paginated;
 use crate::db::schema::vmm::dsl;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -22,7 +22,6 @@ use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -55,10 +54,7 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &Uuid,
     ) -> UpdateResult<bool> {
-        let valid_states = vec![
-            DbInstanceState::new(ApiInstanceState::Destroyed),
-            DbInstanceState::new(ApiInstanceState::Failed),
-        ];
+        let valid_states = vec![DbVmmState::Destroyed, DbVmmState::Failed];
 
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(*vmm_id))
@@ -190,7 +186,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Vmm> {
         use crate::db::schema::instance::dsl as instance_dsl;
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let destroyed = DbVmmState::Destroyed;
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
             // - in the `Destroyed` state

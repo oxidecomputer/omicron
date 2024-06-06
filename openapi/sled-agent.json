@@ -3138,81 +3138,6 @@
           "time_updated"
         ]
       },
-      "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "oneOf": [
-          {
-            "description": "The instance is being created.",
-            "type": "string",
-            "enum": [
-              "creating"
-            ]
-          },
-          {
-            "description": "The instance is currently starting up.",
-            "type": "string",
-            "enum": [
-              "starting"
-            ]
-          },
-          {
-            "description": "The instance is currently running.",
-            "type": "string",
-            "enum": [
-              "running"
-            ]
-          },
-          {
-            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
-            "type": "string",
-            "enum": [
-              "stopping"
-            ]
-          },
-          {
-            "description": "The instance is currently stopped.",
-            "type": "string",
-            "enum": [
-              "stopped"
-            ]
-          },
-          {
-            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
-            "type": "string",
-            "enum": [
-              "rebooting"
-            ]
-          },
-          {
-            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
-            "type": "string",
-            "enum": [
-              "migrating"
-            ]
-          },
-          {
-            "description": "The instance is attempting to recover from a failure.",
-            "type": "string",
-            "enum": [
-              "repairing"
-            ]
-          },
-          {
-            "description": "The instance has encountered a failure.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          },
-          {
-            "description": "The instance has been deleted.",
-            "type": "string",
-            "enum": [
-              "destroyed"
-            ]
-          }
-        ]
-      },
       "InstanceStateRequested": {
         "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
         "oneOf": [
@@ -4560,7 +4485,7 @@
             "description": "The last state reported by this VMM.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceState"
+                "$ref": "#/components/schemas/VmmState"
               }
             ]
           },
@@ -4574,6 +4499,67 @@
           "gen",
           "state",
           "time_updated"
+        ]
+      },
+      "VmmState": {
+        "description": "One of the states that a VMM can be in.",
+        "oneOf": [
+          {
+            "description": "The VMM is initializing and has not started running guest CPUs yet.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The VMM has finished initializing and may be running guest CPUs.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The VMM is shutting down.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The VMM's guest has stopped, and the guest will not run again, but the VMM process may not have released all of its resources yet.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The VMM is being restarted or its guest OS is rebooting.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The VMM is part of a live migration.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The VMM process reported an internal failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The VMM process has been destroyed and its resources have been released.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "Vni": {

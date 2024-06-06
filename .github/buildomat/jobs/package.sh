@@ -20,7 +20,7 @@ WORK=/work
 pfexec mkdir -p $WORK && pfexec chown $USER $WORK
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m ./tools/ci_download_softnpu_machinery
+ptime -m cargo xtask download softnpu
 
 # Build the test target
 export CARGO_INCREMENTAL=0

@@ -17,7 +17,6 @@ mod cte_utils;
 pub mod datastore;
 pub(crate) mod error;
 mod explain;
-pub mod fixed_data;
 pub mod lookup;
 mod on_conflict_ext;
 // Public for doctests.
@@ -42,6 +41,7 @@ pub use pool_connection::DISALLOW_FULL_TABLE_SCAN_SQL;
 #[cfg(test)]
 mod test_utils;
 
+pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 pub use nexus_db_model::schema;

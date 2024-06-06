@@ -996,6 +996,22 @@ pub enum InstanceState {
     Destroyed,
 }
 
+impl From<crate::api::internal::nexus::VmmState> for InstanceState {
+    fn from(state: crate::api::internal::nexus::VmmState) -> Self {
+        use crate::api::internal::nexus::VmmState as InternalVmmState;
+        match state {
+            InternalVmmState::Starting => Self::Starting,
+            InternalVmmState::Running => Self::Running,
+            InternalVmmState::Stopping => Self::Stopping,
+            InternalVmmState::Stopped => Self::Stopped,
+            InternalVmmState::Rebooting => Self::Rebooting,
+            InternalVmmState::Migrating => Self::Migrating,
+            InternalVmmState::Failed => Self::Failed,
+            InternalVmmState::Destroyed => Self::Destroyed,
+        }
+    }
+}
+
 impl Display for InstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())

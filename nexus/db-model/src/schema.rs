@@ -424,7 +424,6 @@ table! {
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -432,6 +431,7 @@ table! {
         migration_id -> Nullable<Uuid>,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
+        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -444,9 +444,9 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        state -> crate::VmmStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -459,7 +459,7 @@ table! {
         project_name -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
         active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -1370,6 +1370,13 @@ table! {
         slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
         slot_a_sha3_256 -> Nullable<Text>,
         slot_b_sha3_256 -> Nullable<Text>,
+        stage0_fwid -> Nullable<Text>,
+        stage0next_fwid -> Nullable<Text>,
+
+        slot_a_error -> Nullable<crate::RotImageErrorEnum>,
+        slot_b_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0next_error -> Nullable<crate::RotImageErrorEnum>,
     }
 }
 

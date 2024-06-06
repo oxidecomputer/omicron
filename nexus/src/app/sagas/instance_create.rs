@@ -18,7 +18,6 @@ use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
@@ -994,7 +993,7 @@ async fn sic_delete_instance_record(
     };
 
     let runtime_state = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Failed),
+        nexus_state: db::model::InstanceState::Failed,
         // Must update the generation, or the database query will fail.
         //
         // The runtime state of the instance record is only changed as a result
@@ -1029,13 +1028,13 @@ async fn sic_move_to_stopped(
     let instance_record =
         sagactx.lookup::<db::model::Instance>("instance_record")?;
 
-    // Create a new generation of the isntance record with the Stopped state and
+    // Create a new generation of the instance record with the no-VMM state and
     // try to write it back to the database. If this node is replayed, or the
     // instance has already changed state by the time this step is reached, this
     // update will (correctly) be ignored because its generation number is out
     // of date.
     let new_state = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: db::model::InstanceState::NoVmm,
         gen: db::model::Generation::from(
             instance_record.runtime_state.gen.next(),
         ),
