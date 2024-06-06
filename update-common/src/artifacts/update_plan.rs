@@ -76,7 +76,8 @@ pub struct UpdatePlan {
 
 // Used to represent the information extracted from signed RoT images. This
 // is used when going from `UpdatePlanBuilder` -> `UpdatePlan` to check
-// the versions on the RoT images
+// the versions on the RoT images and also to generate the map of
+// ArtifactId -> Sign hashes for checking artifacts
 #[derive(Debug, Eq, Hash, PartialEq)]
 struct RotSignData {
     kind: KnownArtifactKind,
@@ -353,7 +354,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             read_hubris_sign_from_archive(artifact_id, image_a)?;
 
         self.rot_by_sign
-            .entry(RotSignData { kind: artifact_kind, sign: image_a_sign })
+            .entry(RotSignData {
+                kind: artifact_kind,
+                sign: hex::decode(image_a_sign).expect("should decode"),
+            })
             .or_default()
             .push(artifact_id.clone());
 
@@ -377,7 +381,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             read_hubris_sign_from_archive(artifact_id, image_b)?;
 
         self.rot_by_sign
-            .entry(RotSignData { kind: artifact_kind, sign: image_b_sign })
+            .entry(RotSignData {
+                kind: artifact_kind,
+                sign: hex::decode(image_b_sign).expect("should decode"),
+            })
             .or_default()
             .push(artifact_id.clone());
 
@@ -768,7 +775,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         // signing key have the same version. (i.e. allow gimlet_rot signed
         // with a staging key to be a different version from gimlet_rot signed
         // with a production key)
-        for (entry, versions) in self.rot_by_sign {
+        for (entry, versions) in &self.rot_by_sign {
             let kind = entry.kind;
             // This unwrap is safe because we check above that each of the types
             // has at least one entry
@@ -784,6 +791,14 @@ impl<'a> UpdatePlanBuilder<'a> {
                 }
             }
         }
+
+        let mut rot_by_sign = HashMap::new();
+        for (k, v) in self.rot_by_sign {
+            for id in v {
+                rot_by_sign.insert(id, k.sign.clone());
+            }
+        }
+
         // Repeat the same version check for all SP images. (This is a separate
         // loop because the types of the iterators don't match.)
         for (kind, mut single_board_sp_artifacts) in [
@@ -842,6 +857,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             plan,
             by_id: self.by_id,
             by_hash: self.by_hash,
+            rot_by_sign,
             artifacts_meta: self.artifacts_meta,
         })
     }
@@ -852,6 +868,7 @@ pub struct UpdatePlanBuildOutput {
     pub plan: UpdatePlan,
     pub by_id: BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
     pub by_hash: HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
+    pub rot_by_sign: HashMap<ArtifactId, Vec<u8>>,
     pub artifacts_meta: Vec<TufArtifactMeta>,
 }
 

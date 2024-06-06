@@ -44,12 +44,14 @@ impl WicketdArtifactStore {
         let artifacts = self.artifacts_with_plan.lock().unwrap();
         let artifacts = artifacts.as_ref()?;
         let system_version = artifacts.plan().system_version.clone();
+
         let artifact_ids = artifacts
             .by_id()
             .iter()
             .map(|(k, v)| InstallableArtifacts {
                 artifact_id: k.clone(),
                 installable: v.clone(),
+                sign: artifacts.rot_by_sign().get(&k).cloned(),
             })
             .collect();
         Some((system_version, artifact_ids))

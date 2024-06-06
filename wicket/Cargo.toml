@@ -17,6 +17,7 @@ ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
+hex.workspace = true
 humantime.workspace = true
 indexmap.workspace = true
 indicatif.workspace = true

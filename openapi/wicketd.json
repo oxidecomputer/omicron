@@ -1658,7 +1658,16 @@
             "items": {
               "$ref": "#/components/schemas/ArtifactHashId"
             }
-          }
+          },
+	  "sign": {
+	    "nullable": true,
+	    "type": "array",
+            "items": {
+               "type": "integer",
+               "format": "uint8",
+               "minimum": 0
+	    }
+	  }
         },
         "required": [
           "artifact_id",
@@ -2908,7 +2917,10 @@
           },
           "version": {
             "type": "string"
-          }
+          },
+	  "sign": {
+            "type": "string"
+	  }
         },
         "required": [
           "board",

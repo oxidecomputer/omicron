@@ -10906,6 +10906,7 @@ dependencies = [
  "crossterm",
  "expectorate",
  "futures",
+ "hex",
  "humantime",
  "indexmap 2.2.6",
  "indicatif",

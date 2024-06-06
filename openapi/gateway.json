@@ -2611,6 +2611,9 @@
           },
           "version": {
             "type": "string"
+          },
+	  "sign": {
+	    "type": "string"
           }
         },
         "required": [
