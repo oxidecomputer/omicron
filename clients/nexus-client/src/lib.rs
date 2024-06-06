@@ -164,7 +164,7 @@ impl From<omicron_common::api::internal::nexus::MigrationRuntimeState>
             migration_id: s.migration_id,
             role: s.role.into(),
             state: s.state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
