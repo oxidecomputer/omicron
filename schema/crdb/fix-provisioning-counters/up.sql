@@ -4,7 +4,15 @@
 -- in invalid accounting, which is mitigated by this schema change.
 --
 -- This update is currently occurring offline, so we exploit
--- that fact to identify that all instances should be off.
+-- that fact to identify that all instances *should* be terminated
+-- before racks are updated. If they aren't, and an instance is in the
+-- "running" state when an update occurs, the propolis zone would be
+-- terminated, while the running database record remains. In this case,
+-- the only action we could take on the VMM would be to delete it,
+-- which would attempt to delete the "vritual provisioning resource"
+-- record anyway. This case is already idempotent, and would be a safe
+-- operation even if the "virtual_provisioning_resource" has already
+-- been removed.
 
 SET LOCAL disallow_full_table_scans = OFF;
 
