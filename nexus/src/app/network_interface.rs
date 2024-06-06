@@ -65,7 +65,7 @@ impl NetworkInterface {
                 project
             } => {
                 let network_interface = self.instance
-                    .instance_lookup(opctx, params::InstanceSelector { project, instance })?
+                    .lookup(opctx, params::InstanceSelector { project, instance })?
                     .instance_network_interface_name_owned(name.into());
                 Ok(network_interface)
             }

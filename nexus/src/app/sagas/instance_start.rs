@@ -491,7 +491,7 @@ async fn sis_ensure_registered(
 
     osagactx
         .instance()
-        .instance_ensure_registered(
+        .ensure_registered(
             &opctx,
             &authz_instance,
             &db_instance,
@@ -537,7 +537,7 @@ async fn sis_ensure_registered_undo(
     // returned.
     if let Err(e) = osagactx
         .instance()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &sled_id)
+        .ensure_unregistered(&opctx, &authz_instance, &sled_id)
         .await
     {
         error!(osagactx.log(),
@@ -575,11 +575,7 @@ async fn sis_ensure_registered_undo(
 
                 if let Err(set_failed_error) = osagactx
                     .instance()
-                    .mark_instance_failed(
-                        &instance_id,
-                        db_instance.runtime(),
-                        &inner,
-                    )
+                    .mark_failed(&instance_id, db_instance.runtime(), &inner)
                     .await
                 {
                     error!(osagactx.log(),
@@ -641,7 +637,7 @@ async fn sis_ensure_running(
 
     match osagactx
         .instance()
-        .instance_request_state(
+        .request_state(
             &opctx,
             &authz_instance,
             &db_instance,

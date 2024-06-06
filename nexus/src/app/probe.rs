@@ -52,7 +52,7 @@ impl Probe {
     }
 
     /// List the probes in the given project.
-    pub(crate) async fn probe_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -65,7 +65,7 @@ impl Probe {
 
     /// List the probes for the given sled. This is used by sled agents to
     /// determine what probes they should be running.
-    pub(crate) async fn probe_list_for_sled(
+    pub(crate) async fn list_for_sled(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -75,7 +75,7 @@ impl Probe {
     }
 
     /// Get info about a particular probe.
-    pub(crate) async fn probe_get(
+    pub(crate) async fn get(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -89,7 +89,7 @@ impl Probe {
     /// Create a probe. This adds the probe to the data store and sets up the
     /// NAT state on the switch. Actual launching of the probe is done by the
     /// target sled agent asynchronously.
-    pub(crate) async fn probe_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -102,7 +102,7 @@ impl Probe {
         let pool = match &new_probe_params.ip_pool {
             Some(pool) => Some(
                 self.ip_pool
-                    .ip_pool_lookup(opctx, &pool)?
+                    .lookup(opctx, &pool)?
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
@@ -117,11 +117,8 @@ impl Probe {
             .probe_create(opctx, &authz_project, &new_probe, pool)
             .await?;
 
-        let (.., sled) = self
-            .sled
-            .sled_lookup(opctx, &new_probe_params.sled)?
-            .fetch()
-            .await?;
+        let (.., sled) =
+            self.sled.lookup(opctx, &new_probe_params.sled)?.fetch().await?;
 
         let boundary_switches =
             self.instance_network.boundary_switches(&self.opctx_alloc).await?;
@@ -158,13 +155,13 @@ impl Probe {
 
     /// Delete a probe. This deletes the probe from the data store and tears
     /// down the associated NAT state.
-    pub(crate) async fn probe_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         name_or_id: NameOrId,
     ) -> DeleteResult {
-        let probe = self.probe_get(opctx, project_lookup, &name_or_id).await?;
+        let probe = self.get(opctx, project_lookup, &name_or_id).await?;
 
         self.instance_network.probe_delete_dpd_config(opctx, probe.id).await?;
 

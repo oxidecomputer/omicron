@@ -36,7 +36,7 @@ impl VpcRouter {
         VpcRouter { datastore, vpc }
     }
 
-    pub fn vpc_router_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         router_selector: params::RouterSelector,
@@ -57,7 +57,7 @@ impl VpcRouter {
                 project
             } => {
                 let router = self.vpc
-                    .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
+                    .lookup(opctx, params::VpcSelector { project, vpc })?
                     .vpc_router_name_owned(name.into());
                 Ok(router)
             }
@@ -73,7 +73,7 @@ impl VpcRouter {
         }
     }
 
-    pub(crate) async fn vpc_create_router(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -96,7 +96,7 @@ impl VpcRouter {
         Ok(router)
     }
 
-    pub(crate) async fn vpc_router_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -111,7 +111,7 @@ impl VpcRouter {
         Ok(routers)
     }
 
-    pub(crate) async fn vpc_update_router(
+    pub(crate) async fn update(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -127,7 +127,7 @@ impl VpcRouter {
     // TODO: When a router is deleted all its routes should be deleted
     // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
     //       or trigger an error
-    pub(crate) async fn vpc_delete_router(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -146,7 +146,7 @@ impl VpcRouter {
 
     // Routes
 
-    pub fn vpc_router_route_lookup<'a>(
+    pub fn route_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         route_selector: params::RouteSelector,
@@ -169,7 +169,7 @@ impl VpcRouter {
                 project,
             } => {
                 let route = self
-                    .vpc_router_lookup(
+                    .lookup(
                         opctx,
                         params::RouterSelector { project, vpc, router },
                     )?
@@ -188,7 +188,7 @@ impl VpcRouter {
         }
     }
 
-    pub(crate) async fn router_create_route(
+    pub(crate) async fn create_route(
         &self,
         opctx: &OpContext,
         router_lookup: &lookup::VpcRouter<'_>,
@@ -211,7 +211,7 @@ impl VpcRouter {
         Ok(route)
     }
 
-    pub(crate) async fn vpc_router_route_list(
+    pub(crate) async fn route_list(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -224,7 +224,7 @@ impl VpcRouter {
             .await
     }
 
-    pub(crate) async fn router_update_route(
+    pub(crate) async fn update_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
@@ -250,7 +250,7 @@ impl VpcRouter {
             .await
     }
 
-    pub(crate) async fn router_delete_route(
+    pub(crate) async fn delete_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,

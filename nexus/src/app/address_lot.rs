@@ -34,7 +34,7 @@ impl AddressLot {
         AddressLot { datastore }
     }
 
-    pub fn address_lot_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         address_lot: NameOrId,
@@ -53,7 +53,7 @@ impl AddressLot {
         }
     }
 
-    pub(crate) async fn address_lot_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         params: params::AddressLotCreate,
@@ -63,7 +63,7 @@ impl AddressLot {
         self.datastore.address_lot_create(opctx, &params).await
     }
 
-    pub(crate) async fn address_lot_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         address_lot_lookup: &lookup::AddressLot<'_>,
@@ -73,7 +73,7 @@ impl AddressLot {
         self.datastore.address_lot_delete(opctx, &authz_address_lot).await
     }
 
-    pub(crate) async fn address_lot_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -82,7 +82,7 @@ impl AddressLot {
         self.datastore.address_lot_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn address_lot_block_list(
+    pub(crate) async fn block_list(
         &self,
         opctx: &OpContext,
         address_lot: &lookup::AddressLot<'_>,

@@ -58,7 +58,7 @@ impl Update {
         Update { log, datastore, updates_config }
     }
 
-    pub(crate) async fn updates_put_repository(
+    pub(crate) async fn put_repository(
         &self,
         opctx: &OpContext,
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
@@ -90,7 +90,7 @@ impl Update {
         Ok(response.into_external())
     }
 
-    pub(crate) async fn updates_get_repository(
+    pub(crate) async fn get_repository(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,
@@ -112,7 +112,7 @@ impl Update {
     }
 
     /// Downloads a file (currently not implemented).
-    pub(crate) async fn updates_download_artifact(
+    pub(crate) async fn download_artifact(
         &self,
         _opctx: &OpContext,
         _artifact: ArtifactId,

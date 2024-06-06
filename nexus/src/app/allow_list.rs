@@ -35,10 +35,7 @@ impl SourceIpAllowList {
     }
 
     /// Fetch the allowlist of source IPs that can reach user-facing services.
-    pub async fn allow_list_view(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<AllowList, Error> {
+    pub async fn view(&self, opctx: &OpContext) -> Result<AllowList, Error> {
         self.datastore
             .allow_list_view(opctx)
             .await
@@ -46,7 +43,7 @@ impl SourceIpAllowList {
     }
 
     /// Upsert the allowlist of source IPs that can reach user-facing services.
-    pub async fn allow_list_upsert(
+    pub async fn upsert(
         &self,
         opctx: &OpContext,
         remote_addr: IpAddr,

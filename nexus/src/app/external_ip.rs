@@ -90,7 +90,7 @@ impl ExternalIp {
             } => {
                 let floating_ip = self
                     .project
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .lookup(opctx, params::ProjectSelector { project })?
                     .floating_ip_name_owned(name.into());
                 Ok(floating_ip)
             }
@@ -139,7 +139,7 @@ impl ExternalIp {
         let pool = match pool {
             Some(pool) => Some(
                 self.ip_pool
-                    .ip_pool_lookup(opctx, &pool)?
+                    .lookup(opctx, &pool)?
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
@@ -208,10 +208,10 @@ impl ExternalIp {
                 };
 
                 let instance =
-                    self.instance.instance_lookup(opctx, instance_selector)?;
+                    self.instance.lookup(opctx, instance_selector)?;
 
                 self.instance
-                    .instance_attach_floating_ip(
+                    .attach_floating_ip(
                         opctx,
                         saga_context,
                         &instance,
@@ -246,19 +246,13 @@ impl ExternalIp {
             project: None,
             instance: parent_id.into(),
         };
-        let instance =
-            self.instance.instance_lookup(opctx, instance_selector)?;
+        let instance = self.instance.lookup(opctx, instance_selector)?;
         let attach_params = &params::ExternalIpDetach::Floating {
             floating_ip: authz_fip.id().into(),
         };
 
         self.instance
-            .instance_detach_external_ip(
-                opctx,
-                saga_context,
-                &instance,
-                attach_params,
-            )
+            .detach_external_ip(opctx, saga_context, &instance, attach_params)
             .await
             .and_then(FloatingIp::try_from)
     }

@@ -80,7 +80,7 @@ impl Crucible {
         Crucible { datastore, reqwest_client }
     }
 
-    fn crucible_agent_client_for_dataset(
+    fn agent_client_for_dataset(
         &self,
         dataset: &db::model::Dataset,
     ) -> CrucibleAgentClient {
@@ -93,10 +93,7 @@ impl Crucible {
     /// Return if the Crucible agent is expected to be there and answer Nexus:
     /// true means it's gone, and the caller should bail out of the
     /// ProgenitorOperationRetry loop.
-    async fn crucible_agent_gone_check(
-        &self,
-        dataset_id: Uuid,
-    ) -> Result<bool, Error> {
+    async fn agent_gone_check(&self, dataset_id: Uuid) -> Result<bool, Error> {
         let on_in_service_physical_disk =
             self.datastore.dataset_physical_disk_in_service(dataset_id).await?;
 
@@ -110,7 +107,7 @@ impl Crucible {
         dataset: &db::model::Dataset,
         region: &db::model::Region,
     ) -> Result<Region, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let Ok(extent_count) = u32::try_from(region.extent_count()) else {
@@ -136,7 +133,7 @@ impl Crucible {
         let create_region = || async {
             let region = match ProgenitorOperationRetry::new(
                 || async { client.region_create(&region_request).await },
-                || async { self.crucible_agent_gone_check(dataset_id).await },
+                || async { self.agent_gone_check(dataset_id).await },
             )
             .run(log)
             .await
@@ -211,20 +208,20 @@ impl Crucible {
 
     /// Returns a Ok(Some(Region)) if a region with id {region_id} exists,
     /// Ok(None) if it does not (a 404 was seen), and Err otherwise.
-    async fn maybe_get_crucible_region(
+    async fn maybe_get_region(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<Option<Region>, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
             || async {
                 client.region_get(&RegionId(region_id.to_string())).await
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
+            || async { self.agent_gone_check(dataset_id).await },
         )
         .run(log)
         .await;
@@ -253,13 +250,13 @@ impl Crucible {
         }
     }
 
-    async fn get_crucible_region_snapshots(
+    async fn get_region_snapshots(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<GetSnapshotResponse, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -268,7 +265,7 @@ impl Crucible {
                     .region_get_snapshots(&RegionId(region_id.to_string()))
                     .await
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
+            || async { self.agent_gone_check(dataset_id).await },
         )
         .run(log)
         .await;
@@ -293,20 +290,20 @@ impl Crucible {
     }
 
     /// Send a region deletion request
-    async fn request_crucible_region_delete(
+    async fn request_region_delete(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
             || async {
                 client.region_delete(&RegionId(region_id.to_string())).await
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
+            || async { self.agent_gone_check(dataset_id).await },
         )
         .run(log)
         .await;
@@ -335,14 +332,14 @@ impl Crucible {
     }
 
     /// Send a running snapshot deletion request
-    async fn request_crucible_running_snapshot_delete(
+    async fn request_running_snapshot_delete(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -354,7 +351,7 @@ impl Crucible {
                     )
                     .await
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
+            || async { self.agent_gone_check(dataset_id).await },
         )
         .run(log)
         .await;
@@ -384,14 +381,14 @@ impl Crucible {
     }
 
     /// Send a snapshot deletion request
-    async fn request_crucible_snapshot_delete(
+    async fn request_snapshot_delete(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -403,7 +400,7 @@ impl Crucible {
                     )
                     .await
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
+            || async { self.agent_gone_check(dataset_id).await },
         )
         .run(log)
         .await;
@@ -433,7 +430,7 @@ impl Crucible {
     }
 
     /// Call out to a Crucible agent to delete a region
-    async fn delete_crucible_region(
+    async fn delete_region(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
@@ -444,7 +441,7 @@ impl Crucible {
         // existed.  This can occur if an `ensure_all_datasets_and_regions`
         // partially fails.
 
-        match self.maybe_get_crucible_region(log, dataset, region_id).await {
+        match self.maybe_get_region(log, dataset, region_id).await {
             Ok(Some(_)) => {
                 // region found, proceed with deleting
             }
@@ -473,7 +470,7 @@ impl Crucible {
         // deleted. Request the deletion (which is idempotent), then wait for
         // the appropriate state change.
 
-        self.request_crucible_region_delete(log, dataset, region_id).await?;
+        self.request_region_delete(log, dataset, region_id).await?;
 
         // Wait until the region is deleted
 
@@ -481,7 +478,7 @@ impl Crucible {
             backoff::retry_policy_internal_service_aggressive(),
             || async {
                 let region = match self
-                    .maybe_get_crucible_region(log, dataset, region_id)
+                    .maybe_get_region(log, dataset, region_id)
                     .await
                 {
                     Ok(None) => Err(BackoffError::Permanent(
@@ -553,7 +550,7 @@ impl Crucible {
         })
     }
 
-    async fn delete_crucible_running_snapshot_impl(
+    async fn delete_running_snapshot_impl(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
@@ -562,7 +559,7 @@ impl Crucible {
     ) -> Result<(), Error> {
         // request running snapshot deletion
 
-        self.request_crucible_running_snapshot_delete(
+        self.request_running_snapshot_delete(
             log,
             dataset,
             region_id,
@@ -575,7 +572,7 @@ impl Crucible {
         backoff::retry_notify(
             backoff::retry_policy_internal_service_aggressive(),
             || async {
-                let response = match self.get_crucible_region_snapshots(
+                let response = match self.get_region_snapshots(
                     log,
                     dataset,
                     region_id,
@@ -677,18 +674,17 @@ impl Crucible {
         })
     }
 
-    pub async fn delete_crucible_snapshot(
+    pub async fn delete_snapshot(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        self.delete_crucible_snapshot_impl(log, dataset, region_id, snapshot_id)
-            .await
+        self.delete_snapshot_impl(log, dataset, region_id, snapshot_id).await
     }
 
-    async fn delete_crucible_snapshot_impl(
+    async fn delete_snapshot_impl(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
@@ -711,19 +707,14 @@ impl Crucible {
             "snapshot_id" => %snapshot_id,
         );
 
-        self.request_crucible_snapshot_delete(
-            log,
-            dataset,
-            region_id,
-            snapshot_id,
-        )
-        .await?;
+        self.request_snapshot_delete(log, dataset, region_id, snapshot_id)
+            .await?;
 
         backoff::retry_notify(
             backoff::retry_policy_internal_service_aggressive(),
             || async {
                 let response = match self
-                    .get_crucible_region_snapshots(log, dataset, region_id)
+                    .get_region_snapshots(log, dataset, region_id)
                     .await
                 {
                     Ok(v) => Ok(v),
@@ -851,7 +842,7 @@ impl Crucible {
 
     /// Given a list of datasets and regions, send DELETE calls to the datasets
     /// corresponding Crucible Agent for each region.
-    pub async fn delete_crucible_regions(
+    pub async fn delete_regions(
         &self,
         log: &Logger,
         datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
@@ -863,7 +854,7 @@ impl Crucible {
 
         futures::stream::iter(datasets_and_regions)
             .map(|(dataset, region)| async move {
-                self.delete_crucible_region(log, &dataset, region.id()).await
+                self.delete_region(log, &dataset, region.id()).await
             })
             // Execute the requests concurrently.
             .buffer_unordered(std::cmp::min(
@@ -879,26 +870,21 @@ impl Crucible {
     }
 
     /// Ensure that a Crucible "running snapshot" is deleted.
-    pub async fn delete_crucible_running_snapshot(
+    pub async fn delete_running_snapshot(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        self.delete_crucible_running_snapshot_impl(
-            log,
-            dataset,
-            region_id,
-            snapshot_id,
-        )
-        .await
+        self.delete_running_snapshot_impl(log, dataset, region_id, snapshot_id)
+            .await
     }
 
     /// Given a list of datasets and region snapshots, send DELETE calls to the
     /// datasets corresponding Crucible Agent for each running read-only
     /// downstairs corresponding to the snapshot.
-    pub async fn delete_crucible_running_snapshots(
+    pub async fn delete_running_snapshots(
         &self,
         log: &Logger,
         datasets_and_snapshots: Vec<(
@@ -913,7 +899,7 @@ impl Crucible {
 
         futures::stream::iter(datasets_and_snapshots)
             .map(|(dataset, region_snapshot)| async move {
-                self.delete_crucible_running_snapshot_impl(
+                self.delete_running_snapshot_impl(
                     &log,
                     &dataset,
                     region_snapshot.region_id,
@@ -936,7 +922,7 @@ impl Crucible {
 
     /// Given a list of datasets and region snapshots, send DELETE calls to the
     /// dataset's corresponding Crucible Agent for each snapshot.
-    pub async fn delete_crucible_snapshots(
+    pub async fn delete_snapshots(
         &self,
         log: &Logger,
         datasets_and_snapshots: Vec<(
@@ -951,7 +937,7 @@ impl Crucible {
 
         futures::stream::iter(datasets_and_snapshots)
             .map(|(dataset, region_snapshot)| async move {
-                self.delete_crucible_snapshot_impl(
+                self.delete_snapshot_impl(
                     &log,
                     &dataset,
                     region_snapshot.region_id,

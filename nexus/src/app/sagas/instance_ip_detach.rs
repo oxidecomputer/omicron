@@ -366,7 +366,7 @@ pub(crate) mod test {
             .await;
             nexus
                 .instance
-                .instance_attach_external_ip(
+                .attach_external_ip(
                     opctx,
                     &nexus.saga_context,
                     authz_instance.clone(),

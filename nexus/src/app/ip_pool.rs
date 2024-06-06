@@ -60,7 +60,7 @@ impl IpPool {
         IpPool { datastore, silo }
     }
 
-    pub fn ip_pool_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         pool: &'a NameOrId,
@@ -79,7 +79,7 @@ impl IpPool {
         }
     }
 
-    pub(crate) async fn ip_pool_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
@@ -112,8 +112,7 @@ impl IpPool {
         opctx: &'a OpContext,
         pool: &'a NameOrId,
     ) -> LookupResult<(db::model::IpPool, db::model::IpPoolResource)> {
-        let (authz_pool, pool) =
-            self.ip_pool_lookup(opctx, pool)?.fetch().await?;
+        let (authz_pool, pool) = self.lookup(opctx, pool)?.fetch().await?;
 
         // 404 if no link is found in the current silo
         let link = self.datastore.ip_pool_fetch_link(opctx, pool.id()).await;
@@ -124,7 +123,7 @@ impl IpPool {
     }
 
     /// List silos for a given pool
-    pub(crate) async fn ip_pool_silo_list(
+    pub(crate) async fn silo_list(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -155,7 +154,7 @@ impl IpPool {
         self.datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
-    pub(crate) async fn ip_pool_link_silo(
+    pub(crate) async fn link_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -170,7 +169,7 @@ impl IpPool {
 
         let (authz_silo,) = self
             .silo
-            .silo_lookup(&opctx, silo_link.silo.clone())?
+            .lookup(&opctx, silo_link.silo.clone())?
             .lookup_for(authz::Action::Modify)
             .await?;
         self.datastore
@@ -186,7 +185,7 @@ impl IpPool {
             .await
     }
 
-    pub(crate) async fn ip_pool_unlink_silo(
+    pub(crate) async fn unlink_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -207,7 +206,7 @@ impl IpPool {
             .await
     }
 
-    pub(crate) async fn ip_pool_silo_update(
+    pub(crate) async fn silo_update(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -234,7 +233,7 @@ impl IpPool {
             .await
     }
 
-    pub(crate) async fn ip_pools_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -242,7 +241,7 @@ impl IpPool {
         self.datastore.ip_pools_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn ip_pool_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -257,7 +256,7 @@ impl IpPool {
         self.datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
-    pub(crate) async fn ip_pool_update(
+    pub(crate) async fn update(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -275,7 +274,7 @@ impl IpPool {
             .await
     }
 
-    pub(crate) async fn ip_pool_list_ranges(
+    pub(crate) async fn list_ranges(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -291,7 +290,7 @@ impl IpPool {
         self.datastore.ip_pool_list_ranges(opctx, &authz_pool, pagparams).await
     }
 
-    pub(crate) async fn ip_pool_add_range(
+    pub(crate) async fn add_range(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -320,7 +319,7 @@ impl IpPool {
         self.datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
-    pub(crate) async fn ip_pool_delete_range(
+    pub(crate) async fn delete_range(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -342,7 +341,7 @@ impl IpPool {
     // TODO(https://github.com/oxidecomputer/omicron/issues/1276): Should be
     // accessed via AZ UUID, probably.
 
-    pub(crate) async fn ip_pool_service_fetch(
+    pub(crate) async fn service_fetch(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::IpPool> {
@@ -352,7 +351,7 @@ impl IpPool {
         Ok(db_pool)
     }
 
-    pub(crate) async fn ip_pool_service_list_ranges(
+    pub(crate) async fn service_list_ranges(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, IpNetwork>,
@@ -363,7 +362,7 @@ impl IpPool {
         self.datastore.ip_pool_list_ranges(opctx, &authz_pool, pagparams).await
     }
 
-    pub(crate) async fn ip_pool_service_add_range(
+    pub(crate) async fn service_add_range(
         &self,
         opctx: &OpContext,
         range: &IpRange,
@@ -386,7 +385,7 @@ impl IpPool {
         self.datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
-    pub(crate) async fn ip_pool_service_delete_range(
+    pub(crate) async fn service_delete_range(
         &self,
         opctx: &OpContext,
         range: &IpRange,

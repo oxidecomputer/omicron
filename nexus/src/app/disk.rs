@@ -76,7 +76,7 @@ impl Disk {
         &self.default_region_allocation_strategy
     }
 
-    pub fn disk_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         disk_selector: params::DiskSelector,
@@ -92,7 +92,7 @@ impl Disk {
                 project: Some(project),
             } => {
                 let disk = self.project
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .lookup(opctx, params::ProjectSelector { project })?
                     .disk_name_owned(name.into());
                 Ok(disk)
             }
@@ -259,7 +259,7 @@ impl Disk {
         Ok(disk_created)
     }
 
-    pub(crate) async fn disk_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -277,7 +277,7 @@ impl Disk {
     // However, it has been left for reference until then, as it will
     // likely be needed once that feature is implemented.
     #[allow(dead_code)]
-    pub(crate) async fn disk_set_runtime(
+    pub(crate) async fn set_runtime(
         &self,
         opctx: &OpContext,
         authz_disk: &authz::Disk,
@@ -403,7 +403,7 @@ impl Disk {
     /// This is just a wrapper around the volume operation of the same
     /// name, but we provide this interface when all the caller has is
     /// the disk UUID as the internal volume_id is not exposed.
-    pub(crate) async fn disk_remove_read_only_parent(
+    pub(crate) async fn remove_read_only_parent(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -418,11 +418,7 @@ impl Disk {
             .await?;
 
         self.volume
-            .volume_remove_read_only_parent(
-                &opctx,
-                saga_context,
-                db_disk.volume_id,
-            )
+            .remove_read_only_parent(&opctx, saga_context, db_disk.volume_id)
             .await?;
 
         Ok(())
@@ -430,7 +426,7 @@ impl Disk {
 
     /// Move a disk from the "ImportReady" state to the "Importing" state,
     /// blocking any import from URL jobs.
-    pub(crate) async fn disk_manual_import_start(
+    pub(crate) async fn manual_import_start(
         &self,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -467,7 +463,7 @@ impl Disk {
     }
 
     /// Bulk write some bytes into a disk that's in state ImportingFromBulkWrites
-    pub(crate) async fn disk_manual_import(
+    pub(crate) async fn manual_import(
         &self,
         disk_lookup: &lookup::Disk<'_>,
         param: params::ImportBlocksBulkWrite,
@@ -589,7 +585,7 @@ impl Disk {
     /// Move a disk from the "ImportingFromBulkWrites" state to the
     /// "ImportReady" state, usually signalling the end of manually importing
     /// blocks.
-    pub(crate) async fn disk_manual_import_stop(
+    pub(crate) async fn manual_import_stop(
         &self,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -627,7 +623,7 @@ impl Disk {
 
     /// Move a disk from the "ImportReady" state to the "Detach" state, making
     /// it ready for general use.
-    pub(crate) async fn disk_finalize_import(
+    pub(crate) async fn finalize_import(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,

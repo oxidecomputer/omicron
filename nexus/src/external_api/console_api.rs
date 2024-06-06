@@ -363,7 +363,7 @@ pub(crate) async fn login_saml(
 
         let user = nexus
             .silo
-            .silo_user_from_authenticated_subject(
+            .user_from_authenticated_subject(
                 &opctx,
                 &authz_silo,
                 &db_silo,
@@ -444,7 +444,7 @@ pub(crate) async fn login_local(
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo.silo_lookup(&opctx, silo)?;
+        let silo_lookup = nexus.silo.lookup(&opctx, silo)?;
         let user =
             nexus.silo.login_local(&opctx, &silo_lookup, credentials).await?;
 
@@ -480,7 +480,7 @@ async fn create_session(
 ) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
     let nexus = &apictx.context.nexus;
     let session = match user {
-        Some(user) => nexus.session.session_create(&opctx, user.id()).await?,
+        Some(user) => nexus.session.create(&opctx, user.id()).await?,
         None => Err(Error::Unauthenticated {
             internal_message: String::from(
                 "no matching user found or credentials were not valid",
@@ -509,10 +509,7 @@ pub(crate) async fn logout(
 
         if let Ok(opctx) = opctx {
             if let Some(token) = token {
-                nexus
-                    .session
-                    .session_hard_delete(&opctx, token.value())
-                    .await?;
+                nexus.session.hard_delete(&opctx, token.value()).await?;
             }
         }
 
@@ -615,8 +612,7 @@ async fn get_login_url(
         // It might be nice to have some policy for choosing which one is used
         // here.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup =
-            nexus.silo.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        let silo_lookup = nexus.silo.lookup(opctx, NameOrId::Id(silo.id()))?;
         let idps = nexus
             .silo
             .identity_provider_list(

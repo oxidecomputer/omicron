@@ -48,7 +48,7 @@ impl VpcSubnet {
         VpcSubnet { log, datastore, tunables, vpc }
     }
 
-    pub fn vpc_subnet_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         subnet_selector: params::SubnetSelector,
@@ -70,7 +70,7 @@ impl VpcSubnet {
             } => {
                 let subnet = self
                     .vpc
-                    .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
+                    .lookup(opctx, params::VpcSelector { project, vpc })?
                     .vpc_subnet_name_owned(name.into());
                 Ok(subnet)
             }
@@ -88,7 +88,7 @@ impl VpcSubnet {
     }
     // TODO: When a subnet is created it should add a route entry into the VPC's
     // system router
-    pub(crate) async fn vpc_create_subnet(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -238,7 +238,7 @@ impl VpcSubnet {
         }
     }
 
-    pub(crate) async fn vpc_subnet_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -249,7 +249,7 @@ impl VpcSubnet {
         self.datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
     }
 
-    pub(crate) async fn vpc_update_subnet(
+    pub(crate) async fn update(
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
@@ -264,7 +264,7 @@ impl VpcSubnet {
 
     // TODO: When a subnet is deleted it should remove its entry from the VPC's
     // system router.
-    pub(crate) async fn vpc_delete_subnet(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
@@ -274,7 +274,7 @@ impl VpcSubnet {
         self.datastore.vpc_delete_subnet(opctx, &db_subnet, &authz_subnet).await
     }
 
-    pub(crate) async fn subnet_list_instance_network_interfaces(
+    pub(crate) async fn list_instance_network_interfaces(
         &self,
         opctx: &OpContext,
         subnet_lookup: &lookup::VpcSubnet<'_>,

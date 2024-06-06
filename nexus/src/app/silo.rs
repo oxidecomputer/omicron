@@ -61,10 +61,10 @@ impl Silo {
             .authn
             .silo_required()
             .internal_context("looking up current silo")?;
-        let silo = self.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        let silo = self.lookup(opctx, NameOrId::Id(silo.id()))?;
         Ok(silo)
     }
-    pub fn silo_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         silo: NameOrId,
@@ -82,13 +82,12 @@ impl Silo {
         }
     }
 
-    pub(crate) async fn silo_fq_dns_names(
+    pub(crate) async fn fq_dns_names(
         &self,
         opctx: &OpContext,
         silo_id: Uuid,
     ) -> ListResultVec<String> {
-        let (_, silo) =
-            self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
+        let (_, silo) = self.lookup(opctx, silo_id.into())?.fetch().await?;
         let silo_dns_name = silo_dns_name(&silo.name());
         let external_dns_zones = self
             .datastore
@@ -101,7 +100,7 @@ impl Silo {
             .collect())
     }
 
-    pub(crate) async fn silo_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
@@ -165,7 +164,7 @@ impl Silo {
         Ok(silo)
     }
 
-    pub(crate) async fn silos_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -175,7 +174,7 @@ impl Silo {
             .await
     }
 
-    pub(crate) async fn silo_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -201,7 +200,7 @@ impl Silo {
 
     // Role assignments
 
-    pub(crate) async fn silo_fetch_policy(
+    pub(crate) async fn fetch_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -219,7 +218,7 @@ impl Silo {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub(crate) async fn silo_update_policy(
+    pub(crate) async fn update_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -249,7 +248,7 @@ impl Silo {
     ///
     /// `LookupPath` lets you look up users directly, regardless of what Silo
     /// they're in.  This helper validates that they're in the expected Silo.
-    async fn silo_user_lookup_by_id(
+    async fn user_lookup_by_id(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
@@ -269,7 +268,7 @@ impl Silo {
     }
 
     /// List the users in a Silo
-    pub(crate) async fn silo_list_users(
+    pub(crate) async fn list_users(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -283,7 +282,7 @@ impl Silo {
     }
 
     /// Fetch a user in a Silo
-    pub(crate) async fn silo_user_fetch(
+    pub(crate) async fn user_fetch(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -291,7 +290,7 @@ impl Silo {
     ) -> LookupResult<db::model::SiloUser> {
         let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let (_, db_silo_user) = self
-            .silo_user_lookup_by_id(
+            .user_lookup_by_id(
                 opctx,
                 &authz_silo,
                 silo_user_id,
@@ -350,7 +349,7 @@ impl Silo {
             db_silo_user.id(),
             LookupType::ById(db_silo_user.id()),
         );
-        self.silo_user_password_set_internal(
+        self.user_password_set_internal(
             opctx,
             &db_silo,
             &authz_silo_user,
@@ -371,7 +370,7 @@ impl Silo {
         let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
         let (authz_silo_user, _) = self
-            .silo_user_lookup_by_id(
+            .user_lookup_by_id(
                 opctx,
                 &authz_silo,
                 silo_user_id,
@@ -382,7 +381,7 @@ impl Silo {
     }
 
     /// Based on an authenticated subject, fetch or create a silo user
-    pub async fn silo_user_from_authenticated_subject(
+    pub async fn user_from_authenticated_subject(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
@@ -453,7 +452,7 @@ impl Silo {
 
                 db::model::UserProvisionType::Jit => {
                     let silo_group = self
-                        .silo_group_lookup_or_create_by_name(
+                        .group_lookup_or_create_by_name(
                             opctx,
                             &authz_silo,
                             &group,
@@ -499,14 +498,14 @@ impl Silo {
         let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(silo_lookup).await?;
         let (authz_silo_user, db_silo_user) = self
-            .silo_user_lookup_by_id(
+            .user_lookup_by_id(
                 opctx,
                 &authz_silo,
                 silo_user_id,
                 authz::Action::Modify,
             )
             .await?;
-        self.silo_user_password_set_internal(
+        self.user_password_set_internal(
             opctx,
             &db_silo,
             &authz_silo_user,
@@ -520,7 +519,7 @@ impl Silo {
     ///
     /// The caller should have already verified that this is a `LocalOnly` Silo
     /// and that the specified user is in that Silo.
-    async fn silo_user_password_set_internal(
+    async fn user_password_set_internal(
         &self,
         opctx: &OpContext,
         db_silo: &db::model::Silo,
@@ -563,7 +562,7 @@ impl Silo {
     /// callers are expected to invoke this function during authentication even
     /// if they've found no user to match the requested credentials.  That's why
     /// this function accepts `Option<SiloUser>` rather than just a `SiloUser`.
-    pub(crate) async fn silo_user_password_verify(
+    pub(crate) async fn user_password_verify(
         &self,
         opctx: &OpContext,
         maybe_authz_silo_user: Option<&authz::SiloUser>,
@@ -624,7 +623,7 @@ impl Silo {
             )
             .await?;
         let verified = self
-            .silo_user_password_verify(
+            .user_password_verify(
                 opctx,
                 fetch_user.as_ref().map(|(authz_silo_user, _)| authz_silo_user),
                 credentials.password.as_ref(),
@@ -644,7 +643,7 @@ impl Silo {
 
     // Silo groups
 
-    pub async fn silo_group_lookup_or_create_by_name(
+    pub async fn group_lookup_or_create_by_name(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
@@ -695,7 +694,7 @@ impl Silo {
                 silo: Some(silo),
             } => {
                 let saml_provider = self
-                    .silo_lookup(opctx, silo)?
+                    .lookup(opctx, silo)?
                     .saml_identity_provider_name_owned(name.into());
                 Ok(saml_provider)
             }
@@ -908,7 +907,7 @@ impl Silo {
             .await
     }
 
-    pub fn silo_group_lookup<'a>(
+    pub fn group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         group_id: &'a Uuid,

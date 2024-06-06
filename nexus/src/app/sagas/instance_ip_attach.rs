@@ -96,7 +96,7 @@ async fn siia_begin_attach_ip(
                 Some(
                     osagactx
                         .ip_pool()
-                        .ip_pool_lookup(&opctx, name_or_id)
+                        .lookup(&opctx, name_or_id)
                         .map_err(ActionError::action_failed)?
                         .lookup_for(authz::Action::CreateChild)
                         .await

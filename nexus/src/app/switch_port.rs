@@ -56,7 +56,7 @@ impl SwitchPort {
         }
     }
 
-    pub(crate) async fn switch_port_settings_post(
+    pub(crate) async fn settings_post(
         &self,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
@@ -75,14 +75,12 @@ impl SwitchPort {
             )
             .await
         {
-            Ok(id) => self.switch_port_settings_update(opctx, id, params).await,
-            Err(_) => {
-                self.switch_port_settings_create(opctx, params, None).await
-            }
+            Ok(id) => self.settings_update(opctx, id, params).await,
+            Err(_) => self.settings_create(opctx, params, None).await,
         }
     }
 
-    pub async fn switch_port_settings_create(
+    pub async fn settings_create(
         &self,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
@@ -91,14 +89,14 @@ impl SwitchPort {
         self.datastore.switch_port_settings_create(opctx, &params, id).await
     }
 
-    pub(crate) async fn switch_port_settings_update(
+    pub(crate) async fn settings_update(
         &self,
         opctx: &OpContext,
         switch_port_settings_id: Uuid,
         new_settings: params::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         // delete old settings
-        self.switch_port_settings_delete(
+        self.settings_delete(
             opctx,
             &params::SwitchPortSettingsSelector {
                 port_settings: Some(NameOrId::Id(switch_port_settings_id)),
@@ -108,7 +106,7 @@ impl SwitchPort {
 
         // create new settings
         let result = self
-            .switch_port_settings_create(
+            .settings_create(
                 opctx,
                 new_settings.clone(),
                 Some(switch_port_settings_id),
@@ -138,7 +136,7 @@ impl SwitchPort {
         Ok(result)
     }
 
-    pub(crate) async fn switch_port_settings_delete(
+    pub(crate) async fn settings_delete(
         &self,
         opctx: &OpContext,
         params: &params::SwitchPortSettingsSelector,
@@ -147,7 +145,7 @@ impl SwitchPort {
         self.datastore.switch_port_settings_delete(opctx, params).await
     }
 
-    pub(crate) async fn switch_port_settings_list(
+    pub(crate) async fn settings_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -156,7 +154,7 @@ impl SwitchPort {
         self.datastore.switch_port_settings_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn switch_port_settings_get(
+    pub(crate) async fn settings_get(
         &self,
         opctx: &OpContext,
         name_or_id: &NameOrId,
@@ -165,7 +163,7 @@ impl SwitchPort {
         self.datastore.switch_port_settings_get(opctx, name_or_id).await
     }
 
-    async fn switch_port_create(
+    async fn create(
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
@@ -182,7 +180,7 @@ impl SwitchPort {
             .await
     }
 
-    pub(crate) async fn switch_port_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -209,7 +207,7 @@ impl SwitchPort {
             .await
     }
 
-    pub(crate) async fn switch_port_apply_settings(
+    pub(crate) async fn apply_settings(
         &self,
         opctx: &OpContext,
         port: &Name,
@@ -252,7 +250,7 @@ impl SwitchPort {
         Ok(())
     }
 
-    pub(crate) async fn switch_port_clear_settings(
+    pub(crate) async fn clear_settings(
         &self,
         opctx: &OpContext,
         port: &Name,
@@ -294,12 +292,7 @@ impl SwitchPort {
     ) -> CreateResult<()> {
         for port in ports {
             match self
-                .switch_port_create(
-                    opctx,
-                    self.rack_id,
-                    switch.clone(),
-                    port.clone(),
-                )
+                .create(opctx, self.rack_id, switch.clone(), port.clone())
                 .await
             {
                 Ok(_) => {}
@@ -312,7 +305,7 @@ impl SwitchPort {
         Ok(())
     }
 
-    pub(crate) async fn switch_port_status(
+    pub(crate) async fn status(
         &self,
         opctx: &OpContext,
         switch: Name,

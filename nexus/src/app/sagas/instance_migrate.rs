@@ -267,7 +267,7 @@ async fn sim_set_migration_ids(
 
     let updated_record = osagactx
         .instance()
-        .instance_set_migration_ids(
+        .set_migration_ids(
             &opctx,
             db_instance.id(),
             src_sled_id,
@@ -308,7 +308,7 @@ async fn sim_clear_migration_ids(
     // as failed.
     if let Err(e) = osagactx
         .instance()
-        .instance_clear_migration_ids(
+        .clear_migration_ids(
             db_instance.id(),
             src_sled_id,
             db_instance.runtime(),
@@ -351,7 +351,7 @@ async fn sim_ensure_destination_propolis(
 
     osagactx
         .instance()
-        .instance_ensure_registered(
+        .ensure_registered(
             &opctx,
             &authz_instance,
             &db_instance,
@@ -400,7 +400,7 @@ async fn sim_ensure_destination_propolis_undo(
     // needed.
     match osagactx
         .instance()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &dst_sled_id)
+        .ensure_unregistered(&opctx, &authz_instance, &dst_sled_id)
         .await
     {
         Ok(_) => Ok(()),
@@ -462,7 +462,7 @@ async fn sim_instance_migrate(
     // generation numbers to filter out stale destruction requests.
     match osagactx
         .instance()
-        .instance_request_state(
+        .request_state(
             &opctx,
             &authz_instance,
             &db_instance,

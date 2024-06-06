@@ -50,7 +50,7 @@ impl Image {
     ) -> Image {
         Image { datastore, project, silo, sec_client }
     }
-    pub(crate) async fn image_lookup<'a>(
+    pub(crate) async fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         image_selector: params::ImageSelector,
@@ -77,7 +77,7 @@ impl Image {
                 project: Some(project),
             } => {
                 let image =
-                    self.project.project_lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
+                    self.project.lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
                 Ok(ImageLookup::ProjectImage(image))
             }
             params::ImageSelector {
@@ -97,7 +97,7 @@ impl Image {
     }
 
     /// Creates an image
-    pub(crate) async fn image_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         lookup_parent: &ImageParentLookup<'_>,
@@ -243,7 +243,7 @@ impl Image {
         }
     }
 
-    pub(crate) async fn image_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         parent_lookup: &ImageParentLookup<'_>,
@@ -267,7 +267,7 @@ impl Image {
         }
     }
 
-    pub(crate) async fn image_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -302,7 +302,7 @@ impl Image {
     }
 
     /// Converts a project scoped image into a silo scoped image
-    pub(crate) async fn image_promote(
+    pub(crate) async fn promote(
         &self,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
@@ -330,7 +330,7 @@ impl Image {
     }
 
     /// Converts a silo scoped image into a project scoped image
-    pub(crate) async fn image_demote(
+    pub(crate) async fn demote(
         &self,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,

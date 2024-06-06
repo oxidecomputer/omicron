@@ -556,7 +556,7 @@ async fn sdc_regions_ensure_undo(
 
     let result = osagactx
         .crucible()
-        .delete_crucible_regions(
+        .delete_regions(
             log,
             sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
                 "datasets_and_regions",
@@ -1110,8 +1110,7 @@ pub(crate) mod test {
             ),
             disk: Name::try_from(DISK_NAME.to_string()).unwrap().into(),
         };
-        let disk_lookup =
-            nexus.disk.disk_lookup(&opctx, disk_selector).unwrap();
+        let disk_lookup = nexus.disk.lookup(&opctx, disk_selector).unwrap();
 
         nexus
             .disk

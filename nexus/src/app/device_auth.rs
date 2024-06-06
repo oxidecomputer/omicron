@@ -70,7 +70,7 @@ impl DeviceAuth {
 
     /// Start a device authorization grant flow.
     /// Corresponds to steps 1 & 2 in the flow description above.
-    pub(crate) async fn device_auth_request_create(
+    pub(crate) async fn request_create(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
@@ -87,7 +87,7 @@ impl DeviceAuth {
     /// request so that at most one token will be granted per request.
     /// Invoked in response to a request from the browser, not the client.
     /// Corresponds to step 5 in the flow description above.
-    pub(crate) async fn device_auth_request_verify(
+    pub(crate) async fn request_verify(
         &self,
         opctx: &OpContext,
         user_code: String,

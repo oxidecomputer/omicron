@@ -55,7 +55,7 @@ impl Bfd {
         Ok(mg_client)
     }
 
-    pub async fn bfd_enable(
+    pub async fn enable(
         &self,
         opctx: &OpContext,
         session: params::BfdSessionEnable,
@@ -73,7 +73,7 @@ impl Bfd {
         Ok(())
     }
 
-    pub async fn bfd_disable(
+    pub async fn disable(
         &self,
         opctx: &OpContext,
         session: params::BfdSessionDisable,
@@ -91,7 +91,7 @@ impl Bfd {
         Ok(())
     }
 
-    pub async fn bfd_status(
+    pub async fn status(
         &self,
         _opctx: &OpContext,
     ) -> Result<Vec<BfdStatus>, Error> {

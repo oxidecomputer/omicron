@@ -60,7 +60,7 @@ impl Vpc {
         Vpc { log, datastore, sec_client, opctx_sled_lookup, project }
     }
 
-    pub fn vpc_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         vpc_selector: params::VpcSelector,
@@ -75,7 +75,7 @@ impl Vpc {
                 project: Some(project),
             } => {
                 let vpc = self.project
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .lookup(opctx, params::ProjectSelector { project })?
                     .vpc_name_owned(name.into());
                 Ok(vpc)
             }
@@ -125,7 +125,7 @@ impl Vpc {
         Ok(db_vpc)
     }
 
-    pub(crate) async fn vpc_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -184,7 +184,7 @@ impl Vpc {
 
     // Firewall rules
 
-    pub(crate) async fn vpc_list_firewall_rules(
+    pub(crate) async fn list_firewall_rules(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -197,7 +197,7 @@ impl Vpc {
         .await
     }
 
-    pub(crate) async fn vpc_update_firewall_rules(
+    pub(crate) async fn update_firewall_rules(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -220,7 +220,7 @@ impl Vpc {
 
     /// Customize the default firewall rules for a particular VPC
     /// by replacing the name `default` with the VPC's actual name.
-    pub(crate) async fn default_firewall_rules_for_vpc(
+    pub(crate) async fn default_firewall_rules(
         &self,
         vpc_id: Uuid,
         vpc_name: Name,

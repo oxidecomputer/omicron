@@ -116,7 +116,7 @@ impl Rack {
         }
     }
 
-    pub(crate) async fn racks_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -124,7 +124,7 @@ impl Rack {
         self.datastore.rack_list(&opctx, pagparams).await
     }
 
-    pub(crate) async fn rack_lookup(
+    pub(crate) async fn lookup(
         &self,
         opctx: &OpContext,
         rack_id: &Uuid,
@@ -139,7 +139,7 @@ impl Rack {
     /// Marks the rack as initialized with information supplied by RSS.
     ///
     /// This function is a no-op if the rack has already been initialized.
-    pub(crate) async fn rack_initialize(
+    pub(crate) async fn initialize(
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
@@ -321,7 +321,7 @@ impl Rack {
 
         // The `rack` row is created with the rack ID we know when Nexus starts,
         // but we didn't know the rack subnet until now. Set it.
-        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
+        let mut rack = self.lookup(opctx, &self.rack_id).await?;
         rack.rack_subnet =
             Some(IpNet::from(rack_network_config.rack_subnet).into());
         self.datastore.update_rack_subnet(opctx, &rack).await?;
@@ -748,7 +748,7 @@ impl Rack {
     /// See RFD 278 for additional context.
     pub(crate) async fn await_rack_initialization(&self, opctx: &OpContext) {
         loop {
-            let result = self.rack_lookup(&opctx, &self.rack_id).await;
+            let result = self.lookup(&opctx, &self.rack_id).await;
             match result {
                 Ok(rack) => {
                     if rack.initialized {
@@ -928,7 +928,7 @@ impl Rack {
     ) -> Result<String, Error> {
         let addr = self
             .sled
-            .sled_list(opctx, &DataPageParams::max_page())
+            .list(opctx, &DataPageParams::max_page())
             .await?
             .get(0)
             .ok_or(Error::InternalError {

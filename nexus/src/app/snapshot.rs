@@ -38,7 +38,7 @@ impl Snapshot {
         Snapshot { datastore, sec_client, project, disk }
     }
 
-    pub fn snapshot_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         snapshot_selector: params::SnapshotSelector,
@@ -57,7 +57,7 @@ impl Snapshot {
                 project: Some(project),
             } => {
                 let snapshot = self.project
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .lookup(opctx, params::ProjectSelector { project })?
                     .snapshot_name_owned(name.into());
                 Ok(snapshot)
             }
@@ -73,7 +73,7 @@ impl Snapshot {
         }
     }
 
-    pub(crate) async fn snapshot_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -93,7 +93,7 @@ impl Snapshot {
             .disk
             .clone()
         {
-            NameOrId::Id(id) => self.disk.disk_lookup(
+            NameOrId::Id(id) => self.disk.lookup(
                 opctx,
                 DiskSelector { disk: NameOrId::Id(id), project: None },
             )?,
@@ -158,7 +158,7 @@ impl Snapshot {
         Ok(snapshot_created)
     }
 
-    pub(crate) async fn snapshot_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -170,7 +170,7 @@ impl Snapshot {
         self.datastore.snapshot_list(opctx, &authz_project, pagparams).await
     }
 
-    pub(crate) async fn snapshot_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,

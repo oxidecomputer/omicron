@@ -79,7 +79,7 @@ impl Session {
         Ok(true)
     }
 
-    pub(crate) async fn session_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         user_id: Uuid,
@@ -96,7 +96,7 @@ impl Session {
         self.datastore.session_create(opctx, session).await
     }
 
-    pub(crate) async fn session_fetch(
+    pub(crate) async fn fetch(
         &self,
         opctx: &OpContext,
         token: String,
@@ -118,7 +118,7 @@ impl Session {
     }
 
     /// Updates last_used to now.
-    pub(crate) async fn session_update_last_used(
+    pub(crate) async fn update_last_used(
         &self,
         opctx: &OpContext,
         token: &str,
@@ -131,7 +131,7 @@ impl Session {
         self.datastore.session_update_last_used(opctx, &authz_session).await
     }
 
-    pub(crate) async fn session_hard_delete(
+    pub(crate) async fn hard_delete(
         &self,
         opctx: &OpContext,
         token: &str,

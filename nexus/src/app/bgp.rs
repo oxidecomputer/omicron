@@ -33,7 +33,7 @@ impl Bgp {
     ) -> Bgp {
         Bgp { log, datastore, internal_resolver }
     }
-    pub async fn bgp_config_set(
+    pub async fn config_set(
         &self,
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
@@ -43,7 +43,7 @@ impl Bgp {
         Ok(result)
     }
 
-    pub async fn bgp_config_get(
+    pub async fn config_get(
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
@@ -52,7 +52,7 @@ impl Bgp {
         self.datastore.bgp_config_get(opctx, &name_or_id).await
     }
 
-    pub async fn bgp_config_list(
+    pub async fn config_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -61,7 +61,7 @@ impl Bgp {
         self.datastore.bgp_config_list(opctx, pagparams).await
     }
 
-    pub async fn bgp_config_delete(
+    pub async fn config_delete(
         &self,
         opctx: &OpContext,
         sel: &params::BgpConfigSelector,
@@ -71,7 +71,7 @@ impl Bgp {
         Ok(result)
     }
 
-    pub async fn bgp_create_announce_set(
+    pub async fn create_announce_set(
         &self,
         opctx: &OpContext,
         announce: &params::BgpAnnounceSetCreate,
@@ -82,7 +82,7 @@ impl Bgp {
         Ok(result)
     }
 
-    pub async fn bgp_announce_list(
+    pub async fn announce_list(
         &self,
         opctx: &OpContext,
         sel: &params::BgpAnnounceSetSelector,
@@ -91,7 +91,7 @@ impl Bgp {
         self.datastore.bgp_announce_list(opctx, sel).await
     }
 
-    pub async fn bgp_delete_announce_set(
+    pub async fn delete_announce_set(
         &self,
         opctx: &OpContext,
         sel: &params::BgpAnnounceSetSelector,
@@ -101,7 +101,7 @@ impl Bgp {
         Ok(result)
     }
 
-    pub async fn bgp_peer_status(
+    pub async fn peer_status(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<BgpPeerStatus> {
@@ -162,7 +162,7 @@ impl Bgp {
         Ok(result)
     }
 
-    pub async fn bgp_message_history(
+    pub async fn message_history(
         &self,
         opctx: &OpContext,
         sel: &params::BgpRouteSelector,
@@ -205,7 +205,7 @@ impl Bgp {
         Ok(result)
     }
 
-    pub async fn bgp_imported_routes_ipv4(
+    pub async fn imported_routes_ipv4(
         &self,
         opctx: &OpContext,
         sel: &params::BgpRouteSelector,

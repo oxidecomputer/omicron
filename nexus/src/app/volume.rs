@@ -44,7 +44,7 @@ impl Volume {
     }
 
     /// Start a saga to remove a read only parent from a volume.
-    pub(crate) async fn volume_remove_read_only_parent(
+    pub(crate) async fn remove_read_only_parent(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,

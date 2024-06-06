@@ -304,7 +304,7 @@ mod test {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =
-            nexus.project.project_lookup(&opctx, project_selector).unwrap();
+            nexus.project.lookup(&opctx, project_selector).unwrap();
 
         let instance_state = nexus
             .instance

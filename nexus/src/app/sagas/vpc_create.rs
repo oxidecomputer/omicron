@@ -382,7 +382,7 @@ async fn svc_update_firewall(
         sagactx.lookup::<(authz::Vpc, db::model::Vpc)>("vpc")?;
     let rules = osagactx
         .vpc()
-        .default_firewall_rules_for_vpc(
+        .default_firewall_rules(
             authz_vpc.id(),
             params.vpc_create.identity.name.clone().into(),
         )
@@ -509,7 +509,7 @@ pub(crate) mod test {
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
             .project
-            .project_lookup(&opctx, project_selector)
+            .lookup(&opctx, project_selector)
             .expect("Invalid parameters constructing project lookup")
             .lookup_for(action)
             .await

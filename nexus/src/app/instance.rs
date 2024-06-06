@@ -248,7 +248,7 @@ impl Instance {
         }
     }
 
-    pub fn instance_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         instance_selector: params::InstanceSelector,
@@ -267,7 +267,7 @@ impl Instance {
                 project: Some(project)
             } => {
                 let instance = self.project
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .lookup(opctx, params::ProjectSelector { project })?
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
@@ -460,8 +460,7 @@ impl Instance {
             let lookup = LookupPath::new(opctx, &self.datastore)
                 .instance_id(instance_id);
 
-            let start_result =
-                self.instance_start(opctx, saga_context, &lookup).await;
+            let start_result = self.start(opctx, saga_context, &lookup).await;
             if let Err(e) = start_result {
                 info!(self.log, "failed to start newly-created instance";
                       "instance_id" => %instance_id,
@@ -487,7 +486,7 @@ impl Instance {
         self.datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
-    pub(crate) async fn instance_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -606,7 +605,7 @@ impl Instance {
     ///
     /// Asserts that `db_instance` has no migration ID or destination Propolis
     /// ID set.
-    pub(crate) async fn instance_set_migration_ids(
+    pub(crate) async fn set_migration_ids(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
@@ -622,7 +621,7 @@ impl Instance {
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        let sa = self.sled.sled_client(&sled_id).await?;
+        let sa = self.sled.client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
@@ -646,11 +645,7 @@ impl Instance {
             Err(e) => {
                 if e.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
+                        .mark_failed(&instance_id, &prev_instance_runtime, &e)
                         .await;
                 }
                 return Err(e.into());
@@ -681,7 +676,7 @@ impl Instance {
     ///
     /// Asserts that `db_instance` has a migration ID and destination Propolis
     /// ID set.
-    pub(crate) async fn instance_clear_migration_ids(
+    pub(crate) async fn clear_migration_ids(
         &self,
         instance_id: Uuid,
         sled_id: Uuid,
@@ -690,7 +685,7 @@ impl Instance {
         assert!(prev_instance_runtime.migration_id.is_some());
         assert!(prev_instance_runtime.dst_propolis_id.is_some());
 
-        let sa = self.sled.sled_client(&sled_id).await?;
+        let sa = self.sled.client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
@@ -710,11 +705,7 @@ impl Instance {
             Err(e) => {
                 if e.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
+                        .mark_failed(&instance_id, &prev_instance_runtime, &e)
                         .await;
                 }
                 return Err(e.into());
@@ -725,7 +716,7 @@ impl Instance {
     }
 
     /// Reboot the specified instance.
-    pub(crate) async fn instance_reboot(
+    pub(crate) async fn reboot(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -739,7 +730,7 @@ impl Instance {
             .await?;
 
         if let Err(e) = self
-            .instance_request_state(
+            .request_state(
                 opctx,
                 &authz_instance,
                 state.instance(),
@@ -751,7 +742,7 @@ impl Instance {
             if let InstanceStateChangeError::SledAgent(inner) = &e {
                 if inner.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
+                        .mark_failed(
                             &authz_instance.id(),
                             state.instance().runtime(),
                             inner,
@@ -767,7 +758,7 @@ impl Instance {
     }
 
     /// Attempts to start an instance if it is currently stopped.
-    pub(crate) async fn instance_start(
+    pub(crate) async fn start(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -832,7 +823,7 @@ impl Instance {
     }
 
     /// Make sure the given Instance is stopped.
-    pub(crate) async fn instance_stop(
+    pub(crate) async fn stop(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -846,7 +837,7 @@ impl Instance {
             .await?;
 
         if let Err(e) = self
-            .instance_request_state(
+            .request_state(
                 opctx,
                 &authz_instance,
                 state.instance(),
@@ -858,7 +849,7 @@ impl Instance {
             if let InstanceStateChangeError::SledAgent(inner) = &e {
                 if inner.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
+                        .mark_failed(
                             &authz_instance.id(),
                             state.instance().runtime(),
                             inner,
@@ -876,7 +867,7 @@ impl Instance {
     /// Idempotently ensures that the sled specified in `db_instance` does not
     /// have a record of the instance. If the instance is currently running on
     /// this sled, this operation rudely terminates it.
-    pub(crate) async fn instance_ensure_unregistered(
+    pub(crate) async fn ensure_unregistered(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -884,7 +875,7 @@ impl Instance {
     ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
     {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let sa = self.sled.sled_client(&sled_id).await?;
+        let sa = self.sled.client(&sled_id).await?;
         sa.instance_unregister(&authz_instance.id())
             .await
             .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -1038,7 +1029,7 @@ impl Instance {
         }
     }
 
-    pub(crate) async fn instance_request_state(
+    pub(crate) async fn request_state(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -1056,7 +1047,7 @@ impl Instance {
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
             InstanceStateChangeRequestAction::SendToSled(sled_id) => {
-                let sa = self.sled.sled_client(&sled_id).await?;
+                let sa = self.sled.client(&sled_id).await?;
                 let instance_put_result = sa
                     .instance_put_state(
                         &instance_id,
@@ -1089,7 +1080,7 @@ impl Instance {
 
     /// Modifies the runtime state of the Instance as requested.  This generally
     /// means booting or halting the Instance.
-    pub(crate) async fn instance_ensure_registered(
+    pub(crate) async fn ensure_registered(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -1296,7 +1287,7 @@ impl Instance {
         // IDs.
         let (.., db_project) = self
             .project
-            .project_lookup(
+            .lookup(
                 opctx,
                 params::ProjectSelector {
                     project: NameOrId::Id(db_instance.project_id),
@@ -1340,7 +1331,7 @@ impl Instance {
             )),
         };
 
-        let sa = self.sled.sled_client(&initial_vmm.sled_id).await?;
+        let sa = self.sled.client(&initial_vmm.sled_id).await?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),
@@ -1369,7 +1360,7 @@ impl Instance {
             Err(e) => {
                 if e.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
+                        .mark_failed(
                             &db_instance.id(),
                             db_instance.runtime(),
                             &e,
@@ -1432,7 +1423,7 @@ impl Instance {
     /// Attempts to move an instance from `prev_instance_runtime` to the
     /// `Failed` state in response to an error returned from a call to a sled
     /// agent instance API, supplied in `reason`.
-    pub(crate) async fn mark_instance_failed(
+    pub(crate) async fn mark_failed(
         &self,
         instance_id: &Uuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
@@ -1472,7 +1463,7 @@ impl Instance {
     }
 
     /// Lists disks attached to the instance.
-    pub(crate) async fn instance_list_disks(
+    pub(crate) async fn list_disks(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1486,7 +1477,7 @@ impl Instance {
     }
 
     /// Attach a disk to an instance.
-    pub(crate) async fn instance_attach_disk(
+    pub(crate) async fn attach_disk(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1496,7 +1487,7 @@ impl Instance {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_project_disk, authz_disk) = self
             .disk
-            .disk_lookup(
+            .lookup(
                 opctx,
                 params::DiskSelector {
                     project: match disk {
@@ -1547,7 +1538,7 @@ impl Instance {
     }
 
     /// Detach a disk from an instance.
-    pub(crate) async fn instance_detach_disk(
+    pub(crate) async fn detach_disk(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1557,7 +1548,7 @@ impl Instance {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_disk) = self
             .disk
-            .disk_lookup(
+            .lookup(
                 opctx,
                 params::DiskSelector {
                     project: match disk {
@@ -1613,7 +1604,7 @@ impl Instance {
 
     /// Returns the requested range of serial console output bytes,
     /// provided they are still in the propolis-server's cache.
-    pub(crate) async fn instance_serial_console_data(
+    pub(crate) async fn serial_console_data(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1653,7 +1644,7 @@ impl Instance {
         })
     }
 
-    pub(crate) async fn instance_serial_console_stream(
+    pub(crate) async fn serial_console_stream(
         &self,
         opctx: &OpContext,
         mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
@@ -1927,7 +1918,7 @@ impl Instance {
     }
 
     /// Attach an ephemeral IP to an instance.
-    pub(crate) async fn instance_attach_ephemeral_ip(
+    pub(crate) async fn attach_ephemeral_ip(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -1937,7 +1928,7 @@ impl Instance {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        self.instance_attach_external_ip(
+        self.attach_external_ip(
             opctx,
             saga_context,
             authz_instance,
@@ -1948,7 +1939,7 @@ impl Instance {
     }
 
     /// Attach an ephemeral IP to an instance.
-    pub(crate) async fn instance_attach_floating_ip(
+    pub(crate) async fn attach_floating_ip(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -1965,7 +1956,7 @@ impl Instance {
             ));
         }
 
-        self.instance_attach_external_ip(
+        self.attach_external_ip(
             opctx,
             saga_context,
             authz_instance,
@@ -1976,7 +1967,7 @@ impl Instance {
     }
 
     /// Attach an external IP to an instance.
-    pub(crate) async fn instance_attach_external_ip(
+    pub(crate) async fn attach_external_ip(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -2006,7 +1997,7 @@ impl Instance {
     }
 
     /// Detach an external IP from an instance.
-    pub(crate) async fn instance_detach_external_ip(
+    pub(crate) async fn detach_external_ip(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,

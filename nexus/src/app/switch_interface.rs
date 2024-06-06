@@ -64,11 +64,10 @@ impl SwitchInterface {
         validate_switch_location(params.switch_location.as_str())?;
 
         // Just a check to make sure a valid rack id was passed in.
-        self.rack.rack_lookup(&opctx, &params.rack_id).await?;
+        self.rack.lookup(&opctx, &params.rack_id).await?;
 
-        let address_lot_lookup = self
-            .address_lot
-            .address_lot_lookup(&opctx, params.address_lot.clone())?;
+        let address_lot_lookup =
+            self.address_lot.lookup(&opctx, params.address_lot.clone())?;
 
         let (.., authz_address_lot) =
             address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;

@@ -85,10 +85,8 @@ pub(crate) async fn device_auth_request(
             }
         };
 
-        let model = nexus
-            .device_auth
-            .device_auth_request_create(&opctx, params.client_id)
-            .await?;
+        let model =
+            nexus.device_auth.request_create(&opctx, params.client_id).await?;
         build_oauth_response(
             StatusCode::OK,
             &model.into_response(rqctx.server.using_tls(), host),
@@ -157,11 +155,7 @@ pub(crate) async fn device_auth_confirm(
         )?;
         let _token = nexus
             .device_auth
-            .device_auth_request_verify(
-                &opctx,
-                params.user_code,
-                actor.actor_id(),
-            )
+            .request_verify(&opctx, params.user_code, actor.actor_id())
             .await?;
         Ok(HttpResponseUpdatedNoContent())
     };

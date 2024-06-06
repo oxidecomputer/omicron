@@ -43,7 +43,7 @@ impl Certificate {
     ) -> Certificate {
         Certificate { datastore, background_tasks, silo, opctx_external_authn }
     }
-    pub fn certificate_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         certificate: &'a NameOrId,
@@ -57,7 +57,7 @@ impl Certificate {
         }
     }
 
-    pub(crate) async fn certificate_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         params: params::CertificateCreate,
@@ -82,7 +82,7 @@ impl Certificate {
         // name(s)).
         let silo_fq_dns_names = self
             .silo
-            .silo_fq_dns_names(&self.opctx_external_authn, authz_silo.id())
+            .fq_dns_names(&self.opctx_external_authn, authz_silo.id())
             .await?;
 
         let kind = params.service;
@@ -109,7 +109,7 @@ impl Certificate {
         }
     }
 
-    pub(crate) async fn certificates_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -117,7 +117,7 @@ impl Certificate {
         self.datastore.certificate_list_for(opctx, None, pagparams, true).await
     }
 
-    pub(crate) async fn certificate_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         certificate_lookup: lookup::Certificate<'_>,

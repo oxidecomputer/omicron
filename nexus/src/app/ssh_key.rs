@@ -32,7 +32,7 @@ impl SshKey {
     }
 
     // SSH Keys
-    pub fn ssh_key_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         ssh_key_selector: &'a params::SshKeySelector,
@@ -58,7 +58,7 @@ impl SshKey {
         }
     }
 
-    pub(crate) async fn ssh_key_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -73,7 +73,7 @@ impl SshKey {
         self.datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
     }
 
-    pub(crate) async fn ssh_keys_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -100,7 +100,7 @@ impl SshKey {
             .await
     }
 
-    pub(crate) async fn ssh_key_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,

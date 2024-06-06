@@ -42,7 +42,7 @@ impl Project {
         Project { datastore, sec_client }
     }
 
-    pub fn project_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         project_selector: params::ProjectSelector,
@@ -58,7 +58,7 @@ impl Project {
         })
     }
 
-    pub(crate) async fn project_create(
+    pub(crate) async fn create(
         &self,
         opctx: &OpContext,
         saga_context: &SagaContext,
@@ -91,7 +91,7 @@ impl Project {
         Ok(db_project)
     }
 
-    pub(crate) async fn project_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -99,7 +99,7 @@ impl Project {
         self.datastore.projects_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn project_update(
+    pub(crate) async fn update(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -112,7 +112,7 @@ impl Project {
             .await
     }
 
-    pub(crate) async fn project_delete(
+    pub(crate) async fn delete(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -124,7 +124,7 @@ impl Project {
 
     // Role assignments
 
-    pub(crate) async fn project_fetch_policy(
+    pub(crate) async fn fetch_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -142,7 +142,7 @@ impl Project {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub(crate) async fn project_update_policy(
+    pub(crate) async fn update_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,

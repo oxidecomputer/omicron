@@ -454,7 +454,7 @@ impl SessionStore for ServerContext {
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session.session_fetch(opctx, token).await.ok()
+        self.nexus.session.fetch(opctx, token).await.ok()
     }
 
     async fn session_update_last_used(
@@ -462,12 +462,12 @@ impl SessionStore for ServerContext {
         token: String,
     ) -> Option<Self::SessionModel> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session.session_update_last_used(&opctx, &token).await.ok()
+        self.nexus.session.update_last_used(&opctx, &token).await.ok()
     }
 
     async fn session_expire(&self, token: String) -> Option<()> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session.session_hard_delete(opctx, &token).await.ok()
+        self.nexus.session.hard_delete(opctx, &token).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {

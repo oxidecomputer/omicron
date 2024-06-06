@@ -61,7 +61,7 @@ impl Sled {
         &self.opctx_sled_lookup
     }
 
-    pub fn sled_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         sled_id: &Uuid,
@@ -125,18 +125,18 @@ impl Sled {
     /// sufficient warning to the operator.
     ///
     /// This is idempotent, and it returns the old policy of the sled.
-    pub(crate) async fn sled_expunge(
+    pub(crate) async fn expunge(
         &self,
         opctx: &OpContext,
         sled_id: Uuid,
     ) -> Result<SledPolicy, Error> {
-        let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
+        let sled_lookup = self.lookup(opctx, &sled_id)?;
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
         self.datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
     }
 
-    pub(crate) async fn sled_request_firewall_rules(
+    pub(crate) async fn request_firewall_rules(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -146,7 +146,7 @@ impl Sled {
         Ok(())
     }
 
-    pub(crate) async fn sled_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -154,7 +154,7 @@ impl Sled {
         self.datastore.sled_list(&opctx, pagparams, SledFilter::InService).await
     }
 
-    pub async fn sled_client(
+    pub async fn client(
         &self,
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
@@ -203,7 +203,7 @@ impl Sled {
     }
 
     /// Returns the old provision policy.
-    pub(crate) async fn sled_set_provision_policy(
+    pub(crate) async fn set_provision_policy(
         &self,
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,
@@ -227,7 +227,7 @@ impl Sled {
             .physical_disk(disk_selector.disk_id))
     }
 
-    pub(crate) async fn sled_list_physical_disks(
+    pub(crate) async fn list_physical_disks(
         &self,
         opctx: &OpContext,
         sled_id: Uuid,
@@ -334,7 +334,7 @@ impl Sled {
         .await
     }
 
-    pub(crate) async fn sled_instance_list(
+    pub(crate) async fn instance_list(
         &self,
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,

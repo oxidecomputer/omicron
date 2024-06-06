@@ -465,7 +465,7 @@ async fn ssc_regions_ensure_undo(
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
     osagactx
         .crucible()
-        .delete_crucible_regions(
+        .delete_regions(
             log,
             sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
                 "datasets_and_regions",
@@ -725,7 +725,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
 
     let sled_agent_client = osagactx
         .sled()
-        .sled_client(&sled_id)
+        .client(&sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -771,7 +771,7 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     for (dataset, region) in datasets_and_regions {
         osagactx
             .crucible()
-            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
+            .delete_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
 
@@ -1096,7 +1096,7 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     for (dataset, region) in datasets_and_regions {
         osagactx
             .crucible()
-            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
+            .delete_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
     Ok(())
@@ -1355,12 +1355,7 @@ async fn ssc_start_running_snapshot_undo(
     for (dataset, region) in datasets_and_regions {
         osagactx
             .crucible()
-            .delete_crucible_running_snapshot(
-                &log,
-                &dataset,
-                region.id(),
-                snapshot_id,
-            )
+            .delete_running_snapshot(&log, &dataset, region.id(), snapshot_id)
             .await?;
 
         osagactx
@@ -2031,7 +2026,7 @@ mod test {
         let sled_id = instance_state
             .sled_id()
             .expect("starting instance should have a sled");
-        let sa = nexus.sled.sled_client(&sled_id).await.unwrap();
+        let sa = nexus.sled.client(&sled_id).await.unwrap();
 
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus

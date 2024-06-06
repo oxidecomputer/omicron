@@ -56,7 +56,7 @@ impl Blueprint {
         Blueprint { nexus_id, datastore, background_tasks }
     }
 
-    pub async fn blueprint_list(
+    pub async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -64,7 +64,7 @@ impl Blueprint {
         self.datastore.blueprints_list(opctx, pagparams).await
     }
 
-    pub async fn blueprint_view(
+    pub async fn view(
         &self,
         opctx: &OpContext,
         blueprint_id: Uuid,
@@ -77,7 +77,7 @@ impl Blueprint {
         self.datastore.blueprint_read(opctx, &blueprint).await
     }
 
-    pub async fn blueprint_delete(
+    pub async fn delete(
         &self,
         opctx: &OpContext,
         blueprint_id: Uuid,
@@ -90,14 +90,14 @@ impl Blueprint {
         self.datastore.blueprint_delete(opctx, &blueprint).await
     }
 
-    pub async fn blueprint_target_view(
+    pub async fn target_view(
         &self,
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, Error> {
         self.datastore.blueprint_target_get_current(opctx).await
     }
 
-    pub async fn blueprint_target_set(
+    pub async fn target_set(
         &self,
         opctx: &OpContext,
         params: BlueprintTargetSet,
@@ -118,7 +118,7 @@ impl Blueprint {
         Ok(new_target)
     }
 
-    pub async fn blueprint_target_set_enabled(
+    pub async fn target_set_enabled(
         &self,
         opctx: &OpContext,
         params: BlueprintTargetSet,
@@ -141,7 +141,7 @@ impl Blueprint {
         Ok(new_target)
     }
 
-    async fn blueprint_planning_context(
+    async fn planning_context(
         &self,
         opctx: &OpContext,
     ) -> Result<PlanningContext, Error> {
@@ -222,7 +222,7 @@ impl Blueprint {
         Ok(PlanningContext { planning_input, creator, inventory })
     }
 
-    async fn blueprint_add(
+    async fn add(
         &self,
         opctx: &OpContext,
         blueprint: &nexus_types::deployment::Blueprint,
@@ -230,14 +230,14 @@ impl Blueprint {
         self.datastore.blueprint_insert(opctx, blueprint).await
     }
 
-    pub async fn blueprint_create_regenerate(
+    pub async fn create_regenerate(
         &self,
         opctx: &OpContext,
     ) -> CreateResult<nexus_types::deployment::Blueprint> {
         let (_, parent_blueprint) =
             self.datastore.blueprint_target_get_current_full(opctx).await?;
 
-        let planning_context = self.blueprint_planning_context(opctx).await?;
+        let planning_context = self.planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
         })?;
@@ -260,16 +260,16 @@ impl Blueprint {
             ))
         })?;
 
-        self.blueprint_add(&opctx, &blueprint).await?;
+        self.add(&opctx, &blueprint).await?;
         Ok(blueprint)
     }
 
-    pub async fn blueprint_import(
+    pub async fn import(
         &self,
         opctx: &OpContext,
         blueprint: nexus_types::deployment::Blueprint,
     ) -> Result<(), Error> {
-        let _ = self.blueprint_add(&opctx, &blueprint).await?;
+        let _ = self.add(&opctx, &blueprint).await?;
         Ok(())
     }
 }

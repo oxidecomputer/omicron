@@ -393,7 +393,7 @@ pub async fn instance_ip_add_opte(
 
     osagactx
         .sled()
-        .sled_client(&sled_uuid)
+        .client(&sled_uuid)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
@@ -448,7 +448,7 @@ pub async fn instance_ip_remove_opte(
 
     osagactx
         .sled()
-        .sled_client(&sled_uuid)
+        .client(&sled_uuid)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(

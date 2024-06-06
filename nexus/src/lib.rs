@@ -309,7 +309,7 @@ impl nexus_test_interface::NexusServer for Server {
             .context
             .nexus
             .rack
-            .rack_initialize(
+            .initialize(
                 &opctx,
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
@@ -353,7 +353,7 @@ impl nexus_test_interface::NexusServer for Server {
         let nexus = &rv.server_context().nexus;
         nexus
             .sled
-            .sled_set_provision_policy(
+            .set_provision_policy(
                 &opctx,
                 &nexus_db_queries::db::lookup::LookupPath::new(
                     &opctx,

@@ -51,10 +51,10 @@ pub(crate) async fn instance_start(
         };
 
     let instance_lookup =
-        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.lookup(&opctx, instance_selector).unwrap();
     nexus
         .instance
-        .instance_start(&opctx, &nexus.saga_context, &instance_lookup)
+        .start(&opctx, &nexus.saga_context, &instance_lookup)
         .await
         .expect("Failed to start instance");
 }
@@ -72,10 +72,10 @@ pub(crate) async fn instance_stop(
         };
 
     let instance_lookup =
-        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.lookup(&opctx, instance_selector).unwrap();
     nexus
         .instance
-        .instance_stop(&opctx, &instance_lookup)
+        .stop(&opctx, &instance_lookup)
         .await
         .expect("Failed to stop instance");
 }
@@ -94,10 +94,10 @@ pub(crate) async fn instance_stop_by_name(
         };
 
     let instance_lookup =
-        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.lookup(&opctx, instance_selector).unwrap();
     nexus
         .instance
-        .instance_stop(&opctx, &instance_lookup)
+        .stop(&opctx, &instance_lookup)
         .await
         .expect("Failed to stop instance");
 }
@@ -116,7 +116,7 @@ pub(crate) async fn instance_delete_by_name(
         };
 
     let instance_lookup =
-        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.lookup(&opctx, instance_selector).unwrap();
     nexus
         .instance
         .project_destroy_instance(&opctx, &nexus.saga_context, &instance_lookup)
@@ -158,7 +158,7 @@ pub(crate) async fn instance_simulate_by_name(
         };
 
     let instance_lookup =
-        nexus.instance.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance.lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
     let sa = nexus
         .instance_sled_by_id(&instance.id())

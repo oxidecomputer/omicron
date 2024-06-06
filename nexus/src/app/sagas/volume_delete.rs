@@ -162,7 +162,7 @@ async fn svd_delete_crucible_regions(
 
     osagactx
         .crucible()
-        .delete_crucible_regions(log, datasets_and_regions.clone())
+        .delete_regions(log, datasets_and_regions.clone())
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(
@@ -221,7 +221,7 @@ async fn svd_delete_crucible_running_snapshots(
 
     osagactx
         .crucible()
-        .delete_crucible_running_snapshots(log, datasets_and_snapshots.clone())
+        .delete_running_snapshots(log, datasets_and_snapshots.clone())
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(
@@ -264,7 +264,7 @@ async fn svd_delete_crucible_snapshots(
 
     osagactx
         .crucible()
-        .delete_crucible_snapshots(log, datasets_and_snapshots.clone())
+        .delete_snapshots(log, datasets_and_snapshots.clone())
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(
@@ -438,10 +438,7 @@ async fn svd_delete_freed_crucible_regions(
         // Send DELETE calls to the corresponding Crucible agents
         osagactx
             .crucible()
-            .delete_crucible_regions(
-                log,
-                vec![(dataset.clone(), region.clone())],
-            )
+            .delete_regions(log, vec![(dataset.clone(), region.clone())])
             .await
             .map_err(|e| {
                 ActionError::action_failed(format!(

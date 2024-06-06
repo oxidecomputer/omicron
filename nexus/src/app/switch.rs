@@ -24,7 +24,7 @@ impl Switch {
     }
 
     // Switches
-    pub fn switch_lookup<'a>(
+    pub fn lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         switch_selector: params::SwitchSelector,
@@ -35,7 +35,7 @@ impl Switch {
 
     /// Upserts a switch into the database, updated it if it already exists.
     /// Should only be called by the internal API
-    pub(crate) async fn switch_upsert(
+    pub(crate) async fn upsert(
         &self,
         id: Uuid,
         request: SwitchPutRequest,
@@ -50,7 +50,7 @@ impl Switch {
         self.datastore.switch_upsert(switch).await
     }
 
-    pub(crate) async fn switch_list(
+    pub(crate) async fn list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
