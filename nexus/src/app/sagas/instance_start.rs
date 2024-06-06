@@ -16,7 +16,7 @@ use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::external::{Error, InstanceState};
+use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog::info;
 use steno::{ActionError, Node};
@@ -200,7 +200,7 @@ async fn sis_destroy_vmm_record(
     );
 
     let vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    super::instance_common::destroy_vmm_record(
+    super::instance_common::unwind_vmm_record(
         osagactx.datastore(),
         &opctx,
         &vmm,
@@ -260,9 +260,7 @@ async fn sis_move_to_starting(
         // be running before Propolis thinks it has started.)
         None => {
             let new_runtime = db::model::InstanceRuntimeState {
-                nexus_state: db::model::InstanceState::new(
-                    InstanceState::Running,
-                ),
+                nexus_state: db::model::InstanceState::Vmm,
                 propolis_id: Some(propolis_id),
                 time_updated: Utc::now(),
                 gen: db_instance.runtime().gen.next().into(),
@@ -300,7 +298,7 @@ async fn sis_move_to_starting_undo(
           "instance_id" => %instance_id);
 
     let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: db::model::InstanceState::NoVmm,
         propolis_id: None,
         gen: db_instance.runtime_state.gen.next().into(),
         ..db_instance.runtime_state
@@ -447,50 +445,18 @@ async fn sis_dpd_ensure_undo(
 async fn sis_v2p_ensure(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
-    let instance_id = params.db_instance.id();
-
-    info!(osagactx.log(), "start saga: ensuring v2p mappings are configured";
-          "instance_id" => %instance_id);
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    osagactx
-        .nexus()
-        .create_instance_v2p_mappings(&opctx, instance_id, sled_uuid)
-        .await
-        .map_err(ActionError::action_failed)?;
-
+    let nexus = osagactx.nexus();
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
 
 async fn sis_v2p_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
-    let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
-    info!(osagactx.log(), "start saga: undoing v2p configuration";
-          "instance_id" => %instance_id,
-          "sled_id" => %sled_id);
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    osagactx
-        .nexus()
-        .delete_instance_v2p_mappings(&opctx, instance_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
+    let nexus = osagactx.nexus();
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
 
@@ -767,7 +733,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
@@ -794,10 +760,9 @@ mod test {
                 .as_ref()
                 .expect("running instance should have a vmm")
                 .runtime
-                .state
-                .0;
+                .state;
 
-        assert_eq!(vmm_state, InstanceState::Running);
+        assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -806,7 +771,7 @@ mod test {
     ) {
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
@@ -850,8 +815,8 @@ mod test {
 
                         assert!(new_db_instance.runtime().propolis_id.is_none());
                         assert_eq!(
-                            new_db_instance.runtime().nexus_state.0,
-                            InstanceState::Stopped
+                            new_db_instance.runtime().nexus_state,
+                            nexus_db_model::InstanceState::NoVmm
                         );
 
                         assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
@@ -868,7 +833,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
@@ -893,10 +858,9 @@ mod test {
                 .as_ref()
                 .expect("running instance should have a vmm")
                 .runtime
-                .state
-                .0;
+                .state;
 
-        assert_eq!(vmm_state, InstanceState::Running);
+        assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
 
     /// Tests that if a start saga unwinds because sled agent returned failure
@@ -910,7 +874,7 @@ mod test {
     #[nexus_test(server = crate::Server)]
     async fn test_ensure_running_unwind(cptestctx: &ControlPlaneTestContext) {
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
@@ -962,7 +926,7 @@ mod test {
 
         assert_eq!(
             db_instance.instance().runtime_state.nexus_state,
-            nexus_db_model::InstanceState(InstanceState::Stopped)
+            nexus_db_model::InstanceState::NoVmm
         );
         assert!(db_instance.vmm().is_none());
 

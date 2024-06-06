@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -52,6 +55,7 @@ uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
 multimap.workspace = true
+indicatif.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

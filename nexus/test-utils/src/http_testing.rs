@@ -65,8 +65,10 @@ pub struct RequestBuilder<'a> {
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
-    // doesn't need Option<> because if it's empty, we don't check anything
-    expected_response_headers: http::HeaderMap<http::header::HeaderValue>,
+    // if an entry's value is `None`, we verify the header exists in the
+    // response, but we don't check the value
+    expected_response_headers:
+        http::HeaderMap<Option<http::header::HeaderValue>>,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -85,7 +87,6 @@ impl<'a> RequestBuilder<'a> {
             body: hyper::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
-                http::header::CACHE_CONTROL,
                 http::header::CONTENT_ENCODING,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
@@ -94,7 +95,7 @@ impl<'a> RequestBuilder<'a> {
                 http::header::SET_COOKIE,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
-            expected_response_headers: http::HeaderMap::new(),
+            expected_response_headers: http::HeaderMap::default(),
             error: None,
             allow_non_dropshot_errors: false,
         }
@@ -213,21 +214,6 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
-    /// Record a list of header names allowed in the response
-    ///
-    /// If this function is used, then [`Self::execute()`] will check each header in
-    /// the response against this list and raise an error if a header name is
-    /// found that's not in this list.
-    pub fn expect_allowed_headers<
-        I: IntoIterator<Item = http::header::HeaderName>,
-    >(
-        mut self,
-        allowed_headers: I,
-    ) -> Self {
-        self.allowed_headers = Some(allowed_headers.into_iter().collect());
-        self
-    }
-
     /// Add header and value to check for at execution time
     ///
     /// Behaves like header() rather than expect_allowed_headers() in that it
@@ -248,7 +234,7 @@ impl<'a> RequestBuilder<'a> {
                 self.error = Some(error);
             }
             Ok((name, value)) => {
-                self.expected_response_headers.append(name, value);
+                self.expected_response_headers.append(name, Some(value));
             }
         }
         self
@@ -277,6 +263,21 @@ impl<'a> RequestBuilder<'a> {
                 http::header::SEC_WEBSOCKET_ACCEPT,
                 TEST_WEBSOCKET_RESPONSE_KEY,
             )
+    }
+
+    /// Expect a successful console asset response.
+    pub fn expect_console_asset(mut self) -> Self {
+        let headers = [
+            http::header::CACHE_CONTROL,
+            http::header::CONTENT_SECURITY_POLICY,
+            http::header::X_CONTENT_TYPE_OPTIONS,
+            http::header::X_FRAME_OPTIONS,
+        ];
+        self.allowed_headers.as_mut().unwrap().extend(headers.clone());
+        for header in headers {
+            self.expected_response_headers.entry(header).or_insert(None);
+        }
+        self.expect_status(Some(http::StatusCode::OK))
     }
 
     /// Allow non-dropshot error responses, i.e., errors that are not compatible
@@ -357,14 +358,17 @@ impl<'a> RequestBuilder<'a> {
                 "response did not contain expected header {:?}",
                 header_name
             );
-            let actual_value = headers.get(header_name).unwrap();
-            ensure!(
-                actual_value == expected_value,
-                "response contained expected header {:?}, but with value {:?} instead of expected {:?}",
-                header_name,
-                actual_value,
-                expected_value,
-            );
+            if let Some(expected_value) = expected_value {
+                let actual_value = headers.get(header_name).unwrap();
+                ensure!(
+                    actual_value == expected_value,
+                    "response contained expected header {:?}, but with value \
+                    {:?} instead of expected {:?}",
+                    header_name,
+                    actual_value,
+                    expected_value,
+                );
+            }
         }
 
         // Sanity check the Date header in the response.  This check assumes
@@ -584,6 +588,12 @@ impl<'a> NexusRequest<'a> {
     pub fn websocket_handshake(mut self) -> Self {
         self.request_builder =
             self.request_builder.expect_websocket_handshake();
+        self
+    }
+
+    /// Tells the request builder to expect headers specific to console assets.
+    pub fn console_asset(mut self) -> Self {
+        self.request_builder = self.request_builder.expect_console_asset();
         self
     }
 

@@ -41,7 +41,6 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     ) -> Self {
         Self {
             address: s.address.to_string(),
-            base_route: s.base_route.clone(),
             id: s.id,
             kind: s.kind.into(),
             interval: s.interval.into(),

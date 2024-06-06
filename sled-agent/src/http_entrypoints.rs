@@ -25,18 +25,13 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
 };
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::SwitchPorts;
-use oximeter::types::ProducerResults;
-use oximeter_producer::collect;
-use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -54,6 +49,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_get_state)?;
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
@@ -73,6 +69,7 @@ pub fn api() -> SledApiDescription {
         api.register(zone_bundle_cleanup_context_update)?;
         api.register(zone_bundle_cleanup)?;
         api.register(sled_role_get)?;
+        api.register(list_v2p)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
         api.register(timesync_get)?;
@@ -83,7 +80,6 @@ pub fn api() -> SledApiDescription {
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
         api.register(sled_add)?;
-        api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
@@ -478,6 +474,19 @@ async fn instance_put_state(
 }
 
 #[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_get_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
+}
+
+#[endpoint {
     method = PUT,
     path = "/instances/{instance_id}/migration-ids",
 }]
@@ -642,24 +651,16 @@ async fn vpc_firewall_rules_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Path parameters for V2P mapping related requests (sled agent API)
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema)]
-struct V2pPathParam {
-    interface_id: Uuid,
-}
-
 /// Create a mapping from a virtual NIC to a physical host
 // Keep interface_id to maintain parity with the simulated sled agent, which
 // requires interface_id on the path.
 #[endpoint {
     method = PUT,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn set_v2p(
     rqctx: RequestContext<SledAgent>,
-    _path_params: Path<V2pPathParam>,
-    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -674,12 +675,11 @@ async fn set_v2p(
 // requires interface_id on the path.
 #[endpoint {
     method = DELETE,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn del_v2p(
     rqctx: RequestContext<SledAgent>,
-    _path_params: Path<V2pPathParam>,
-    body: TypedBody<DeleteVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -687,6 +687,22 @@ async fn del_v2p(
     sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// List v2p mappings present on sled
+// Used by nexus background task
+#[endpoint {
+    method = GET,
+    path = "/v2p/",
+}]
+async fn list_v2p(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError> {
+    let sa = rqctx.context();
+
+    let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;
+
+    Ok(HttpResponseOk(vnics))
 }
 
 #[endpoint {
@@ -812,20 +828,6 @@ async fn sled_add(
         }
     })?;
     Ok(HttpResponseUpdatedNoContent())
-}
-
-/// Collect oximeter samples from the sled agent.
-#[endpoint {
-    method = GET,
-    path = "/metrics/collect/{producer_id}",
-}]
-async fn metrics_collect(
-    request_context: RequestContext<SledAgent>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let sa = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    collect(&sa.metrics_registry(), producer_id).await
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]

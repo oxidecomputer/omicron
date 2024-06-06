@@ -18,10 +18,12 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
-        Ipv4Network = ipnetwork::Ipv4Network,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
     }
 );
 

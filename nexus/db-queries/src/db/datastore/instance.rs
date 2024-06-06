@@ -18,22 +18,28 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
 use crate::db::model::Project;
+use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::Disk;
 use nexus_db_model::VmmRuntimeState;
+use nexus_types::deployment::SledFilter;
 use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -68,9 +74,9 @@ impl InstanceAndActiveVmm {
         &self,
     ) -> omicron_common::api::external::InstanceState {
         if let Some(vmm) = &self.vmm {
-            vmm.runtime.state.0
+            vmm.runtime.state.into()
         } else {
-            self.instance.runtime().nexus_state.0
+            self.instance.runtime().nexus_state.into()
         }
     }
 }
@@ -83,11 +89,13 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
 
 impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
-        let (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
-            (vmm.runtime.state, vmm.runtime.time_state_updated)
+        let run_state: omicron_common::api::external::InstanceState;
+        let time_run_state_updated: chrono::DateTime<Utc>;
+        (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
+            (vmm.runtime.state.into(), vmm.runtime.time_state_updated)
         } else {
             (
-                value.instance.runtime_state.nexus_state.clone(),
+                value.instance.runtime_state.nexus_state.into(),
                 value.instance.runtime_state.time_updated,
             )
         };
@@ -103,11 +111,34 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             runtime: omicron_common::api::external::InstanceRuntimeState {
-                run_state: *run_state.state(),
+                run_state,
                 time_run_state_updated,
             },
         }
     }
+}
+
+/// A token which represents that a saga holds the instance-updater lock on a
+/// particular instance.
+///
+/// This is returned by [`DataStore::instance_updater_lock`] if the lock is
+/// successfully acquired, and passed to [`DataStore::instance_updater_unlock`]
+/// when the lock is released.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UpdaterLock {
+    saga_lock_id: Uuid,
+    locked_gen: Generation,
+}
+
+/// Errors returned by [`DataStore::instance_updater_lock`].
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum UpdaterLockError {
+    /// The instance was already locked by another saga.
+    #[error("instance already locked by another saga")]
+    AlreadyLocked,
+    /// An error occurred executing the query.
+    #[error("error locking instance: {0}")]
+    Query(#[from] Error),
 }
 
 impl DataStore {
@@ -167,8 +198,8 @@ impl DataStore {
         })?;
 
         bail_unless!(
-            instance.runtime().nexus_state.state()
-                == &api::external::InstanceState::Creating,
+            instance.runtime().nexus_state
+                == nexus_db_model::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime().nexus_state
         );
@@ -385,6 +416,58 @@ impl DataStore {
         Ok((instance_updated, vmm_updated))
     }
 
+    /// Lists all instances on in-service sleds with active Propolis VMM
+    /// processes, returning the instance along with the VMM on which it's
+    /// running, the sled on which the VMM is running, and the project that owns
+    /// the instance.
+    ///
+    /// The query performed by this function is paginated by the sled's UUID.
+    pub async fn instance_and_vmm_list_by_sled_agent(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<(Sled, Instance, Vmm, Project)> {
+        use crate::db::schema::{
+            instance::dsl as instance_dsl, project::dsl as project_dsl,
+            sled::dsl as sled_dsl, vmm::dsl as vmm_dsl,
+        };
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let result = paginated(sled_dsl::sled, sled_dsl::id, pagparams)
+            .filter(sled_dsl::time_deleted.is_null())
+            .sled_filter(SledFilter::InService)
+            .inner_join(
+                vmm_dsl::vmm
+                    .on(vmm_dsl::sled_id
+                        .eq(sled_dsl::id)
+                        .and(vmm_dsl::time_deleted.is_null()))
+                    .inner_join(
+                        instance_dsl::instance
+                            .on(instance_dsl::id
+                                .eq(vmm_dsl::instance_id)
+                                .and(instance_dsl::time_deleted.is_null()))
+                            .inner_join(
+                                project_dsl::project.on(project_dsl::id
+                                    .eq(instance_dsl::project_id)
+                                    .and(project_dsl::time_deleted.is_null())),
+                            ),
+                    ),
+            )
+            .sled_filter(SledFilter::InService)
+            .select((
+                Sled::as_select(),
+                Instance::as_select(),
+                Vmm::as_select(),
+                Project::as_select(),
+            ))
+            .load_async::<(Sled, Instance, Vmm, Project)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(result)
+    }
+
     pub async fn project_delete_instance(
         &self,
         opctx: &OpContext,
@@ -396,13 +479,12 @@ impl DataStore {
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
-        use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
         use db::schema::{disk, instance};
 
-        let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
-        let failed = DbInstanceState::new(ApiInstanceState::Failed);
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let stopped = DbInstanceState::NoVmm;
+        let failed = DbInstanceState::Failed;
+        let destroyed = DbInstanceState::Destroyed;
         let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();
@@ -472,5 +554,523 @@ impl DataStore {
         self.instance_ssh_keys_delete(opctx, authz_instance.id()).await?;
 
         Ok(())
+    }
+
+    /// Attempts to lock an instance's record to apply state updates in an
+    /// instance-update saga, returning the state of the instance when the lock
+    /// was acquired.
+    ///
+    /// # Notes
+    ///
+    /// This method MUST only be called from the context of a saga! The
+    /// calling saga must ensure that the reverse action for the action that
+    /// acquires the lock must call [`DataStore::instance_updater_unlock`] to
+    /// ensure that the lock is always released if the saga unwinds.
+    ///
+    /// This method is idempotent: if the instance is already locked by the same
+    /// saga, it will succeed, as though the lock was acquired.
+    ///
+    /// # Arguments
+    ///
+    /// - `authz_instance`: the instance to attempt to lock to lock
+    /// - `saga_lock_id`: the UUID of the saga that's attempting to lock this
+    ///   instance.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`UpdaterLock`]`)` if the lock was acquired.
+    /// - [`Err`]`([`UpdaterLockError::AlreadyLocked`])` if the instance was
+    ///   locked by another saga.
+    /// - [`Err`]`([`UpdaterLockError::Query`]`(...))` if the query to fetch
+    ///   the instance or lock it returned another error (such as if the
+    ///   instance no longer exists, or if the database connection failed).
+    pub async fn instance_updater_lock(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        saga_lock_id: Uuid,
+    ) -> Result<UpdaterLock, UpdaterLockError> {
+        use db::schema::instance::dsl;
+
+        let mut instance = self.instance_refetch(opctx, authz_instance).await?;
+        let instance_id = instance.id();
+        // `true` if the instance was locked by *this* call to
+        // `instance_updater_lock`, *false* in the (rare) case that it was
+        // previously locked by *this* saga's ID. This is used only for logging,
+        // as this method is idempotent --- if the instance's current updater ID
+        // matches the provided saga ID, this method completes successfully.
+        //
+        // XXX(eliza): I *think* this is the right behavior for sagas, since
+        // saga actions are expected to be idempotent...but it also means that a
+        // UUID collision would allow two sagas to lock the instance. But...(1)
+        // a UUID collision is extremely unlikely, and (2), if a UUID collision
+        // *did* occur, the odds are even lower that the same UUID would
+        // assigned to two instance-update sagas which both try to update the
+        // *same* instance at the same time. So, idempotency is probably more
+        // important than handling that extremely unlikely edge case.
+        let mut did_lock = false;
+        loop {
+            match instance.runtime_state.updater_id {
+                // If the `updater_id` field is not null and the ID equals this
+                // saga's ID, we already have the lock. We're done here!
+                Some(lock_id) if lock_id == saga_lock_id => {
+                    slog::info!(
+                        &opctx.log,
+                        "instance updater lock acquired!";
+                        "instance_id" => %instance_id,
+                        "saga_id" => %saga_lock_id,
+                        "already_locked" => !did_lock,
+                    );
+                    return Ok(UpdaterLock {
+                        saga_lock_id,
+                        locked_gen: instance.runtime_state.updater_gen,
+                    });
+                }
+                // The `updater_id` field is set, but it's not our ID. The instance
+                // is locked by a different saga, so give up.
+                Some(lock_id) => {
+                    slog::info!(
+                        &opctx.log,
+                        "instance is locked by another saga";
+                        "instance_id" => %instance_id,
+                        "locked_by" => %lock_id,
+                        "saga_id" => %saga_lock_id,
+                    );
+                    return Err(UpdaterLockError::AlreadyLocked);
+                }
+                // No saga's ID is set as the instance's `updater_id`. We can
+                // attempt to lock it.
+                None => {}
+            }
+
+            // Okay, now attempt to acquire the lock
+            let current_gen = instance.runtime_state.updater_gen;
+            slog::debug!(
+                &opctx.log,
+                "attempting to acquire instance updater lock";
+                "instance_id" => %instance_id,
+                "saga_id" => %saga_lock_id,
+                "current_gen" => ?current_gen,
+            );
+
+            (instance, did_lock) = diesel::update(dsl::instance)
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(instance_id))
+                // If the generation is the same as the captured generation when we
+                // read the instance record to check if it was not locked, we can
+                // lock this instance. This is because changing the `updater_id`
+                // field always increments the generation number. Therefore, we
+                // want the update query to succeed if and only if the
+                // generation number remains the same as the generation when we
+                // last fetched the instance. This query is used equivalently to
+                // an atomic compare-and-swap instruction in the implementation
+                // of a non-distributed, single-process mutex.
+                .filter(dsl::updater_gen.eq(current_gen))
+                .set((
+                    dsl::updater_gen.eq(dsl::updater_gen + 1),
+                    dsl::updater_id.eq(Some(saga_lock_id)),
+                ))
+                .check_if_exists::<Instance>(instance_id)
+                .execute_and_check(
+                    &*self.pool_connection_authorized(opctx).await?,
+                )
+                .await
+                .map(|r| {
+                    // If we successfully updated the instance record, we have
+                    // acquired the lock; otherwise, we haven't --- either because
+                    // our generation is stale, or because the instance is already locked.
+                    let locked = match r.status {
+                        UpdateStatus::Updated => true,
+                        UpdateStatus::NotUpdatedButExists => false,
+                    };
+                    (r.found, locked)
+                })
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::Instance,
+                            LookupType::ById(instance_id),
+                        ),
+                    )
+                })?;
+        }
+    }
+
+    /// Release the instance-updater lock acquired by
+    /// [`DataStore::instance_updater_lock`].
+    ///
+    /// This method will unlock the instance if (and only if) the lock is
+    /// currently held by the provided `saga_lock_id`. If the lock is held by a
+    /// different saga UUID, the instance will remain locked. If the instance
+    /// has already been unlocked, this method will return `false`.
+    ///
+    /// # Arguments
+    ///
+    /// - `authz_instance`: the instance to attempt to unlock
+    /// - `updater_lock`: an [`UpdaterLock`] token representing the acquired
+    ///   lock to release.
+    pub async fn instance_updater_unlock(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        UpdaterLock { saga_lock_id, locked_gen }: UpdaterLock,
+    ) -> Result<bool, Error> {
+        use db::schema::instance::dsl;
+
+        let instance_id = authz_instance.id();
+
+        let result = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(instance_id))
+            // Only unlock the instance if:
+            // - the provided updater ID matches that of the saga that has
+            //   currently locked this instance.
+            .filter(dsl::updater_id.eq(Some(saga_lock_id)))
+            // - the provided updater generation matches the current updater
+            //   generation.
+            .filter(dsl::updater_gen.eq(locked_gen))
+            .set((
+                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_id.eq(None::<Uuid>),
+            ))
+            .check_if_exists::<Instance>(instance_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(instance_id),
+                    ),
+                )
+            })?;
+
+        match result {
+            // If we updated the record, the lock has been released! Return
+            // `Ok(true)` to indicate that we released the lock successfully.
+            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
+                Ok(true)
+            }
+            // The generation has advanced past the generation at which the
+            // lock was held. This means that we have already released the
+            // lock. Return `Ok(false)` here for idempotency.
+            UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                ref found,
+            } if found.runtime_state.updater_gen > locked_gen => Ok(false),
+            // The instance exists, but the lock ID doesn't match our lock ID.
+            // This means we were trying to release a lock we never held, whcih
+            // is almost certainly a programmer error.
+            UpdateAndQueryResult { ref found, .. } => {
+                match found.runtime_state.updater_id {
+                    Some(lock_holder) => {
+                        debug_assert_ne!(lock_holder, saga_lock_id);
+                        Err(Error::internal_error(
+                            "attempted to release a lock held by another saga! this is a bug!",
+                        ))
+                    },
+                    None => Err(Error::internal_error(
+                            "attempted to release a lock on an instance that is not locked! this is a bug!",
+                        )),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::lookup::LookupPath;
+    use nexus_db_model::Project;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_test_utils::dev;
+
+    async fn test_setup(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> authz::Instance {
+        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+        let instance_id = Uuid::new_v4();
+
+        let (authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "stuff".parse().unwrap(),
+                            description: "Where I keep my stuff".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .expect("project must be created successfully");
+
+        let _ = datastore
+            .project_create_instance(
+                &opctx,
+                &authz_project,
+                Instance::new(
+                    instance_id,
+                    project_id,
+                    &params::InstanceCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myinstance".parse().unwrap(),
+                            description: "It's an instance".into(),
+                        },
+                        ncpus: 2i64.try_into().unwrap(),
+                        memory: ByteCount::from_gibibytes_u32(16),
+                        hostname: "myhostname".try_into().unwrap(),
+                        user_data: Vec::new(),
+                        network_interfaces:
+                            params::InstanceNetworkInterfaceAttachment::None,
+                        external_ips: Vec::new(),
+                        disks: Vec::new(),
+                        ssh_public_keys: None,
+                        start: false,
+                    },
+                ),
+            )
+            .await
+            .expect("instance must be created successfully");
+
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance_id)
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+        authz_instance
+    }
+
+    #[tokio::test]
+    async fn test_instance_updater_acquires_lock() {
+        // Setup
+        let logctx = dev::test_setup_log("test_instance_updater_acquires_lock");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let saga1 = Uuid::new_v4();
+        let saga2 = Uuid::new_v4();
+        let authz_instance = test_setup(&datastore, &opctx).await;
+
+        macro_rules! assert_locked {
+            ($id:expr) => {{
+                let lock = dbg!(
+                    datastore
+                        .instance_updater_lock(&opctx, &authz_instance, $id)
+                        .await
+                )
+                .expect(concat!(
+                    "instance must be locked by ",
+                    stringify!($id)
+                ));
+                assert_eq!(
+                    lock.saga_lock_id,
+                    $id,
+                    "instance's `updater_id` must be set to {}",
+                    stringify!($id),
+                );
+                lock
+            }};
+        }
+
+        macro_rules! assert_not_locked {
+            ($id:expr) => {
+                let err = dbg!(datastore
+                    .instance_updater_lock(&opctx, &authz_instance, $id)
+                    .await)
+                    .expect_err("attempting to lock the instance while it is already locked must fail");
+                assert_eq!(
+                    err,
+                    UpdaterLockError::AlreadyLocked,
+                );
+            };
+        }
+
+        // attempt to lock the instance from saga 1
+        let lock1 = assert_locked!(saga1);
+
+        // now, also attempt to lock the instance from saga 2. this must fail.
+        assert_not_locked!(saga2);
+
+        // unlock the instance from saga 1
+        let unlocked = datastore
+            .instance_updater_unlock(&opctx, &authz_instance, lock1)
+            .await
+            .expect("instance must be unlocked by saga 1");
+        assert!(unlocked, "instance must actually be unlocked");
+
+        // now, locking the instance from saga 2 should succeed.
+        let lock2 = assert_locked!(saga2);
+
+        // trying to lock the instance again from saga 1 should fail
+        assert_not_locked!(saga1);
+
+        // unlock the instance from saga 2
+        let unlocked = datastore
+            .instance_updater_unlock(&opctx, &authz_instance, lock2)
+            .await
+            .expect("instance must be unlocked by saga 2");
+        assert!(unlocked, "instance must actually be unlocked");
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_updater_lock_is_idempotent() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_instance_updater_lock_is_idempotent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = test_setup(&datastore, &opctx).await;
+        let saga1 = Uuid::new_v4();
+
+        // attempt to lock the instance once.
+        let lock1 = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect("instance should be locked");
+        assert_eq!(lock1.saga_lock_id, saga1);
+
+        // doing it again should be fine.
+        let lock2 = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect(
+            "instance_updater_lock should succeed again with the same saga ID",
+        );
+        assert_eq!(lock2.saga_lock_id, saga1);
+        // the generation should not have changed as a result of the second
+        // update.
+        assert_eq!(lock1.locked_gen, lock2.locked_gen);
+
+        // now, unlock the instance.
+        let unlocked = dbg!(
+            datastore
+                .instance_updater_unlock(&opctx, &authz_instance, lock1)
+                .await
+        )
+        .expect("instance should unlock");
+        assert!(unlocked, "instance should have unlocked");
+
+        // unlocking it again should also succeed...
+        let unlocked = dbg!(
+            datastore
+                .instance_updater_unlock(&opctx, &authz_instance, lock2)
+                .await
+        )
+        .expect("instance should unlock again");
+        // ...but the `locked` bool should now be false.
+        assert!(!unlocked, "instance should already have been unlocked");
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_updater_unlocking_someone_elses_instance_errors() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_instance_updater_unlocking_someone_elses_instance_errors",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = test_setup(&datastore, &opctx).await;
+        let saga1 = Uuid::new_v4();
+        let saga2 = Uuid::new_v4();
+
+        // lock the instance once.
+        let lock1 = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect("instance should be locked");
+
+        // attempting to unlock with a different saga ID should be an error.
+        let err = dbg!(
+            datastore
+                .instance_updater_unlock(
+                    &opctx,
+                    &authz_instance,
+                    // N.B. that the `UpdaterLock` type's fields are private
+                    // specifically to *prevent* callers from accidentally doing
+                    // what we're doing here. But this simulates a case where
+                    // an incorrect one is constructed, or a raw database query
+                    // attempts an invalid unlock operation.
+                    UpdaterLock {
+                        saga_lock_id: saga2,
+                        locked_gen: lock1.locked_gen,
+                    },
+                )
+                .await
+        )
+        .expect_err(
+            "unlocking the instance with someone else's ID should fail",
+        );
+        assert_eq!(
+            err,
+            Error::internal_error(
+                "attempted to release a lock held by another saga! \
+                this is a bug!",
+            ),
+        );
+        let next_gen = Generation(lock1.locked_gen.0.next());
+
+        // unlocking with the correct ID should succeed.
+        let unlocked = dbg!(
+            datastore
+                .instance_updater_unlock(&opctx, &authz_instance, lock1)
+                .await
+        )
+        .expect("instance should unlock");
+        assert!(unlocked, "instance should have unlocked");
+
+        // unlocking with the lock holder's ID *again* at a new generation
+        // (where the lock is no longer held) should fail.
+        let err = dbg!(
+            datastore
+                .instance_updater_unlock(
+                    &opctx,
+                    &authz_instance,
+                    // Again, these fields are private specifically to prevent
+                    // you from doing this exact thing. But, we should  still
+                    // test that we handle it gracefully.
+                    UpdaterLock { saga_lock_id: saga1, locked_gen: next_gen },
+                )
+                .await
+        )
+        .expect_err(
+            "unlocking the instance with someone else's ID should fail",
+        );
+        assert_eq!(
+            err,
+            Error::internal_error(
+                "attempted to release a lock on an instance \
+                that is not locked! this is a bug!"
+            ),
+        );
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

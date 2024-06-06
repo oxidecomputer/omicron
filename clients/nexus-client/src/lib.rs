@@ -21,22 +21,24 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
         // It's kind of unfortunate to pull in such a complex and unstable type
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         Generation = omicron_common::api::external::Generation,
-        Ipv4Network = ipnetwork::Ipv4Network,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        NewPasswordHash = omicron_passwords::NewPasswordHash,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        NewPasswordHash = omicron_passwords::NewPasswordHash,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
+        TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
@@ -81,21 +83,34 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<types::InstanceState>
-    for omicron_common::api::external::InstanceState
-{
-    fn from(s: types::InstanceState) -> Self {
+impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
+    fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmState as Input;
         match s {
-            types::InstanceState::Creating => Self::Creating,
-            types::InstanceState::Starting => Self::Starting,
-            types::InstanceState::Running => Self::Running,
-            types::InstanceState::Stopping => Self::Stopping,
-            types::InstanceState::Stopped => Self::Stopped,
-            types::InstanceState::Rebooting => Self::Rebooting,
-            types::InstanceState::Migrating => Self::Migrating,
-            types::InstanceState::Repairing => Self::Repairing,
-            types::InstanceState::Failed => Self::Failed,
-            types::InstanceState::Destroyed => Self::Destroyed,
+            Input::Starting => types::VmmState::Starting,
+            Input::Running => types::VmmState::Running,
+            Input::Stopping => types::VmmState::Stopping,
+            Input::Stopped => types::VmmState::Stopped,
+            Input::Rebooting => types::VmmState::Rebooting,
+            Input::Migrating => types::VmmState::Migrating,
+            Input::Failed => types::VmmState::Failed,
+            Input::Destroyed => types::VmmState::Destroyed,
+        }
+    }
+}
+
+impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
+    fn from(s: types::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmState as Output;
+        match s {
+            types::VmmState::Starting => Output::Starting,
+            types::VmmState::Running => Output::Running,
+            types::VmmState::Stopping => Output::Stopping,
+            types::VmmState::Stopped => Output::Stopped,
+            types::VmmState::Rebooting => Output::Rebooting,
+            types::VmmState::Migrating => Output::Migrating,
+            types::VmmState::Failed => Output::Failed,
+            types::VmmState::Destroyed => Output::Destroyed,
         }
     }
 }
@@ -138,26 +153,6 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
     }
 }
 
-impl From<omicron_common::api::external::InstanceState>
-    for types::InstanceState
-{
-    fn from(s: omicron_common::api::external::InstanceState) -> Self {
-        use omicron_common::api::external::InstanceState;
-        match s {
-            InstanceState::Creating => Self::Creating,
-            InstanceState::Starting => Self::Starting,
-            InstanceState::Running => Self::Running,
-            InstanceState::Stopping => Self::Stopping,
-            InstanceState::Stopped => Self::Stopped,
-            InstanceState::Rebooting => Self::Rebooting,
-            InstanceState::Migrating => Self::Migrating,
-            InstanceState::Repairing => Self::Repairing,
-            InstanceState::Failed => Self::Failed,
-            InstanceState::Destroyed => Self::Destroyed,
-        }
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     for types::DiskRuntimeState
 {
@@ -190,25 +185,6 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
     }
 }
 
-impl From<&types::InstanceState>
-    for omicron_common::api::external::InstanceState
-{
-    fn from(state: &types::InstanceState) -> Self {
-        match state {
-            types::InstanceState::Creating => Self::Creating,
-            types::InstanceState::Starting => Self::Starting,
-            types::InstanceState::Running => Self::Running,
-            types::InstanceState::Stopping => Self::Stopping,
-            types::InstanceState::Stopped => Self::Stopped,
-            types::InstanceState::Rebooting => Self::Rebooting,
-            types::InstanceState::Migrating => Self::Migrating,
-            types::InstanceState::Repairing => Self::Repairing,
-            types::InstanceState::Failed => Self::Failed,
-            types::InstanceState::Destroyed => Self::Destroyed,
-        }
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::ProducerKind>
     for types::ProducerKind
 {
@@ -230,7 +206,6 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     ) -> Self {
         Self {
             address: s.address.to_string(),
-            base_route: s.base_route.clone(),
             id: s.id,
             kind: s.kind.into(),
             interval: s.interval.into(),
@@ -413,8 +388,21 @@ impl TryFrom<types::ProducerEndpoint>
             id: ep.id,
             kind: ep.kind.into(),
             address,
-            base_route: ep.base_route,
             interval: ep.interval.into(),
         })
+    }
+}
+
+impl From<&omicron_common::api::external::AllowedSourceIps>
+    for types::AllowedSourceIps
+{
+    fn from(ips: &omicron_common::api::external::AllowedSourceIps) -> Self {
+        use omicron_common::api::external::AllowedSourceIps;
+        match ips {
+            AllowedSourceIps::Any => types::AllowedSourceIps::Any,
+            AllowedSourceIps::List(list) => {
+                types::AllowedSourceIps::List(list.iter().cloned().collect())
+            }
+        }
     }
 }

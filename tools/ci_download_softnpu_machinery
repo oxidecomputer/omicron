@@ -1,28 +1,5 @@
 #!/usr/bin/env bash
-#
-# This script fetches the following from CI
-#
-#   - the softnpu ASIC simulator (softnpu)
-#   - a softnpu admin program (scadm)
-#   - the sidecar-lite precompiled P4 program
-#
 
-set -euo pipefail
-
-TOOLS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-
-OUT_DIR="out/npuzone"
-
-# Pinned commit for softnpu ASIC simulator
-SOFTNPU_REPO="softnpu"
-SOFTNPU_COMMIT="dbab082dfa89da5db5ca2325c257089d2f130092"
-
-# This is the softnpu ASIC simulator
-echo "fetching npuzone"
-mkdir -p $OUT_DIR
-"$TOOLS_DIR"/ensure_buildomat_artifact.sh \
-    -O $OUT_DIR \
-    "npuzone" \
-    "$SOFTNPU_REPO" \
-    "$SOFTNPU_COMMIT"
-chmod +x $OUT_DIR/npuzone
+echo -e "\e[0;33m$0 is deprecated; running: cargo xtask download softnpu\e[0m"
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 42
+exec cargo xtask download softnpu

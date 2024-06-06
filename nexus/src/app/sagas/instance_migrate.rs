@@ -235,7 +235,7 @@ async fn sim_destroy_vmm_record(
     info!(osagactx.log(), "destroying vmm record for migration unwind";
           "propolis_id" => %vmm.id);
 
-    super::instance_common::destroy_vmm_record(
+    super::instance_common::unwind_vmm_record(
         osagactx.datastore(),
         &opctx,
         &vmm,
@@ -614,7 +614,7 @@ mod tests {
     ) {
         let other_sleds = add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -658,7 +658,7 @@ mod tests {
         let log = &cptestctx.logctx.log;
         let other_sleds = add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -755,8 +755,8 @@ mod tests {
                     let new_instance = new_state.instance();
                     let new_vmm = new_state.vmm().as_ref();
                     assert_eq!(
-                        new_instance.runtime().nexus_state.0,
-                        omicron_common::api::external::InstanceState::Stopped
+                        new_instance.runtime().nexus_state,
+                        nexus_db_model::InstanceState::NoVmm,
                     );
                     assert!(new_instance.runtime().propolis_id.is_none());
                     assert!(new_vmm.is_none());

@@ -388,7 +388,7 @@ mod test {
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_db_init(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let log = &logctx.log;
 
@@ -444,7 +444,7 @@ mod test {
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_db_init(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         info!(&log, "cleaning up database");

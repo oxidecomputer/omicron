@@ -389,6 +389,9 @@ impl Oximeter {
     }
 
     /// List producers.
+    ///
+    /// This returns up to `limit` producers, whose ID is _strictly greater_
+    /// than `start`, or all producers if `start` is `None`.
     pub async fn list_producers(
         &self,
         start: Option<Uuid>,
@@ -400,5 +403,10 @@ impl Oximeter {
     /// Delete a producer by ID, stopping its collection task.
     pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
         self.agent.delete_producer(id).await
+    }
+
+    /// Return the ID of this collector.
+    pub fn collector_id(&self) -> &Uuid {
+        &self.agent.id
     }
 }

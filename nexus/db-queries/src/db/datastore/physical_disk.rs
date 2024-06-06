@@ -21,6 +21,7 @@ use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -54,26 +55,40 @@ impl DataStore {
                 let disk = disk.clone();
                 let zpool = zpool.clone();
                 async move {
-                    // TODO: These functions need to retry diesel errors
-                    // in order to actually propagate retry errors
+                    // Verify that the sled into which we are inserting the disk
+                    // and zpool pair is still in-service.
+                    //
+                    // Although the "physical_disk_insert" and "zpool_insert"
+                    // functions below check that the Sled hasn't been deleted,
+                    // they do not currently check that the Sled has not been
+                    // expunged.
+                    Self::check_sled_in_service_on_connection(
+                        &conn,
+                        disk.sled_id,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     Self::physical_disk_insert_on_connection(
                         &conn, opctx, disk,
                     )
                     .await
-                    .map_err(|e| err.bail(e))?;
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
                     Self::zpool_insert_on_connection(&conn, opctx, zpool)
                         .await
-                        .map_err(|e| err.bail(e))?;
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
                     Ok(())
                 }
             })
             .await
             .map_err(|e| {
-                if let Some(err) = err.take() {
-                    return err;
+                match err.take() {
+                    // A called function performed its own error propagation.
+                    Some(txn_error) => txn_error.into(),
+                    // The transaction setup/teardown itself encountered a diesel error.
+                    None => public_error_from_diesel(e, ErrorHandler::Server),
                 }
-                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
         Ok(())
     }
@@ -90,14 +105,16 @@ impl DataStore {
         disk: PhysicalDisk,
     ) -> CreateResult<PhysicalDisk> {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
-        Self::physical_disk_insert_on_connection(&conn, opctx, disk).await
+        let disk = Self::physical_disk_insert_on_connection(&conn, opctx, disk)
+            .await?;
+        Ok(disk)
     }
 
     pub async fn physical_disk_insert_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         disk: PhysicalDisk,
-    ) -> CreateResult<PhysicalDisk> {
+    ) -> Result<PhysicalDisk, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
@@ -291,6 +308,7 @@ mod test {
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
     use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::lookup::LookupPath;
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
     use nexus_db_model::Generation;
@@ -716,9 +734,54 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_physical_disk_uninitialized_list() {
+    async fn physical_disk_cannot_insert_to_expunged_sled() {
         let logctx =
-            dev::test_setup_log("test_physical_disk_uninitialized_list");
+            dev::test_setup_log("physical_disk_cannot_insert_to_expunged_sled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        // We can insert a disk into a sled that is not yet expunged
+        let inv_disk = create_inv_disk("serial-001".to_string(), 1);
+        let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
+        datastore
+            .physical_disk_and_zpool_insert(&opctx, disk, zpool)
+            .await
+            .unwrap();
+
+        // Mark the sled as expunged
+        let sled_lookup =
+            LookupPath::new(&opctx, &datastore).sled_id(sled.id());
+        let (authz_sled,) =
+            sled_lookup.lookup_for(authz::Action::Modify).await.unwrap();
+        datastore
+            .sled_set_policy_to_expunged(&opctx, &authz_sled)
+            .await
+            .unwrap();
+
+        // Now that the sled is expunged, inserting the disk should fail
+        let inv_disk = create_inv_disk("serial-002".to_string(), 2);
+        let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
+        let err = datastore
+            .physical_disk_and_zpool_insert(&opctx, disk, zpool)
+            .await
+            .unwrap_err();
+
+        let expected = format!("Sled {} is not in service", sled.id());
+        let actual = err.to_string();
+        assert!(
+            actual.contains(&expected),
+            "Expected string: {expected} within actual error: {actual}",
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn physical_disk_uninitialized_list() {
+        let logctx = dev::test_setup_log("physical_disk_uninitialized_list");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 

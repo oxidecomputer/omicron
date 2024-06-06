@@ -11,6 +11,7 @@ use crate::app::{
     },
     map_switch_zone_addrs,
 };
+use oxnet::Ipv4Net;
 use slog::o;
 
 use internal_dns::resolver::Resolver;
@@ -23,12 +24,15 @@ use nexus_db_model::{
 use uuid::Uuid;
 
 use super::common::BackgroundTask;
+use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig,
-    DeleteStaticRoute4Request, Prefix4, StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
+    DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy,
+    Prefix as MgPrefix, Prefix4, Prefix6, ShaperSource, StaticRoute4,
+    StaticRoute4List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -40,15 +44,15 @@ use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{get_sled_address, Ipv6Subnet},
     api::{
-        external::{DataPageParams, SwitchLocation},
+        external::{DataPageParams, ImportExportPolicy, SwitchLocation},
         internal::shared::ParseSwitchLocationError,
     },
 };
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
-    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, Ipv4Network,
-    PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV1,
+    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -282,13 +286,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
             let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
-                    error!(log, "failed to retrieve racks from database"; "error" => ?e);
+                    error!(log, "failed to retrieve racks from database"; 
+                        "error" => %DisplayErrorChain::new(&e)
+                    );
                     return json!({
                         "error":
                             format!(
-                                "failed to retrieve racks from database : \
-                                    {:#}",
-                                e
+                                "failed to retrieve racks from database : {}",
+                                DisplayErrorChain::new(&e)
                             )
                     });
                 },
@@ -311,7 +316,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 {
                     Ok(addrs) => addrs,
                     Err(e) => {
-                        error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                        error!(log, "failed to resolve addresses for Dendrite services"; 
+                            "error" => %DisplayErrorChain::new(&e));
                         continue;
                     },
                 };
@@ -428,7 +434,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(
                             log,
                             "error fetching loopback addresses from db, skipping loopback config";
-                            "error" => %e
+                            "error" => %DisplayErrorChain::new(&e)
                         );
                     },
                 };
@@ -465,7 +471,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             log,
                             "error while applying smf updates to switch zone";
                             "location" => %location,
-                            "error" => %e,
+                            "error" => %DisplayErrorChain::new(&e)
                         );
                     }
                 }
@@ -530,7 +536,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                             "error while fetching bgp peer config from db";
                                             "location" => %location,
                                             "port_name" => %port.port_name,
-                                            "error" => %e,
+                                            "error" => %DisplayErrorChain::new(&e)
                                         );
                                         continue;
                                     },
@@ -546,7 +552,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         // Same thing as above, check to see if we've already built the announce set,
                         // if so we'll skip this step
-                        if bgp_announce_prefixes.get(&bgp_config.bgp_announce_set_id).is_none() {
+                        #[allow(clippy::map_entry)]
+                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
                             let announcements = match self
                                 .datastore
                                 .bgp_announce_list(
@@ -566,7 +573,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         "error while fetching bgp announcements from db";
                                         "location" => %location,
                                         "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
-                                        "error" => %e,
+                                        "error" => %DisplayErrorChain::new(&e)
                                     );
                                     continue;
                                 },
@@ -587,6 +594,133 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
+                        let ttl = peer.min_ttl.map(|x| x.0);
+
+                        //TODO consider awaiting in parallel and joining
+                        let communities = match self.datastore.communities_for_peer(
+                            opctx,
+                            peer.port_settings_id,
+                            &peer.interface_name,
+                            peer.addr,
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get communities for peer";
+                                    "peer" => ?peer,
+                                    "error" => %DisplayErrorChain::new(&e)
+                                );
+                                return json!({
+                                    "error":
+                                        format!(
+                                            "failed to get port settings for peer {:?}: {}",
+                                            peer,
+                                            DisplayErrorChain::new(&e)
+                                        )
+                                });
+                            }
+                        };
+
+                        let allow_import = match self.datastore.allow_import_for_peer(
+                            opctx,
+                            peer.port_settings_id,
+                            &peer.interface_name,
+                            peer.addr,
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed imports";
+                                    "peer" => ?peer,
+                                    "error" => %DisplayErrorChain::new(&e)
+                                );
+                                return json!({
+                                    "error":
+                                        format!(
+                                            "failed to get allowed imports peer {:?}: {}",
+                                            peer,
+                                            DisplayErrorChain::new(&e)
+                                        )
+                                });
+                            }
+                        };
+
+                        let import_policy = match allow_import {
+                            Some(list) => {
+                                MgImportExportPolicy::Allow(list
+                                    .into_iter()
+                                    .map(|x|
+                                        match x.prefix {
+                                            IpNetwork::V4(p) =>  MgPrefix::V4(
+                                                Prefix4{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            ),
+                                            IpNetwork::V6(p) =>  MgPrefix::V6(
+                                                Prefix6{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            )
+                                        }
+                                    )
+                                    .collect()
+                                )
+                            }
+                            None => MgImportExportPolicy::NoFiltering,
+                        };
+
+                        let allow_export = match self.datastore.allow_export_for_peer(
+                            opctx,
+                            peer.port_settings_id,
+                            &peer.interface_name,
+                            peer.addr,
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed exportss";
+                                    "peer" => ?peer,
+                                    "error" => %DisplayErrorChain::new(&e),
+                                );
+                                return json!({
+                                    "error":
+                                        format!(
+                                            "failed to get allowed exports peer {:?}: {}",
+                                            peer,
+                                            DisplayErrorChain::new(&e)
+                                        )
+                                });
+                            }
+                        };
+
+                        let export_policy = match allow_export {
+                            Some(list) => {
+                                MgImportExportPolicy::Allow(list
+                                    .into_iter()
+                                    .map(|x|
+                                        match x.prefix {
+                                            IpNetwork::V4(p) =>  MgPrefix::V4(
+                                                Prefix4{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            ),
+                                            IpNetwork::V6(p) =>  MgPrefix::V6(
+                                                Prefix6{
+                                                    length: p.prefix(),
+                                                    value: p.ip(),
+                                                }
+                                            )
+                                        }
+                                    )
+                                    .collect()
+                                )
+                            }
+                            None => MgImportExportPolicy::NoFiltering,
+                        };
+
                         // now that the peer passes the above validations, add it to the list for configuration
                         let peer_config = BgpPeerConfig {
                             name: format!("{}", peer.addr.ip()),
@@ -598,6 +732,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             keepalive: peer.keepalive.0.into(),
                             resolution: BGP_SESSION_RESOLUTION,
                             passive: false,
+                            remote_asn: peer.remote_asn.as_ref().map(|x| x.0),
+                            min_ttl: ttl,
+                            md5_auth_key: peer.md5_auth_key.clone(),
+                            multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
+                            local_pref: peer.local_pref.as_ref().map(|x| x.0),
+                            enforce_first_as: peer.enforce_first_as,
+                            communities: communities.into_iter().map(|c| c.community.0).collect(),
+                            allow_export: export_policy,
+                            allow_import: import_policy,
+                            vlan_id: peer.vlan_id.map(|x| x.0),
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -637,6 +781,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         asn: *request_bgp_config.asn,
                         peers,
                         originate: request_prefixes.clone(),
+                        checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
+                            asn: *request_bgp_config.asn,
+                            code: code.clone(),
+                        }),
+                        shaper: request_bgp_config.shaper.as_ref().map(|code| ShaperSource{
+                            asn: *request_bgp_config.asn,
+                            code: code.clone(),
+                        }),
                     };
 
                     match desired_bgp_configs.entry(*location) {
@@ -717,7 +869,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
-                    Some(IpNetwork::V6(subnet)) => subnet,
+                    Some(IpNetwork::V6(subnet)) => subnet.into(),
                     Some(IpNetwork::V4(_)) => {
                         error!(log, "rack subnet must be ipv6"; "rack" => ?rack);
                         continue;
@@ -728,21 +880,22 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                // TODO: @rcgoodfellow is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
+                // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
                 let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
-                    let announcements: Vec<Ipv4Network> = bgp_announce_prefixes
+                    let announcements = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
                         .expect("bgp config is present but announce set is not populated")
                         .iter()
                         .map(|prefix| {
-                            ipnetwork::Ipv4Network::new(prefix.value, prefix.length)
-                                .expect("Prefix4 and Ipv4Network's value types have diverged")
-                                .into()
+                            Ipv4Net::new(prefix.value, prefix.length)
+                                .expect("Prefix4 and Ipv4Net's value types have diverged")
                         }).collect();
 
                     SledBgpConfig {
                         asn: config.asn.0,
                         originate: announcements,
+                        checker: config.checker.clone(),
+                        shaper: config.shaper.clone(),
                     }
                 }).collect();
 
@@ -763,14 +916,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 "failed to fetch bgp peer config for switch port";
                                 "switch_location" => ?location,
                                 "port" => &port.port_name,
-                                "error" => %e,
+                                "error" => %DisplayErrorChain::new(&e)
                             );
                             continue;
                         },
                     };
 
-                    let port_config = PortConfigV1 {
-                        addresses: info.addresses.iter().map(|a| a.address).collect(),
+                    let mut port_config = PortConfigV1 {
+                        addresses: info.addresses.iter().map(|a| a.address.into()).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -792,6 +945,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     delay_open: Some(c.delay_open.0.into()),
                                     connect_retry: Some(c.connect_retry.0.into()),
                                     keepalive: Some(c.keepalive.0.into()),
+                                    enforce_first_as: c.enforce_first_as,
+                                    local_pref: c.local_pref.map(|x| x.into()),
+                                    md5_auth_key: c.md5_auth_key,
+                                    min_ttl: c.min_ttl.map(|x| x.0 as u8), //TODO avoid cast return error
+                                    multi_exit_discriminator: c.multi_exit_discriminator.map(|x| x.into()),
+                                    remote_asn: c.remote_asn.map(|x| x.into()),
+                                    communities: Vec::new(),
+                                    allowed_export: ImportExportPolicy::NoFiltering,
+                                    allowed_import: ImportExportPolicy::NoFiltering,
+                                    vlan_id: c.vlan_id.map(|x| x.0 as u16),
                                 }
                         }).collect(),
                         port: port.port_name.clone(),
@@ -799,8 +962,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .routes
                             .iter()
                             .map(|r| SledRouteConfig {
-                                destination: r.dst,
+                                destination: r.dst.into(),
                                 nexthop: r.gw.ip(),
+                                vlan_id: r.vid.map(|x| x.0),
                             })
                             .collect(),
                         switch: *location,
@@ -817,6 +981,76 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .unwrap_or(SwitchLinkSpeed::Speed100G)
                             .into(),
                     };
+
+                    for peer in port_config.bgp_peers.iter_mut() {
+                        peer.communities = match self
+                            .datastore
+                            .communities_for_peer(
+                                opctx,
+                                port.port_settings_id.unwrap(),
+                                &peer.port,
+                                IpNetwork::from(IpAddr::from(peer.addr))
+                            ).await {
+                                Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
+                                Err(e) => {
+                                    error!(log,
+                                        "failed to get communities for peer";
+                                        "peer" => ?peer,
+                                        "error" => %DisplayErrorChain::new(&e)
+                                    );
+                                    continue;
+                                }
+                            };
+
+                        //TODO consider awaiting in parallel and joining
+                        let allow_import = match self.datastore.allow_import_for_peer(
+                            opctx,
+                            port.port_settings_id.unwrap(),
+                            &peer.port,
+                            IpNetwork::from(IpAddr::from(peer.addr)),
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed imports";
+                                    "peer" => ?peer,
+                                    "error" => %DisplayErrorChain::new(&e)
+                                );
+                                continue;
+                            }
+                        };
+
+                        peer.allowed_import = match allow_import {
+                            Some(list) =>  ImportExportPolicy::Allow(
+                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
+                            ),
+                            None => ImportExportPolicy::NoFiltering,
+                        };
+
+                        let allow_export = match self.datastore.allow_export_for_peer(
+                            opctx,
+                            port.port_settings_id.unwrap(),
+                            &peer.port,
+                            IpNetwork::from(IpAddr::from(peer.addr)),
+                        ).await {
+                            Ok(cs) => cs,
+                            Err(e) => {
+                                error!(log,
+                                    "failed to get peer allowed exports";
+                                    "peer" => ?peer,
+                                    "error" => %DisplayErrorChain::new(&e)
+                                );
+                                continue;
+                            }
+                        };
+
+                        peer.allowed_export = match allow_export {
+                            Some(list) =>  ImportExportPolicy::Allow(
+                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
+                            ),
+                            None => ImportExportPolicy::NoFiltering,
+                        };
+                    }
                     ports.push(port_config);
                 }
 
@@ -1167,7 +1401,7 @@ fn uplinks(
         };
         let config = HostPortConfig {
             port: port.port_name.clone(),
-            addrs: config.addresses.iter().map(|a| a.address).collect(),
+            addrs: config.addresses.iter().map(|a| a.address.into()).collect(),
         };
 
         match uplinks.entry(*location) {
@@ -1202,15 +1436,11 @@ fn build_sled_agent_clients(
     sled_agent_clients
 }
 
+type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>)>;
+
 fn static_routes_to_del(
-    current_static_routes: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4)>,
-    >,
-    desired_static_routes: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4)>,
-    >,
+    current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
+    desired_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
 ) -> HashMap<SwitchLocation, DeleteStaticRoute4Request> {
     let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request> =
         HashMap::new();
@@ -1222,9 +1452,10 @@ fn static_routes_to_del(
             // if it's on the switch but not desired (in our db), it should be removed
             let stale_routes = routes_on_switch
                 .difference(routes_wanted)
-                .map(|(nexthop, prefix)| StaticRoute4 {
+                .map(|(nexthop, prefix, vlan_id)| StaticRoute4 {
                     nexthop: *nexthop,
                     prefix: *prefix,
+                    vlan_id: *vlan_id,
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1238,9 +1469,10 @@ fn static_routes_to_del(
             // if no desired routes are present, all routes on this switch should be deleted
             let stale_routes = routes_on_switch
                 .iter()
-                .map(|(nexthop, prefix)| StaticRoute4 {
+                .map(|(nexthop, prefix, vlan_id)| StaticRoute4 {
                     nexthop: *nexthop,
                     prefix: *prefix,
+                    vlan_id: *vlan_id,
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1262,15 +1494,10 @@ fn static_routes_to_del(
     routes_to_del
 }
 
+#[allow(clippy::type_complexity)]
 fn static_routes_to_add(
-    desired_static_routes: &HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4)>,
-    >,
-    current_static_routes: &HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4)>,
-    >,
+    desired_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
+    current_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, AddStaticRoute4Request> {
     let mut routes_to_add: HashMap<SwitchLocation, AddStaticRoute4Request> =
@@ -1292,9 +1519,10 @@ fn static_routes_to_add(
         };
         let missing_routes = routes_wanted
             .difference(routes_on_switch)
-            .map(|(nexthop, prefix)| StaticRoute4 {
+            .map(|(nexthop, prefix, vlan_id)| StaticRoute4 {
                 nexthop: *nexthop,
                 prefix: *prefix,
+                vlan_id: *vlan_id,
             })
             .collect::<Vec<StaticRoute4>>();
 
@@ -1321,11 +1549,9 @@ fn static_routes_in_db(
         nexus_db_model::SwitchPort,
         PortSettingsChange,
     )],
-) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4)>> {
-    let mut routes_from_db: HashMap<
-        SwitchLocation,
-        HashSet<(Ipv4Addr, Prefix4)>,
-    > = HashMap::new();
+) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
+    let mut routes_from_db: HashMap<SwitchLocation, SwitchStaticRoutes> =
+        HashMap::new();
 
     for (location, _port, change) in changes {
         // we only need to check for ports that have a configuration present. No config == no routes.
@@ -1345,7 +1571,7 @@ fn static_routes_in_db(
                 }
                 IpAddr::V6(_) => continue,
             };
-            routes.insert((nexthop, prefix));
+            routes.insert((nexthop, prefix, route.vid.map(|x| x.0)));
         }
 
         match routes_from_db.entry(*location) {
@@ -1519,24 +1745,49 @@ async fn apply_switch_port_changes(
 async fn static_routes_on_switch<'a>(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4)>> {
+) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: HashSet<(Ipv4Addr, Prefix4)> =
-            match client.static_list_v4_routes().await {
-                Ok(routes) => {
-                    routes.list.iter().map(|r| (r.nexthop, r.prefix)).collect()
+        let static_routes: SwitchStaticRoutes = match client
+            .static_list_v4_routes()
+            .await
+        {
+            Ok(routes) => {
+                let mut flattened = HashSet::new();
+                for (destination, paths) in routes.iter() {
+                    let Ok(dst) = destination.parse() else {
+                        error!(
+                                log,
+                                "failed to parse static route destination: {destination}"
+                            );
+                        continue;
+                    };
+                    for p in paths.iter() {
+                        let nh = match p.nexthop {
+                            IpAddr::V4(addr) => addr,
+                            IpAddr::V6(addr) => {
+                                error!(
+                                    log,
+                                    "ipv6 nexthops not supported: {addr}"
+                                );
+                                continue;
+                            }
+                        };
+                        flattened.insert((nh, dst, p.vlan_id));
+                    }
                 }
-                Err(_) => {
-                    error!(
-                        &log,
-                        "unable to retrieve routes from switch";
-                        "switch_location" => ?location,
-                    );
-                    continue;
-                }
-            };
+                flattened
+            }
+            Err(_) => {
+                error!(
+                    &log,
+                    "unable to retrieve routes from switch";
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch

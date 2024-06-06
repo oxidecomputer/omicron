@@ -7,7 +7,6 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nexus_db_model::DnsGroup;
-use nexus_db_model::IpKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
@@ -17,20 +16,21 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::PlanningInputBuildError;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_REDUNDANCY;
@@ -38,7 +38,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -46,6 +45,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -60,8 +60,10 @@ pub struct PlanningInputFromDb<'a> {
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_nexus_zone_count: usize,
+    pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
+    pub cockroachdb_settings: &'a CockroachDbSettings,
     pub log: &'a Logger,
 }
 
@@ -72,11 +74,14 @@ impl PlanningInputFromDb<'_> {
         let policy = Policy {
             service_ip_pool_ranges,
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_cluster_version: self
+                .target_cockroachdb_cluster_version,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
+            self.cockroachdb_settings.clone(),
         );
 
         let mut zpools_by_sled_id = {
@@ -136,32 +141,17 @@ impl PlanningInputFromDb<'_> {
 
             let zone_id = OmicronZoneUuid::from_untyped_uuid(zone_id);
 
-            let to_kind = |ip| match external_ip_row.kind {
-                IpKind::Floating => Ok(OmicronZoneExternalIpKind::Floating(ip)),
-                IpKind::SNat => {
-                    let snat = SourceNatConfig::new(
-                        ip,
-                        *external_ip_row.first_port,
-                        *external_ip_row.last_port,
-                    )
-                    .map_err(|err| {
-                        PlanningInputBuildError::BadSnatConfig { zone_id, err }
-                    })?;
-                    Ok(OmicronZoneExternalIpKind::Snat(snat))
-                }
-                IpKind::Ephemeral => Err(
-                    PlanningInputBuildError::EphemeralIpUnsupported(zone_id),
-                ),
-            };
+            let external_ip = OmicronZoneExternalIp::try_from(external_ip_row)
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "invalid database IP record for \
+                         Omicron zone {zone_id}: {}",
+                        InlineErrorChain::new(&e)
+                    ))
+                })?;
 
             builder
-                .add_omicron_zone_external_ip_network(
-                    zone_id,
-                    // TODO-cleanup use `TypedUuid` everywhere
-                    ExternalIpUuid::from_untyped_uuid(external_ip_row.id),
-                    external_ip_row.ip,
-                    to_kind,
-                )
+                .add_omicron_zone_external_ip(zone_id, external_ip)
                 .map_err(|e| {
                     Error::internal_error(&format!(
                         "unexpectedly failed to add external IP \
@@ -199,7 +189,7 @@ pub async fn reconfigurator_state_load(
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
     let sled_rows = datastore
-        .sled_list_all_batched(opctx)
+        .sled_list_all_batched(opctx, SledFilter::Commissioned)
         .await
         .context("listing sleds")?;
     let zpool_rows = datastore
@@ -234,17 +224,23 @@ pub async fn reconfigurator_state_load(
         .await
         .context("fetching external DNS version")?
         .version;
+    let cockroachdb_settings = datastore
+        .cockroachdb_settings(opctx)
+        .await
+        .context("fetching cockroachdb settings")?;
 
     let planning_input = PlanningInputFromDb {
         sled_rows: &sled_rows,
         zpool_rows: &zpool_rows,
         ip_pool_range_rows: &ip_pool_range_rows,
         target_nexus_zone_count: NEXUS_REDUNDANCY,
+        target_cockroachdb_cluster_version: CockroachDbClusterVersion::POLICY,
         external_ip_rows: &external_ip_rows,
         service_nic_rows: &service_nic_rows,
         log: &opctx.log,
         internal_dns_version,
         external_dns_version,
+        cockroachdb_settings: &cockroachdb_settings,
     }
     .build()
     .context("assembling planning_input")?;

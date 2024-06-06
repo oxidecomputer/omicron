@@ -269,7 +269,7 @@ impl UpdateTracker {
                 // This used to check that the task was finished, but we changed
                 // that in favor of forcing users to clear update state before
                 // starting a new one.
-                update_data.sp_update_data.get(sp).is_some()
+                update_data.sp_update_data.contains_key(sp)
             })
             .copied()
             .collect();

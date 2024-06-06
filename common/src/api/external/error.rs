@@ -85,6 +85,11 @@ pub enum Error {
     /// ObjectNotFound instead.
     #[error("Not found: {}", .message.display_internal())]
     NotFound { message: MessagePair },
+
+    /// Access to the target resource is no longer available, and this condition
+    /// is likely to be permanent.
+    #[error("Gone")]
+    Gone,
 }
 
 /// Represents an error message which has an external component, along with
@@ -214,7 +219,8 @@ impl Error {
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
             | Error::NotFound { .. }
-            | Error::Conflict { .. } => false,
+            | Error::Conflict { .. }
+            | Error::Gone => false,
         }
     }
 
@@ -335,7 +341,8 @@ impl Error {
         match self {
             Error::ObjectNotFound { .. }
             | Error::ObjectAlreadyExists { .. }
-            | Error::Forbidden => self,
+            | Error::Forbidden
+            | Error::Gone => self,
             Error::InvalidRequest { message } => Error::InvalidRequest {
                 message: message.with_internal_context(context),
             },
@@ -513,6 +520,12 @@ impl From<Error> for HttpError {
                     internal_message,
                 }
             }
+
+            Error::Gone => HttpError::for_client_error(
+                Some(String::from("Gone")),
+                http::StatusCode::GONE,
+                String::from("Gone"),
+            ),
         }
     }
 }

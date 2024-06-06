@@ -11,6 +11,8 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
+use crate::db::model::VmmState as DbVmmState;
+use crate::db::pagination::paginated;
 use crate::db::schema::vmm::dsl;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -18,7 +20,9 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -50,20 +54,20 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &Uuid,
     ) -> UpdateResult<bool> {
-        use crate::db::model::InstanceState as DbInstanceState;
-        use omicron_common::api::external::InstanceState as ApiInstanceState;
-
-        let valid_states = vec![
-            DbInstanceState::new(ApiInstanceState::Destroyed),
-            DbInstanceState::new(ApiInstanceState::Failed),
-        ];
+        let valid_states = vec![DbVmmState::Destroyed, DbVmmState::Failed];
 
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(*vmm_id))
             .filter(dsl::state.eq_any(valid_states))
+            .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .check_if_exists::<Vmm>(*vmm_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
@@ -74,7 +78,7 @@ impl DataStore {
                 )
             })?;
 
-        Ok(updated != 0)
+        Ok(updated)
     }
 
     pub async fn vmm_fetch(
@@ -163,5 +167,64 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(vmm)
+    }
+
+    /// Lists VMMs which have been abandoned by their instances after a
+    /// migration and are in need of cleanup.
+    ///
+    /// A VMM is considered "abandoned" if (and only if):
+    ///
+    /// - It is in the `Destroyed` state.
+    /// - It is not currently running an instance, and it is also not the
+    ///   migration target of any instance (i.e. it is not pointed to by
+    ///   any instance record's `active_propolis_id` and `target_propolis_id`
+    ///   fields).
+    /// - It has not been deleted yet.
+    pub async fn vmm_list_abandoned(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Vmm> {
+        use crate::db::schema::instance::dsl as instance_dsl;
+        let destroyed = DbVmmState::Destroyed;
+        paginated(dsl::vmm, dsl::id, pagparams)
+            // In order to be considered "abandoned", a VMM must be:
+            // - in the `Destroyed` state
+            .filter(dsl::state.eq(destroyed))
+            // - not deleted yet
+            .filter(dsl::time_deleted.is_null())
+            // - not pointed to by any instance's `active_propolis_id` or
+            //   `target_propolis_id`.
+            //
+            .left_join(
+                // Left join with the `instance` table on the VMM's instance ID, so
+                // that we can check if the instance pointed to by this VMM (if
+                // any exists) has this VMM pointed to by its
+                // `active_propolis_id` or `target_propolis_id` fields.
+                instance_dsl::instance
+                    .on(instance_dsl::id.eq(dsl::instance_id)),
+            )
+            .filter(
+                dsl::id
+                    .nullable()
+                    .ne(instance_dsl::active_propolis_id)
+                    // In SQL, *all* comparisons with NULL are `false`, even `!=
+                    // NULL`, so we have to explicitly check for nulls here, or
+                    // else VMMs whose instances have no `active_propolis_id`
+                    // will not be considered abandoned (incorrectly).
+                    .or(instance_dsl::active_propolis_id.is_null()),
+            )
+            .filter(
+                dsl::id
+                    .nullable()
+                    .ne(instance_dsl::target_propolis_id)
+                    // As above, we must add this clause because SQL nulls have
+                    // the most irritating behavior possible.
+                    .or(instance_dsl::target_propolis_id.is_null()),
+            )
+            .select(Vmm::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

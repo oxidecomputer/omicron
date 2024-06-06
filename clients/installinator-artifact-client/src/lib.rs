@@ -19,13 +19,13 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     replace = {
+        Duration = std::time::Duration,
         EventReportForInstallinatorSpec = installinator_common::EventReport,
-        StepEventForInstallinatorSpec = installinator_common::StepEvent,
+        M2Slot = installinator_common::M2Slot,
+        ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
-        ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
-        M2Slot = installinator_common::M2Slot,
-        Duration = std::time::Duration,
+        StepEventForInstallinatorSpec = installinator_common::StepEvent,
     }
 );
 

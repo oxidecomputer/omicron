@@ -6,9 +6,8 @@
 
 use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
+    InstanceRuntimeState, SledInstanceState, VmmRuntimeState, VmmState,
 };
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
@@ -35,7 +34,7 @@ impl From<PropolisApiState> for PropolisInstanceState {
     }
 }
 
-impl From<PropolisInstanceState> for ApiInstanceState {
+impl From<PropolisInstanceState> for VmmState {
     fn from(value: PropolisInstanceState) -> Self {
         use propolis_client::types::InstanceState as State;
         match value.0 {
@@ -43,25 +42,28 @@ impl From<PropolisInstanceState> for ApiInstanceState {
             // when an instance has an active VMM. A Propolis that is "creating"
             // its virtual machine objects is "starting" from the external API's
             // perspective.
-            State::Creating | State::Starting => ApiInstanceState::Starting,
-            State::Running => ApiInstanceState::Running,
-            State::Stopping => ApiInstanceState::Stopping,
+            State::Creating | State::Starting => VmmState::Starting,
+            State::Running => VmmState::Running,
+            State::Stopping => VmmState::Stopping,
             // A Propolis that is stopped but not yet destroyed should still
             // appear to be Stopping from an external API perspective, since
             // they cannot be restarted yet. Instances become logically Stopped
             // once Propolis reports that the VM is Destroyed (see below).
-            State::Stopped => ApiInstanceState::Stopping,
-            State::Rebooting => ApiInstanceState::Rebooting,
-            State::Migrating => ApiInstanceState::Migrating,
-            State::Repairing => ApiInstanceState::Repairing,
-            State::Failed => ApiInstanceState::Failed,
+            State::Stopped => VmmState::Stopping,
+            State::Rebooting => VmmState::Rebooting,
+            State::Migrating => VmmState::Migrating,
+            State::Failed => VmmState::Failed,
             // Nexus needs to learn when a VM has entered the "destroyed" state
             // so that it can release its resource reservation. When this
             // happens, this module also clears the active VMM ID from the
             // instance record, which will accordingly set the Nexus-owned
             // instance state to Stopped, preventing this state from being used
             // as an externally-visible instance state.
-            State::Destroyed => ApiInstanceState::Destroyed,
+            State::Destroyed => VmmState::Destroyed,
+            // Propolis never actually uses the Repairing state, so this should
+            // be unreachable, but since these states come from another process,
+            // program defensively and convert Repairing to Running.
+            State::Repairing => VmmState::Running,
         }
     }
 }
@@ -170,11 +172,11 @@ pub enum PublishedVmmState {
     Rebooting,
 }
 
-impl From<PublishedVmmState> for ApiInstanceState {
+impl From<PublishedVmmState> for VmmState {
     fn from(value: PublishedVmmState) -> Self {
         match value {
-            PublishedVmmState::Stopping => ApiInstanceState::Stopping,
-            PublishedVmmState::Rebooting => ApiInstanceState::Rebooting,
+            PublishedVmmState::Stopping => VmmState::Stopping,
+            PublishedVmmState::Rebooting => VmmState::Rebooting,
         }
     }
 }
@@ -525,7 +527,7 @@ mod test {
         };
 
         let vmm = VmmRuntimeState {
-            state: ApiInstanceState::Starting,
+            state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: now,
         };
@@ -535,7 +537,7 @@ mod test {
 
     fn make_migration_source_instance() -> InstanceStates {
         let mut state = make_instance();
-        state.vmm.state = ApiInstanceState::Migrating;
+        state.vmm.state = VmmState::Migrating;
         state.instance.migration_id = Some(Uuid::new_v4());
         state.instance.dst_propolis_id = Some(Uuid::new_v4());
         state
@@ -543,7 +545,7 @@ mod test {
 
     fn make_migration_target_instance() -> InstanceStates {
         let mut state = make_instance();
-        state.vmm.state = ApiInstanceState::Migrating;
+        state.vmm.state = VmmState::Migrating;
         state.instance.migration_id = Some(Uuid::new_v4());
         state.propolis_id = Uuid::new_v4();
         state.instance.dst_propolis_id = Some(state.propolis_id);
@@ -661,7 +663,7 @@ mod test {
         // The Stopped state is translated internally to Stopping to prevent
         // external viewers from perceiving that the instance is stopped before
         // the VMM is fully retired.
-        assert_eq!(state.vmm.state, ApiInstanceState::Stopping);
+        assert_eq!(state.vmm.state, VmmState::Stopping);
         assert!(state.vmm.gen > prev.vmm.gen);
 
         let prev = state.clone();
@@ -672,7 +674,7 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Destroyed);
+        assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
     }
 
@@ -695,7 +697,7 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Failed);
+        assert_eq!(state.vmm.state, VmmState::Failed);
         assert!(state.vmm.gen > prev.vmm.gen);
     }
 
@@ -734,7 +736,7 @@ mod test {
         assert!(state.instance.migration_id.is_none());
         assert!(state.instance.dst_propolis_id.is_none());
         assert!(state.instance.gen > prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Running);
+        assert_eq!(state.vmm.state, VmmState::Running);
         assert!(state.vmm.gen > prev.vmm.gen);
 
         // Pretend Nexus set some new migration IDs.
@@ -766,7 +768,7 @@ mod test {
             state.instance.dst_propolis_id.unwrap(),
             prev.instance.dst_propolis_id.unwrap()
         );
-        assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
+        assert_eq!(state.vmm.state, VmmState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.gen, prev.instance.gen);
 
@@ -778,7 +780,7 @@ mod test {
         observed.migration_status = ObservedMigrationStatus::Succeeded;
         assert!(state.apply_propolis_observation(&observed).is_none());
         assert_state_change_has_gen_change(&prev, &state);
-        assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
+        assert_eq!(state.vmm.state, VmmState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.migration_id, prev.instance.migration_id);
         assert_eq!(

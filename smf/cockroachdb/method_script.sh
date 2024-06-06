@@ -7,7 +7,6 @@ set -o pipefail
 . /lib/svc/share/smf_include.sh
 
 LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
-LISTEN_PORT="$(svcprop -c -p config/listen_port "${SMF_FMRI}")"
 DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
 
 # We need to tell CockroachDB the DNS names or IP addresses of the other nodes
@@ -25,7 +24,7 @@ fi
 
 args=(
   '--insecure'
-  '--listen-addr' "[$LISTEN_ADDR]:$LISTEN_PORT"
+  '--listen-addr' "$LISTEN_ADDR"
   '--http-addr' '127.0.0.1:8080'
   '--store' "$DATASTORE"
   '--join' "$JOIN_ADDRS"

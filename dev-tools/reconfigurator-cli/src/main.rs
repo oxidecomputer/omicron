@@ -21,8 +21,6 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::deployment::OmicronZoneExternalIpKind;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -34,13 +32,12 @@ use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::BufRead;
-use std::net::IpAddr;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -60,14 +57,6 @@ struct ReconfiguratorSim {
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
-
-    /// external IPs allocated to services
-    ///
-    /// In the real system, external IPs have IDs, but those IDs only live in
-    /// CRDB - they're not part of the zone config sent from Reconfigurator to
-    /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
-    /// we need.
-    external_ips: RefCell<IndexMap<IpAddr, ExternalIpUuid>>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -152,24 +141,15 @@ impl ReconfiguratorSim {
         for (_, zone) in
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
-            if let Some(ip) = zone.zone_type.external_ip() {
-                let external_ip = OmicronZoneExternalIp {
-                    id: *self
-                        .external_ips
-                        .borrow_mut()
-                        .entry(ip)
-                        .or_insert_with(ExternalIpUuid::new_v4),
-                    // TODO-cleanup This is potentially wrong;
-                    // zone_type should tell us the IP kind.
-                    kind: OmicronZoneExternalIpKind::Floating(ip),
-                };
+            if let Some((external_ip, nic)) =
+                zone.zone_type.external_networking()
+            {
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
-            }
-            if let Some(nic) = zone.zone_type.opte_vnic() {
                 let nic = OmicronZoneNic {
-                    id: nic.id,
+                    // TODO-cleanup use `TypedUuid` everywhere
+                    id: VnicUuid::from_untyped_uuid(nic.id),
                     mac: nic.mac,
                     ip: nic.ip,
                     slot: nic.slot,
@@ -205,7 +185,6 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
-        external_ips: RefCell::new(IndexMap::new()),
         internal_dns: BTreeMap::new(),
         external_dns: BTreeMap::new(),
         log,
@@ -583,7 +562,7 @@ fn cmd_sled_list(
         .to_planning_input_builder()
         .context("failed to generate planning input")?
         .build();
-    let rows = planning_input.all_sled_resources(SledFilter::All).map(
+    let rows = planning_input.all_sled_resources(SledFilter::Commissioned).map(
         |(sled_id, sled_resources)| Sled {
             id: sled_id,
             subnet: sled_resources.subnet.net().to_string(),
@@ -672,7 +651,7 @@ fn cmd_inventory_generate(
     // has no zones on it.
     let planning_input =
         sim.system.to_planning_input_builder().unwrap().build();
-    for sled_id in planning_input.all_sled_ids(SledFilter::All) {
+    for sled_id in planning_input.all_sled_ids(SledFilter::Commissioned) {
         builder
             .found_sled_omicron_zones(
                 "fake sled agent",
@@ -801,9 +780,7 @@ fn cmd_blueprint_diff(
     let blueprint1 = sim.blueprint_lookup(blueprint1_id)?;
     let blueprint2 = sim.blueprint_lookup(blueprint2_id)?;
 
-    let sled_diff = blueprint2
-        .diff_since_blueprint(&blueprint1)
-        .context("failed to diff blueprints")?;
+    let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
 
     // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
@@ -918,9 +895,7 @@ fn cmd_blueprint_diff_inventory(
         anyhow!("no such inventory collection: {}", collection_id)
     })?;
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
-    let diff = blueprint
-        .diff_since_collection(&collection)
-        .context("failed to diff blueprint from inventory collection")?;
+    let diff = blueprint.diff_since_collection(&collection);
     Ok(Some(diff.display().to_string()))
 }
 
@@ -1101,7 +1076,7 @@ fn cmd_load(
         .context("generating planning input")?
         .build();
     for (sled_id, sled_details) in
-        loaded.planning_input.all_sleds(SledFilter::All)
+        loaded.planning_input.all_sleds(SledFilter::Commissioned)
     {
         if current_planning_input.sled_resources(&sled_id).is_some() {
             swriteln!(
@@ -1226,7 +1201,7 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
 
     for (sled_id, sled_resources) in
-        loaded.planning_input.all_sled_resources(SledFilter::All)
+        loaded.planning_input.all_sled_resources(SledFilter::Commissioned)
     {
         swriteln!(
             s,

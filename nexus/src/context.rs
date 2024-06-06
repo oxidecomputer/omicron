@@ -29,6 +29,61 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Indicates the kind of HTTP server.
+#[derive(Clone, Copy)]
+pub enum ServerKind {
+    /// This serves the internal API.
+    Internal,
+    /// This serves the external API over the normal public network.
+    External,
+    /// This serves the external API proxied over the technician port.
+    Techport,
+}
+
+/// The API context for each distinct Dropshot server.
+///
+/// This packages up the main server context, which is shared by all API servers
+/// (e.g., internal, external, and techport). It also includes the
+/// [`ServerKind`], which makes it possible to know which server is handling any
+/// particular request.
+#[derive(Clone)]
+pub struct ApiContext {
+    /// The kind of server.
+    pub kind: ServerKind,
+    /// Shared state available to all endpoint handlers.
+    pub context: Arc<ServerContext>,
+}
+
+impl ApiContext {
+    /// Create a new context with a rack ID and logger. This creates the
+    /// underlying `Nexus` as well.
+    pub async fn for_internal(
+        rack_id: Uuid,
+        log: Logger,
+        config: &NexusConfig,
+    ) -> Result<Self, String> {
+        ServerContext::new(rack_id, log, config)
+            .await
+            .map(|context| Self { kind: ServerKind::Internal, context })
+    }
+
+    /// Clone self for use by the external Dropshot server.
+    pub fn for_external(&self) -> Self {
+        Self { kind: ServerKind::External, context: self.context.clone() }
+    }
+
+    /// Clone self for use by the techport Dropshot server.
+    pub fn for_techport(&self) -> Self {
+        Self { kind: ServerKind::Techport, context: self.context.clone() }
+    }
+}
+
+impl std::borrow::Borrow<ServerContext> for ApiContext {
+    fn borrow(&self) -> &ServerContext {
+        &self.context
+    }
+}
+
 /// Shared state available to all API request handlers
 pub struct ServerContext {
     /// reference to the underlying nexus
@@ -157,7 +212,8 @@ impl ServerContext {
         // Set up DNS Client
         let resolver = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
-                let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().ip());
+                let az_subnet =
+                    Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
                 info!(
                     log,
                     "Setting up resolver using DNS servers for subnet: {:?}",
@@ -262,18 +318,19 @@ impl ServerContext {
 /// Authenticates an incoming request to the external API and produces a new
 /// operation context for it
 pub(crate) async fn op_context_for_external_api(
-    rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+    rqctx: &dropshot::RequestContext<ApiContext>,
 ) -> Result<OpContext, dropshot::HttpError> {
     let apictx = rqctx.context();
     OpContext::new_async(
         &rqctx.log,
         async {
-            let authn =
-                Arc::new(apictx.external_authn.authn_request(rqctx).await?);
-            let datastore = Arc::clone(apictx.nexus.datastore());
+            let authn = Arc::new(
+                apictx.context.external_authn.authn_request(rqctx).await?,
+            );
+            let datastore = Arc::clone(apictx.context.nexus.datastore());
             let authz = authz::Context::new(
                 Arc::clone(&authn),
-                Arc::clone(&apictx.authz),
+                Arc::clone(&apictx.context.authz),
                 datastore,
             );
             Ok((authn, authz))
@@ -285,17 +342,17 @@ pub(crate) async fn op_context_for_external_api(
 }
 
 pub(crate) async fn op_context_for_internal_api(
-    rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+    rqctx: &dropshot::RequestContext<ApiContext>,
 ) -> OpContext {
-    let apictx = rqctx.context();
+    let apictx = &rqctx.context();
     OpContext::new_async(
         &rqctx.log,
         async {
-            let authn = Arc::clone(&apictx.internal_authn);
-            let datastore = Arc::clone(apictx.nexus.datastore());
+            let authn = Arc::clone(&apictx.context.internal_authn);
+            let datastore = Arc::clone(apictx.context.nexus.datastore());
             let authz = authz::Context::new(
                 Arc::clone(&authn),
-                Arc::clone(&apictx.authz),
+                Arc::clone(&apictx.context.authz),
                 datastore,
             );
             Ok::<_, std::convert::Infallible>((authn, authz))

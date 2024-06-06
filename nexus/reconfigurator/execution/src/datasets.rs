@@ -5,7 +5,6 @@
 //! Ensures dataset records required by a given blueprint
 
 use anyhow::Context;
-use illumos_utils::zpool::ZpoolName;
 use nexus_db_model::Dataset;
 use nexus_db_model::DatasetKind;
 use nexus_db_queries::context::OpContext;
@@ -68,21 +67,7 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
             continue;
         }
 
-        // Map progenitor client strings into the types we need. We never
-        // expect these to fail.
-        let zpool_name: ZpoolName = match dataset.pool_name.parse() {
-            Ok(name) => name,
-            Err(err) => {
-                warn!(
-                    opctx.log, "failed to parse crucible zone pool name";
-                    "pool_name" => &*dataset.pool_name,
-                    "err" => err,
-                );
-                continue;
-            }
-        };
-
-        let pool_id = zpool_name.id();
+        let pool_id = dataset.pool_name.id();
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
@@ -145,6 +130,7 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::types::OmicronZoneDataset;
@@ -161,7 +147,7 @@ mod tests {
         const TEST_NAME: &str = "test_ensure_crucible_dataset_records_exist";
 
         // Set up.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
@@ -199,10 +185,8 @@ mod tests {
                 else {
                     continue;
                 };
-                let zpool_name: ZpoolName =
-                    dataset.pool_name.parse().expect("invalid zpool name");
                 let zpool = Zpool::new(
-                    zpool_name.id().into_untyped_uuid(),
+                    dataset.pool_name.id().into_untyped_uuid(),
                     sled_id.into_untyped_uuid(),
                     Uuid::new_v4(), // physical_disk_id
                 );
@@ -298,10 +282,7 @@ mod tests {
                 blueprint_zone_type::Crucible {
                     address: "[::1]:0".parse().unwrap(),
                     dataset: OmicronZoneDataset {
-                        pool_name: ZpoolName::new_external(new_zpool_id)
-                            .to_string()
-                            .parse()
-                            .unwrap(),
+                        pool_name: ZpoolName::new_external(new_zpool_id),
                     },
                 },
             ),

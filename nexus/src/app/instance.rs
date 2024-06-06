@@ -20,6 +20,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -28,6 +29,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::DataStore;
 use nexus_types::external_api::views;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -42,6 +44,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
@@ -476,7 +479,7 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state.0 != InstanceState::Running
+            || vmm.as_ref().unwrap().runtime.state != DbVmmState::Running
         {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
@@ -706,16 +709,16 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Rebooting => {
+            match vmm.runtime.state {
+                DbVmmState::Starting
+                | DbVmmState::Running
+                | DbVmmState::Rebooting => {
                     debug!(self.log, "asked to start an active instance";
                            "instance_id" => %authz_instance.id());
 
                     return Ok(state);
                 }
-                InstanceState::Stopped => {
+                DbVmmState::Stopped => {
                     let propolis_id = instance
                         .runtime()
                         .propolis_id
@@ -732,7 +735,7 @@ impl super::Nexus {
                 _ => {
                     return Err(Error::conflict(&format!(
                         "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                         InstanceState::Stopped
                     )));
                 }
@@ -840,9 +843,9 @@ impl super::Nexus {
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
         let effective_state = if let Some(vmm) = vmm_state {
-            vmm.runtime.state.0
+            vmm.runtime.state.into()
         } else {
-            instance_state.runtime().nexus_state.0
+            instance_state.runtime().nexus_state.into()
         };
 
         // Requests that operate on active instances have to be directed to the
@@ -1361,7 +1364,7 @@ impl super::Nexus {
                "error" => ?reason);
 
         let new_runtime = db::model::InstanceRuntimeState {
-            nexus_state: db::model::InstanceState::new(InstanceState::Failed),
+            nexus_state: db::model::InstanceState::Failed,
 
             // TODO(#4226): Clearing the Propolis ID is required to allow the
             // instance to be deleted, but this doesn't actually terminate the
@@ -1513,176 +1516,18 @@ impl super::Nexus {
         instance_id: &Uuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
-        let log = &self.log;
-        let propolis_id = new_runtime_state.propolis_id;
-
-        info!(log, "received new runtime state from sled agent";
-              "instance_id" => %instance_id,
-              "instance_state" => ?new_runtime_state.instance_state,
-              "propolis_id" => %propolis_id,
-              "vmm_state" => ?new_runtime_state.vmm_state);
-
-        // Grab the current state of the instance in the DB to reason about
-        // whether this update is stale or not.
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(&opctx, &self.db_datastore)
-                .instance_id(*instance_id)
-                .fetch()
-                .await?;
-
-        // Update OPTE and Dendrite if the instance's active sled assignment
-        // changed or a migration was retired. If these actions fail, sled agent
-        // is expected to retry this update.
-        //
-        // This configuration must be updated before updating any state in CRDB
-        // so that, if the instance was migrating or has shut down, it will not
-        // appear to be able to migrate or start again until the appropriate
-        // networking state has been written. Without this interlock, another
-        // thread or another Nexus can race with this routine to write
-        // conflicting configuration.
-        //
-        // In the future, this should be replaced by a call to trigger a
-        // networking state update RPW.
-        self.ensure_updated_instance_network_config(
+        notify_instance_updated(
+            &self.datastore(),
+            &self.resolver().await,
+            &self.opctx_alloc,
             opctx,
-            &authz_instance,
-            db_instance.runtime(),
-            &new_runtime_state.instance_state,
+            &self.log,
+            instance_id,
+            new_runtime_state,
+            self.v2p_notification_tx.clone(),
         )
         .await?;
-
-        // If the supplied instance state indicates that the instance no longer
-        // has an active VMM, attempt to delete the virtual provisioning record,
-        // and the assignment of the Propolis metric producer to an oximeter
-        // collector.
-        //
-        // As with updating networking state, this must be done before
-        // committing the new runtime state to the database: once the DB is
-        // written, a new start saga can arrive and start the instance, which
-        // will try to create its own virtual provisioning charges, which will
-        // race with this operation.
-        if new_runtime_state.instance_state.propolis_id.is_none() {
-            self.db_datastore
-                .virtual_provisioning_collection_delete_instance(
-                    opctx,
-                    *instance_id,
-                    db_instance.project_id,
-                    i64::from(db_instance.ncpus.0 .0),
-                    db_instance.memory,
-                    (&new_runtime_state.instance_state.gen).into(),
-                )
-                .await?;
-
-            // TODO-correctness: The `notify_instance_updated` method can run
-            // concurrently with itself in some situations, such as where a
-            // sled-agent attempts to update Nexus about a stopped instance;
-            // that times out; and it makes another request to a different
-            // Nexus. The call to `unassign_producer` is racy in those
-            // situations, and we may end with instances with no metrics.
-            //
-            // This unfortunate case should be handled as part of
-            // instance-lifecycle improvements, notably using a reliable
-            // persistent workflow to correctly update the oximete assignment as
-            // an instance's state changes.
-            //
-            // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-            self.unassign_producer(opctx, instance_id).await?;
-        }
-
-        // Write the new instance and VMM states back to CRDB. This needs to be
-        // done before trying to clean up the VMM, since the datastore will only
-        // allow a VMM to be marked as deleted if it is already in a terminal
-        // state.
-        let result = self
-            .db_datastore
-            .instance_and_vmm_update_runtime(
-                instance_id,
-                &db::model::InstanceRuntimeState::from(
-                    new_runtime_state.instance_state.clone(),
-                ),
-                &propolis_id,
-                &db::model::VmmRuntimeState::from(
-                    new_runtime_state.vmm_state.clone(),
-                ),
-            )
-            .await;
-
-        // If the VMM is now in a terminal state, make sure its resources get
-        // cleaned up.
-        //
-        // For idempotency, only check to see if the update was successfully
-        // processed and ignore whether the VMM record was actually updated.
-        // This is required to handle the case where this routine is called
-        // once, writes the terminal VMM state, fails before all per-VMM
-        // resources are released, returns a retriable error, and is retried:
-        // the per-VMM resources still need to be cleaned up, but the DB update
-        // will return Ok(_, false) because the database was already updated.
-        //
-        // Unlike the pre-update cases, it is legal to do this cleanup *after*
-        // committing state to the database, because a terminated VMM cannot be
-        // reused (restarting or migrating its former instance will use new VMM
-        // IDs).
-        if result.is_ok() {
-            let propolis_terminated = matches!(
-                new_runtime_state.vmm_state.state,
-                InstanceState::Destroyed | InstanceState::Failed
-            );
-
-            if propolis_terminated {
-                info!(log, "vmm is terminated, cleaning up resources";
-                      "instance_id" => %instance_id,
-                      "propolis_id" => %propolis_id);
-
-                self.db_datastore
-                    .sled_reservation_delete(opctx, propolis_id)
-                    .await?;
-
-                if !self
-                    .db_datastore
-                    .vmm_mark_deleted(opctx, &propolis_id)
-                    .await?
-                {
-                    warn!(log, "failed to mark vmm record as deleted";
-                      "instance_id" => %instance_id,
-                      "propolis_id" => %propolis_id,
-                      "vmm_state" => ?new_runtime_state.vmm_state);
-                }
-            }
-        }
-
-        match result {
-            Ok((instance_updated, vmm_updated)) => {
-                info!(log, "instance and vmm updated by sled agent";
-                      "instance_id" => %instance_id,
-                      "propolis_id" => %propolis_id,
-                      "instance_updated" => instance_updated,
-                      "vmm_updated" => vmm_updated);
-                Ok(())
-            }
-
-            // The update command should swallow object-not-found errors and
-            // return them back as failures to update, so this error case is
-            // unexpected. There's no work to do if this occurs, however.
-            Err(Error::ObjectNotFound { .. }) => {
-                error!(log, "instance/vmm update unexpectedly returned \
-                       an object not found error";
-                       "instance_id" => %instance_id,
-                       "propolis_id" => %propolis_id);
-                Ok(())
-            }
-
-            // If the datastore is unavailable, propagate that to the caller.
-            // TODO-robustness Really this should be any _transient_ error.  How
-            // can we distinguish?  Maybe datastore should emit something
-            // different from Error with an Into<Error>.
-            Err(error) => {
-                warn!(log, "failed to update instance from sled agent";
-                      "instance_id" => %instance_id,
-                      "propolis_id" => %propolis_id,
-                      "error" => ?error);
-                Err(error)
-            }
-        }
+        Ok(())
     }
 
     /// Returns the requested range of serial console output bytes,
@@ -1804,25 +1649,23 @@ impl super::Nexus {
 
         let (instance, vmm) = (state.instance(), state.vmm());
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Running
-                | InstanceState::Rebooting
-                | InstanceState::Migrating
-                | InstanceState::Repairing => {
+            match vmm.runtime.state {
+                DbVmmState::Running
+                | DbVmmState::Rebooting
+                | DbVmmState::Migrating => {
                     Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Failed => {
+                DbVmmState::Starting
+                | DbVmmState::Stopping
+                | DbVmmState::Stopped
+                | DbVmmState::Failed => {
                     Err(Error::invalid_request(format!(
                         "cannot connect to serial console of instance in state \"{}\"",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                     )))
                 }
-                InstanceState::Destroyed => Err(Error::invalid_request(
-                    "cannot connect to serial console of destroyed instance",
+                DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
+                    "cannot connect to serial console of instance in state \"Stopped\"",
                 )),
             }
         } else {
@@ -2108,6 +1951,198 @@ impl super::Nexus {
                     )
                 })
             })
+    }
+}
+
+/// Records what aspects of an instance's state were actually changed in a
+/// [`notify_instance_updated`] call.
+///
+/// This is (presently) used for debugging purposes only.
+#[derive(Copy, Clone)]
+pub(crate) struct InstanceUpdated {
+    pub instance_updated: bool,
+    pub vmm_updated: bool,
+}
+
+/// Invoked by a sled agent to publish an updated runtime state for an
+/// Instance.
+#[allow(clippy::too_many_arguments)] // :(
+pub(crate) async fn notify_instance_updated(
+    datastore: &DataStore,
+    resolver: &internal_dns::resolver::Resolver,
+    opctx_alloc: &OpContext,
+    opctx: &OpContext,
+    log: &slog::Logger,
+    instance_id: &Uuid,
+    new_runtime_state: &nexus::SledInstanceState,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+) -> Result<Option<InstanceUpdated>, Error> {
+    let propolis_id = new_runtime_state.propolis_id;
+
+    info!(log, "received new runtime state from sled agent";
+            "instance_id" => %instance_id,
+            "instance_state" => ?new_runtime_state.instance_state,
+            "propolis_id" => %propolis_id,
+            "vmm_state" => ?new_runtime_state.vmm_state);
+
+    // Grab the current state of the instance in the DB to reason about
+    // whether this update is stale or not.
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(*instance_id)
+        .fetch()
+        .await?;
+
+    // Update OPTE and Dendrite if the instance's active sled assignment
+    // changed or a migration was retired. If these actions fail, sled agent
+    // is expected to retry this update.
+    //
+    // This configuration must be updated before updating any state in CRDB
+    // so that, if the instance was migrating or has shut down, it will not
+    // appear to be able to migrate or start again until the appropriate
+    // networking state has been written. Without this interlock, another
+    // thread or another Nexus can race with this routine to write
+    // conflicting configuration.
+    //
+    // In the future, this should be replaced by a call to trigger a
+    // networking state update RPW.
+    super::instance_network::ensure_updated_instance_network_config(
+        datastore,
+        log,
+        resolver,
+        opctx,
+        opctx_alloc,
+        &authz_instance,
+        db_instance.runtime(),
+        &new_runtime_state.instance_state,
+        v2p_notification_tx.clone(),
+    )
+    .await?;
+
+    // If the supplied instance state indicates that the instance no longer
+    // has an active VMM, attempt to delete the virtual provisioning record,
+    // and the assignment of the Propolis metric producer to an oximeter
+    // collector.
+    //
+    // As with updating networking state, this must be done before
+    // committing the new runtime state to the database: once the DB is
+    // written, a new start saga can arrive and start the instance, which
+    // will try to create its own virtual provisioning charges, which will
+    // race with this operation.
+    if new_runtime_state.instance_state.propolis_id.is_none() {
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                opctx,
+                *instance_id,
+                db_instance.project_id,
+                i64::from(db_instance.ncpus.0 .0),
+                db_instance.memory,
+                (&new_runtime_state.instance_state.gen).into(),
+            )
+            .await?;
+
+        // TODO-correctness: The `notify_instance_updated` method can run
+        // concurrently with itself in some situations, such as where a
+        // sled-agent attempts to update Nexus about a stopped instance;
+        // that times out; and it makes another request to a different
+        // Nexus. The call to `unassign_producer` is racy in those
+        // situations, and we may end with instances with no metrics.
+        //
+        // This unfortunate case should be handled as part of
+        // instance-lifecycle improvements, notably using a reliable
+        // persistent workflow to correctly update the oximete assignment as
+        // an instance's state changes.
+        //
+        // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
+        super::oximeter::unassign_producer(datastore, log, opctx, instance_id)
+            .await?;
+    }
+
+    // Write the new instance and VMM states back to CRDB. This needs to be
+    // done before trying to clean up the VMM, since the datastore will only
+    // allow a VMM to be marked as deleted if it is already in a terminal
+    // state.
+    let result = datastore
+        .instance_and_vmm_update_runtime(
+            instance_id,
+            &db::model::InstanceRuntimeState::from(
+                new_runtime_state.instance_state.clone(),
+            ),
+            &propolis_id,
+            &db::model::VmmRuntimeState::from(
+                new_runtime_state.vmm_state.clone(),
+            ),
+        )
+        .await;
+
+    // If the VMM is now in a terminal state, make sure its resources get
+    // cleaned up.
+    //
+    // For idempotency, only check to see if the update was successfully
+    // processed and ignore whether the VMM record was actually updated.
+    // This is required to handle the case where this routine is called
+    // once, writes the terminal VMM state, fails before all per-VMM
+    // resources are released, returns a retriable error, and is retried:
+    // the per-VMM resources still need to be cleaned up, but the DB update
+    // will return Ok(_, false) because the database was already updated.
+    //
+    // Unlike the pre-update cases, it is legal to do this cleanup *after*
+    // committing state to the database, because a terminated VMM cannot be
+    // reused (restarting or migrating its former instance will use new VMM
+    // IDs).
+    if result.is_ok() {
+        let propolis_terminated = matches!(
+            new_runtime_state.vmm_state.state,
+            VmmState::Destroyed | VmmState::Failed
+        );
+
+        if propolis_terminated {
+            info!(log, "vmm is terminated, cleaning up resources";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id);
+
+            datastore.sled_reservation_delete(opctx, propolis_id).await?;
+
+            if !datastore.vmm_mark_deleted(opctx, &propolis_id).await? {
+                warn!(log, "failed to mark vmm record as deleted";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "vmm_state" => ?new_runtime_state.vmm_state);
+            }
+        }
+    }
+
+    match result {
+        Ok((instance_updated, vmm_updated)) => {
+            info!(log, "instance and vmm updated by sled agent";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "instance_updated" => instance_updated,
+                    "vmm_updated" => vmm_updated);
+            Ok(Some(InstanceUpdated { instance_updated, vmm_updated }))
+        }
+
+        // The update command should swallow object-not-found errors and
+        // return them back as failures to update, so this error case is
+        // unexpected. There's no work to do if this occurs, however.
+        Err(Error::ObjectNotFound { .. }) => {
+            error!(log, "instance/vmm update unexpectedly returned \
+                    an object not found error";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id);
+            Ok(None)
+        }
+
+        // If the datastore is unavailable, propagate that to the caller.
+        // TODO-robustness Really this should be any _transient_ error.  How
+        // can we distinguish?  Maybe datastore should emit something
+        // different from Error with an Into<Error>.
+        Err(error) => {
+            warn!(log, "failed to update instance from sled agent";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "error" => ?error);
+            Err(error)
+        }
     }
 }
 

@@ -209,6 +209,42 @@ table! {
         delay_open -> Int8,
         connect_retry -> Int8,
         keepalive -> Int8,
+        remote_asn -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
+        md5_auth_key -> Nullable<Text>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        local_pref -> Nullable<Int8>,
+        enforce_first_as -> Bool,
+        allow_import_list_active -> Bool,
+        allow_export_list_active -> Bool,
+        vlan_id -> Nullable<Int4>
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, addr, community) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        community -> Int8,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, addr, prefix) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        prefix -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config_allow_import (port_settings_id, interface_name, addr, prefix) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        prefix -> Inet,
     }
 }
 
@@ -223,6 +259,8 @@ table! {
         asn -> Int8,
         bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+        shaper -> Nullable<Text>,
+        checker -> Nullable<Text>,
     }
 }
 
@@ -237,6 +275,24 @@ table! {
         hold_time -> Int8,
         idle_hold_time -> Int8,
         keepalive -> Int8,
+        remote_asn -> Nullable<Int8>,
+        min_ttl -> Nullable<Int8>,
+        md5_auth_key -> Nullable<Text>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        local_pref -> Nullable<Int8>,
+        enforce_first_as -> Bool,
+        vlan_id -> Nullable<Int8>,
+    }
+}
+
+table! {
+    v2p_mapping_view (nic_id) {
+        nic_id -> Uuid,
+        sled_id -> Uuid,
+        sled_ip -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        ip -> Inet,
     }
 }
 
@@ -368,12 +424,14 @@ table! {
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        updater_id -> Nullable<Uuid>,
+        updater_gen-> Int8,
+        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -386,9 +444,9 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        state -> crate::VmmStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -401,7 +459,7 @@ table! {
         project_name -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
         active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -418,7 +476,6 @@ table! {
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
-        base_route -> Text,
         oximeter_id -> Uuid,
     }
 }
@@ -981,6 +1038,8 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(zpool, dataset);
+
 table! {
     region (id) {
         id -> Uuid,
@@ -995,6 +1054,8 @@ table! {
         extent_count -> Int8,
     }
 }
+
+allow_tables_to_appear_in_same_query!(zpool, region);
 
 table! {
     region_snapshot (dataset_id, region_id, snapshot_id) {
@@ -1309,6 +1370,13 @@ table! {
         slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
         slot_a_sha3_256 -> Nullable<Text>,
         slot_b_sha3_256 -> Nullable<Text>,
+        stage0_fwid -> Nullable<Text>,
+        stage0next_fwid -> Nullable<Text>,
+
+        slot_a_error -> Nullable<crate::RotImageErrorEnum>,
+        slot_b_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0next_error -> Nullable<crate::RotImageErrorEnum>,
     }
 }
 
@@ -1445,6 +1513,9 @@ table! {
 
         internal_dns_version -> Int8,
         external_dns_version -> Int8,
+        cockroachdb_fingerprint -> Text,
+
+        cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
     }
 }
 
@@ -1456,6 +1527,15 @@ table! {
 
         enabled -> Bool,
         time_made_target -> Timestamptz,
+    }
+}
+
+table! {
+    bp_sled_state (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        sled_state -> crate::SledStateEnum,
     }
 }
 
@@ -1517,6 +1597,7 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
+        external_ip_id -> Nullable<Uuid>,
     }
 }
 
@@ -1624,6 +1705,50 @@ table! {
 }
 
 table! {
+    allow_list (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        allowed_ips -> Nullable<Array<Inet>>,
+    }
+}
+
+table! {
+    region_replacement (id) {
+        id -> Uuid,
+        request_time -> Timestamptz,
+        old_region_id -> Uuid,
+        volume_id -> Uuid,
+        old_region_volume_id -> Nullable<Uuid>,
+        new_region_id -> Nullable<Uuid>,
+        replacement_state -> crate::RegionReplacementStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    volume_repair (volume_id) {
+        volume_id -> Uuid,
+        repair_id -> Uuid,
+    }
+}
+
+table! {
+    region_replacement_step (replacement_id, step_time, step_type) {
+        replacement_id -> Uuid,
+        step_time -> Timestamptz,
+        step_type -> crate::RegionReplacementStepTypeEnum,
+
+        step_associated_instance_id -> Nullable<Uuid>,
+        step_associated_vmm_id -> Nullable<Uuid>,
+
+        step_associated_pantry_ip -> Nullable<Inet>,
+        step_associated_pantry_port -> Nullable<Int4>,
+        step_associated_pantry_job_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
@@ -1715,3 +1840,5 @@ allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
 allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
 joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
+
+allow_tables_to_appear_in_same_query!(sled, sled_instance);

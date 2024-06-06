@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -37,9 +40,9 @@ internal-dns.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
-mime_guess.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
+nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-networking.workspace = true
 nexus-test-interface.workspace = true
@@ -48,6 +51,7 @@ once_cell.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
+oxnet.workspace = true
 parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -70,16 +74,19 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+display-error-chain.workspace = true
 slog-term.workspace = true
 steno.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
+tokio-util = { workspace = true, features = ["codec"] }
 tough.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 
+nexus-auth.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
@@ -118,6 +125,7 @@ omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 oxide-client.workspace = true
+oximeter-collector.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 pretty_assertions.workspace = true

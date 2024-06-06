@@ -19,7 +19,7 @@ enum Commands {
         /// The physical link over which Chelsio links are simulated
         ///
         /// Will be inferred by `dladm show-phys` if unsupplied.
-        #[clap(long)]
+        #[clap(long, env)]
         physical_link: Option<String>,
 
         /// Sets `promisc-filtered` off for the sc0_1 vnic.
@@ -33,6 +33,10 @@ enum Commands {
         /// Will be inferred via `netstat` if unsupplied.
         #[clap(long)]
         gateway_ip: Option<String>,
+
+        /// The configured mode for softnpu
+        #[clap(long, env, default_value = "zone")]
+        softnpu_mode: String,
 
         /// The MAC address of your gateway IP
         ///
@@ -67,13 +71,13 @@ pub struct Pxa {
     /// The first IP address your Oxide cluster can use.
     ///
     /// Requires `pxa-end`.
-    #[clap(long = "pxa-start", requires = "end")]
+    #[clap(long = "pxa-start", requires = "end", env = "PXA_START")]
     start: Option<String>,
 
     /// The last IP address your Oxide cluster can use
     ///
     /// Requires `pxa-start`.
-    #[clap(long = "pxa-end", requires = "start")]
+    #[clap(long = "pxa-end", requires = "start", env = "PXA_END")]
     end: Option<String>,
 }
 
@@ -100,6 +104,7 @@ const IPADM: &'static str = "/usr/sbin/ipadm";
 const MODINFO: &'static str = "/usr/sbin/modinfo";
 const MODUNLOAD: &'static str = "/usr/sbin/modunload";
 const NETSTAT: &'static str = "/usr/bin/netstat";
+const OPTEADM: &'static str = "/opt/oxide/opte/bin/opteadm";
 const PFEXEC: &'static str = "/usr/bin/pfexec";
 const PING: &'static str = "/usr/sbin/ping";
 const SWAP: &'static str = "/usr/sbin/swap";
@@ -109,8 +114,8 @@ const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
-    "e3ea4b495ba0a71801ded0776ae4bbd31df57e26";
-const SOFTNPU_COMMIT: &'static str = "dbab082dfa89da5db5ca2325c257089d2f130092";
+    "960f11afe859e0316088e04578aedb700fba6159";
+const SOFTNPU_COMMIT: &'static str = "3203c51cf4473d30991b522062ac0df2e045c2f2";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
@@ -153,6 +158,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
         Commands::Create {
             physical_link,
             promiscuous_filter_off,
+            softnpu_mode,
             gateway_ip,
             gateway_mac,
             pxa,
@@ -168,7 +174,9 @@ pub fn run_cmd(args: Args) -> Result<()> {
             if matches!(args.scope, Scope::All | Scope::Disks) {
                 ensure_vdevs(&sled_agent_config, &args.vdev_dir)?;
             }
-            if matches!(args.scope, Scope::All | Scope::Network) {
+            if matches!(args.scope, Scope::All | Scope::Network)
+                && softnpu_mode == "zone"
+            {
                 ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
                 ensure_softnpu_zone(&npu_zone)?;
                 initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
@@ -240,8 +248,17 @@ fn unload_xde_driver() -> Result<()> {
         println!("xde driver already unloaded");
         return Ok(());
     };
-    println!("unloading xde driver");
+    println!("unloading xde driver:\na) clearing underlay...");
+    let mut cmd = Command::new(PFEXEC);
+    cmd.args([OPTEADM, "clear-xde-underlay"]);
+    if let Err(e) = execute(cmd) {
+        // This is explicitly non-fatal: the underlay is only set when
+        // sled-agent is running. We still need to be able to tear
+        // down the driver if we immediately call create->destroy.
+        println!("\tFailed or already unset: {e}");
+    }
 
+    println!("b) unloading module...");
     let mut cmd = Command::new(PFEXEC);
     cmd.arg(MODUNLOAD);
     cmd.arg("-i");
@@ -263,7 +280,15 @@ fn remove_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
         "--ports",
         "sc0_1,tfportqsfp0_0",
     ]);
-    execute(cmd)?;
+    if let Err(output) = execute(cmd) {
+        // Don't throw an error if the zone was already removed
+        if output.to_string().contains("No such zone configured") {
+            println!("zone {npu_zone} already destroyed");
+            return Ok(());
+        } else {
+            return Err(output);
+        }
+    }
     Ok(())
 }
 

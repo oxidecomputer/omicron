@@ -9,7 +9,6 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
-use ipnetwork::Ipv4Network;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -22,8 +21,9 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-    InstanceNetworkInterface, Ipv4Net,
+    InstanceNetworkInterface,
 };
+use oxnet::Ipv4Net;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =
@@ -91,13 +91,17 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
-    let subnet_size =
-        cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
+    let subnet_size = cptestctx
+        .server
+        .server_context()
+        .nexus
+        .tunables()
+        .max_vpc_ipv4_subnet_prefix;
     let vpc_selector = format!("project={}&vpc=default", project_name);
     let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
-    let subnet = Ipv4Network::new(network_address, subnet_size)
+    let subnet = Ipv4Net::new(network_address, subnet_size)
         .expect("Invalid IPv4 network");
     let subnet_create = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
@@ -105,7 +109,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             description: String::from("a small subnet"),
         },
         // Use the minimum subnet size
-        ipv4_block: Ipv4Net(subnet),
+        ipv4_block: subnet,
         ipv6_block: None,
     };
     NexusRequest::objects_post(client, &subnets_url, &Some(&subnet_create))
@@ -128,12 +132,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         },
     ]);
 
-    // Create enough instances to fill the subnet. There are subnet.size() total
-    // addresses, 6 of which are reserved.
-    let n_final_reserved_addresses = 1;
-    let n_reserved_addresses =
-        NUM_INITIAL_RESERVED_IP_ADDRESSES + n_final_reserved_addresses;
-    let subnet_size = subnet.size() as usize - n_reserved_addresses;
+    // Create enough instances to fill the subnet. There are subnet.size()
+    // total addresses, 6 of which are reserved.
+    let subnet_size_minus_1 = match subnet.size() {
+        Some(n) => n - 1,
+        None => u32::MAX,
+    } as usize;
+    let subnet_size = subnet_size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES;
     for i in 0..subnet_size {
         create_instance_with(
             client,
@@ -174,7 +179,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
     for (iface, addr) in network_interfaces
         .iter()
-        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
+        .zip(subnet.addr_iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
             iface.ip,

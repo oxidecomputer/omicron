@@ -389,7 +389,7 @@ pub struct OmicronZoneDataset {
 impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
     fn from(local: OmicronZoneDataset) -> Self {
         Self {
-            pool_name: sled_agent_client::types::ZpoolName::from_str(
+            pool_name: omicron_common::zpool_name::ZpoolName::from_str(
                 &local.pool_name.to_string(),
             )
             .unwrap(),
@@ -610,7 +610,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 domain,
                 ntp_servers,
                 snat_cfg,
-                nic: nic,
+                nic,
             },
             OmicronZoneType::Clickhouse { address, dataset } => {
                 Other::Clickhouse {
@@ -646,7 +646,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dataset: dataset.into(),
                 http_address: http_address.to_string(),
                 dns_address: dns_address.to_string(),
-                nic: nic,
+                nic,
             },
             OmicronZoneType::InternalDns {
                 dataset,
@@ -683,7 +683,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 external_ip,
                 external_tls,
                 internal_address: internal_address.to_string(),
-                nic: nic,
+                nic,
             },
             OmicronZoneType::Oximeter { address } => {
                 Other::Oximeter { address: address.to_string() }

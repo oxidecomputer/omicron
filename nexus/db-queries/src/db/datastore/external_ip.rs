@@ -31,7 +31,6 @@ use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
-use crate::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -50,7 +49,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -84,33 +82,14 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         probe_id: Uuid,
-        pool_name: Option<NameOrId>,
+        pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
-        let pool = match pool_name {
-            Some(NameOrId::Name(name)) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_name(&name.into())
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-                pool
-            }
-            Some(NameOrId::Id(id)) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(id)
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-                pool
-            }
-            // If no name given, use the default pool
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.identity.id;
-        let data =
-            IncompleteExternalIp::for_ephemeral_probe(ip_id, probe_id, pool_id);
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let data = IncompleteExternalIp::for_ephemeral_probe(
+            ip_id,
+            probe_id,
+            authz_pool.id(),
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -140,33 +119,9 @@ impl DataStore {
         // - At most MAX external IPs per instance
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
-        let pool = match pool {
-            Some(authz_pool) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(authz_pool.id())
-                    // any authenticated user can CreateChild on an IP pool. this is
-                    // meant to represent allocating an IP
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
 
-                // If this pool is not linked to the current silo, 404
-                // As name resolution happens one layer up, we need to use the *original*
-                // authz Pool.
-                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
-                    return Err(authz_pool.not_found());
-                }
-
-                pool
-            }
-            // If no name given, use the default logic
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.identity.id;
-        let data = IncompleteExternalIp::for_ephemeral(ip_id, pool_id);
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
         // idempotent or double attach this failure is allowed.
@@ -228,6 +183,33 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// If a pool is specified, make sure it's linked to this silo. If a pool is
+    /// not specified, fetch the default pool for this silo. Once the pool is
+    /// resolved (by either method) do an auth check. Then return the pool.
+    async fn resolve_pool_for_allocation(
+        &self,
+        opctx: &OpContext,
+        pool: Option<authz::IpPool>,
+    ) -> LookupResult<authz::IpPool> {
+        let authz_pool = match pool {
+            Some(authz_pool) => {
+                self.ip_pool_fetch_link(opctx, authz_pool.id())
+                    .await
+                    .map_err(|_| authz_pool.not_found())?;
+
+                authz_pool
+            }
+            // If no pool specified, use the default logic
+            None => {
+                let (authz_pool, ..) =
+                    self.ip_pools_fetch_default(&opctx).await?;
+                authz_pool
+            }
+        };
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+        Ok(authz_pool)
+    }
+
     /// Allocates a floating IP address for instance usage.
     pub async fn allocate_floating_ip(
         &self,
@@ -239,29 +221,7 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        // This implements the same pattern as in `allocate_instance_ephemeral_ip` to
-        // check that a chosen pool is valid from within the current silo.
-        let pool = match pool {
-            Some(authz_pool) => {
-                let (.., pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(authz_pool.id())
-                    .fetch_for(authz::Action::CreateChild)
-                    .await?;
-
-                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
-                    return Err(authz_pool.not_found());
-                }
-
-                pool
-            }
-            // If no name given, use the default logic
-            None => {
-                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
-                pool
-            }
-        };
-
-        let pool_id = pool.id();
+        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
 
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
@@ -270,7 +230,7 @@ impl DataStore {
                 &identity.description,
                 project_id,
                 ip,
-                pool_id,
+                authz_pool.id(),
             )
         } else {
             IncompleteExternalIp::for_floating(
@@ -278,7 +238,7 @@ impl DataStore {
                 &Name(identity.name),
                 &identity.description,
                 project_id,
-                pool_id,
+                authz_pool.id(),
             )
         };
 
@@ -518,11 +478,6 @@ impl DataStore {
                 }
 
                 Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state)
-                        => Error::unavail(&format!(
-                        "tried to attach {kind} IP while instance was changing state: \
-                         attach will be safe to retry once start/stop completes"
-                    )),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
                             Error::invalid_request(&format!(
@@ -647,10 +602,6 @@ impl DataStore {
                 }
 
                 match collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(&format!(
-                        "tried to attach {kind} IP while instance was changing state: \
-                         detach will be safe to retry once start/stop completes"
-                    )),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error(&format!("failed to detach {kind} IP"))
                     },
@@ -1150,7 +1101,8 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
-    use nexus_types::deployment::OmicronZoneExternalIpKind;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfig;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -1205,23 +1157,28 @@ mod tests {
         let mut external_ips = Vec::new();
         let mut allocate_snat = false; // flip-flop between regular and snat
         for ip in ip_range.iter() {
-            let external_ip_kind = if allocate_snat {
-                OmicronZoneExternalIpKind::Snat(
-                    SourceNatConfig::new(ip, 0, NUM_SOURCE_NAT_PORTS - 1)
-                        .unwrap(),
-                )
+            let external_ip = if allocate_snat {
+                OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+                    id: ExternalIpUuid::new_v4(),
+                    snat_cfg: SourceNatConfig::new(
+                        ip,
+                        0,
+                        NUM_SOURCE_NAT_PORTS - 1,
+                    )
+                    .unwrap(),
+                })
             } else {
-                OmicronZoneExternalIpKind::Floating(ip)
+                OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip,
+                })
             };
             let external_ip = datastore
                 .external_ip_allocate_omicron_zone(
                     &opctx,
                     OmicronZoneUuid::new_v4(),
                     ZoneKind::Nexus,
-                    OmicronZoneExternalIp {
-                        id: ExternalIpUuid::new_v4(),
-                        kind: external_ip_kind,
-                    },
+                    external_ip,
                 )
                 .await
                 .expect("failed to allocate service IP");

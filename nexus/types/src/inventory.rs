@@ -15,12 +15,14 @@ use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
+pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -31,7 +33,6 @@ pub use sled_agent_client::types::OmicronZoneDataset;
 pub use sled_agent_client::types::OmicronZoneType;
 pub use sled_agent_client::types::OmicronZonesConfig;
 pub use sled_agent_client::types::SledRole;
-pub use sled_agent_client::types::ZpoolName;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -256,6 +257,13 @@ pub struct RotState {
     pub transient_boot_preference: Option<RotSlot>,
     pub slot_a_sha3_256_digest: Option<String>,
     pub slot_b_sha3_256_digest: Option<String>,
+    pub stage0_digest: Option<String>,
+    pub stage0next_digest: Option<String>,
+
+    pub slot_a_error: Option<RotImageError>,
+    pub slot_b_error: Option<RotImageError>,
+    pub stage0_error: Option<RotImageError>,
+    pub stage0next_error: Option<RotImageError>,
 }
 
 /// Describes which caboose this is (which component, which slot)
@@ -276,6 +284,8 @@ pub enum CabooseWhich {
     SpSlot1,
     RotSlotA,
     RotSlotB,
+    Stage0,
+    Stage0Next,
 }
 
 /// Root of trust page contents found during a collection

@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(53, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(71, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -29,6 +29,24 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(71, "add-saga-unwound-vmm-state"),
+        KnownVersion::new(70, "separate-instance-and-vmm-states"),
+        KnownVersion::new(69, "expose-stage0"),
+        KnownVersion::new(68, "filter-v2p-mapping-by-instance-state"),
+        KnownVersion::new(67, "add-instance-updater-lock"),
+        KnownVersion::new(66, "blueprint-crdb-preserve-downgrade"),
+        KnownVersion::new(65, "region-replacement"),
+        KnownVersion::new(64, "add-view-for-v2p-mappings"),
+        KnownVersion::new(63, "remove-producer-base-route-column"),
+        KnownVersion::new(62, "allocate-subnet-decommissioned-sleds"),
+        KnownVersion::new(61, "blueprint-add-sled-state"),
+        KnownVersion::new(60, "add-lookup-vmm-by-sled-id-index"),
+        KnownVersion::new(59, "enforce-first-as-default"),
+        KnownVersion::new(58, "insert-default-allowlist"),
+        KnownVersion::new(57, "add-allowed-source-ips"),
+        KnownVersion::new(56, "bgp-oxpop-features"),
+        KnownVersion::new(55, "add-lookup-sled-by-policy-and-state-index"),
+        KnownVersion::new(54, "blueprint-add-external-ip-id"),
         KnownVersion::new(53, "drop-service-table"),
         KnownVersion::new(52, "blueprint-physical-disk"),
         KnownVersion::new(51, "blueprint-disposition-column"),

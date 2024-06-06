@@ -31,23 +31,13 @@ pub struct VpcFirewallRule {
 }
 
 /// A mapping from a virtual NIC to a physical host
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SetVirtualNetworkInterfaceHost {
+#[derive(
+    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct VirtualNetworkInterfaceHost {
     pub virtual_ip: IpAddr,
     pub virtual_mac: external::MacAddr,
     pub physical_host_ip: Ipv6Addr,
-    pub vni: external::Vni,
-}
-
-/// The data needed to identify a virtual IP for which a sled maintains an OPTE
-/// virtual-to-physical mapping such that that mapping can be deleted.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct DeleteVirtualNetworkInterfaceHost {
-    /// The virtual IP whose mapping should be deleted.
-    pub virtual_ip: IpAddr,
-
-    /// The VNI for the network containing the virtual IP whose mapping should
-    /// be deleted.
     pub vni: external::Vni,
 }
 

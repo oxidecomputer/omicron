@@ -82,6 +82,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 
     // Authenticated requests get the console verification page.
     assert!(NexusRequest::object_get(testctx, "/device/verify")
+        .console_asset()
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

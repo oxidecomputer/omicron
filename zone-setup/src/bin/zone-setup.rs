@@ -851,8 +851,20 @@ allow @ALLOW@
 
 # Enable local reference mode, which keeps us operating as an NTP server that
 # appears synchronised even if there are currently no active upstreams. When
-# in this mode, we report as stratum 10 to clients.
-local stratum 10
+# in this mode, we report as stratum 10 to clients. The `distance' parameter
+# controls when we will decide to abandon the upstreams and switch to the local
+# reference. By setting `activate`, we prevent the server from ever activating
+# its local reference until it has synchronised with upstream at least once and
+# the root distance has dropped below the provided threshold. This prevents
+# a boundary server in a cold booted rack from authoritatively advertising a
+# time from the 1980s prior to gaining external connectivity.
+#
+# distance: Distance from root above which we use the local reference, opting
+#           to ignore the upstream.
+# activate: Distance from root below which we must fall once to ever consider
+#           the local reference.
+#
+local stratum 10 distance 0.4 activate 0.5
 
 # makestep <threshold> <limit>
 # We allow chrony to step the system clock during the first three time updates

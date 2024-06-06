@@ -184,7 +184,12 @@ impl PropertyGroupBuilder {
         }
     }
 
-    pub fn add_property(mut self, name: &str, ty: &str, value: &str) -> Self {
+    pub fn add_property<S: Into<String>>(
+        mut self,
+        name: &str,
+        ty: &str,
+        value: S,
+    ) -> Self {
         // The data structures here are oriented around a few goals:
         //
         // - Properties will be written out in the order that they were added.
@@ -210,7 +215,7 @@ impl PropertyGroupBuilder {
             .property_values
             .entry(name.to_string())
             .or_insert_with(Vec::new);
-        values.push(value.to_string());
+        values.push(value.into());
         self
     }
 }
