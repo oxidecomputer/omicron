@@ -171,7 +171,7 @@ impl UserSpecifiedRackNetworkConfig {
     }
 }
 
-/// User-specified version of [`PortConfigV1`].
+/// User-specified version of [`PortConfigV2`].
 ///
 /// All of [`PortConfigV2`] is user-specified. But we expect the port name to
 /// be a key, rather than a field as in [`PortConfigV2`]. So this has all of
