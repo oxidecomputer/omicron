@@ -367,14 +367,24 @@ impl SimInstanceInner {
         }
 
         self.state.set_migration_ids(ids, Utc::now());
-        let role = self
+
+        // If we set migration IDs and are the migration source, ensure that we
+        // will perform the correct state transitions to simulate a successful
+        // migration.
+        if ids.is_some() {
+            let role = self
             .state
             .migration()
-            .expect("we just got a `put_migration_ids` request, so we should have a migration")
+            .expect(
+                "we just got a `put_migration_ids` request with `Some` IDs, \
+                so we should have a migration"
+            )
             .role;
-        if role == MigrationRole::Source {
-            self.queue_successful_migration(MigrationRole::Target)
+            if role == MigrationRole::Source {
+                self.queue_successful_migration(MigrationRole::Target)
+            }
         }
+
         Ok(self.state.sled_instance_state())
     }
 }
