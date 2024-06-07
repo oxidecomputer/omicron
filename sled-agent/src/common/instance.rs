@@ -211,7 +211,22 @@ impl InstanceStates {
         vmm: VmmRuntimeState,
         propolis_id: Uuid,
     ) -> Self {
-        InstanceStates { instance, vmm, propolis_id, migration: None }
+        let migration = instance.migration_id.map(|migration_id| {
+            let dst_propolis_id = instance.dst_propolis_id.expect("if an instance has a migration ID, it should also have a target VMM ID");
+            let role = if dst_propolis_id == propolis_id {
+                MigrationRole::Target
+            } else {
+                MigrationRole::Source
+            };
+            MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::InProgress,
+                role,
+                gen: Generation::new(),
+                time_updated: Utc::now(),
+            }
+        });
+        InstanceStates { instance, vmm, propolis_id, migration }
     }
 
     pub fn instance(&self) -> &InstanceRuntimeState {
@@ -224,6 +239,10 @@ impl InstanceStates {
 
     pub fn propolis_id(&self) -> Uuid {
         self.propolis_id
+    }
+
+    pub(crate) fn migration(&self) -> Option<&MigrationRuntimeState> {
+        self.migration.as_ref()
     }
 
     /// Creates a `SledInstanceState` structure containing the entirety of this

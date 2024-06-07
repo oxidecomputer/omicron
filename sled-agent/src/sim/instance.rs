@@ -16,7 +16,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmState,
+    InstanceRuntimeState, MigrationRole, SledInstanceState, VmmState,
 };
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateStatus,
@@ -360,6 +360,28 @@ impl SimInstanceInner {
         }
 
         self.state.set_migration_ids(ids, Utc::now());
+        let role = self.state.migration().expect("we just got a `put_migration_ids` request, so we should have a migration").role;
+        if role == MigrationRole::Source {
+            // Propolis transitions to the Migrating state once before
+            // actually starting migration.
+            self.queue_propolis_state(PropolisInstanceState::Migrating);
+            let migration_id =
+                self.state.instance().migration_id.unwrap_or_else(|| {
+                    panic!(
+                        "should have migration ID set before getting request to
+                        migrate in (current state: {:?})",
+                        self
+                    )
+                });
+            self.queue_migration_status(PropolisMigrateStatus {
+                migration_id,
+                state: propolis_client::types::MigrationState::Sync,
+            });
+            self.queue_migration_status(PropolisMigrateStatus {
+                migration_id,
+                state: propolis_client::types::MigrationState::Finish,
+            });
+        }
         Ok(self.state.sled_instance_state())
     }
 }
