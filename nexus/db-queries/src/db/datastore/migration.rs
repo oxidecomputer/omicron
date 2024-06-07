@@ -30,7 +30,6 @@ impl DataStore {
             .values(migration)
             .on_conflict(dsl::id)
             .do_update()
-            // I don't know what this does but it somehow
             .set(dsl::time_created.eq(dsl::time_created))
             .returning(Migration::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)

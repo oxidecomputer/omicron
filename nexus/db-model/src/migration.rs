@@ -27,6 +27,9 @@ pub struct Migration {
     /// The time at which this migration record was created.
     pub time_created: DateTime<Utc>,
 
+    /// The time at which this migration record was deleted,
+    pub time_deleted: Option<DateTime<Utc>>,
+
     /// The time at which the source VMM state was last updated.
 
     /// The state of the migration source VMM.
@@ -63,6 +66,7 @@ impl Migration {
         Self {
             id: migration_id,
             time_created: Utc::now(),
+            time_deleted: None,
             source_state: nexus::MigrationState::Pending.into(),
             source_propolis_id,
             source_gen: Generation::new(),
