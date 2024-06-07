@@ -34,7 +34,7 @@ use thiserror::Error;
 // output length.
 const ARGON2_ALGORITHM: argon2::Algorithm = argon2::Algorithm::Argon2id;
 const ARGON2_COST_M_KIB: u32 = 96 * 1024;
-const ARGON2_COST_T: u32 = 13;
+const ARGON2_COST_T: u32 = 23;
 const ARGON2_COST_P: u32 = 1;
 
 // Maximum password length, intended to prevent denial of service attacks.  See
