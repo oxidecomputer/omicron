@@ -188,6 +188,7 @@ impl From<omicron_common::api::internal::nexus::MigrationState>
     fn from(s: omicron_common::api::internal::nexus::MigrationState) -> Self {
         use omicron_common::api::internal::nexus::MigrationState as Input;
         match s {
+            Input::Pending => Self::Pending,
             Input::InProgress => Self::InProgress,
             Input::Completed => Self::Completed,
             Input::Failed => Self::Failed,

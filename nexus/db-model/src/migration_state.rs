@@ -21,6 +21,7 @@ impl_enum_wrapper!(
     pub struct MigrationState(pub nexus::MigrationState);
 
     // Enum values
+    Pending => b"pending"
     InProgress => b"in_progress"
     Completed => b"completed"
     Failed => b"failed"

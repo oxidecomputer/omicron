@@ -63,11 +63,11 @@ impl Migration {
         Self {
             id: migration_id,
             time_created: Utc::now(),
-            source_state: nexus::MigrationState::InProgress.into(),
+            source_state: nexus::MigrationState::Pending.into(),
             source_propolis_id,
             source_gen: Generation::new(),
             time_source_updated: None,
-            target_state: nexus::MigrationState::InProgress.into(),
+            target_state: nexus::MigrationState::Pending.into(),
             target_propolis_id,
             target_gen: Generation::new(),
             time_target_updated: None,

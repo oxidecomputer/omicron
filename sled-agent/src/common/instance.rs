@@ -355,8 +355,14 @@ impl InstanceStates {
                     PropolisRole::Retired => {}
                 }
             }
+            ObservedMigrationStatus::InProgress => {
+                if let Some(ref mut migration) = self.migration {
+                    migration.state = MigrationState::InProgress;
+                    migration.gen = migration.gen.next();
+                    migration.time_updated = observed.time;
+                }
+            }
             ObservedMigrationStatus::NoMigration
-            | ObservedMigrationStatus::InProgress
             | ObservedMigrationStatus::Pending => {}
         }
 

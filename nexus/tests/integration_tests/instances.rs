@@ -797,8 +797,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::Pending.into());
 
     // Explicitly simulate the migration action on the target. Simulated
     // migrations always succeed. The state transition on the target is
@@ -806,6 +806,10 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     // speaking no further updates from the source are required if the target
     // successfully takes over).
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    // Ensure that both sled agents report that the migration has completed.
+    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
@@ -817,9 +821,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(current_sled, dst_sled_id);
 
-    // Ensure that both sled agents report that the migration has completed.
-    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
-        .await;
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::Completed.into());
     assert_eq!(migration.source_state, MigrationState::Completed.into());

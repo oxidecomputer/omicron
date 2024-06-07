@@ -3481,6 +3481,13 @@
         "description": "The state of an instance's live migration.",
         "oneOf": [
           {
+            "description": "The migration has not started for this VMM.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
             "description": "The migration is in progress.",
             "type": "string",
             "enum": [

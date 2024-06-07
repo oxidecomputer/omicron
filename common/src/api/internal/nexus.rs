@@ -130,10 +130,21 @@ pub struct MigrationRuntimeState {
 
 /// The state of an instance's live migration.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum MigrationState {
+    /// The migration has not started for this VMM.
+    #[default]
+    Pending,
     /// The migration is in progress.
     InProgress,
     /// The migration has failed.
@@ -145,6 +156,7 @@ pub enum MigrationState {
 impl MigrationState {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Pending => "pending",
             Self::InProgress => "in_progress",
             Self::Completed => "completed",
             Self::Failed => "failed",

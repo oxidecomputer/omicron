@@ -364,6 +364,7 @@ impl From<types::MigrationState>
     fn from(s: types::MigrationState) -> Self {
         use omicron_common::api::internal::nexus::MigrationState as Output;
         match s {
+            types::MigrationState::Pending => Output::Pending,
             types::MigrationState::InProgress => Output::InProgress,
             types::MigrationState::Failed => Output::Failed,
             types::MigrationState::Completed => Output::Completed,
