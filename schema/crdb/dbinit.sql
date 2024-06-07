@@ -982,7 +982,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'rebooting',
     'migrating',
     'failed',
-    'destroyed'
+    'destroyed',
+    'saga_unwound'
 );
 
 /*
@@ -4123,7 +4124,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '71.0.0', NULL)
+    (TRUE, NOW(), NOW(), '73.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
