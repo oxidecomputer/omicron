@@ -818,7 +818,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(current_sled, dst_sled_id);
 
     // Ensure that both sled agents report that the migration has completed.
-    instance_simulate_on_sled(cptestctx, nexus, default_sled_id, instance_id)
+    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
         .await;
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::Completed.into());

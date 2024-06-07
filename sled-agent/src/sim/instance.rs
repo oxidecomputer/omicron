@@ -78,6 +78,46 @@ impl SimInstanceInner {
         self.queue.push_back(MonitorChange::MigrateStatus(migrate_status))
     }
 
+    /// Queue a successful simulated migration.
+    ///
+    fn queue_successful_migration(&mut self, role: MigrationRole) {
+        // Propolis transitions to the Migrating state once before
+        // actually starting migration.
+        self.queue_propolis_state(PropolisInstanceState::Migrating);
+        let migration_id =
+            self.state.instance().migration_id.unwrap_or_else(|| {
+                panic!(
+                    "should have migration ID set before getting request to
+                    migrate in (current state: {:?})",
+                    self
+                )
+            });
+        self.queue_migration_status(PropolisMigrateStatus {
+            migration_id,
+            state: propolis_client::types::MigrationState::Sync,
+        });
+        self.queue_migration_status(PropolisMigrateStatus {
+            migration_id,
+            state: propolis_client::types::MigrationState::Finish,
+        });
+
+        // The state we transition to after the migration completes will depend
+        // on whether we are the source or destination.
+        match role {
+            MigrationRole::Target => {
+                self.queue_propolis_state(PropolisInstanceState::Running)
+            }
+            MigrationRole::Source => self.queue_graceful_stop(),
+        }
+    }
+
+    fn queue_graceful_stop(&mut self) {
+        self.state.transition_vmm(PublishedVmmState::Stopping, Utc::now());
+        self.queue_propolis_state(PropolisInstanceState::Stopping);
+        self.queue_propolis_state(PropolisInstanceState::Stopped);
+        self.queue_propolis_state(PropolisInstanceState::Destroyed);
+    }
+
     /// Searches the queue for its last Propolis state change transition. If
     /// one exists, returns the associated Propolis state.
     fn last_queued_instance_state(&self) -> Option<PropolisInstanceState> {
@@ -118,26 +158,7 @@ impl SimInstanceInner {
                     )));
                 }
 
-                // Propolis transitions to the Migrating state once before
-                // actually starting migration.
-                self.queue_propolis_state(PropolisInstanceState::Migrating);
-                let migration_id =
-                    self.state.instance().migration_id.unwrap_or_else(|| {
-                        panic!(
-                        "should have migration ID set before getting request to
-                        migrate in (current state: {:?})",
-                        self
-                    )
-                    });
-                self.queue_migration_status(PropolisMigrateStatus {
-                    migration_id,
-                    state: propolis_client::types::MigrationState::Sync,
-                });
-                self.queue_migration_status(PropolisMigrateStatus {
-                    migration_id,
-                    state: propolis_client::types::MigrationState::Finish,
-                });
-                self.queue_propolis_state(PropolisInstanceState::Running);
+                self.queue_successful_migration(MigrationRole::Target)
             }
             InstanceStateRequested::Running => {
                 match self.next_resting_state() {
@@ -171,21 +192,7 @@ impl SimInstanceInner {
                     VmmState::Starting => {
                         self.state.terminate_rudely();
                     }
-                    VmmState::Running => {
-                        self.state.transition_vmm(
-                            PublishedVmmState::Stopping,
-                            Utc::now(),
-                        );
-                        self.queue_propolis_state(
-                            PropolisInstanceState::Stopping,
-                        );
-                        self.queue_propolis_state(
-                            PropolisInstanceState::Stopped,
-                        );
-                        self.queue_propolis_state(
-                            PropolisInstanceState::Destroyed,
-                        );
-                    }
+                    VmmState::Running => self.queue_graceful_stop(),
                     // Idempotently allow requests to stop an instance that is
                     // already stopping.
                     VmmState::Stopping
@@ -360,27 +367,13 @@ impl SimInstanceInner {
         }
 
         self.state.set_migration_ids(ids, Utc::now());
-        let role = self.state.migration().expect("we just got a `put_migration_ids` request, so we should have a migration").role;
+        let role = self
+            .state
+            .migration()
+            .expect("we just got a `put_migration_ids` request, so we should have a migration")
+            .role;
         if role == MigrationRole::Source {
-            // Propolis transitions to the Migrating state once before
-            // actually starting migration.
-            self.queue_propolis_state(PropolisInstanceState::Migrating);
-            let migration_id =
-                self.state.instance().migration_id.unwrap_or_else(|| {
-                    panic!(
-                        "should have migration ID set before getting request to
-                        migrate in (current state: {:?})",
-                        self
-                    )
-                });
-            self.queue_migration_status(PropolisMigrateStatus {
-                migration_id,
-                state: propolis_client::types::MigrationState::Sync,
-            });
-            self.queue_migration_status(PropolisMigrateStatus {
-                migration_id,
-                state: propolis_client::types::MigrationState::Finish,
-            });
+            self.queue_successful_migration(MigrationRole::Target)
         }
         Ok(self.state.sled_instance_state())
     }
