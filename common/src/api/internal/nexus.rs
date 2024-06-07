@@ -125,7 +125,6 @@ pub struct MigrationRuntimeState {
     pub gen: Generation,
 
     /// Timestamp for the migration state update.
-    // TODO(eliza): could this just be the VMM state timestamp?
     pub time_updated: DateTime<Utc>,
 }
 
