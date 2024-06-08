@@ -1136,7 +1136,7 @@ impl ServiceInner {
         // from the bootstore".
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
-            schema_version: 1,
+            schema_version: 2,
             body: EarlyNetworkConfigBody {
                 ntp_servers: config.ntp_servers.clone(),
                 rack_network_config: Some(config.rack_network_config.clone()),

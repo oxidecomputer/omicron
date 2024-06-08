@@ -1100,7 +1100,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
-                    schema_version: 1,
+                    schema_version: 2,
                     body: EarlyNetworkConfigBody {
                         ntp_servers,
                         rack_network_config: Some(RackNetworkConfigV2 {
