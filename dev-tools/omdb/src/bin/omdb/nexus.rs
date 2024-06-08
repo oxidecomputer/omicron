@@ -1049,6 +1049,33 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "region_replacement_driver" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// how many region replacement drive sagas were started ok
+            region_replacement_driven_ok: usize,
+
+            /// errors querying the db, or region replacement drive sagas that
+            /// were not started ok
+            region_replacement_driven_err: usize,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!(
+                    "    number of region replacement drive sagas started ok: {}",
+                    success.region_replacement_driven_ok
+                );
+                println!(
+                    "    errors querying, or number of region replacement drive saga start errors: {}",
+                    success.region_replacement_driven_err
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

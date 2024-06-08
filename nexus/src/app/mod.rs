@@ -953,6 +953,54 @@ impl Nexus {
                     }
                 });
             }
+
+            SagaRequest::RegionReplacementDrive { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement drive saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement drive saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementFinish { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement finish saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement finish saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
         }
     }
 

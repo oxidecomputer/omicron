@@ -90,6 +90,8 @@ impl super::Nexus {
         );
 
         for repaired_downstairs in repair_finish_info.repairs {
+            // First, record this notification
+
             self.db_datastore
                 .upstairs_repair_notification(
                     opctx,
@@ -110,10 +112,27 @@ impl super::Nexus {
                 )
                 .await?;
 
+            // If the live repair or reconciliation was successfully completed,
+            // check if the repaired downstairs is part of a a region
+            // replacement request.
+
             if !repair_finish_info.aborted {
-                // TODO-followup if there's an active region replacement
-                // occurring, a successfully completed live repair can trigger a
-                // saga to destroy the original region.
+                let maybe_region_replacement = self
+                    .datastore()
+                    .lookup_in_progress_region_replacement_request_by_new_region_id(
+                        opctx,
+                        repaired_downstairs.region_uuid,
+                    )
+                    .await?;
+
+                if maybe_region_replacement.is_none() {
+                    // A live repair or reconciliation completed successfully,
+                    // but there is no in-progress region replacement request
+                    // for that region, so it wasn't initated by Nexus.
+                    //
+                    // TODO-followup if there are too many repairs to the same
+                    // downstairs, do something with that information.
+                }
             }
         }
 
