@@ -3278,7 +3278,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack",
- "hubtools",
+ "hubtools 0.4.6",
  "lru-cache",
  "nix 0.27.1",
  "once_cell",
@@ -4011,6 +4011,26 @@ dependencies = [
 name = "hubtools"
 version = "0.4.6"
 source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#943c4bbe6b50d1ab635d085d6204895fb4154e79"
+dependencies = [
+ "hex",
+ "lpc55_areas",
+ "lpc55_sign",
+ "object 0.30.4",
+ "path-slash",
+ "rsa",
+ "thiserror",
+ "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
+ "tlvc-text",
+ "toml 0.7.8",
+ "x509-cert",
+ "zerocopy 0.6.6",
+ "zip",
+]
+
+[[package]]
+name = "hubtools"
+version = "0.4.7"
+source = "git+https://github.com/oxidecomputer/hubtools.git#088527fa3d8747c502ce3069ec210a0d3fbb15b1"
 dependencies = [
  "hex",
  "lpc55_areas",
@@ -6585,7 +6605,7 @@ dependencies = [
  "hickory-resolver",
  "http 0.2.12",
  "httptest",
- "hubtools",
+ "hubtools 0.4.7",
  "hyper 0.14.30",
  "hyper-rustls 0.26.0",
  "illumos-utils",
@@ -11665,7 +11685,7 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "hubtools",
+ "hubtools 0.4.7",
  "itertools 0.13.0",
  "omicron-common",
  "omicron-test-utils",
@@ -11956,7 +11976,7 @@ dependencies = [
  "dropshot 0.10.2-dev",
  "futures",
  "hex",
- "hubtools",
+ "hubtools 0.4.7",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -12498,7 +12518,7 @@ dependencies = [
  "hex",
  "hickory-resolver",
  "http 0.2.12",
- "hubtools",
+ "hubtools 0.4.7",
  "hyper 0.14.30",
  "illumos-utils",
  "installinator",
