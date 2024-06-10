@@ -8,9 +8,9 @@ use super::{
 };
 use crate::app::db::datastore::instance;
 use crate::app::db::datastore::InstanceAndVmms;
+use crate::app::db::model::VmmState;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz};
-use omicron_common::api::external::InstanceState;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node, SagaName};
 use uuid::Uuid;
@@ -90,7 +90,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         if let Some(ref active_vmm) = params.state.active_vmm {
             // If the active VMM is `Destroyed`, schedule the active VMM
             // destroyed subsaga.
-            if active_vmm.runtime.state.state() == InstanceState::Destroyed {
+            if active_vmm.runtime.state == VmmState::Destroyed {
                 const DESTROYED_SUBSAGA_PARAMS: &str =
                     "params_for_vmm_destroyed_subsaga";
                 let subsaga_params = destroyed::Params {

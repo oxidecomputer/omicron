@@ -10,9 +10,9 @@ use crate::app::sagas::ActionError;
 use nexus_db_model::Generation;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
+use nexus_db_model::InstanceState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
-use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog::info;
@@ -252,7 +252,7 @@ async fn siud_update_instance(
     let osagactx = sagactx.user_data();
     let new_runtime = InstanceRuntimeState {
         propolis_id: None,
-        nexus_state: external::InstanceState::Stopped.into(),
+        nexus_state: InstanceState::Destroyed,
         gen: Generation(instance.runtime_state.gen.0.next()),
         ..instance.runtime_state
     };
