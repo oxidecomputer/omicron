@@ -280,17 +280,13 @@ impl InstanceStates {
         // migration.
         match observed.migration_status {
             ObservedMigrationStatus::Succeeded => {
-                if let Some(ref mut migration) = self.migration {
-                    migration.state = MigrationState::Completed;
-                    migration.gen = migration.gen.next();
-                    migration.time_updated = observed.time;
-                } else {
-                    // XXX(eliza): we don't have an active migration state, but
-                    // we saw a migration succeed. this is almost certainly a
-                    // bug, but i don't *really* want to panic here...but, we
-                    // also don't have a `slog` logger in this function, so ...
-                    // what do.
-                }
+                let migration = self.migration.as_mut().expect(
+                    "an ObservedMigrationStatus::Completed is only \
+                        constructed if a migration state exists",
+                );
+                migration.state = MigrationState::Completed;
+                migration.gen = migration.gen.next();
+                migration.time_updated = observed.time;
                 match self.propolis_role() {
                     // This is a successful migration out. Point the instance to the
                     // target VMM, but don't clear migration IDs; let the target do
@@ -321,22 +317,19 @@ impl InstanceStates {
 
                     // This is a migration source that previously reported success
                     // and removed itself from the active Propolis position. Don't
-                    // touch the instance.
+                    // touch the instance.'
                     PropolisRole::Retired => {}
                 }
             }
             ObservedMigrationStatus::Failed => {
-                if let Some(ref mut migration) = self.migration {
-                    migration.state = MigrationState::Failed;
-                    migration.gen = migration.gen.next();
-                    migration.time_updated = observed.time;
-                } else {
-                    // XXX(eliza): we don't have an active migration state, but
-                    // we saw a migration succeed. this is almost certainly a
-                    // bug, but i don't *really* want to panic here...but, we
-                    // also don't have a `slog` logger in this function, so ...
-                    // what do.
-                }
+                let migration = self.migration.as_mut().expect(
+                    "an ObservedMigrationStatus::Failed is only \
+                        constructed if a migration state exists",
+                );
+                migration.state = MigrationState::Failed;
+                migration.gen = migration.gen.next();
+                migration.time_updated = observed.time;
+
                 match self.propolis_role() {
                     // This is a failed migration out. CLear migration IDs so that
                     // Nexus can try again.

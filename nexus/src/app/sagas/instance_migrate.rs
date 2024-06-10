@@ -60,15 +60,16 @@ declare_saga_actions! {
         + sim_allocate_propolis_ip
     }
 
+    CREATE_VMM_RECORD -> "dst_vmm_record" {
+        + sim_create_vmm_record
+        - sim_destroy_vmm_record
+    }
+
     CREATE_MIGRATION_RECORD -> "migration_record" {
         + sim_create_migration_record
         - sim_delete_migration_record
     }
 
-    CREATE_VMM_RECORD -> "dst_vmm_record" {
-        + sim_create_vmm_record
-        - sim_destroy_vmm_record
-    }
 
     // This step the instance's migration ID and destination Propolis ID
     // fields. Because the instance is active, its current sled agent maintains
@@ -132,8 +133,8 @@ impl NexusSaga for SagaInstanceMigrate {
 
         builder.append(reserve_resources_action());
         builder.append(allocate_propolis_ip_action());
-        builder.append(create_migration_record_action());
         builder.append(create_vmm_record_action());
+        builder.append(create_migration_record_action());
         builder.append(set_migration_ids_action());
         builder.append(ensure_destination_propolis_action());
         builder.append(instance_migrate_action());
