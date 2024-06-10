@@ -14,8 +14,8 @@ use illumos_utils::zone::Zones;
 use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use serde_json::Value;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
+use serde_json::Value;
 use slog::{info, Logger};
 use std::fs::{
     copy, create_dir_all, metadata, read_to_string, set_permissions, write,

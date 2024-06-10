@@ -32,12 +32,7 @@ impl<'t> SmfHelper<'t> {
         let smf_name = service.smf_name();
         let default_smf_name = format!("{}:default", smf_name);
 
-        SmfHelper {
-            running_zone,
-            _service_name,
-            smf_name,
-            default_smf_name,
-        }
+        SmfHelper { running_zone, _service_name, smf_name, default_smf_name }
     }
 
     pub fn setprop<P, V>(&self, prop: P, val: V) -> Result<(), Error>

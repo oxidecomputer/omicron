@@ -4891,10 +4891,7 @@ impl ServiceManager {
         let zone_request =
             SwitchZoneConfigLocal { root, zone: request.clone() };
         let zone_args = ZoneArgs::Switch(&zone_request);
-        info!(
-            self.inner.log,
-            "Starting switch zone",
-        );
+        info!(self.inner.log, "Starting switch zone",);
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;
