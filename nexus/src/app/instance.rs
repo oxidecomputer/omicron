@@ -47,7 +47,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;

@@ -13,7 +13,6 @@ use nexus_db_model::InstanceRuntimeState;
 use nexus_db_model::InstanceState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
-use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog::info;
