@@ -4,11 +4,16 @@
 #
 # See also: ./.envrc
 
+OLD_SHELL_OPTS=$-
 set -o xtrace
-OMICRON_WS="$(readlink -f $(dirname "${BASH_SOURCE[0]}"))"
+OMICRON_WS=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
 export PATH="$OMICRON_WS/out/cockroachdb/bin:$PATH"
 export PATH="$OMICRON_WS/out/clickhouse:$PATH"
 export PATH="$OMICRON_WS/out/dendrite-stub/bin:$PATH"
 export PATH="$OMICRON_WS/out/mgd/root/opt/oxide/mgd/bin:$PATH"
-unset OMICRON_WS
-set +o xtrace
+# if xtrace was set previously, do not unset it
+case $OLD_SHELL_OPTS in
+    *x*) ;;
+    *) set +o xtrace ;;
+esac
+unset OLD_SHELL_OPTS OMICRON_WS
