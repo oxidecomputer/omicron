@@ -231,7 +231,8 @@ impl DbUrlOptions {
         eprintln!("note: using database URL {}", &db_url);
 
         let db_config = db::Config { url: db_url.clone() };
-        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
+        let pool =
+            Arc::new(db::Pool::new_qorb_single_host_blocking(&db_config).await);
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
@@ -3069,7 +3070,7 @@ async fn cmd_db_inventory(
 }
 
 async fn cmd_db_inventory_baseboard_ids(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -3106,7 +3107,7 @@ async fn cmd_db_inventory_baseboard_ids(
 }
 
 async fn cmd_db_inventory_cabooses(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -3147,7 +3148,7 @@ async fn cmd_db_inventory_cabooses(
 }
 
 async fn cmd_db_inventory_physical_disks(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
     args: PhysicalDisksArgs,
 ) -> Result<(), anyhow::Error> {
@@ -3204,7 +3205,7 @@ async fn cmd_db_inventory_physical_disks(
 }
 
 async fn cmd_db_inventory_rot_pages(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -3239,7 +3240,7 @@ async fn cmd_db_inventory_rot_pages(
 }
 
 async fn cmd_db_inventory_collections_list(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]

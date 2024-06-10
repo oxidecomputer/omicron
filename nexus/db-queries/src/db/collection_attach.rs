@@ -564,9 +564,7 @@ where
 mod test {
     use super::*;
     use crate::db::{self, identity::Resource as IdentityResource};
-    use async_bb8_diesel::{
-        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -603,8 +601,8 @@ mod test {
 
     async fn setup_db(
         pool: &crate::db::Pool,
-    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
-        let connection = pool.pool().get().await.unwrap();
+    ) -> crate::db::datastore::DataStoreConnection {
+        let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
                 "CREATE SCHEMA IF NOT EXISTS test_schema; \
@@ -859,7 +857,7 @@ mod test {
             dev::test_setup_log("test_attach_missing_collection_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -888,7 +886,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_missing_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -925,7 +923,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -973,7 +971,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once_synchronous");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1022,7 +1020,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_multiple_times");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1078,7 +1076,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_beyond_capacity_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1142,7 +1140,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_while_already_attached");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1249,7 +1247,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1304,7 +1302,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_deleted_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1349,7 +1347,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_without_update_filter");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         let conn = setup_db(&pool).await;
 

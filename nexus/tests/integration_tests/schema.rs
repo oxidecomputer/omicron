@@ -954,12 +954,12 @@ async fn dbinit_equals_sum_of_all_up() {
     // Create a connection pool after we apply the first schema version but
     // before applying the rest, and grab a connection from that pool. We'll use
     // it for an extra check later.
-    let pool = nexus_db_queries::db::Pool::new(
-        log,
+    let pool = nexus_db_queries::db::Pool::new_qorb_single_host_blocking(
         &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
-    );
+    )
+    .await;
     let conn_from_pool =
-        pool.pool().get().await.expect("failed to get pooled connection");
+        pool.claim().await.expect("failed to get pooled connection");
 
     // Go from the second version to the latest version.
     for version in all_versions.iter_versions().skip(1) {

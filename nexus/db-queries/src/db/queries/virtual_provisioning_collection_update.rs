@@ -590,8 +590,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let pool = crate::db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
@@ -619,8 +619,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let pool = crate::db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
@@ -646,8 +646,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let pool = crate::db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
@@ -672,8 +672,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let pool = crate::db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
         let max_instance_gen = 0;

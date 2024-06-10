@@ -5,6 +5,7 @@
 //! Common objects used for configuration
 
 use std::fmt;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -31,6 +32,13 @@ pub struct PostgresConfigWithUrl {
 impl PostgresConfigWithUrl {
     pub fn url(&self) -> String {
         self.url_raw.clone()
+    }
+
+    /// Accesses the first ip / port pair within the URL.
+    pub fn address(&self) -> SocketAddr {
+        let ip = self.config.get_hostaddrs()[0];
+        let port = self.config.get_ports()[0];
+        SocketAddr::new(ip, port)
     }
 }
 

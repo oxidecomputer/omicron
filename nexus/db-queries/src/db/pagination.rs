@@ -354,7 +354,7 @@ mod test {
     async fn populate_users(pool: &db::Pool, values: &Vec<(i64, i64)>) {
         use schema::test_users::dsl;
 
-        let conn = pool.pool().get().await.unwrap();
+        let conn = pool.claim().await.unwrap();
 
         // The indexes here work around the check that prevents full table
         // scans.
@@ -392,7 +392,7 @@ mod test {
         pool: &db::Pool,
         query: BoxedQuery<schema::test_users::dsl::test_users>,
     ) -> Vec<User> {
-        let conn = pool.pool().get().await.unwrap();
+        let conn = pool.claim().await.unwrap();
         query.select(User::as_select()).load_async(&*conn).await.unwrap()
     }
 
@@ -402,7 +402,7 @@ mod test {
             dev::test_setup_log("test_paginated_single_column_ascending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         use schema::test_users::dsl;
 
@@ -437,7 +437,7 @@ mod test {
             dev::test_setup_log("test_paginated_single_column_descending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         use schema::test_users::dsl;
 
@@ -472,7 +472,7 @@ mod test {
             dev::test_setup_log("test_paginated_multicolumn_ascending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         use schema::test_users::dsl;
 
@@ -526,7 +526,7 @@ mod test {
             dev::test_setup_log("test_paginated_multicolumn_descending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
 
         use schema::test_users::dsl;
 

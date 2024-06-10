@@ -616,7 +616,7 @@ mod tests {
     }
 
     async fn setup_test_schema(pool: &db::Pool) {
-        let connection = pool.pool().get().await.unwrap();
+        let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
                 "CREATE SCHEMA IF NOT EXISTS test_schema; \
@@ -708,8 +708,10 @@ mod tests {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
-        let conn = pool.pool().get().await.unwrap();
+        let pool = Arc::new(
+            crate::db::Pool::new_qorb_single_host_blocking(&cfg).await,
+        );
+        let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
         setup_test_schema(&pool).await;
@@ -770,8 +772,10 @@ mod tests {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
-        let conn = pool.pool().get().await.unwrap();
+        let pool = Arc::new(
+            crate::db::Pool::new_qorb_single_host_blocking(&cfg).await,
+        );
+        let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
         setup_test_schema(&pool).await;

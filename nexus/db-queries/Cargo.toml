@@ -22,6 +22,7 @@ diesel.workspace = true
 diesel-dtrace.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+internal-dns.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 once_cell.workspace = true
@@ -29,6 +30,7 @@ oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+qorb = { workspace = true, features = [ "diesel_pg", "qtop" ] }
 rand.workspace = true
 ref-cast.workspace = true
 schemars.workspace = true
