@@ -142,6 +142,25 @@ pub enum UpdaterLockError {
     Query(#[from] Error),
 }
 
+/// The result of an [`DataStore::instance_and_vmm_update_runtime`] call,
+/// indicating which records were updated.
+#[derive(Copy, Clone, Debug)]
+pub struct InstanceUpdateResult {
+    /// `true` if the instance record was updated, `false` otherwise.
+    pub instance_updated: bool,
+    /// `true` if the VMM record was updated, `false` otherwise.
+    pub vmm_updated: bool,
+    /// Indicates whether a migration record for this instance was updated, if a
+    /// [`MigrationRuntimeState`] was provided to
+    /// [`DataStore::instance_and_vmm_update_runtime`].
+    ///
+    /// - `Some(true)` if a migration record was updated
+    /// - `Some(false)` if a [`MigrationRuntimeState`] was provided, but the
+    ///   migration record was not updated
+    /// - `None` if no [`MigrationRuntimeState`] was provided
+    pub migration_updated: Option<bool>,
+}
+
 impl DataStore {
     /// Idempotently insert a database record for an Instance
     ///
@@ -373,12 +392,11 @@ impl DataStore {
     ///
     /// # Return value
     ///
-    /// - `Ok((instance_updated, vmm_updated))` if the query was issued
-    ///   successfully. `instance_updated` and `vmm_updated` are each true if
-    ///   the relevant item was updated and false otherwise. Note that an update
-    ///   can fail because it was inapplicable (i.e. the database has state with
-    ///   a newer generation already) or because the relevant record was not
-    ///   found.
+    /// - `Ok(`[`InstanceUpdateResult`]`)` if the query was issued
+    ///   successfully. The returned [`InstanceUpdateResult`] indicates which
+    ///   database record(s) were updated. Note that an update can fail because
+    ///   it was inapplicable (i.e. the database has state with a newer
+    ///   generation already) or because the relevant record was not found.
     /// - `Err` if another error occurred while accessing the database.
     pub async fn instance_and_vmm_update_runtime(
         &self,
@@ -387,7 +405,7 @@ impl DataStore {
         vmm_id: &Uuid,
         new_vmm: &VmmRuntimeState,
         migration: &Option<MigrationRuntimeState>,
-    ) -> Result<(bool, bool, Option<bool>), Error> {
+    ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             *instance_id,
             new_instance.clone(),
@@ -427,7 +445,11 @@ impl DataStore {
             None
         };
 
-        Ok((instance_updated, vmm_updated, migration_updated))
+        Ok(InstanceUpdateResult {
+            instance_updated,
+            vmm_updated,
+            migration_updated,
+        })
     }
 
     /// Lists all instances on in-service sleds with active Propolis VMM

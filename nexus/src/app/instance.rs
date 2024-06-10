@@ -25,6 +25,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::instance::InstanceUpdateResult;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -563,28 +564,27 @@ impl super::Nexus {
         // outright fails, this operation fails. If the operation nominally
         // succeeds but nothing was updated, this action is outdated and the
         // caller should not proceed with migration.
-        let (updated, _, _) = match instance_put_result {
-            Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?
-
-                // TODO(eliza): this is where we would also want to insert to the
-                // migration table...
-            }
-            Err(e) => {
-                if e.instance_unhealthy() {
-                    let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
-                        .await;
+        let InstanceUpdateResult { instance_updated, .. } =
+            match instance_put_result {
+                Ok(state) => {
+                    self.write_returned_instance_state(&instance_id, state)
+                        .await?
                 }
-                return Err(e.into());
-            }
-        };
+                Err(e) => {
+                    if e.instance_unhealthy() {
+                        let _ = self
+                            .mark_instance_failed(
+                                &instance_id,
+                                &prev_instance_runtime,
+                                &e,
+                            )
+                            .await;
+                    }
+                    return Err(e.into());
+                }
+            };
 
-        if updated {
+        if instance_updated {
             Ok(self
                 .db_datastore
                 .instance_refetch(opctx, &authz_instance)
@@ -1324,7 +1324,7 @@ impl super::Nexus {
         &self,
         instance_id: &Uuid,
         state: Option<nexus::SledInstanceState>,
-    ) -> Result<(bool, bool, Option<bool>), Error> {
+    ) -> Result<InstanceUpdateResult, Error> {
         slog::debug!(&self.log,
                      "writing instance state returned from sled agent";
                      "instance_id" => %instance_id,
@@ -1350,7 +1350,13 @@ impl super::Nexus {
 
             update_result
         } else {
-            Ok((false, false, None))
+            // There was no instance state to write back, so --- perhaps
+            // obviously --- nothing happened.
+            Ok(InstanceUpdateResult {
+                instance_updated: false,
+                vmm_updated: false,
+                migration_updated: None,
+            })
         }
     }
 
@@ -1958,16 +1964,6 @@ impl super::Nexus {
     }
 }
 
-/// Records what aspects of an instance's state were actually changed in a
-/// [`notify_instance_updated`] call.
-///
-/// This is (presently) used for debugging purposes only.
-#[derive(Copy, Clone)]
-pub(crate) struct InstanceUpdated {
-    pub instance_updated: bool,
-    pub vmm_updated: bool,
-}
-
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
 #[allow(clippy::too_many_arguments)] // :(
@@ -1980,7 +1976,7 @@ pub(crate) async fn notify_instance_updated(
     instance_id: &Uuid,
     new_runtime_state: &nexus::SledInstanceState,
     v2p_notification_tx: tokio::sync::watch::Sender<()>,
-) -> Result<Option<InstanceUpdated>, Error> {
+) -> Result<Option<InstanceUpdateResult>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
     info!(log, "received new runtime state from sled agent";
@@ -2118,14 +2114,14 @@ pub(crate) async fn notify_instance_updated(
     }
 
     match result {
-        Ok((instance_updated, vmm_updated, migration_updated)) => {
+        Ok(result) => {
             info!(log, "instance and vmm updated by sled agent";
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id,
-                    "instance_updated" => instance_updated,
-                    "vmm_updated" => vmm_updated,
-                    "migration_updated" => ?migration_updated);
-            Ok(Some(InstanceUpdated { instance_updated, vmm_updated }))
+                    "instance_updated" => result.instance_updated,
+                    "vmm_updated" => result.vmm_updated,
+                    "migration_updated" => ?result.migration_updated);
+            Ok(Some(result))
         }
 
         // The update command should swallow object-not-found errors and

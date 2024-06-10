@@ -30,8 +30,6 @@ pub struct Migration {
     /// The time at which this migration record was deleted,
     pub time_deleted: Option<DateTime<Utc>>,
 
-    /// The time at which the source VMM state was last updated.
-
     /// The state of the migration source VMM.
     pub source_state: MigrationState,
 
