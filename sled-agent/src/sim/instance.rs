@@ -381,7 +381,7 @@ impl SimInstanceInner {
             )
             .role;
             if role == MigrationRole::Source {
-                self.queue_successful_migration(MigrationRole::Target)
+                self.queue_successful_migration(MigrationRole::Source)
             }
         }
 

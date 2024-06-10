@@ -222,7 +222,7 @@ impl InstanceAndVmmUpdate {
                             .filter(migration_dsl::source_gen.lt(gen))
                             .set((
                                 migration_dsl::source_state.eq(state),
-                                migration_dsl::time_target_updated
+                                migration_dsl::time_source_updated
                                     .eq(time_updated),
                             )),
                     ),
