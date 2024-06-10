@@ -108,6 +108,8 @@ impl Route {
         Ok(())
     }
 
+    // TODO: Perhaps get rid of this function? Or should I continue using the
+    // running zone method?
     pub fn add_bootstrap_route(
         bootstrap_prefix: u16,
         gz_bootstrap_addr: Ipv6Addr,

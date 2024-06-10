@@ -17,51 +17,28 @@ pub enum Error {
 pub trait Service {
     fn service_name(&self) -> String;
     fn smf_name(&self) -> String;
-    // fn should_import(&self) -> bool;
 }
 
 pub struct SmfHelper<'t> {
     running_zone: &'t RunningZone,
-    //    service_name: String,
+    _service_name: String,
     smf_name: String,
     default_smf_name: String,
-    //    import: bool,
 }
 
 impl<'t> SmfHelper<'t> {
     pub fn new(running_zone: &'t RunningZone, service: &impl Service) -> Self {
-        //        let service_name = service.service_name();
+        let _service_name = service.service_name();
         let smf_name = service.smf_name();
-        //        let import = service.should_import();
         let default_smf_name = format!("{}:default", smf_name);
 
         SmfHelper {
             running_zone,
-            //            service_name,
+            _service_name,
             smf_name,
             default_smf_name,
-            //            import,
         }
     }
-
-    //    pub fn import_manifest(&self) -> Result<(), Error> {
-    //        if self.import {
-    //            self.running_zone
-    //                .run_cmd(&[
-    //                    illumos_utils::zone::SVCCFG,
-    //                    "import",
-    //                    &format!(
-    //                        "/var/svc/manifest/site/{}/manifest.xml",
-    //                        self.service_name
-    //                    ),
-    //                ])
-    //                .map_err(|err| Error::ZoneCommand {
-    //                    intent: "importing manifest".to_string(),
-    //                    err,
-    //                })?;
-    //        }
-    //        Ok(())
-    //    }
 
     pub fn setprop<P, V>(&self, prop: P, val: V) -> Result<(), Error>
     where
@@ -271,37 +248,4 @@ impl<'t> SmfHelper<'t> {
             })?;
         Ok(())
     }
-
-    //    pub fn restart(&self) -> Result<(), Error> {
-    //        self.running_zone
-    //            .run_cmd(&[
-    //                illumos_utils::zone::SVCADM,
-    //                "restart",
-    //                "-s",
-    //                &self.default_smf_name,
-    //            ])
-    //            .map_err(|err| Error::ZoneCommand {
-    //                intent: format!(
-    //                    "Restart SMF service instance {}",
-    //                    self.default_smf_name
-    //                ),
-    //                err,
-    //            })?;
-    //        Ok(())
-    //    }
-
-    //    pub fn enable(&self) -> Result<(), Error> {
-    //        self.running_zone
-    //            .run_cmd(&[
-    //                illumos_utils::zone::SVCADM,
-    //                "enable",
-    //                "-t",
-    //                &self.default_smf_name,
-    //            ])
-    //            .map_err(|err| Error::ZoneCommand {
-    //                intent: format!("Enable {} service", self.default_smf_name),
-    //                err,
-    //            })?;
-    //        Ok(())
-    //    }
 }

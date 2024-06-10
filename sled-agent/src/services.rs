@@ -509,9 +509,6 @@ impl crate::smf_helper::Service for SwitchService {
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())
     }
-    //   fn should_import(&self) -> bool {
-    //       true
-    //   }
 }
 
 /// Combines the generic `SwitchZoneConfig` with other locally-determined
@@ -1941,6 +1938,8 @@ impl ServiceManager {
                     &installed_zone,
                     &vec![*underlay_address],
                 )?;
+                // Like Nexus, we need to be reachable externally via
+                // `dns_address` but we don't listen on that address
                 // directly but instead on a VPC private IP. OPTE will
                 // en/decapsulate as appropriate.
                 let opte_interface_setup =
@@ -2776,9 +2775,6 @@ impl ServiceManager {
 
                             let mut lldpd_config =
                                 PropertyGroupBuilder::new("config")
-                                    // Always tell MGS to listen on localhost so wicketd
-                                    // can contact it even before we have an underlay
-                                    // network.
                                     .add_property(
                                         "board_rev",
                                         "astring",
@@ -2980,24 +2976,6 @@ impl ServiceManager {
                                 );
                             }
 
-                            //     mg_ddm_config = mg_ddm_config.add_property(
-                            //         "interfaces",
-                            //         "astring",
-                            //         // `svccfg setprop` requires a list of values to
-                            //         // be enclosed in `()`, and each string value to
-                            //         // be enclosed in `""`.
-                            //         &format!(
-                            //             "({})",
-                            //             maghemite_interfaces
-                            //                 .iter()
-                            //                 .map(|interface| format!(
-                            //                     r#""{}""#,
-                            //                     interface
-                            //                 ))
-                            //                 .join(" "),
-                            //         ),
-                            //     );
-
                             if is_gimlet {
                                 mg_ddm_config = mg_ddm_config
                                     .add_property(
@@ -3051,25 +3029,6 @@ impl ServiceManager {
 
         //        // TODO: Remove from here until end
         let running_zone = RunningZone::boot(installed_zone).await?;
-        //
-        //        for (link, needs_link_local) in
-        //            running_zone.links().iter().zip(links_need_link_local)
-        //        {
-        //            if needs_link_local {
-        //                info!(
-        //                    self.inner.log,
-        //                    "Ensuring {}/{} exists in zone",
-        //                    link.name(),
-        //                    IPV6_LINK_LOCAL_NAME
-        //                );
-        //                Zones::ensure_has_link_local_v6_address(
-        //                    Some(running_zone.name()),
-        //                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
-        //                        .unwrap(),
-        //                )?;
-        //            }
-        //        }
-        //
 
         // TODO: Figure out where to best do this.
         // It's not possible to have it from the zone itself
@@ -4619,7 +4578,7 @@ impl ServiceManager {
                 SledLocalZone::Initializing { request, .. },
                 Some(new_request),
             ) => {
-                info!(log, "Enabling {zone_typestr} zone (already underway)"; "switch-state" => "first",);
+                info!(log, "Enabling {zone_typestr} zone (already underway)");
                 // The zone has not started yet -- we can simply replace
                 // the next request with our new request.
                 *request = new_request;
@@ -4627,59 +4586,6 @@ impl ServiceManager {
             (SledLocalZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
-                //                let req = request.clone();
-                //                // TODO: make this cleaner
-                //                let switch_zone_config = SwitchZoneConfigLocal { zone: req, root: Utf8PathBuf::new() };
-                //                let zone_args = ZoneArgs::Switch(&switch_zone_config);
-                //
-                //                let (bootstrap_vnic, bootstrap_name_and_address) =
-                //            match self.bootstrap_address_needed(&zone_args)? {
-                //                Some((vnic, address)) => {
-                //                    let name = vnic.name().to_string();
-                //                    (Some(vnic), Some((name, address)))
-                //                }
-                //                None => (None, None),
-                //            };
-                //
-                //            if let Some((bootstrap_name, bootstrap_address)) =
-                //                    bootstrap_name_and_address.as_ref()
-                //                {
-                //
-                //                    info!(
-                //                        self.inner.log,
-                //                        "BOOTSTRAP VNIC {} BOOTSTRAP NAME {} BOOTSTRAP ADDRESS {}",
-                //                        bootstrap_vnic.unwrap().name(),
-                //                        bootstrap_name.to_string(),
-                //                        bootstrap_address.to_string();
-                //                        "switch-state" => "second",
-                //                    );
-                //
-                //                    info!(
-                //                        self.inner.log,
-                //                        "Ensuring bootstrap address {} exists in switch zone",
-                //                        bootstrap_address.to_string();
-                //                        "switch-state" => "second",
-                //                    );
-                //                    zone.ensure_bootstrap_address(*bootstrap_address).await?;
-                //                    info!(
-                //                        self.inner.log,
-                //                        "Forwarding bootstrap traffic via {} to {}",
-                //                        bootstrap_name,
-                //                        self.inner.global_zone_bootstrap_link_local_address;
-                //                        "switch-state" => "second",
-                //                    );
-                //                    zone
-                //                        .add_bootstrap_route(
-                //                            BOOTSTRAP_PREFIX,
-                //                            self.inner.global_zone_bootstrap_link_local_address,
-                //                            bootstrap_name,
-                //                        )
-                //                        .map_err(|err| Error::ZoneCommand {
-                //                            intent: "add bootstrap network route".to_string(),
-                //                            err,
-                //                        })?;
-                //                }
-
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
@@ -4696,6 +4602,7 @@ impl ServiceManager {
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
+                // TODO: I should probably add this to the zone_network_setup_service as part of refresh
                 for addr in &request.addresses {
                     if *addr == Ipv6Addr::LOCALHOST {
                         continue;
@@ -4715,7 +4622,8 @@ impl ServiceManager {
                     );
                 }
 
-                // TODO: This is probably not necessary as it's added byt the zone_network_setup service
+                // TODO: This is probably not necessary as it's added by the zone_network_setup service
+                // Or perhaps I should add this to a refresh method on the zone_network_setup service?
                 //    if let Some(info) = self.inner.sled_info.get() {
                 //        zone.add_default_route(info.underlay_address).map_err(
                 //            |err| Error::ZoneCommand {
@@ -4775,7 +4683,6 @@ impl ServiceManager {
                                 self.inner.log,
                                 "refreshed MGS service with new configuration"
                             )
-                            //smfh.restart()?;
                         }
                         SwitchService::Dendrite { .. } => {
                             info!(
@@ -4819,7 +4726,6 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                             info!(self.inner.log, "refreshed dendrite service with new configuration")
-                            //smfh.restart()?;
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4859,7 +4765,6 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                             info!(self.inner.log, "refreshed lldpd service with new configuration")
-                            //smfh.restart()?;
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
@@ -4908,7 +4813,6 @@ impl ServiceManager {
                                 self.inner.log,
                                 "refreshed mgd service with new configuration"
                             )
-                            //smfh.restart()?;
                         }
                         SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "configuring mg-ddm service");
@@ -4939,7 +4843,6 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                             info!(self.inner.log, "refreshed mg-ddm service with new configuration")
-                            //smfh.restart()?;
                         }
                     }
                 }
@@ -4990,7 +4893,7 @@ impl ServiceManager {
         let zone_args = ZoneArgs::Switch(&zone_request);
         info!(
             self.inner.log,
-            "Starting switch zone"; "switch-state" => "first",
+            "Starting switch zone",
         );
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)

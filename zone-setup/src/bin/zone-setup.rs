@@ -15,7 +15,6 @@ use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use serde_json::Value;
-// use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
 use slog::{info, Logger};
 use std::fs::{
@@ -31,16 +30,12 @@ use uzers::{get_group_by_name, get_user_by_name};
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
 pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
-//pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 pub const ROOT: &str = "root";
 pub const SYS: &str = "sys";
 
 pub const COMMON_NW_CMD: &str = "common-networking";
 pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
 pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
-// TODO: Decide if we want to do the whole switch zone set up via the
-// CLI, or just the baseboard generation. If it's just the latter,
-// this command should change to something else.
 pub const SWITCH_ZONE_SETUP_CMD: &str = "switch-zone";
 
 // User information for the switch zone
@@ -75,6 +70,8 @@ impl SwitchZoneUser {
         }
     }
 
+    // TODO: Use builder pattern to set values
+
     fn setup_switch_zone_user(self, log: &Logger) -> Result<(), CmdError> {
         // TODO: Remove non-destructive comments I'm using for testing on my machine
         info!(&log, "Add a new group for the user"; "group" => &self.group, "user" => &self.user);
@@ -101,10 +98,6 @@ impl SwitchZoneUser {
                 }
             }
         };
-        // println!(
-        //     "getent group {} >/dev/null 2>&1 || groupadd {}",
-        //     self.group, self.group
-        // );
 
         info!(&log, "Add the user"; "user" => &self.user, "shell" => &self.shell,
         "group" => &self.group, "gecos" => &self.gecos);
@@ -139,10 +132,6 @@ impl SwitchZoneUser {
                 }
             }
         };
-        // println!(
-        //     "getent passwd {} >/dev/null 2>&1 || useradd -m -s {} -g {} -c {} {}",
-        //     self.user, self.shell, self.group, self.gecos, self.user
-        // );
 
         // Either enable password-less login (wicket) or disable password-based logins
         // completely (support, which logs in via ssh key).
@@ -166,7 +155,6 @@ impl SwitchZoneUser {
                     cmd.status
                 )));
             }
-            // println!("passwd -d {}", self.user);
         } else {
             info!(&log, "Disable password-based logins"; "user" => self.user.clone());
             let cmd = std::process::Command::new("passwd")
@@ -187,7 +175,6 @@ impl SwitchZoneUser {
                     cmd.status
                 )));
             }
-            // println!("passwd -N {}", self.user);
         };
 
         if let Some(profiles) = self.profiles {
@@ -216,11 +203,6 @@ impl SwitchZoneUser {
                     cmd.status
                 )));
             }
-
-            // println!(
-            //     "usermod -P\"$(printf '%s,' \"{}\")\" {}",
-            //     profile_list, self.user
-            // );
         } else {
             info!(&log, "Remove user profiles"; "user" => self.user.clone());
             let cmd = std::process::Command::new("usermod")
@@ -241,7 +223,6 @@ impl SwitchZoneUser {
                     cmd.status
                 )));
             }
-            // println!("usermod -P '' {}", self.user)
         };
 
         if let Some(homedir) = self.homedir {
@@ -295,11 +276,6 @@ impl SwitchZoneUser {
                     cmd.status
                 )));
             }
-
-            // println!("mkdir -p {}", homedir);
-            // println!("cp /root/.bashrc {}/.bashrc", homedir);
-            // println!("cp /root/.profile {}/.profile", homedir);
-            // println!("chown -R {} {}", self.user, homedir);
         }
         Ok(())
     }
@@ -566,11 +542,6 @@ async fn switch_zone_setup(
     let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
     let gz_local_link_addr: &Ipv6Addr =
         matches.get_one("gz_local_link_addr").unwrap();
-    //let links = matches
-    //    .get_many::<String>("link_local_links")
-    //    .unwrap()
-    //    .collect::<Vec<_>>();
-
     let links = if let Some(l) = matches.get_many::<String>("link_local_links")
     {
         Some(l.collect::<Vec<_>>())
@@ -581,7 +552,6 @@ async fn switch_zone_setup(
     info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
     generate_switch_zone_baseboard_file(file, info)?;
 
-    // TODO: Decide if we actually want to set the users via rust code or the bash script
     info!(&log, "Setting up the users required for wicket and support");
     let wicket_user = SwitchZoneUser::new(
         String::from("wicket"),
@@ -608,14 +578,6 @@ async fn switch_zone_setup(
         u.setup_switch_zone_user(&log)?;
     }
 
-    // // Clap only checks if a flag is present or not. In this case, an
-    // // empty list could sneak through if the flag is set without a value
-    // // like `-l ""`.
-    // if links.is_empty() {
-    //     return Err(CmdError::Failure(anyhow!(
-    //         "At least one link local link must be provided"
-    //     )));
-    // } else {
     if let Some(links) = links {
         info!(&log, "Ensuring link local links"; "links" => ?links, "zone name" => ?zone_name);
         for link in &links {
@@ -636,9 +598,9 @@ async fn switch_zone_setup(
     } else {
         info!(&log, "No link local links to be configured");
     };
-    // };
 
     // TODO: This CANNOT happen inside the zone as the vnics live in the global zone
+    // Oooooor can it????
 
     info!(&log, "Ensuring bootstrap address exists in zone";
     "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic, "bootstrap address" => ?bootstrap_addr);
@@ -981,6 +943,13 @@ async fn common_nw_set_up(
     // TODO: Run this enough times to make sure this implementation is solid
     // perhaps somehow find out a way to know when the gateway is up?
     // perhaps configure this for the switch zone separately?
+    //
+    // Maybe instead of waiting we want to implement the "Maybe gateway" logic,
+    // and afterwards update this when the other services refresh?
+    //
+    // NOTE: Route must come after bootstrap, meaning this won't succeed until
+    // after all bootstrap address code is run in switch zone. Maybe this service
+    // can depend on the switch setup serice?
     retry_notify(
         // TODO: Is this the best retry policy?
         retry_policy_local(),
@@ -1004,11 +973,6 @@ async fn common_nw_set_up(
         },
     )
     .await?;
-
-    // TODO: Route must come after bootstrap
-    //   info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
-    //   Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
-    //       .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
     let mut hosts_contents = String::from(
