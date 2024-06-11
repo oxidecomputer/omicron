@@ -386,6 +386,16 @@ impl InstanceStates {
                 self.clear_migration_ids(observed.time);
                 self.retire_active_propolis(observed.time);
             }
+            // If there's an active migration and the VMM is suddenly gone,
+            // that should constitute a migration failure!
+            if let Some(MigrationState::Pending | MigrationState::InProgress) =
+                self.migration.as_ref().map(|m| m.state)
+            {
+                self.transition_migration(
+                    MigrationState::Failed,
+                    observed.time,
+                );
+            }
             Some(Action::Destroy)
         } else {
             None
@@ -717,6 +727,37 @@ mod test {
                     > original_instance_state.instance.gen
             );
         }
+    }
+
+    fn test_termination_fails_in_progress_migration(
+        mk_instance: impl Fn() -> InstanceStates,
+    ) {
+        for state in [Observed::Destroyed, Observed::Failed] {
+            let mut instance_state = mk_instance();
+            let original_migration = instance_state.clone().migration.unwrap();
+            let requested_action = instance_state
+                .apply_propolis_observation(&make_observed_state(state.into()));
+
+            let migration =
+                instance_state.migration.expect("state must have a migration");
+            assert_eq!(migration.state, MigrationState::Failed);
+            assert!(migration.gen > original_migration.gen);
+            assert!(matches!(requested_action, Some(Action::Destroy)));
+        }
+    }
+
+    #[test]
+    fn source_termination_fails_in_progress_migration() {
+        test_termination_fails_in_progress_migration(
+            make_migration_source_instance,
+        )
+    }
+
+    #[test]
+    fn target_termination_fails_in_progress_migration() {
+        test_termination_fails_in_progress_migration(
+            make_migration_target_instance,
+        )
     }
 
     #[test]
