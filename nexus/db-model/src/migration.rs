@@ -14,7 +14,15 @@ use uuid::Uuid;
 
 /// The state of a migration as understood by Nexus.
 #[derive(
-    Clone, Debug, Queryable, Insertable, Selectable, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Queryable,
+    Insertable,
+    Selectable,
+    Serialize,
+    Deserialize,
+    Eq,
+    PartialEq,
 )]
 #[diesel(table_name = migration)]
 pub struct Migration {
