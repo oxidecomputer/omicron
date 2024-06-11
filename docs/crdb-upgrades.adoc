@@ -60,13 +60,15 @@ a tick, but they must occur in that order.)
 . Add an enum variant for the new version to `CockroachDbClusterVersion`
   in `nexus/types/src/deployment/planning_input.rs`, and change the
   associated constant `NEWLY_INITIALIZED` to that value.
-. Run the test suite, which should catch any unexpected SQL
+. Regenerate test output files that depend on the database version:
++
+....
+EXPECTORATE=overwrite cargo nextest run -p omicron-nexus -- integration_tests::commands::test_nexus_openapi_internal
+EXPECTORATE=overwrite cargo nextest run -p omicron-omdb -- test_omdb_success_cases
+....
+. Run the full test suite, which should catch any unexpected SQL
   compatibility issues between releases and help validate that your
   build works.
-  * You will need to run the `test_omdb_success_cases` test from
-    omicron-omdb with `EXPECTORATE=overwrite`; this file contains the
-    expected output of various omdb commands, including a fingerprint of
-    CockroachDB's cluster state.
 . Submit a PR for your changes to garbage-compactor; when merged,
   publish the final build to the `oxide-cockroachdb-build` S3 bucket.
 . Update `tools/cockroachdb_checksums`. For non-illumos checksums, use
