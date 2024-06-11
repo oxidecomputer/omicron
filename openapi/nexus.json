@@ -12309,7 +12309,7 @@
         ]
       },
       "Distributiondouble": {
-        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12326,15 +12326,47 @@
               "format": "uint64",
               "minimum": 0
             }
+          },
+          "max": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "p50": {
+            "$ref": "#/components/schemas/Quantile"
+          },
+          "p90": {
+            "$ref": "#/components/schemas/Quantile"
+          },
+          "p99": {
+            "$ref": "#/components/schemas/Quantile"
+          },
+          "sum_of_samples": {
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_squares": {
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
-          "counts"
+          "counts",
+          "p50",
+          "p90",
+          "p99",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Distributionint64": {
-        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12351,11 +12383,43 @@
               "format": "uint64",
               "minimum": 0
             }
+          },
+          "max": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "p50": {
+            "$ref": "#/components/schemas/Quantile"
+          },
+          "p90": {
+            "$ref": "#/components/schemas/Quantile"
+          },
+          "p99": {
+            "$ref": "#/components/schemas/Quantile"
+          },
+          "sum_of_samples": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
-          "counts"
+          "counts",
+          "p50",
+          "p90",
+          "p99",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "EphemeralIpCreate": {
@@ -13112,25 +13176,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Bindouble"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramfloat": {
@@ -13138,25 +13256,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binfloat"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "number",
+            "format": "float"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "number",
+            "format": "float"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramint16": {
@@ -13164,25 +13336,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint16"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int16"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int16"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramint32": {
@@ -13190,25 +13416,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint32"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int32"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramint64": {
@@ -13216,25 +13496,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint64"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramint8": {
@@ -13242,25 +13576,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint8"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int8"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int8"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramuint16": {
@@ -13268,25 +13656,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint16"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramuint32": {
@@ -13294,25 +13738,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint32"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramuint64": {
@@ -13320,25 +13820,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint64"
             }
           },
-          "n_samples": {
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_samples": {
+            "description": "The total number of samples in the histogram.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Histogramuint8": {
@@ -13346,25 +13902,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint8"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sum_of_squares": {
+            "description": "The sum of the squares of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "start_time",
+          "sum_of_samples",
+          "sum_of_squares"
         ]
       },
       "Hostname": {
@@ -15755,6 +16367,58 @@
             ]
           }
         }
+      },
+      "Quantile": {
+        "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.\n\nRead <https://www.cs.wustl.edu/~jain/papers/ftp/psqr.pdf> for more.",
+        "type": "object",
+        "properties": {
+          "desired_marker_increments": {
+            "description": "The increment for the desired marker positions.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "desired_marker_positions": {
+            "description": "The desired marker positions.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "marker_heights": {
+            "description": "The heights of the markers.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "marker_positions": {
+            "description": "The positions of the markers.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "desired_marker_increments",
+          "desired_marker_positions",
+          "marker_heights",
+          "marker_positions"
+        ]
       },
       "Rack": {
         "description": "View of an Rack",

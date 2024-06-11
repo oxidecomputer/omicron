@@ -866,7 +866,6 @@ impl Client {
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, &sql));
         let start = Instant::now();
-
         // Submit the SQL request itself.
         let response = self
             .client
@@ -1072,7 +1071,6 @@ mod tests {
     // explored or decided on these.
     //
     // TODO-robustness TODO-correctness: Figure out the ClickHouse options we need.
-
     #[tokio::test]
     async fn test_single_node() {
         let logctx = test_setup_log("test_single_node");
@@ -3101,7 +3099,7 @@ mod tests {
         let insert_sql = format!(
             "INSERT INTO {measurement_table} FORMAT JSONEachRow {inserted_row}",
         );
-        println!("Inserted row: {}", inserted_row);
+        println!("Row to insert: {}", inserted_row);
         client
             .execute(insert_sql)
             .await
@@ -3114,11 +3112,17 @@ mod tests {
             measurement.timestamp().format(crate::DATABASE_TIMESTAMP_FORMAT),
             crate::DATABASE_SELECT_FORMAT,
         );
+
+        println!("Selecting row: {}", select_sql);
+
         let body = client
             .execute_with_body(select_sql)
             .await
             .expect("Failed to select measurement row")
             .1;
+
+        println!("Body: {}", body);
+
         let (_, actual_row) = crate::model::parse_measurement_from_row(
             &body,
             measurement.datum_type(),
@@ -3671,12 +3675,12 @@ mod tests {
 
         // Write out the upgrading SQL files.
         //
-        // Note that all of these statements are going in the version 2 schema
+        // Note that all of these statements are going in the version 6 schema
         // directory.
         let (schema_dir, version_dirs) =
             create_test_upgrade_schema_directory(replicated, &[NEXT_VERSION])
                 .await;
-        const NEXT_VERSION: u64 = 2;
+        const NEXT_VERSION: u64 = OXIMETER_VERSION + 1;
         let first_sql =
             format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
         let second_sql =
@@ -3895,7 +3899,7 @@ mod tests {
         // Write out the upgrading SQL files.
         //
         // Note that each statement goes into a different version.
-        const VERSIONS: [u64; 3] = [1, 2, 3];
+        const VERSIONS: [u64; 4] = [1, 2, 3, 4];
         let (schema_dir, version_dirs) =
             create_test_upgrade_schema_directory(replicated, &VERSIONS).await;
         let first_sql = String::new();

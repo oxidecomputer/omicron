@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
+float-ord.workspace = true
 num.workspace = true
 omicron-common.workspace = true
 oximeter-macro-impl.workspace = true
