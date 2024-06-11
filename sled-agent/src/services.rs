@@ -3801,7 +3801,6 @@ impl ServiceManager {
             }
         };
 
-        info!(self.inner.log, "Setting up uplinkd service");
         let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
 
         // We want to delete all the properties in the `uplinks` group, but we
@@ -3812,7 +3811,6 @@ impl ServiceManager {
 
         for port_config in &our_ports {
             for addr in &port_config.addrs {
-                info!(self.inner.log, "configuring port: {port_config:?}");
                 smfh.addpropvalue_type(
                     &format!("uplinks/{}_0", port_config.port,),
                     &addr.to_string(),
