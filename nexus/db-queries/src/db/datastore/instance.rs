@@ -21,7 +21,6 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
-use crate::db::model::Migration;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
