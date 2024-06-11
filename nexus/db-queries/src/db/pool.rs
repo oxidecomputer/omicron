@@ -8,7 +8,7 @@
 use super::Config as DbConfig;
 use qorb::backend;
 use qorb::connectors::diesel_pg::DieselPgConnector;
-use qorb::policy::Policy;
+use qorb::policy::{Policy, SetConfig};
 use qorb::resolver::{AllBackends, Resolver};
 use qorb::resolvers::dns::{DnsResolver, DnsResolverConfig};
 use qorb::service;
@@ -114,10 +114,21 @@ impl Pool {
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector();
 
-        let spares_wanted = 10;
+        // NOTE: this seems like overkill, but it's actually needed
+        // for "test_iam_roles_behavior" -- even 50 spares doesn't work
+        // reliably.
+        //
+        // Unclear to me who should eat the burden for this. Should it be
+        // configurable? Should we let tests "await" a little longer during
+        // connection claiming? This wait-on-claim behavior is what bb8 did,
+        // but we explicitly wanted to avoid that in cases where the databases
+        // are offline.
+        let spares_wanted = 100;
+        let max = spares_wanted * 2;
         let policy = Policy {
             spares_wanted,
-            max_slots: 20,
+            max_slots: max,
+            set_config: SetConfig { max_count: max, ..Default::default() },
             ..Default::default()
         };
         let pool =
@@ -136,7 +147,8 @@ impl Pool {
         pool.inner.block_until_online().await;
 
         let mut rx = pool.inner.stats().rx.clone();
-        let backends = rx.wait_for(|value| !value.is_empty())
+        let backends = rx
+            .wait_for(|value| !value.is_empty())
             .await
             .expect("Database never became ready and pool was dropped");
         let stats = backends.values().next().unwrap();
