@@ -426,6 +426,7 @@ async fn verify_endpoint(
             allowed,
             AllowedMethod::Get
                 | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket
         )
     });
@@ -459,6 +460,22 @@ async fn verify_endpoint(
             .execute()
             .await
             .unwrap();
+            None
+        }
+        Some(AllowedMethod::GetVolatile) => {
+            // Same thing as `Get`, but avoid returning the output to prevent
+            // the resource change detection ahead.
+            info!(log, "test: privileged GET (volatile output)");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::OK,
+            )));
+            NexusRequest::object_get(client, uri.as_str())
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
+                .parsed_body::<serde_json::Value>()
+                .unwrap();
             None
         }
         Some(AllowedMethod::GetWebsocket) => {
