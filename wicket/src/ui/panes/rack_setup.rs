@@ -792,10 +792,19 @@ fn rss_config_text<'a>(
             });
 
             let addresses = addresses.iter().map(|a| {
-                vec![
+                let mut items = vec![
                     Span::styled("  • Address       : ", label_style),
-                    Span::styled(a.to_string(), ok_style),
-                ]
+                    Span::styled(a.address.to_string(), ok_style),
+                ];
+                if let Some(vlan_id) = a.vlan_id {
+                    items.extend([
+                        Span::styled(" (vlan_id=", label_style),
+                        Span::styled(vlan_id.to_string(), ok_style),
+                        Span::styled(")", label_style),
+                    ]);
+                }
+
+                items
             });
 
             let peers = bgp_peers.iter().flat_map(|p| {
