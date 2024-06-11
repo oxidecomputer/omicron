@@ -70,6 +70,12 @@ use crate::db::update_and_check::UpdateStatus;
 // SELECT vmm_result.found, vmm_result.updated, instance_result.found,
 //        instance_result.updated
 // FROM vmm_result, instance_result;
+///
+/// If a [`MigrationUpdate`] is provided, similar "found" and "update" clauses
+/// are also added to join the `migration` record for the isntance's active
+/// migration, if one exists, and update the migration record. If no migration
+/// record is provided, this part of the query is skipped, and the
+/// `migration_found` and `migration_updated` portions are always `false`.
 //
 // The "wrapper" SELECTs when finding instances and VMMs are used to get a NULL
 // result in the final output instead of failing the entire query if the target
