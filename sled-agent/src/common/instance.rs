@@ -257,6 +257,24 @@ impl InstanceStates {
         }
     }
 
+    fn transition_migration(
+        &mut self,
+        state: MigrationState,
+        time_updated: DateTime<Utc>,
+    ) {
+        let migration = self.migration.as_mut().expect(
+            "an ObservedMigrationState should only be constructed when the \
+            VMM has an active migration",
+        );
+        // Don't generate spurious state updates if the migration is already in
+        // the state we're transitioning to.
+        if migration.state != state {
+            migration.state = state;
+            migration.time_updated = time_updated;
+            migration.gen = migration.gen.next();
+        }
+    }
+
     /// Update the known state of an instance based on an observed state from
     /// Propolis.
     pub(crate) fn apply_propolis_observation(
@@ -280,13 +298,10 @@ impl InstanceStates {
         // migration.
         match observed.migration_status {
             ObservedMigrationStatus::Succeeded => {
-                let migration = self.migration.as_mut().expect(
-                    "an ObservedMigrationStatus::Completed is only \
-                        constructed if a migration state exists",
+                self.transition_migration(
+                    MigrationState::Completed,
+                    observed.time,
                 );
-                migration.state = MigrationState::Completed;
-                migration.gen = migration.gen.next();
-                migration.time_updated = observed.time;
                 match self.propolis_role() {
                     // This is a successful migration out. Point the instance to the
                     // target VMM, but don't clear migration IDs; let the target do
@@ -322,13 +337,10 @@ impl InstanceStates {
                 }
             }
             ObservedMigrationStatus::Failed => {
-                let migration = self.migration.as_mut().expect(
-                    "an ObservedMigrationStatus::Failed is only \
-                        constructed if a migration state exists",
+                self.transition_migration(
+                    MigrationState::Failed,
+                    observed.time,
                 );
-                migration.state = MigrationState::Failed;
-                migration.gen = migration.gen.next();
-                migration.time_updated = observed.time;
 
                 match self.propolis_role() {
                     // This is a failed migration out. CLear migration IDs so that
@@ -349,11 +361,10 @@ impl InstanceStates {
                 }
             }
             ObservedMigrationStatus::InProgress => {
-                if let Some(ref mut migration) = self.migration {
-                    migration.state = MigrationState::InProgress;
-                    migration.gen = migration.gen.next();
-                    migration.time_updated = observed.time;
-                }
+                self.transition_migration(
+                    MigrationState::InProgress,
+                    observed.time,
+                );
             }
             ObservedMigrationStatus::NoMigration
             | ObservedMigrationStatus::Pending => {}
