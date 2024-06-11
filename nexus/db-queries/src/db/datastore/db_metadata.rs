@@ -511,8 +511,7 @@ mod test {
         let mut crdb = test_db::test_setup_database(&logctx.log).await;
 
         let cfg = db::Config { url: crdb.pg_config().clone() };
-        let pool =
-            Arc::new(db::Pool::new_qorb_single_host_blocking(&cfg).await);
+        let pool = Arc::new(db::Pool::new_qorb_single_host(&cfg).await);
         let datastore =
             Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
 
@@ -560,8 +559,7 @@ mod test {
         let mut crdb = test_db::test_setup_database(&logctx.log).await;
 
         let cfg = db::Config { url: crdb.pg_config().clone() };
-        let pool =
-            Arc::new(db::Pool::new_qorb_single_host_blocking(&cfg).await);
+        let pool = Arc::new(db::Pool::new_qorb_single_host(&cfg).await);
         let conn = pool.claim().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
@@ -673,8 +671,7 @@ mod test {
         let mut crdb = test_db::test_setup_database(&logctx.log).await;
 
         let cfg = db::Config { url: crdb.pg_config().clone() };
-        let pool =
-            Arc::new(db::Pool::new_qorb_single_host_blocking(&cfg).await);
+        let pool = Arc::new(db::Pool::new_qorb_single_host(&cfg).await);
         let conn = pool.claim().await.unwrap();
 
         // Mimic the layout of "schema/crdb".

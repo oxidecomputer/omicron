@@ -857,7 +857,7 @@ mod test {
             dev::test_setup_log("test_attach_missing_collection_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -886,7 +886,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_missing_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -923,7 +923,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -971,7 +971,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once_synchronous");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1020,7 +1020,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_multiple_times");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1076,7 +1076,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_beyond_capacity_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1140,7 +1140,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_while_already_attached");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1247,7 +1247,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1302,7 +1302,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_deleted_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 
@@ -1347,7 +1347,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_without_update_filter");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host_blocking(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg).await;
 
         let conn = setup_db(&pool).await;
 

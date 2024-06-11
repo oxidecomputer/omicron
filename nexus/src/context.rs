@@ -251,7 +251,14 @@ impl ServerContext {
             }
         };
 
-        let pool = db::Pool::new_qorb(dns_addrs);
+        let pool = match &config.deployment.database {
+            nexus_config::Database::FromUrl { url } => {
+                db::Pool::new_qorb_single_host(&db::Config { url: url.clone() })
+                    .await
+            }
+            nexus_config::Database::FromDns => db::Pool::new_qorb(dns_addrs),
+        };
+
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),

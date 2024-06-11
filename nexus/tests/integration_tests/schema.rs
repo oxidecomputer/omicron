@@ -954,7 +954,7 @@ async fn dbinit_equals_sum_of_all_up() {
     // Create a connection pool after we apply the first schema version but
     // before applying the rest, and grab a connection from that pool. We'll use
     // it for an extra check later.
-    let pool = nexus_db_queries::db::Pool::new_qorb_single_host_blocking(
+    let pool = nexus_db_queries::db::Pool::new_qorb_single_host(
         &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
     )
     .await;
