@@ -17,10 +17,7 @@ use omicron_common::cmd::CmdError;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
 use serde_json::Value;
 use slog::{info, Logger};
-use std::fs::{
-    metadata, read_to_string, set_permissions, write,
-    OpenOptions,
-};
+use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
