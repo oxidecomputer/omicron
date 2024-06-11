@@ -114,10 +114,37 @@ impl Pool {
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector();
 
-        let policy = Policy::default();
+        let spares_wanted = 10;
+        let policy = Policy {
+            spares_wanted,
+            max_slots: 20,
+            ..Default::default()
+        };
         let pool =
             Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) };
+
+        // I wish this was enough to work for our tests, but many of them try to
+        // grab multiple connections back-to-back. Therefore, we can't "just"
+        // wait for the pool to come online, we need to wait until we have some
+        // confidence that enough connections exist to be used by our test.
+        //
+        // Rather than flaking, we wait until unclaimed slots are made
+        // accessible.
+        //
+        // Since this is intended to be used by tests connecting to a single
+        // host locally, we SHOULD be able to make these connections.
         pool.inner.block_until_online().await;
+
+        let mut rx = pool.inner.stats().rx.clone();
+        let backends = rx.wait_for(|value| !value.is_empty())
+            .await
+            .expect("Database never became ready and pool was dropped");
+        let stats = backends.values().next().unwrap();
+
+        while stats.get().unclaimed_slots < spares_wanted {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
         pool
     }
 

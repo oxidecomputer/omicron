@@ -35,8 +35,21 @@ impl PostgresConfigWithUrl {
     }
 
     /// Accesses the first ip / port pair within the URL.
+    ///
+    /// # Safety
+    ///
+    /// This method makes the assumption that the hostname has at least one
+    /// "host IP / port" pair which can be extracted. If the supplied URL
+    /// does not have such a pair, this function will panic.
+    // Yes, panicking in the above scenario sucks. But this type is already
+    // pretty ubiquitous within Omicron, and integration with the qorb
+    // connection pooling library requires access to database by SocketAddr.
     pub fn address(&self) -> SocketAddr {
-        let ip = self.config.get_hostaddrs()[0];
+        let tokio_postgres::config::Host::Tcp(host) = &self.config.get_hosts()[0] else {
+            panic!("Non-TCP hostname");
+        };
+        let ip: std::net::IpAddr = host.parse().expect("Failed to parse host as IP address");
+
         let port = self.config.get_ports()[0];
         SocketAddr::new(ip, port)
     }
