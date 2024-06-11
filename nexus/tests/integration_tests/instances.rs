@@ -686,6 +686,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         let datastore =
             cptestctx.server.server_context().nexus.datastore().clone();
         let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
             .filter(dsl::id.eq(migration_id))
             .select(Migration::as_select())
             .get_results_async::<Migration>(
@@ -824,6 +827,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::Completed.into());
     assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert!(migration.time_deleted.is_some());
 }
 
 #[nexus_test]

@@ -2076,6 +2076,40 @@ pub(crate) async fn notify_instance_updated(
         )
         .await;
 
+    // Has a migration terminated? If so,mark the migration record as deleted if
+    // and only if both sides of the migration are in a terminal state.
+    if let Some(nexus::MigrationRuntimeState {
+        migration_id,
+        state,
+        role,
+        ..
+    }) = new_runtime_state.migration_state
+    {
+        if state.is_terminal() {
+            info!(
+                log,
+                "migration has terminated, trying to delete it...";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "migration_id" => %propolis_id,
+                "migration_state" => %state,
+                "migration_role" => %role,
+            );
+            if !datastore.migration_terminate(opctx, migration_id).await? {
+                info!(
+                    log,
+                    "did not mark migration record as deleted (the other half \
+                    may not yet have reported termination)";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "migration_id" => %propolis_id,
+                    "migration_state" => %state,
+                    "migration_role" => %role,
+                );
+            }
+        }
+    }
+
     // If the VMM is now in a terminal state, make sure its resources get
     // cleaned up.
     //

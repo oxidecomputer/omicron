@@ -27,6 +27,15 @@ impl_enum_wrapper!(
     Failed => b"failed"
 );
 
+impl MigrationState {
+    /// Returns `true` if this migration state means that the migration is no
+    /// longer in progress (it has either succeeded or failed).
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        self.0.is_terminal()
+    }
+}
+
 impl fmt::Display for MigrationState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
