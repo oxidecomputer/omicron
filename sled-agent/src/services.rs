@@ -2361,58 +2361,11 @@ impl ServiceManager {
                 let mut uplink_service = ServiceBuilder::new("oxide/uplink");
                 let mut sp_sim_service = ServiceBuilder::new("oxide/sp-sim");
 
-                let Some((bootstrap_name, bootstrap_address)) =
-                    bootstrap_name_and_address.as_ref()
-                else {
-                    return Err(Error::BadServiceRequest {
-                        service: String::from("switch_zone_setup"),
-                        message: String::from(
-                            "Could not retrieve bootstrap vnic name and address",
-                        ),
-                    });
-                };
-
-                let Some(b_vnic) = bootstrap_vnic.as_ref() else {
-                    return Err(Error::BadServiceRequest {
-                        service: String::from("switch_zone_setup"),
-                        message: String::from(
-                            "Could not retrieve bootstrap vnic information",
-                        ),
-                    });
-                };
-
                 let mut switch_zone_setup_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "zone_name",
-                            "astring",
-                            installed_zone.name(),
-                        )
-                        .add_property(
-                            "bootstrap_addr",
-                            "astring",
-                            &format!("{bootstrap_address}"),
-                        )
-                        .add_property(
-                            "bootstrap_name",
-                            "astring",
-                            bootstrap_name,
-                        )
-                        .add_property(
-                            "bootstrap_vnic",
-                            "astring",
-                            b_vnic.name(),
-                        )
-                        .add_property(
-                            "gz_local_link_addr",
-                            "astring",
-                            &format!(
-                                "{}",
-                                self.inner
-                                    .global_zone_bootstrap_link_local_address
-                            ),
-                        );
+                    PropertyGroupBuilder::new("config");
 
+                // TODO: investigate links_need_link_local more throroughly, there don't seem to be any
+                // in either of the scrimlets
                 for (link, needs_link_local) in
                     installed_zone.links().iter().zip(links_need_link_local)
                 {
@@ -3030,9 +2983,10 @@ impl ServiceManager {
         //        // TODO: Remove from here until end
         let running_zone = RunningZone::boot(installed_zone).await?;
 
-        // TODO: Figure out where to best do this.
-        // It's not possible to have it from the zone itself
-        // as it needs to be run from the global zone
+        // Part of the process to ensure bootstrap address is to set up
+        // an IPv6 address within the Global Zone.
+        // This means we cannot run bootsrap setup via a service running on
+        // the switch zone itself.
         if let Some((bootstrap_name, bootstrap_address)) =
             bootstrap_name_and_address.as_ref()
         {

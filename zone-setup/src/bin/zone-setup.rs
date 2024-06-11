@@ -439,38 +439,6 @@ async fn do_run() -> Result<(), CmdError> {
                     .value_parser(parse_baseboard_info),
                 )
                 .arg(
-                    arg!(
-                        -a --bootstrap_addr <Ipv6Addr> "bootstrap_addr"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv6),
-                )
-                .arg(
-                    arg!(
-                        -n --bootstrap_name <String> "bootstrap_name"
-                    )
-                    .required(true),
-                )
-                .arg(
-                    arg!(
-                        -v --bootstrap_vnic <String> "bootstrap_vnic"
-                    )
-                    .required(true),
-                )
-                .arg(
-                    arg!(
-                        -g --gz_local_link_addr <Ipv6Addr> "gz_local_link_addr"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv6),
-                )
-                .arg(
-                    arg!(
-                        -z --zone_name <STRING> "zone_name"
-                    )
-                    .required(true),
-                )
-                .arg(
                     Arg::new("link_local_links")
                     .short('l')
                     .long("link_local_links")
@@ -535,13 +503,6 @@ async fn switch_zone_setup(
 ) -> Result<(), CmdError> {
     let file: &String = matches.get_one("baseboard_file").unwrap();
     let info: &String = matches.get_one("baseboard_info").unwrap();
-    // TODO: Get rid of zone name?
-    let zone_name: &String = matches.get_one("zone_name").unwrap();
-    let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
-    let bootstrap_name: &String = matches.get_one("bootstrap_name").unwrap();
-    let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
-    let gz_local_link_addr: &Ipv6Addr =
-        matches.get_one("gz_local_link_addr").unwrap();
     let links = if let Some(l) = matches.get_many::<String>("link_local_links")
     {
         Some(l.collect::<Vec<_>>())
@@ -579,10 +540,8 @@ async fn switch_zone_setup(
     }
 
     if let Some(links) = links {
-        info!(&log, "Ensuring link local links"; "links" => ?links, "zone name" => ?zone_name);
+        info!(&log, "Ensuring link local links"; "links" => ?links);
         for link in &links {
-            //  println!("{link}");
-            //  println!("{zone_name}");
             Zones::ensure_has_link_local_v6_address(
                 None,
                 &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
@@ -598,48 +557,6 @@ async fn switch_zone_setup(
     } else {
         info!(&log, "No link local links to be configured");
     };
-
-    // TODO: This CANNOT happen inside the zone as the vnics live in the global zone
-    // Oooooor can it????
-
-    info!(&log, "Ensuring bootstrap address exists in zone";
-    "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic, "bootstrap address" => ?bootstrap_addr);
-    //    let addrtype =
-    //        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
-    //    let addrobj_name = "bootstrap6";
-    //    let addrobj =
-    //        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
-    //            CmdError::Failure(anyhow!(
-    //                "Could not create new addrobj {:?}: {}",
-    //                addrobj_name,
-    //                err
-    //            ))
-    //        })?;
-    //    // TODO: Fix error
-    //    // root@oxz_switch:~# /usr/sbin/ipadm create-addr -t -T static -a fdb0:a8a1:59c7:4e85::2/64 oxBootstrap0/bootstrap6
-    //    // ipadm: Could not create address: Can't assign requested address
-    //    let _ = Zones::ensure_address(None, &addrobj, addrtype)
-    //        .map_err(|err| {
-    //            CmdError::Failure(anyhow!(
-    //                "Could not ensure address {} {:?}: {}",
-    //                addrobj,
-    //                addrtype,
-    //                err
-    //            ))
-    //        })?;
-    //
-    info!(
-        &log,
-        "Forwarding bootstrap traffic via {} to {}",
-        bootstrap_name,
-        gz_local_link_addr
-    );
-    //    Route::add_bootstrap_route(
-    //        BOOTSTRAP_PREFIX,
-    //        *gz_local_link_addr,
-    //        &bootstrap_name,
-    //    )
-    //    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
