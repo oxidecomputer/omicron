@@ -21,6 +21,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::Migration;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
@@ -117,6 +118,16 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
             },
         }
     }
+}
+
+/// Wraps a record of an [`Instance`] along with its active [`Vmm`], migration
+/// target [`Vmm`], and [`Migration`] record, if a migration exists.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct InstanceSnapshot {
+    pub instance: Instance,
+    pub active_vmm: Option<Vmm>,
+    pub target_vmm: Option<Vmm>,
+    pub migration: Option<Migration>,
 }
 
 /// A token which represents that a saga holds the instance-updater lock on a
@@ -328,6 +339,60 @@ impl DataStore {
             })?;
 
         Ok(InstanceAndActiveVmm { instance, vmm })
+    }
+
+    pub async fn instance_fetch_all(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceSnapshot> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::migration::dsl as migration_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let (instance, active_vmm, target_vmm, migration) = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                vmm_dsl::vmm.on((vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id))
+                .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .left_join(
+                vmm_dsl::vmm.on((vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::target_propolis_id))
+                .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .left_join(
+                migration_dsl::migration
+                    .on(migration_dsl::id
+                        .nullable()
+                        .eq(instance_dsl::migration_id)),
+            )
+            .select((
+                Instance::as_select(),
+                Option::<Vmm>::as_select(),
+                Option::<Vmm>::as_select(),
+                Option::<Migration>::as_select(),
+            ))
+            .get_result_async::<(Instance, Option<Vmm>, Option<Vmm>, Option<Migration>)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(authz_instance.id()),
+                    ),
+                )
+            })?;
+        Ok(InstanceSnapshot { instance, active_vmm, target_vmm, migration })
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
