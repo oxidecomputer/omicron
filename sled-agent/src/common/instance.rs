@@ -493,7 +493,7 @@ impl InstanceStates {
             };
             self.migration = Some(MigrationRuntimeState {
                 migration_id,
-                state: MigrationState::InProgress,
+                state: MigrationState::Pending,
                 role,
                 gen: Generation::new(),
                 time_updated: now,
@@ -736,6 +736,17 @@ mod test {
         assert_eq!(state.instance.propolis_id, state.instance.dst_propolis_id);
         assert!(state.instance.migration_id.is_some());
 
+        // The migration state should transition to "completed"
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert!(migration.gen > prev_migration.gen);
+        let prev_migration = migration;
+
         // Once a successful migration is observed, the VMM's state should
         // continue to update, but the instance's state shouldn't change
         // anymore.
@@ -751,6 +762,15 @@ mod test {
         assert_eq!(state.vmm.state, VmmState::Stopping);
         assert!(state.vmm.gen > prev.vmm.gen);
 
+        // Now that the migration has completed, it should not transition again.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert_eq!(migration.gen, prev_migration.gen);
+        let prev_migration = migration;
+
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Destroyed);
         assert!(matches!(
@@ -762,13 +782,12 @@ mod test {
         assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
 
-        // The migration state should transition.
-        let migration =
-            state.migration.expect("instance must have a migration state");
-        let prev_migration =
-            prev.migration.expect("previous state must have a migration");
-        assert_eq!(migration.state, MigrationState::Failed);
-        assert!(migration.gen > prev_migration.gen);
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert_eq!(migration.gen, prev_migration.gen);
     }
 
     #[test]
