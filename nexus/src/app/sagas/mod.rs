@@ -32,6 +32,7 @@ pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
 pub mod project_create;
+pub mod region_replacement_start;
 pub mod snapshot_create;
 pub mod snapshot_delete;
 pub mod test_saga;
@@ -157,6 +158,9 @@ fn make_action_registry() -> ActionRegistry {
     );
     <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
     <image_delete::SagaImageDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_replacement_start::SagaRegionReplacementStart as NexusSaga>::register_actions(
         &mut registry,
     );
 
@@ -312,6 +316,10 @@ pub(crate) use declare_saga_actions;
 pub enum SagaRequest {
     #[cfg(test)]
     TestOnly,
+
+    RegionReplacementStart {
+        params: region_replacement_start::Params,
+    },
 }
 
 impl SagaRequest {

@@ -121,7 +121,7 @@ source.paths = [
 ]
 output.type = "zone"
 setup_hint = """
-- Run `./tools/ci_download_console` to download the web console assets
+- Run `cargo xtask download console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 output.intermediate_only = true
@@ -170,7 +170,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
 service_name = "clickhouse_keeper"
@@ -196,7 +196,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.cockroachdb]
 service_name = "cockroachdb"
@@ -223,7 +223,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download cockroach` to download the necessary binaries"
 
 [package.omicron-cockroach-admin]
 service_name = "cockroach-admin"
@@ -686,7 +686,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download transceiver-control` to download the necessary binaries"
 
 [package.thundermuffin]
 service_name = "thundermuffin"

@@ -47,6 +47,8 @@ use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledOmicronZones;
 use nexus_db_model::InvZpool;
+use nexus_db_model::RotImageError;
+use nexus_db_model::RotImageErrorEnum;
 use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SledRole;
 use nexus_db_model::SledRoleEnum;
@@ -404,6 +406,26 @@ impl DataStore {
                                 .clone()
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(
                                 ),
+                            rot.stage0_digest
+                                .clone()
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(
+                                ),
+                            rot.stage0next_digest
+                                .clone()
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(
+                                ),
+                            rot.slot_a_error
+                                .map(RotImageError::from)
+                                .into_sql::<Nullable<RotImageErrorEnum>>(),
+                            rot.slot_b_error
+                                .map(RotImageError::from)
+                                .into_sql::<Nullable<RotImageErrorEnum>>(),
+                            rot.stage0_error
+                                .map(RotImageError::from)
+                                .into_sql::<Nullable<RotImageErrorEnum>>(),
+                            rot.stage0next_error
+                                .map(RotImageError::from)
+                                .into_sql::<Nullable<RotImageErrorEnum>>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -429,6 +451,12 @@ impl DataStore {
                         rot_dsl::slot_boot_pref_transient,
                         rot_dsl::slot_a_sha3_256,
                         rot_dsl::slot_b_sha3_256,
+                        rot_dsl::stage0_fwid,
+                        rot_dsl::stage0next_fwid,
+                        rot_dsl::slot_a_error,
+                        rot_dsl::slot_b_error,
+                        rot_dsl::stage0_error,
+                        rot_dsl::stage0next_error,
                     ))
                     .execute_async(&conn)
                     .await?;
@@ -447,6 +475,12 @@ impl DataStore {
                         _slot_boot_pref_transient,
                         _slot_a_sha3_256,
                         _slot_b_sha3_256,
+                        _stage0_fwid,
+                        _stage0next_fwid,
+                        _slot_a_error,
+                        _slot_b_error,
+                        _stage0_error,
+                        _stage0next_error,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
                 }
             }

@@ -56,6 +56,7 @@ mod semver_version;
 mod switch_interface;
 mod switch_port;
 mod v2p_mapping;
+mod vmm_state;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -197,6 +198,7 @@ pub use v2p_mapping::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
+pub use vmm_state::*;
 pub use vni::*;
 pub use volume::*;
 pub use volume_repair::*;

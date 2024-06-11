@@ -74,9 +74,9 @@ impl InstanceAndActiveVmm {
         &self,
     ) -> omicron_common::api::external::InstanceState {
         if let Some(vmm) = &self.vmm {
-            vmm.runtime.state.0
+            vmm.runtime.state.into()
         } else {
-            self.instance.runtime().nexus_state.0
+            self.instance.runtime().nexus_state.into()
         }
     }
 }
@@ -89,11 +89,13 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
 
 impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
-        let (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
-            (vmm.runtime.state, vmm.runtime.time_state_updated)
+        let run_state: omicron_common::api::external::InstanceState;
+        let time_run_state_updated: chrono::DateTime<Utc>;
+        (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
+            (vmm.runtime.state.into(), vmm.runtime.time_state_updated)
         } else {
             (
-                value.instance.runtime_state.nexus_state.clone(),
+                value.instance.runtime_state.nexus_state.into(),
                 value.instance.runtime_state.time_updated,
             )
         };
@@ -109,7 +111,7 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             runtime: omicron_common::api::external::InstanceRuntimeState {
-                run_state: *run_state.state(),
+                run_state,
                 time_run_state_updated,
             },
         }
@@ -196,8 +198,8 @@ impl DataStore {
         })?;
 
         bail_unless!(
-            instance.runtime().nexus_state.state()
-                == &api::external::InstanceState::Creating,
+            instance.runtime().nexus_state
+                == nexus_db_model::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime().nexus_state
         );
@@ -477,13 +479,12 @@ impl DataStore {
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
-        use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
         use db::schema::{disk, instance};
 
-        let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
-        let failed = DbInstanceState::new(ApiInstanceState::Failed);
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let stopped = DbInstanceState::NoVmm;
+        let failed = DbInstanceState::Failed;
+        let destroyed = DbInstanceState::Destroyed;
         let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();

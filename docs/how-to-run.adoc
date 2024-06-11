@@ -449,14 +449,16 @@ This won't be in public DNS, though.  You'd need to be using the deployed system
 [source,console]
 ----
 $ dig recovery.sys.oxide.test @192.168.1.20 +short
-192.168.1.21
+192.168.1.22
+192.168.1.23
+192.168.1.24
 ----
 
-Where did 192.168.1.20 come from?  That's the external address of the external
-DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
+Where did 192.168.1.20 come from?  That's an external address of the external
+DNS server.  We knew that because it's listed in the `external_dns_ips` array in
 the `config-rss.toml` file we're using.
 
-Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
+Having looked this up, the easiest thing will be to use `http://192.168.1.22` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
 
 === Setting up an SSH tunnel for console access
 
@@ -485,12 +487,31 @@ via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
 
 === Using the CLI
 
-Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[Oxide CLI].  See the previous section to find the URL for the API.  Then you can log in with:
+Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[Oxide CLI]. See the previous section to find the URL for the API. Then you can start the login flow with:
 
 [source,console]
 ----
-oxide auth login --host http://192.168.1.21
+$ oxide auth login --host http://192.168.1.22
+
+Opened this URL in your browser:
+  http://192.168.1.22/device/verify
+
+Enter the code: CXKX-KPBK
 ----
+
+Assuming you haven't already logged in, this page will bring you to the recovery silo login. The username and password are defined in `config-rss.toml` and default to:
+
+```
+username: recovery
+password: oxide
+```
+
+Once logged in, enter the 8-character code to complete the login flow. In a few moments the CLI should show you're logged in.
+
+[NOTE]
+====
+If you're using an SSH tunnel, you will either need to change the `device/verify` URL (if running the CLI on the same host as the control plane) or the `--host` URL (if running the CLI on a different host) to point to your tunnel. In the previous section's example, the URL is `http://127.0.0.1:1234`.
+====
 
 === Configure quotas for your silo
 
@@ -522,7 +543,7 @@ An IP pool is needed to provide external connectivity to Instances.  The address
 
 Here we will first create an ip pool for the recovery silo:
 [source,console]
----
+----
 $ oxide api /v1/system/ip-pools --method POST --input - <<EOF
 {
   "name": "default",
@@ -538,11 +559,11 @@ EOF
   "time_created": "2024-01-16T22:51:54.679751Z",
   "time_modified": "2024-01-16T22:51:54.679751Z"
 }
----
+----
 
 Now we will associate the pool with the recovery silo.
 [source,console]
----
+----
 $ oxide api /v1/system/ip-pools/default/silos --method POST --input - <<EOF
 {
   "silo": "recovery",
@@ -556,7 +577,7 @@ EOF
   "is_default": true,
   "silo_id": "5c0aca09-d7ee-4be6-b7b1-060655659f74"
 }
----
+----
 
 Now we will add an address range to the recovery silo:
 
@@ -707,12 +728,12 @@ If you provided TLS certificates during setup, you can connect securely to the A
 
 [source,console]
 ----
-$ curl -i --resolve recovery.sys.oxide.test:443:192.168.1.21 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem https://recovery.sys.oxide.test
+$ curl -i --resolve recovery.sys.oxide.test:443:192.168.1.22 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem https://recovery.sys.oxide.test
 ----
 
 [source,console]
 ----
-$ oxide --resolve recovery.sys.oxide.test:443:192.168.1.21 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem auth login --host https://recovery.sys.oxide.test
+$ oxide --resolve recovery.sys.oxide.test:443:192.168.1.22 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem auth login --host https://recovery.sys.oxide.test
 ----
 
 === Switch Zone
@@ -763,7 +784,10 @@ The components of Omicron are deployed into separate zones that act as separate 
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::9]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | External DNS               | `192.168.1.20:53`
-| Nexus: External API        | `192.168.1.21:80`
+| External DNS               | `192.168.1.21:53`
+| Nexus: External API        | `192.168.1.22:80`
+| Nexus: External API        | `192.168.1.23:80`
+| Nexus: External API        | `192.168.1.24:80`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other other services and allocating them with VNICs and IPv6 addresses.

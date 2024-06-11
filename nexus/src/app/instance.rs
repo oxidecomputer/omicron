@@ -20,6 +20,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -43,6 +44,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
@@ -477,7 +479,7 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state.0 != InstanceState::Running
+            || vmm.as_ref().unwrap().runtime.state != DbVmmState::Running
         {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
@@ -707,16 +709,16 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Rebooting => {
+            match vmm.runtime.state {
+                DbVmmState::Starting
+                | DbVmmState::Running
+                | DbVmmState::Rebooting => {
                     debug!(self.log, "asked to start an active instance";
                            "instance_id" => %authz_instance.id());
 
                     return Ok(state);
                 }
-                InstanceState::Stopped => {
+                DbVmmState::Stopped => {
                     let propolis_id = instance
                         .runtime()
                         .propolis_id
@@ -733,7 +735,7 @@ impl super::Nexus {
                 _ => {
                     return Err(Error::conflict(&format!(
                         "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                         InstanceState::Stopped
                     )));
                 }
@@ -841,9 +843,9 @@ impl super::Nexus {
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
         let effective_state = if let Some(vmm) = vmm_state {
-            vmm.runtime.state.0
+            vmm.runtime.state.into()
         } else {
-            instance_state.runtime().nexus_state.0
+            instance_state.runtime().nexus_state.into()
         };
 
         // Requests that operate on active instances have to be directed to the
@@ -1362,7 +1364,7 @@ impl super::Nexus {
                "error" => ?reason);
 
         let new_runtime = db::model::InstanceRuntimeState {
-            nexus_state: db::model::InstanceState::new(InstanceState::Failed),
+            nexus_state: db::model::InstanceState::Failed,
 
             // TODO(#4226): Clearing the Propolis ID is required to allow the
             // instance to be deleted, but this doesn't actually terminate the
@@ -1647,25 +1649,23 @@ impl super::Nexus {
 
         let (instance, vmm) = (state.instance(), state.vmm());
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Running
-                | InstanceState::Rebooting
-                | InstanceState::Migrating
-                | InstanceState::Repairing => {
+            match vmm.runtime.state {
+                DbVmmState::Running
+                | DbVmmState::Rebooting
+                | DbVmmState::Migrating => {
                     Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Failed => {
+                DbVmmState::Starting
+                | DbVmmState::Stopping
+                | DbVmmState::Stopped
+                | DbVmmState::Failed => {
                     Err(Error::invalid_request(format!(
                         "cannot connect to serial console of instance in state \"{}\"",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                     )))
                 }
-                InstanceState::Destroyed => Err(Error::invalid_request(
-                    "cannot connect to serial console of destroyed instance",
+                DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
+                    "cannot connect to serial console of instance in state \"Stopped\"",
                 )),
             }
         } else {
@@ -2092,7 +2092,7 @@ pub(crate) async fn notify_instance_updated(
     if result.is_ok() {
         let propolis_terminated = matches!(
             new_runtime_state.vmm_state.state,
-            InstanceState::Destroyed | InstanceState::Failed
+            VmmState::Destroyed | VmmState::Failed
         );
 
         if propolis_terminated {

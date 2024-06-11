@@ -9,14 +9,12 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use chrono::Utc;
 use nexus_db_model::{
-    ByteCount, ExternalIp, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResource,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
+    SledReservationConstraints, SledResource, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::{Error, NameOrId};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
@@ -113,19 +111,22 @@ pub async fn create_and_insert_vmm_record(
     Ok(vmm)
 }
 
-/// Given a previously-inserted VMM record, set its state to Destroyed and then
-/// delete it.
+/// Given a previously-inserted VMM record, set its state to `SagaUnwound` and
+/// then delete it.
 ///
 /// This function succeeds idempotently if called with the same parameters,
 /// provided that the VMM record was not changed by some other actor after the
 /// calling saga inserted it.
-pub async fn destroy_vmm_record(
+///
+/// This function is intended to be called when a saga which created a VMM
+/// record unwinds.
+pub async fn unwind_vmm_record(
     datastore: &DataStore,
     opctx: &OpContext,
     prev_record: &db::model::Vmm,
 ) -> Result<(), anyhow::Error> {
     let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::InstanceState(InstanceState::Destroyed),
+        state: db::model::VmmState::SagaUnwound,
         time_state_updated: Utc::now(),
         gen: prev_record.runtime.gen.next().into(),
     };
@@ -201,6 +202,16 @@ pub async fn instance_ip_move_state(
     }
 }
 
+/// Yields the sled on which an instance is found to be running so that IP
+/// attachment and detachment operations can be propagated there.
+///
+/// # Preconditions
+///
+/// To synchronize correctly with other concurrent operations on an instance,
+/// the calling saga must have placed the IP it is attaching or detaching into
+/// the Attaching or Detaching state so that concurrent attempts to start the
+/// instance will notice that the IP state is in flux and ask the caller to
+/// retry.
 pub async fn instance_ip_get_instance_state(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
@@ -220,15 +231,20 @@ pub async fn instance_ip_get_instance_state(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let found_state = inst_and_vmm.instance().runtime_state.nexus_state.0;
+    let found_vmm_state =
+        inst_and_vmm.vmm().as_ref().map(|vmm| vmm.runtime.state);
+    let found_instance_state =
+        inst_and_vmm.instance().runtime_state.nexus_state;
     let mut sled_id = inst_and_vmm.sled_id();
+
+    slog::debug!(
+        osagactx.log(), "evaluating instance state for IP attach/detach";
+        "instance_state" => ?found_instance_state,
+        "vmm_state" => ?found_vmm_state
+    );
 
     // Arriving here means we started in a correct state (running/stopped).
     // We need to consider how we interact with the other sagas/ops:
-    // - starting: our claim on an IP will block it from moving past
-    //             DPD_ensure and instance_start will undo. If we complete
-    //             before then, it can move past and will fill in routes/opte.
-    //             Act as though we have no sled_id.
     // - stopping: this is not sagaized, and the propolis/sled-agent might
     //             go away. Act as though stopped if we catch it here,
     //             otherwise convert OPTE ensure to 'service unavailable'
@@ -236,29 +252,90 @@ pub async fn instance_ip_get_instance_state(
     // - deleting: can only be called from stopped -- we won't push to dpd
     //             or sled-agent, and IP record might be deleted or forcibly
     //             detached. Catch here just in case.
-    match found_state {
-        InstanceState::Stopped
-        | InstanceState::Starting
-        | InstanceState::Stopping => {
+    // - starting: see below.
+    match (found_instance_state, found_vmm_state) {
+        // If there's no VMM, the instance is definitely not on any sled.
+        (InstanceState::NoVmm, _) | (_, Some(VmmState::SagaUnwound)) => {
             sled_id = None;
         }
-        InstanceState::Running => {}
-        state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state.into()) => {
+
+        // If the instance is running normally or rebooting, it's resident on
+        // the sled given by its VMM record.
+        (
+            InstanceState::Vmm,
+            Some(VmmState::Running) | Some(VmmState::Rebooting),
+        ) => {}
+
+        // If the VMM is in the Stopping, Migrating, or Starting states, its
+        // sled assignment is in doubt, so report a transient state error and
+        // ask the caller to retry.
+        //
+        // Although an instance with a Starting VMM has a sled assignment,
+        // there's no way to tell at this point whether or not there's a
+        // concurrent instance-start saga that has passed the point where it
+        // sends IP assignments to the instance's new sled:
+        //
+        // - If the start saga is still in progress and hasn't pushed any IP
+        //   information to the instance's new sled yet, then either of two
+        //   things can happen:
+        //   - This function's caller can finish modifying IPs before the start
+        //     saga propagates IP information to the sled. In this case the
+        //     calling saga should do nothing--the start saga will send the
+        //     right IP set to the sled.
+        //   - If the start saga "wins" the race, it will see that the instance
+        //     still has an attaching/detaching IP and bail out.
+        //  - If the start saga is already done, and Nexus is just waiting for
+        //    the VMM to report that it's Running, the calling saga needs to
+        //    send the IP change to the instance's sled.
+        //
+        // There's no way to distinguish these cases, so if a VMM is Starting,
+        // block the attach/detach.
+        (
+            InstanceState::Vmm,
+            Some(state @ VmmState::Starting)
+            | Some(state @ VmmState::Migrating)
+            | Some(state @ VmmState::Stopping)
+            | Some(state @ VmmState::Stopped),
+        ) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
-            ))))
+            ))));
         }
-        InstanceState::Destroyed => {
+        (InstanceState::Destroyed, _) => {
             return Err(ActionError::action_failed(Error::not_found_by_id(
                 omicron_common::api::external::ResourceType::Instance,
                 &authz_instance.id(),
             )))
         }
-        // Final cases are repairing/failed.
-        _ => {
+        (InstanceState::Creating, _) => {
+            return Err(ActionError::action_failed(Error::invalid_request(
+                "cannot modify instance IPs, instance is still being created",
+            )))
+        }
+        (InstanceState::Failed, _)
+        | (InstanceState::Vmm, Some(VmmState::Failed)) => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is in unhealthy state",
             )))
+        }
+
+        // This case represents an inconsistency in the database. It should
+        // never happen, but don't blow up Nexus if it somehow does.
+        (InstanceState::Vmm, None) => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!(
+                    "instance {} is in the 'VMM' state but has no VMM ID",
+                    authz_instance.id(),
+                ),
+            )));
+        }
+        (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!(
+                    "instance {} points to destroyed VMM",
+                    authz_instance.id(),
+                ),
+            )));
         }
     }
 

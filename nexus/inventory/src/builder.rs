@@ -217,7 +217,7 @@ impl CollectionBuilder {
         });
 
         match sp_state.rot {
-            gateway_client::types::RotState::Enabled {
+            gateway_client::types::RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -236,6 +236,12 @@ impl CollectionBuilder {
                             transient_boot_preference,
                             slot_a_sha3_256_digest,
                             slot_b_sha3_256_digest,
+                            stage0_digest: None,
+                            stage0next_digest: None,
+                            slot_a_error: None,
+                            slot_b_error: None,
+                            stage0_error: None,
+                            stage0next_error: None,
                         }
                     });
             }
@@ -248,6 +254,40 @@ impl CollectionBuilder {
                     baseboard,
                     message
                 )));
+            }
+            gateway_client::types::RotState::V3 {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_fwid,
+                slot_b_fwid,
+                stage0_fwid,
+                stage0next_fwid,
+                transient_boot_preference,
+                slot_a_error,
+                slot_b_error,
+                stage0_error,
+                stage0next_error,
+            } => {
+                let _ =
+                    self.rots.entry(baseboard.clone()).or_insert_with(|| {
+                        RotState {
+                            time_collected: now,
+                            source: source.to_owned(),
+                            active_slot: active,
+                            persistent_boot_preference,
+                            pending_persistent_boot_preference,
+                            transient_boot_preference,
+                            slot_a_sha3_256_digest: Some(slot_a_fwid),
+                            slot_b_sha3_256_digest: Some(slot_b_fwid),
+                            stage0_digest: Some(stage0_fwid),
+                            stage0next_digest: Some(stage0next_fwid),
+                            slot_a_error,
+                            slot_b_error,
+                            stage0_error,
+                            stage0next_error,
+                        }
+                    });
             }
         }
 
@@ -965,7 +1005,7 @@ mod test {
                     model: String::from("model1"),
                     power_state: PowerState::A0,
                     revision: 0,
-                    rot: RotState::Enabled {
+                    rot: RotState::V2 {
                         active: RotSlot::A,
                         pending_persistent_boot_preference: None,
                         persistent_boot_preference: RotSlot::A,
@@ -990,7 +1030,7 @@ mod test {
                     model: String::from("model1"),
                     power_state: PowerState::A0,
                     revision: 0,
-                    rot: RotState::Enabled {
+                    rot: RotState::V2 {
                         active: RotSlot::A,
                         pending_persistent_boot_preference: None,
                         persistent_boot_preference: RotSlot::A,
@@ -1016,7 +1056,7 @@ mod test {
                     model: String::from("model1"),
                     power_state: PowerState::A0,
                     revision: 1,
-                    rot: RotState::Enabled {
+                    rot: RotState::V2 {
                         active: RotSlot::A,
                         pending_persistent_boot_preference: None,
                         persistent_boot_preference: RotSlot::A,
