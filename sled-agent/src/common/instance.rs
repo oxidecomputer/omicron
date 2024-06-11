@@ -603,17 +603,37 @@ mod test {
     fn make_migration_source_instance() -> InstanceStates {
         let mut state = make_instance();
         state.vmm.state = VmmState::Migrating;
-        state.instance.migration_id = Some(Uuid::new_v4());
+        let migration_id = Uuid::new_v4();
+        state.instance.migration_id = Some(migration_id);
         state.instance.dst_propolis_id = Some(Uuid::new_v4());
+        state.migration = Some(MigrationRuntimeState {
+            migration_id,
+            state: MigrationState::InProgress,
+            role: MigrationRole::Source,
+            // advance the generation once, since we are starting out in the
+            // `InProgress` state.
+            gen: Generation::new().next(),
+            time_updated: Utc::now(),
+        });
         state
     }
 
     fn make_migration_target_instance() -> InstanceStates {
         let mut state = make_instance();
         state.vmm.state = VmmState::Migrating;
-        state.instance.migration_id = Some(Uuid::new_v4());
+        let migration_id = Uuid::new_v4();
+        state.instance.migration_id = Some(migration_id);
         state.propolis_id = Uuid::new_v4();
         state.instance.dst_propolis_id = Some(state.propolis_id);
+        state.migration = Some(MigrationRuntimeState {
+            migration_id,
+            state: MigrationState::InProgress,
+            role: MigrationRole::Target,
+            // advance the generation once, since we are starting out in the
+            // `InProgress` state.
+            gen: Generation::new().next(),
+            time_updated: Utc::now(),
+        });
         state
     }
 
@@ -741,6 +761,14 @@ mod test {
         assert_eq!(state.instance.gen, prev.instance.gen);
         assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
+
+        // The migration state should transition.
+        let migration =
+            state.migration.expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Failed);
+        assert!(migration.gen > prev_migration.gen);
     }
 
     #[test]
@@ -764,6 +792,14 @@ mod test {
         assert_eq!(state.instance.gen, prev.instance.gen);
         assert_eq!(state.vmm.state, VmmState::Failed);
         assert!(state.vmm.gen > prev.vmm.gen);
+
+        // The migration state should transition.
+        let migration =
+            state.migration.expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Failed);
+        assert!(migration.gen > prev_migration.gen);
     }
 
     // Verifies that the rude-termination state change doesn't update the
@@ -782,6 +818,14 @@ mod test {
 
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
+
+        // The migration state should transition.
+        let migration =
+            state.migration.expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Failed);
+        assert!(migration.gen > prev_migration.gen);
     }
 
     #[test]
@@ -804,11 +848,22 @@ mod test {
         assert_eq!(state.vmm.state, VmmState::Running);
         assert!(state.vmm.gen > prev.vmm.gen);
 
+        // The migration state should transition to completed.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert!(migration.gen > prev_migration.gen);
+
         // Pretend Nexus set some new migration IDs.
+        let migration_id = Uuid::new_v4();
         let prev = state.clone();
         state.set_migration_ids(
             &Some(InstanceMigrationSourceParams {
-                migration_id: Uuid::new_v4(),
+                migration_id,
                 dst_propolis_id: Uuid::new_v4(),
             }),
             Utc::now(),
@@ -816,6 +871,15 @@ mod test {
         assert_state_change_has_gen_change(&prev, &state);
         assert!(state.instance.gen > prev.instance.gen);
         assert_eq!(state.vmm.gen, prev.vmm.gen);
+
+        // There should be a new, pending migration state.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Pending);
+        assert_eq!(migration.migration_id, migration_id);
+        let prev_migration = migration;
 
         // Mark that the new migration out is in progress. This doesn't change
         // anything in the instance runtime state, but does update the VMM state
@@ -837,6 +901,15 @@ mod test {
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.gen, prev.instance.gen);
 
+        // The migration state should transition to in progress.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::InProgress);
+        assert!(migration.gen > prev_migration.gen);
+        let prev_migration = migration;
+
         // Propolis will publish that the migration succeeds before changing any
         // state. This should transfer control to the target but should not
         // touch the migration ID (that is the new target's job).
@@ -854,6 +927,14 @@ mod test {
         );
         assert_eq!(state.instance.propolis_id, state.instance.dst_propolis_id);
         assert!(state.instance.gen > prev.instance.gen);
+
+        // The migration state should transition to completed.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert!(migration.gen > prev_migration.gen);
 
         // The rest of the destruction sequence is covered by other tests.
     }
