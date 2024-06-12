@@ -10,6 +10,7 @@ use crate::api::external::{
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
@@ -50,9 +51,9 @@ pub struct InstanceProperties {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
     /// The instance's currently active VMM ID.
-    pub propolis_id: Option<Uuid>,
+    pub propolis_id: Option<PropolisUuid>,
     /// If a migration is active, the ID of the target VMM.
-    pub dst_propolis_id: Option<Uuid>,
+    pub dst_propolis_id: Option<PropolisUuid>,
     /// If a migration is active, the ID of that migration.
     pub migration_id: Option<Uuid>,
     /// Generation number for this state.
@@ -105,7 +106,7 @@ pub struct SledInstanceState {
     pub instance_state: InstanceRuntimeState,
 
     /// The ID of the VMM whose state is being reported.
-    pub propolis_id: Uuid,
+    pub propolis_id: PropolisUuid,
 
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,

@@ -32,6 +32,7 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -427,12 +428,13 @@ async fn instance_register(
     body: TypedBody<InstanceEnsureBody>,
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_ensure_registered(
             instance_id,
-            body_args.propolis_id,
+            PropolisUuid::from_untyped_uuid(body_args.propolis_id),
             body_args.hardware,
             body_args.instance_runtime,
             body_args.vmm_runtime,
@@ -452,7 +454,8 @@ async fn instance_unregister(
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     Ok(HttpResponseOk(sa.instance_ensure_unregistered(instance_id).await?))
 }
 
@@ -466,7 +469,8 @@ async fn instance_put_state(
     body: TypedBody<InstancePutStateBody>,
 ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_ensure_state(instance_id, body_args.state).await?,
@@ -482,7 +486,8 @@ async fn instance_get_state(
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
 }
 
@@ -496,7 +501,8 @@ async fn instance_put_migration_ids(
     body: TypedBody<InstancePutMigrationIdsBody>,
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_put_migration_ids(
@@ -518,7 +524,8 @@ async fn instance_put_external_ip(
     body: TypedBody<InstanceExternalIpBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     let body_args = body.into_inner();
     sa.instance_put_external_ip(instance_id, &body_args).await?;
     Ok(HttpResponseUpdatedNoContent())
@@ -534,7 +541,8 @@ async fn instance_delete_external_ip(
     body: TypedBody<InstanceExternalIpBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(path_params.into_inner().instance_id);
     let body_args = body.into_inner();
     sa.instance_delete_external_ip(instance_id, &body_args).await?;
     Ok(HttpResponseUpdatedNoContent())
@@ -614,7 +622,7 @@ async fn instance_issue_disk_snapshot_request(
     let body = body.into_inner();
 
     sa.instance_issue_disk_snapshot_request(
-        path_params.instance_id,
+        InstanceUuid::from_untyped_uuid(path_params.instance_id),
         path_params.disk_id,
         body.snapshot_id,
     )

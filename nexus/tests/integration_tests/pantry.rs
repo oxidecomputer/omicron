@@ -26,6 +26,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -83,13 +85,13 @@ async fn set_instance_state(
     .unwrap()
 }
 
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
     let sa = nexus
         .instance_sled_by_id(id)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(*id).await;
+    sa.instance_finish_transition(id.into_untyped_uuid()).await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
@@ -147,14 +149,14 @@ async fn create_instance_and_attach_disk(
 ) {
     // Create an instance to attach the disk.
     let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-    let instance_next =
         set_instance_state(&client, INSTANCE_NAME, "stop").await;
-    instance_simulate(nexus, &instance_next.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
 
     let url_instance_attach_disk =
         get_disk_attach_url(instance.identity.name.as_str());

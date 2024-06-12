@@ -16,9 +16,9 @@ use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use omicron_common::api::external::{Error, NameOrId};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
-use uuid::Uuid;
 
 use super::NexusActionContext;
 
@@ -33,7 +33,7 @@ const DEFAULT_PROPOLIS_PORT: u16 = 12400;
 /// `propolis_id`.
 pub async fn reserve_vmm_resources(
     nexus: &Nexus,
-    propolis_id: Uuid,
+    propolis_id: PropolisUuid,
     ncpus: u32,
     guest_memory: ByteCount,
     constraints: SledReservationConstraints,
@@ -68,7 +68,7 @@ pub async fn reserve_vmm_resources(
 
     let resource = nexus
         .reserve_on_random_sled(
-            propolis_id,
+            propolis_id.into_untyped_uuid(),
             nexus_db_model::SledResourceKind::Instance,
             resources,
             constraints,
@@ -88,9 +88,9 @@ pub async fn reserve_vmm_resources(
 pub async fn create_and_insert_vmm_record(
     datastore: &DataStore,
     opctx: &OpContext,
-    instance_id: Uuid,
-    propolis_id: Uuid,
-    sled_id: Uuid,
+    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
+    sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
     initial_state: nexus_db_model::VmmInitialState,
 ) -> Result<db::model::Vmm, ActionError> {
@@ -131,8 +131,9 @@ pub async fn unwind_vmm_record(
         gen: prev_record.runtime.gen.next().into(),
     };
 
-    datastore.vmm_update_runtime(&prev_record.id, &new_runtime).await?;
-    datastore.vmm_mark_deleted(&opctx, &prev_record.id).await?;
+    let prev_id = PropolisUuid::from_untyped_uuid(prev_record.id);
+    datastore.vmm_update_runtime(&prev_id, &new_runtime).await?;
+    datastore.vmm_mark_deleted(&opctx, &prev_id).await?;
     Ok(())
 }
 
@@ -141,7 +142,7 @@ pub async fn unwind_vmm_record(
 pub(super) async fn allocate_vmm_ipv6(
     opctx: &OpContext,
     datastore: &DataStore,
-    sled_uuid: Uuid,
+    sled_uuid: SledUuid,
 ) -> Result<Ipv6Addr, ActionError> {
     datastore
         .next_ipv6_address(opctx, sled_uuid)
@@ -217,7 +218,7 @@ pub async fn instance_ip_get_instance_state(
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     verb: &str,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<Option<SledUuid>, ActionError> {
     // XXX: we can get instance state (but not sled ID) in same transaction
     //      as attach (but not detach) wth current design. We need to re-query
     //      for sled ID anyhow, so keep consistent between attach/detach.
@@ -351,7 +352,7 @@ pub async fn instance_ip_add_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
-    sled_uuid: Option<Uuid>,
+    sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<Option<Ipv4NatEntry>, ActionError> {
     let osagactx = sagactx.user_data();
@@ -376,7 +377,7 @@ pub async fn instance_ip_add_nat(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
-        .sled_id(sled_uuid)
+        .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -385,7 +386,7 @@ pub async fn instance_ip_add_nat(
         .nexus()
         .instance_ensure_dpd_config(
             &opctx,
-            authz_instance.id(),
+            InstanceUuid::from_untyped_uuid(authz_instance.id()),
             &sled.address(),
             Some(target_ip.id),
         )
@@ -407,7 +408,7 @@ pub async fn instance_ip_add_nat(
 pub async fn instance_ip_remove_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
-    sled_uuid: Option<Uuid>,
+    sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -445,7 +446,7 @@ pub async fn instance_ip_remove_nat(
 pub async fn instance_ip_add_opte(
     sagactx: &NexusActionContext,
     authz_instance: &authz::Instance,
-    sled_uuid: Option<Uuid>,
+    sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -500,7 +501,7 @@ pub async fn instance_ip_add_opte(
 pub async fn instance_ip_remove_opte(
     sagactx: &NexusActionContext,
     authz_instance: &authz::Instance,
-    sled_uuid: Option<Uuid>,
+    sled_uuid: Option<SledUuid>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();

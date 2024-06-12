@@ -47,6 +47,10 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -174,14 +178,14 @@ enum InstanceStateChangeRequestAction {
 
     /// Request the appropriate state change from the sled with the specified
     /// UUID.
-    SendToSled(Uuid),
+    SendToSled(SledUuid),
 }
 
 /// What is the higher level operation that is calling
 /// `instance_ensure_registered`?
 pub(crate) enum InstanceRegisterReason {
-    Start { vmm_id: Uuid },
-    Migrate { vmm_id: Uuid, target_vmm_id: Uuid },
+    Start { vmm_id: PropolisUuid },
+    Migrate { vmm_id: PropolisUuid, target_vmm_id: PropolisUuid },
 }
 
 impl super::Nexus {
@@ -534,8 +538,8 @@ impl super::Nexus {
     pub(crate) async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
-        sled_id: Uuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
         migration_params: InstanceMigrationSourceParams,
     ) -> UpdateResult<db::model::Instance> {
@@ -543,14 +547,14 @@ impl super::Nexus {
         assert!(prev_instance_runtime.dst_propolis_id.is_none());
 
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 
         let sa = self.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
-                &instance_id,
+                &instance_id.into_untyped_uuid(),
                 &InstancePutMigrationIdsBody {
                     old_runtime: prev_instance_runtime.clone().into(),
                     migration_params: Some(migration_params),
@@ -613,8 +617,8 @@ impl super::Nexus {
     /// ID set.
     pub(crate) async fn instance_clear_migration_ids(
         &self,
-        instance_id: Uuid,
-        sled_id: Uuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<(), Error> {
         assert!(prev_instance_runtime.migration_id.is_some());
@@ -623,7 +627,7 @@ impl super::Nexus {
         let sa = self.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
-                &instance_id,
+                &instance_id.into_untyped_uuid(),
                 &InstancePutMigrationIdsBody {
                     old_runtime: prev_instance_runtime.clone().into(),
                     migration_params: None,
@@ -682,7 +686,9 @@ impl super::Nexus {
                 if inner.instance_unhealthy() {
                     let _ = self
                         .mark_instance_failed(
-                            &authz_instance.id(),
+                            &InstanceUuid::from_untyped_uuid(
+                                authz_instance.id(),
+                            ),
                             state.instance().runtime(),
                             inner,
                         )
@@ -786,7 +792,9 @@ impl super::Nexus {
                 if inner.instance_unhealthy() {
                     let _ = self
                         .mark_instance_failed(
-                            &authz_instance.id(),
+                            &InstanceUuid::from_untyped_uuid(
+                                authz_instance.id(),
+                            ),
                             state.instance().runtime(),
                             inner,
                         )
@@ -807,7 +815,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        sled_id: &Uuid,
+        sled_id: &SledUuid,
     ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
     {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
@@ -855,7 +863,7 @@ impl super::Nexus {
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
         let sled_id = if let Some(vmm) = vmm_state {
-            vmm.sled_id
+            SledUuid::from_untyped_uuid(vmm.sled_id)
         } else {
             match effective_state {
                 // If there's no active sled because the instance is stopped,
@@ -974,7 +982,7 @@ impl super::Nexus {
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let instance_id = authz_instance.id();
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         match self.select_runtime_change_action(
             prev_instance_state,
@@ -986,7 +994,7 @@ impl super::Nexus {
                 let sa = self.sled_client(&sled_id).await?;
                 let instance_put_result = sa
                     .instance_put_state(
-                        &instance_id,
+                        &instance_id.into_untyped_uuid(),
                         &InstancePutStateBody { state: requested.into() },
                     )
                     .await
@@ -1021,7 +1029,7 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
-        propolis_id: &Uuid,
+        propolis_id: &PropolisUuid,
         initial_vmm: &db::model::Vmm,
         operation: InstanceRegisterReason,
     ) -> Result<(), Error> {
@@ -1111,7 +1119,10 @@ impl super::Nexus {
         // Collect the external IPs for the instance.
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
-            .instance_lookup_external_ips(&opctx, authz_instance.id())
+            .instance_lookup_external_ips(
+                &opctx,
+                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            )
             .await?
             .into_iter()
             .partition(|ip| ip.kind == IpKind::SNat);
@@ -1264,7 +1275,9 @@ impl super::Nexus {
             )),
         };
 
-        let sa = self.sled_client(&initial_vmm.sled_id).await?;
+        let sa = self
+            .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
+            .await?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),
@@ -1272,7 +1285,7 @@ impl super::Nexus {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
                     vmm_runtime: initial_vmm.clone().into(),
-                    propolis_id: *propolis_id,
+                    propolis_id: propolis_id.into_untyped_uuid(),
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
                         initial_vmm.propolis_port.into(),
@@ -1285,16 +1298,16 @@ impl super::Nexus {
             .map(|res| Some(res.into_inner().into()))
             .map_err(|e| SledAgentInstancePutError(e));
 
+        let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
         match instance_register_result {
             Ok(state) => {
-                self.write_returned_instance_state(&db_instance.id(), state)
-                    .await?;
+                self.write_returned_instance_state(&instance_id, state).await?;
             }
             Err(e) => {
                 if e.instance_unhealthy() {
                     let _ = self
                         .mark_instance_failed(
-                            &db_instance.id(),
+                            &instance_id,
                             db_instance.runtime(),
                             &e,
                         )
@@ -1322,7 +1335,7 @@ impl super::Nexus {
     ///   owing to an outdated generation number) will return `Ok`.
     async fn write_returned_instance_state(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         state: Option<nexus::SledInstanceState>,
     ) -> Result<InstanceUpdateResult, Error> {
         slog::debug!(&self.log,
@@ -1365,7 +1378,7 @@ impl super::Nexus {
     /// agent instance API, supplied in `reason`.
     pub(crate) async fn mark_instance_failed(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
         reason: &SledAgentInstancePutError,
     ) -> Result<(), Error> {
@@ -1523,7 +1536,7 @@ impl super::Nexus {
     pub(crate) async fn notify_instance_updated(
         &self,
         opctx: &OpContext,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         notify_instance_updated(
@@ -1973,7 +1986,7 @@ pub(crate) async fn notify_instance_updated(
     opctx_alloc: &OpContext,
     opctx: &OpContext,
     log: &slog::Logger,
-    instance_id: &Uuid,
+    instance_id: &InstanceUuid,
     new_runtime_state: &nexus::SledInstanceState,
     v2p_notification_tx: tokio::sync::watch::Sender<()>,
 ) -> Result<Option<InstanceUpdateResult>, Error> {
@@ -1989,7 +2002,7 @@ pub(crate) async fn notify_instance_updated(
     // Grab the current state of the instance in the DB to reason about
     // whether this update is stale or not.
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(*instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await?;
 
@@ -2054,8 +2067,13 @@ pub(crate) async fn notify_instance_updated(
         // an instance's state changes.
         //
         // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-        super::oximeter::unassign_producer(datastore, log, opctx, instance_id)
-            .await?;
+        super::oximeter::unassign_producer(
+            datastore,
+            log,
+            opctx,
+            &instance_id.into_untyped_uuid(),
+        )
+        .await?;
     }
 
     // Write the new instance and VMM states back to CRDB. This needs to be
@@ -2136,7 +2154,9 @@ pub(crate) async fn notify_instance_updated(
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id);
 
-            datastore.sled_reservation_delete(opctx, propolis_id).await?;
+            datastore
+                .sled_reservation_delete(opctx, propolis_id.into_untyped_uuid())
+                .await?;
 
             if !datastore.vmm_mark_deleted(opctx, &propolis_id).await? {
                 warn!(log, "failed to mark vmm record as deleted";

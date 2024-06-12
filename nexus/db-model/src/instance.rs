@@ -10,6 +10,7 @@ use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -64,12 +65,14 @@ impl Instance {
     /// Constructs a new instance record with no VMM that will initially appear
     /// to be in the Creating state.
     pub fn new(
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         project_id: Uuid,
         params: &params::InstanceCreate,
     ) -> Self {
-        let identity =
-            InstanceIdentity::new(instance_id, params.identity.clone());
+        let identity = InstanceIdentity::new(
+            instance_id.into_untyped_uuid(),
+            params.identity.clone(),
+        );
 
         let runtime_state = InstanceRuntimeState::new(
             InstanceState::Creating,
@@ -228,8 +231,10 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             nexus_state,
             time_updated: state.time_updated,
             gen: state.gen.into(),
-            propolis_id: state.propolis_id,
-            dst_propolis_id: state.dst_propolis_id,
+            propolis_id: state.propolis_id.map(|id| id.into_untyped_uuid()),
+            dst_propolis_id: state
+                .dst_propolis_id
+                .map(|id| id.into_untyped_uuid()),
             migration_id: state.migration_id,
             updater_gen: Generation::new(),
             updater_id: None,
@@ -242,10 +247,12 @@ impl From<InstanceRuntimeState>
 {
     fn from(state: InstanceRuntimeState) -> Self {
         Self {
-            dst_propolis_id: state.dst_propolis_id,
+            dst_propolis_id: state
+                .dst_propolis_id
+                .map(PropolisUuid::from_untyped_uuid),
             gen: state.gen.into(),
             migration_id: state.migration_id,
-            propolis_id: state.propolis_id,
+            propolis_id: state.propolis_id.map(PropolisUuid::from_untyped_uuid),
             time_updated: state.time_updated,
         }
     }
