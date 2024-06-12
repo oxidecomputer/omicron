@@ -554,7 +554,8 @@ impl super::Nexus {
                 .iter()
                 .map(|a| Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: (*a),
+                    address: a.address,
+                    vlan_id: a.vlan_id,
                 })
                 .collect();
 
@@ -565,7 +566,11 @@ impl super::Nexus {
             let routes: Vec<Route> = uplink_config
                 .routes
                 .iter()
-                .map(|r| Route { dst: r.destination, gw: r.nexthop, vid: None })
+                .map(|r| Route {
+                    dst: r.destination,
+                    gw: r.nexthop,
+                    vid: r.vlan_id,
+                })
                 .collect();
 
             port_settings_params

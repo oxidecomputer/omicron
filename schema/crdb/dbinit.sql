@@ -2763,6 +2763,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     rsvd_address_lot_block_id UUID NOT NULL,
     address INET,
     interface_name TEXT,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, address, interface_name)
@@ -4125,7 +4126,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '73.0.0', NULL)
+    (TRUE, NOW(), NOW(), '74.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

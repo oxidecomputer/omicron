@@ -3806,14 +3806,14 @@
           "vendor"
         ]
       },
-      "PortConfigV1": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -4130,7 +4130,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           },
@@ -4165,7 +4165,7 @@
           "zpools"
         ]
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -4198,7 +4198,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
@@ -4979,6 +4979,24 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ]
       },
       "UpstairsRepairType": {

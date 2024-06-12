@@ -16,6 +16,7 @@ use omicron_common::api::internal::shared::BgpPeerConfig;
 use omicron_common::api::internal::shared::PortFec;
 use omicron_common::api::internal::shared::PortSpeed;
 use omicron_common::api::internal::shared::RouteConfig;
+use omicron_common::api::internal::shared::UplinkAddressConfig;
 use omicron_common::update::ArtifactHash;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
@@ -170,18 +171,18 @@ impl UserSpecifiedRackNetworkConfig {
     }
 }
 
-/// User-specified version of [`PortConfigV1`].
+/// User-specified version of [`PortConfigV2`].
 ///
-/// All of [`PortConfigV1`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfigV1`]. So this has all of
+/// All of [`PortConfigV2`] is user-specified. But we expect the port name to
+/// be a key, rather than a field as in [`PortConfigV2`]. So this has all of
 /// the fields other than the port name.
 ///
-/// [`PortConfigV1`]: omicron_common::api::internal::shared::PortConfigV1
+/// [`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
-    pub addresses: Vec<IpNet>,
+    pub addresses: Vec<UplinkAddressConfig>,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: PortFec,
     pub autoneg: bool,
