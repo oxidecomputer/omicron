@@ -322,6 +322,7 @@ table! {
         rsvd_address_lot_block_id -> Uuid,
         address -> Inet,
         interface_name -> Text,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -424,7 +425,6 @@ table! {
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -432,6 +432,7 @@ table! {
         migration_id -> Nullable<Uuid>,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
+        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -444,9 +445,9 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        state -> crate::VmmStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -459,7 +460,7 @@ table! {
         project_name -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
         active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -1764,6 +1765,25 @@ table! {
         target_version -> Nullable<Text>,
     }
 }
+
+table! {
+    migration (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        source_state -> crate::MigrationStateEnum,
+        source_propolis_id -> Uuid,
+        source_gen -> Int8,
+        time_source_updated -> Nullable<Timestamptz>,
+        target_state -> crate::MigrationStateEnum,
+        target_propolis_id -> Uuid,
+        target_gen -> Int8,
+        time_target_updated -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(instance, migration);
+joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,

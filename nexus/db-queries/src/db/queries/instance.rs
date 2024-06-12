@@ -12,8 +12,14 @@ use diesel::sql_types::{Nullable, Uuid as SqlUuid};
 use diesel::{pg::Pg, query_builder::AstPass};
 use diesel::{Column, ExpressionMethods, QueryDsl, RunQueryDsl};
 use nexus_db_model::{
-    schema::{instance::dsl as instance_dsl, vmm::dsl as vmm_dsl},
-    InstanceRuntimeState, VmmRuntimeState,
+    schema::{
+        instance::dsl as instance_dsl, migration::dsl as migration_dsl,
+        vmm::dsl as vmm_dsl,
+    },
+    Generation, InstanceRuntimeState, MigrationState, VmmRuntimeState,
+};
+use omicron_common::api::internal::nexus::{
+    MigrationRole, MigrationRuntimeState,
 };
 use uuid::Uuid;
 
@@ -64,6 +70,12 @@ use crate::db::update_and_check::UpdateStatus;
 // SELECT vmm_result.found, vmm_result.updated, instance_result.found,
 //        instance_result.updated
 // FROM vmm_result, instance_result;
+///
+/// If a [`MigrationRuntimeState`] is provided, similar "found" and "update"
+/// clauses  are also added to join the `migration` record for the instance's
+/// active migration, if one exists, and update the migration record. If no
+/// migration record is provided, this part of the query is skipped, and the
+/// `migration_found` and `migration_updated` portions are always `false`.
 //
 // The "wrapper" SELECTs when finding instances and VMMs are used to get a NULL
 // result in the final output instead of failing the entire query if the target
@@ -76,6 +88,12 @@ pub struct InstanceAndVmmUpdate {
     vmm_find: Box<dyn QueryFragment<Pg> + Send>,
     instance_update: Box<dyn QueryFragment<Pg> + Send>,
     vmm_update: Box<dyn QueryFragment<Pg> + Send>,
+    migration: Option<MigrationUpdate>,
+}
+
+struct MigrationUpdate {
+    find: Box<dyn QueryFragment<Pg> + Send>,
+    update: Box<dyn QueryFragment<Pg> + Send>,
 }
 
 /// Contains the result of a combined instance-and-VMM update operation.
@@ -89,6 +107,11 @@ pub struct InstanceAndVmmUpdateResult {
     /// `Some(status)` if the target VMM was found; the wrapped `UpdateStatus`
     /// indicates whether the row was updated. `None` if the VMM was not found.
     pub vmm_status: Option<UpdateStatus>,
+
+    /// `Some(status)` if the target migration was found; the wrapped `UpdateStatus`
+    /// indicates whether the row was updated. `None` if the migration was not
+    /// found, or no migration update was performed.
+    pub migration_status: Option<UpdateStatus>,
 }
 
 /// Computes the update status to return from the results of queries that find
@@ -135,6 +158,7 @@ impl InstanceAndVmmUpdate {
         new_instance_runtime_state: InstanceRuntimeState,
         vmm_id: Uuid,
         new_vmm_runtime_state: VmmRuntimeState,
+        migration: Option<MigrationRuntimeState>,
     ) -> Self {
         let instance_find = Box::new(
             instance_dsl::instance
@@ -165,24 +189,90 @@ impl InstanceAndVmmUpdate {
                 .set(new_vmm_runtime_state),
         );
 
-        Self { instance_find, vmm_find, instance_update, vmm_update }
+        let migration = migration.map(
+            |MigrationRuntimeState {
+                 role,
+                 migration_id,
+                 state,
+                 gen,
+                 time_updated,
+             }| {
+                let state = MigrationState::from(state);
+                let find = Box::new(
+                    migration_dsl::migration
+                        .filter(migration_dsl::id.eq(migration_id))
+                        .filter(migration_dsl::time_deleted.is_null())
+                        .select(migration_dsl::id),
+                );
+                let gen = Generation::from(gen);
+                let update: Box<dyn QueryFragment<Pg> + Send> = match role {
+                    MigrationRole::Target => Box::new(
+                        diesel::update(migration_dsl::migration)
+                            .filter(migration_dsl::id.eq(migration_id))
+                            .filter(
+                                migration_dsl::target_propolis_id.eq(vmm_id),
+                            )
+                            .filter(migration_dsl::target_gen.lt(gen))
+                            .set((
+                                migration_dsl::target_state.eq(state),
+                                migration_dsl::time_target_updated
+                                    .eq(time_updated),
+                            )),
+                    ),
+                    MigrationRole::Source => Box::new(
+                        diesel::update(migration_dsl::migration)
+                            .filter(migration_dsl::id.eq(migration_id))
+                            .filter(
+                                migration_dsl::source_propolis_id.eq(vmm_id),
+                            )
+                            .filter(migration_dsl::source_gen.lt(gen))
+                            .set((
+                                migration_dsl::source_state.eq(state),
+                                migration_dsl::time_source_updated
+                                    .eq(time_updated),
+                            )),
+                    ),
+                };
+                MigrationUpdate { find, update }
+            },
+        );
+
+        Self { instance_find, vmm_find, instance_update, vmm_update, migration }
     }
 
     pub async fn execute_and_check(
         self,
         conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection> + Sync),
     ) -> Result<InstanceAndVmmUpdateResult, DieselError> {
-        let (vmm_found, vmm_updated, instance_found, instance_updated) =
-            self.get_result_async::<(Option<Uuid>,
-                                     Option<Uuid>,
-                                     Option<Uuid>,
-                                     Option<Uuid>)>(conn).await?;
+        let (
+            vmm_found,
+            vmm_updated,
+            instance_found,
+            instance_updated,
+            migration_found,
+            migration_updated,
+        ) = self
+            .get_result_async::<(
+                Option<Uuid>,
+                Option<Uuid>,
+                Option<Uuid>,
+                Option<Uuid>,
+                Option<Uuid>,
+                Option<Uuid>,
+            )>(conn)
+            .await?;
 
         let instance_status =
             compute_update_status(instance_found, instance_updated);
         let vmm_status = compute_update_status(vmm_found, vmm_updated);
+        let migration_status =
+            compute_update_status(migration_found, migration_updated);
 
-        Ok(InstanceAndVmmUpdateResult { instance_status, vmm_status })
+        Ok(InstanceAndVmmUpdateResult {
+            instance_status,
+            vmm_status,
+            migration_status,
+        })
     }
 }
 
@@ -193,6 +283,8 @@ impl QueryId for InstanceAndVmmUpdate {
 
 impl Query for InstanceAndVmmUpdate {
     type SqlType = (
+        Nullable<SqlUuid>,
+        Nullable<SqlUuid>,
         Nullable<SqlUuid>,
         Nullable<SqlUuid>,
         Nullable<SqlUuid>,
@@ -212,6 +304,12 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         self.vmm_find.walk_ast(out.reborrow())?;
         out.push_sql(") AS id), ");
 
+        if let Some(MigrationUpdate { ref find, .. }) = self.migration {
+            out.push_sql("migration_found AS (SELECT (");
+            find.walk_ast(out.reborrow())?;
+            out.push_sql(") AS id), ");
+        }
+
         out.push_sql("instance_updated AS (");
         self.instance_update.walk_ast(out.reborrow())?;
         out.push_sql(" RETURNING id), ");
@@ -219,6 +317,12 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         out.push_sql("vmm_updated AS (");
         self.vmm_update.walk_ast(out.reborrow())?;
         out.push_sql(" RETURNING id), ");
+
+        if let Some(MigrationUpdate { ref update, .. }) = self.migration {
+            out.push_sql("migration_updated AS (");
+            update.walk_ast(out.reborrow())?;
+            out.push_sql(" RETURNING id), ");
+        }
 
         out.push_sql("vmm_result AS (");
         out.push_sql("SELECT vmm_found.");
@@ -244,11 +348,37 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         out.push_identifier(instance_dsl::id::NAME)?;
         out.push_sql(" = instance_updated.");
         out.push_identifier(instance_dsl::id::NAME)?;
-        out.push_sql(") ");
+        out.push_sql(")");
+
+        if self.migration.is_some() {
+            out.push_sql(", ");
+            out.push_sql("migration_result AS (");
+            out.push_sql("SELECT migration_found.");
+            out.push_identifier(migration_dsl::id::NAME)?;
+            out.push_sql(" AS found, migration_updated.");
+            out.push_identifier(migration_dsl::id::NAME)?;
+            out.push_sql(" AS updated");
+            out.push_sql(
+                " FROM migration_found LEFT JOIN migration_updated ON migration_found.",
+            );
+            out.push_identifier(migration_dsl::id::NAME)?;
+            out.push_sql(" = migration_updated.");
+            out.push_identifier(migration_dsl::id::NAME)?;
+            out.push_sql(")");
+        }
+        out.push_sql(" ");
 
         out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
-        out.push_sql("instance_result.found, instance_result.updated ");
-        out.push_sql("FROM vmm_result, instance_result;");
+        out.push_sql("instance_result.found, instance_result.updated, ");
+        if self.migration.is_some() {
+            out.push_sql("migration_result.found, migration_result.updated ");
+        } else {
+            out.push_sql("NULL, NULL ");
+        }
+        out.push_sql("FROM vmm_result, instance_result");
+        if self.migration.is_some() {
+            out.push_sql(", migration_result");
+        }
 
         Ok(())
     }

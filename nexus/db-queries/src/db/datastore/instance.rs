@@ -46,6 +46,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::MigrationRuntimeState;
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use uuid::Uuid;
@@ -74,9 +75,9 @@ impl InstanceAndActiveVmm {
         &self,
     ) -> omicron_common::api::external::InstanceState {
         if let Some(vmm) = &self.vmm {
-            vmm.runtime.state.0
+            vmm.runtime.state.into()
         } else {
-            self.instance.runtime().nexus_state.0
+            self.instance.runtime().nexus_state.into()
         }
     }
 }
@@ -89,11 +90,13 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
 
 impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
-        let (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
-            (vmm.runtime.state, vmm.runtime.time_state_updated)
+        let run_state: omicron_common::api::external::InstanceState;
+        let time_run_state_updated: chrono::DateTime<Utc>;
+        (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
+            (vmm.runtime.state.into(), vmm.runtime.time_state_updated)
         } else {
             (
-                value.instance.runtime_state.nexus_state.clone(),
+                value.instance.runtime_state.nexus_state.into(),
                 value.instance.runtime_state.time_updated,
             )
         };
@@ -109,7 +112,7 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             runtime: omicron_common::api::external::InstanceRuntimeState {
-                run_state: *run_state.state(),
+                run_state,
                 time_run_state_updated,
             },
         }
@@ -137,6 +140,25 @@ pub enum UpdaterLockError {
     /// An error occurred executing the query.
     #[error("error locking instance: {0}")]
     Query(#[from] Error),
+}
+
+/// The result of an [`DataStore::instance_and_vmm_update_runtime`] call,
+/// indicating which records were updated.
+#[derive(Copy, Clone, Debug)]
+pub struct InstanceUpdateResult {
+    /// `true` if the instance record was updated, `false` otherwise.
+    pub instance_updated: bool,
+    /// `true` if the VMM record was updated, `false` otherwise.
+    pub vmm_updated: bool,
+    /// Indicates whether a migration record for this instance was updated, if a
+    /// [`MigrationRuntimeState`] was provided to
+    /// [`DataStore::instance_and_vmm_update_runtime`].
+    ///
+    /// - `Some(true)` if a migration record was updated
+    /// - `Some(false)` if a [`MigrationRuntimeState`] was provided, but the
+    ///   migration record was not updated
+    /// - `None` if no [`MigrationRuntimeState`] was provided
+    pub migration_updated: Option<bool>,
 }
 
 impl DataStore {
@@ -196,8 +218,8 @@ impl DataStore {
         })?;
 
         bail_unless!(
-            instance.runtime().nexus_state.state()
-                == &api::external::InstanceState::Creating,
+            instance.runtime().nexus_state
+                == nexus_db_model::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
             instance.runtime().nexus_state
         );
@@ -370,12 +392,11 @@ impl DataStore {
     ///
     /// # Return value
     ///
-    /// - `Ok((instance_updated, vmm_updated))` if the query was issued
-    ///   successfully. `instance_updated` and `vmm_updated` are each true if
-    ///   the relevant item was updated and false otherwise. Note that an update
-    ///   can fail because it was inapplicable (i.e. the database has state with
-    ///   a newer generation already) or because the relevant record was not
-    ///   found.
+    /// - `Ok(`[`InstanceUpdateResult`]`)` if the query was issued
+    ///   successfully. The returned [`InstanceUpdateResult`] indicates which
+    ///   database record(s) were updated. Note that an update can fail because
+    ///   it was inapplicable (i.e. the database has state with a newer
+    ///   generation already) or because the relevant record was not found.
     /// - `Err` if another error occurred while accessing the database.
     pub async fn instance_and_vmm_update_runtime(
         &self,
@@ -383,12 +404,14 @@ impl DataStore {
         new_instance: &InstanceRuntimeState,
         vmm_id: &Uuid,
         new_vmm: &VmmRuntimeState,
-    ) -> Result<(bool, bool), Error> {
+        migration: &Option<MigrationRuntimeState>,
+    ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             *instance_id,
             new_instance.clone(),
             *vmm_id,
             new_vmm.clone(),
+            migration.clone(),
         );
 
         // The InstanceAndVmmUpdate query handles and indicates failure to find
@@ -411,7 +434,22 @@ impl DataStore {
             None => false,
         };
 
-        Ok((instance_updated, vmm_updated))
+        let migration_updated = if migration.is_some() {
+            Some(match result.migration_status {
+                Some(UpdateStatus::Updated) => true,
+                Some(UpdateStatus::NotUpdatedButExists) => false,
+                None => false,
+            })
+        } else {
+            debug_assert_eq!(result.migration_status, None);
+            None
+        };
+
+        Ok(InstanceUpdateResult {
+            instance_updated,
+            vmm_updated,
+            migration_updated,
+        })
     }
 
     /// Lists all instances on in-service sleds with active Propolis VMM
@@ -477,13 +515,12 @@ impl DataStore {
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
-        use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
         use db::schema::{disk, instance};
 
-        let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
-        let failed = DbInstanceState::new(ApiInstanceState::Failed);
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let stopped = DbInstanceState::NoVmm;
+        let failed = DbInstanceState::Failed;
+        let destroyed = DbInstanceState::Destroyed;
         let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();

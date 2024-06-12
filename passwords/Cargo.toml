@@ -17,8 +17,13 @@ serde_with.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+# For tests
 argon2alt = { package = "rust-argon2", version = "2.1.0" }
+# For benchmark
 criterion.workspace = true
+# For the "argon2" example
+anyhow.workspace = true
+clap.workspace = true
 
 [[bench]]
 name = "argon2"

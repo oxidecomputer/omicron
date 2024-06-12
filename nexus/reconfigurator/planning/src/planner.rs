@@ -10,6 +10,7 @@ use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
+use crate::blueprint_builder::Operation;
 use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -25,6 +26,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -228,16 +230,19 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
-            if self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
-                == Ensure::Added
+            if let EnsureMultiple::Changed { added, removed } =
+                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
                     "altered physical disks";
                     "sled_id" => %sled_id
                 );
-                self.blueprint
-                    .comment(&format!("sled {}: altered disks", sled_id));
+                self.blueprint.record_operation(Operation::UpdateDisks {
+                    sled_id,
+                    added,
+                    removed,
+                });
 
                 // Note that this doesn't actually need to short-circuit the
                 // rest of the blueprint planning, as long as during execution
@@ -254,8 +259,10 @@ impl<'a> Planner<'a> {
                     "found sled missing NTP zone (will add one)";
                     "sled_id" => %sled_id
                 );
-                self.blueprint
-                    .comment(&format!("sled {}: add NTP zone", sled_id));
+                self.blueprint.record_operation(Operation::AddZone {
+                    sled_id,
+                    kind: ZoneKind::BoundaryNtp,
+                });
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
@@ -323,7 +330,10 @@ impl<'a> Planner<'a> {
                 // (Yes, it's currently the last thing in the loop, but being
                 // explicit here means we won't forget to do this when more code
                 // is added below.)
-                self.blueprint.comment(&format!("sled {}: add zones", sled_id));
+                self.blueprint.record_operation(Operation::AddZone {
+                    sled_id,
+                    kind: ZoneKind::Crucible,
+                });
                 continue;
             }
         }
@@ -429,12 +439,12 @@ impl<'a> Planner<'a> {
                 .blueprint
                 .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
             {
-                EnsureMultiple::Added(n) => {
+                EnsureMultiple::Changed { added, removed: _ } => {
                     info!(
-                        self.log, "will add {n} Nexus zone(s) to sled";
+                        self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
                     );
-                    total_added += n;
+                    total_added += added;
                 }
                 // This is only possible if we asked the sled to ensure the same
                 // number of zones it already has, but that's impossible based

@@ -673,6 +673,36 @@ async fn test_instance_start_creates_networking_state(
 
 #[nexus_test]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
+    use nexus_db_model::Migration;
+    use omicron_common::api::internal::nexus::MigrationState;
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_queries::db::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
@@ -729,7 +759,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     let migrate_url =
         format!("/v1/instances/{}/migrate", &instance_id.to_string());
-    let _ = NexusRequest::new(
+    let instance = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &migrate_url)
             .body(Some(&params::InstanceMigrate { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
@@ -749,12 +779,40 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(current_sled, original_sled);
 
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::Pending.into());
+
     // Explicitly simulate the migration action on the target. Simulated
     // migrations always succeed. The state transition on the target is
     // sufficient to move the instance back into a Running state (strictly
     // speaking no further updates from the source are required if the target
     // successfully takes over).
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    // Ensure that both sled agents report that the migration has completed.
+    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
@@ -765,6 +823,11 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .expect("migrated instance should still have a sled");
 
     assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Completed.into());
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert!(migration.time_deleted.is_some());
 }
 
 #[nexus_test]

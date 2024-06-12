@@ -920,11 +920,38 @@ impl Nexus {
 
     /// Reliable persistent workflows can request that sagas be executed by
     /// sending a SagaRequest to a supplied channel. Execute those here.
-    pub(crate) async fn handle_saga_request(&self, saga_request: SagaRequest) {
+    pub(crate) async fn handle_saga_request(
+        self: &Arc<Self>,
+        saga_request: SagaRequest,
+    ) {
         match saga_request {
             #[cfg(test)]
             SagaRequest::TestOnly => {
                 unimplemented!();
+            }
+
+            SagaRequest::RegionReplacementStart { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement drive saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                        }
+                    }
+                });
             }
         }
     }

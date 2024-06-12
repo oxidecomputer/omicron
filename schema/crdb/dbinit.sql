@@ -954,17 +954,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
  * Instances
  */
 
-CREATE TYPE IF NOT EXISTS omicron.public.instance_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
+    /* The instance exists in the DB but its create saga is still in flight. */
     'creating',
+
+    /*
+     * The instance has no active VMM. Corresponds to the "stopped" external
+     * state.
+     */
+    'no_vmm',
+
+    /* The instance's state is derived from its active VMM's state. */
+    'vmm',
+
+    /* Something bad happened while trying to interact with the instance. */
+    'failed',
+
+    /* The instance has been destroyed. */
+    'destroyed'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'starting',
     'running',
     'stopping',
     'stopped',
     'rebooting',
     'migrating',
-    'repairing',
     'failed',
-    'destroyed'
+    'destroyed',
+    'saga_unwound'
 );
 
 /*
@@ -989,8 +1008,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
-    /* The state of the instance when it has no active VMM. */
-    state omicron.public.instance_state NOT NULL,
+    /* The last-updated time and generation for the instance's state. */
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
 
@@ -1014,8 +1032,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     updater_id UUID,
 
     /* Generation of the instance updater lock */
-    updater_gen INT NOT NULL DEFAULT 0
+    updater_gen INT NOT NULL DEFAULT 0,
 
+    /*
+     * The internal instance state. If this is 'vmm', the externally-visible
+     * instance state is derived from its active VMM's state. This column is
+     * distant from its generation number and update time because it is
+     * deleted and recreated by the schema upgrade process; see the
+     * `separate-instance-and-vmm-states` schema change for details.
+     */
+    state omicron.public.instance_state_v2 NOT NULL,
+
+    CONSTRAINT vmm_iff_active_propolis CHECK (
+        ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
+        ((state != 'vmm') AND (active_propolis_id IS NULL))
+    )
 );
 
 -- Names for instances within a project should be unique
@@ -2732,6 +2763,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     rsvd_address_lot_block_id UUID NOT NULL,
     address INET,
     interface_name TEXT,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, address, interface_name)
@@ -3491,12 +3523,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     instance_id UUID NOT NULL,
-    state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
-    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
+    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
+    state omicron.public.vmm_state NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -4047,6 +4079,55 @@ VALUES (
 ON CONFLICT (id)
 DO NOTHING;
 
+CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
+  'pending',
+  'in_progress',
+  'failed',
+  'completed'
+);
+
+-- A table of the states of current migrations.
+CREATE TABLE IF NOT EXISTS omicron.public.migration (
+    id UUID PRIMARY KEY,
+
+    /* The time this migration record was created. */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /* The time this migration record was deleted. */
+    time_deleted TIMESTAMPTZ,
+
+    /* The state of the migration source */
+    source_state omicron.public.migration_state NOT NULL,
+
+    /* The ID of the migration source Propolis */
+    source_propolis_id UUID NOT NULL,
+
+    /* Generation number owned and incremented by the source sled-agent */
+    source_gen INT8 NOT NULL DEFAULT 1,
+
+    /* Timestamp of when the source field was last updated.
+     *
+     * This is provided by the sled-agent when publishing a migration state
+     * update.
+     */
+    time_source_updated TIMESTAMPTZ,
+
+    /* The state of the migration target */
+    target_state omicron.public.migration_state NOT NULL,
+
+    /* The ID of the migration target Propolis */
+    target_propolis_id UUID NOT NULL,
+
+    /* Generation number owned and incremented by the target sled-agent */
+    target_gen INT8 NOT NULL DEFAULT 1,
+
+    /* Timestamp of when the source field was last updated.
+     *
+     * This is provided by the sled-agent when publishing a migration state
+     * update.
+     */
+    time_target_updated TIMESTAMPTZ
+);
 
 /*
  * Keep this at the end of file so that the database does not contain a version
@@ -4059,7 +4140,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '70.0.0', NULL)
+    (TRUE, NOW(), NOW(), '75.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
