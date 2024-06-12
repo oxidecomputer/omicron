@@ -144,7 +144,7 @@ mod test {
         let logctx = dev::test_setup_log("test_explain_async");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg);
         let conn = pool.claim().await.unwrap();
 
         create_schema(&pool).await;
@@ -169,7 +169,7 @@ mod test {
         let logctx = dev::test_setup_log("test_explain_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg);
         let conn = pool.claim().await.unwrap();
 
         create_schema(&pool).await;

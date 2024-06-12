@@ -71,11 +71,9 @@ fn make_single_host_resolver(
 fn make_postgres_connector() -> qorb::backend::SharedConnector<QorbConnection> {
     // Create postgres connections.
     //
-    // TODO: "on acquire"?
-    // TODO: Connection timeout for failfast?
-    //
-    // We're currently relying on somewhat intrusive modifications to qorb to
-    // make these things possible. Might be worth a refactor?
+    // We're currently relying on the DieselPgConnector doing the following:
+    // - Disallowing full table scans in its implementation of "on_acquire"
+    // - Creating async_bb8_diesel connections that also wrap DTraceConnections.
     let user = "root";
     let db = "omicron";
     let args = Some("sslmode=disable");
@@ -105,8 +103,7 @@ impl Pool {
     /// on a single instance of the database.
     ///
     /// In production, [Self::new_qorb] should be preferred.
-    // TODO: Does not need to be async
-    pub async fn new_qorb_single_host(db_config: &DbConfig) -> Self {
+    pub fn new_qorb_single_host(db_config: &DbConfig) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
@@ -114,29 +111,25 @@ impl Pool {
         let connector = make_postgres_connector();
 
         let policy = Policy::default();
-        let pool =
-            Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) };
+        Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
+    }
 
-        let stats = pool.inner.stats().clone();
+    /// Creates a new qorb-backed connection pool which returns an error
+    /// if claims are not quickly available.
+    ///
+    /// This is intended for test-only usage.
+    pub fn new_qorb_single_host_failfast(db_config: &DbConfig) -> Self {
+        // Make sure diesel-dtrace's USDT probes are enabled.
+        usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
-        tokio::task::spawn(async move {
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        let resolver = make_single_host_resolver(db_config);
+        let connector = make_postgres_connector();
 
-                let backends = stats.rx.borrow();
-                for (name, stats) in backends.iter() {
-                    let stats = stats.get();
-                    println!("Backend: {name:?}");
-                    println!("  Stats: {stats:?}");
-                }
-                println!(
-                    "Total claims: {}",
-                    stats.claims.load(std::sync::atomic::Ordering::SeqCst)
-                );
-            }
-        });
-
-        pool
+        let policy = Policy {
+            claim_timeout: tokio::time::Duration::from_millis(1),
+            ..Default::default()
+        };
+        Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
     }
 
     /// Returns a connection from the pool

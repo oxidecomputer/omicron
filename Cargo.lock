@@ -7450,7 +7450,7 @@ dependencies = [
 [[package]]
 name = "qorb"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=master#64d959b94b594499e28df3117dfdeafad3ab9036"
+source = "git+https://github.com/oxidecomputer/qorb?branch=master#6b39fd4c08790036ec4cc7cf18a0bcbbb0fcd34e"
 dependencies = [
  "anyhow",
  "async-bb8-diesel",

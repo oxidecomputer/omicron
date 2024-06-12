@@ -956,8 +956,7 @@ async fn dbinit_equals_sum_of_all_up() {
     // it for an extra check later.
     let pool = nexus_db_queries::db::Pool::new_qorb_single_host(
         &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
-    )
-    .await;
+    );
     let conn_from_pool =
         pool.claim().await.expect("failed to get pooled connection");
 

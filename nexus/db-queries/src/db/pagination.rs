@@ -402,7 +402,7 @@ mod test {
             dev::test_setup_log("test_paginated_single_column_ascending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg);
 
         use schema::test_users::dsl;
 
@@ -437,7 +437,7 @@ mod test {
             dev::test_setup_log("test_paginated_single_column_descending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg);
 
         use schema::test_users::dsl;
 
@@ -472,7 +472,7 @@ mod test {
             dev::test_setup_log("test_paginated_multicolumn_ascending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg);
 
         use schema::test_users::dsl;
 
@@ -526,7 +526,7 @@ mod test {
             dev::test_setup_log("test_paginated_multicolumn_descending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg).await;
+        let pool = db::Pool::new_qorb_single_host(&cfg);
 
         use schema::test_users::dsl;
 

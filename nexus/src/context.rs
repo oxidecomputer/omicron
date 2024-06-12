@@ -254,7 +254,6 @@ impl ServerContext {
         let pool = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => {
                 db::Pool::new_qorb_single_host(&db::Config { url: url.clone() })
-                    .await
             }
             nexus_config::Database::FromDns => db::Pool::new_qorb(dns_addrs),
         };

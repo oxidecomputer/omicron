@@ -395,8 +395,6 @@ bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a0
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
 proptest = "1.4.0"
-# TODO: Patch me before merging!
-# qorb = { path = "../../qorb" }
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
 rand = "0.8.5"

@@ -29,7 +29,7 @@ pub async fn datastore_test(
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new_qorb_single_host(&cfg).await);
+    let pool = Arc::new(db::Pool::new_qorb_single_host(&cfg));
     let datastore =
         Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
 
