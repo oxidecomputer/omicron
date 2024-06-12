@@ -2364,8 +2364,6 @@ impl ServiceManager {
                 let mut switch_zone_setup_config =
                     PropertyGroupBuilder::new("config");
 
-                // TODO: investigate links_need_link_local more throroughly, there don't seem to be any
-                // in either of the scrimlets
                 for (link, needs_link_local) in
                     installed_zone.links().iter().zip(links_need_link_local)
                 {

@@ -11,6 +11,7 @@ use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
 use illumos_utils::zone::Zones;
+use illumos_utils::ExecutionError;
 use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -601,7 +602,6 @@ async fn common_nw_set_up(
     Ipadm::set_interface_mtu(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    // TODO: Log if there are no addresses, or add a flag so that this doesn't run on the switch zone
     if static_addrs.is_empty() {
         info!(
             &log,
@@ -611,39 +611,50 @@ async fn common_nw_set_up(
 
     for addr in &static_addrs {
         if **addr != Ipv6Addr::LOCALHOST {
-            info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
+            info!(
+                &log,
+                "Ensuring static and auto-configured addresses are set on the IP interface";
+                "data link" => ?datalink,
+                "static address" => ?addr,
+            );
             Ipadm::create_static_and_autoconfigured_addrs(&datalink, addr)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
         } else {
             info!(
                 &log,
                 "Static address is localhost, will not ensure it's set on the IP interface"
-            );  
+            );
         }
     }
 
-    // TODO: Run this enough times to make sure this implementation is solid
-    // perhaps somehow find out a way to know when the gateway is up?
-    // perhaps configure this for the switch zone separately?
-    //
-    // Maybe instead of waiting we want to implement the "Maybe gateway" logic,
-    // and afterwards update this when the other services refresh?
-    //
-    // NOTE: Route must come after bootstrap, meaning this won't succeed until
-    // after all bootstrap address code is run in switch zone. Maybe this service
-    // can depend on the switch setup serice?
+    // NOTE: Ensuring default route with gateway must happen after peer agents have been initialized.
+    // Omicron zones will be able ensure a default route with gateway immediately, but the switch zone
+    // on the secondary scrimlet might need a few tries while it waits.
     retry_notify(
-        // TODO: Is this the best retry policy?
         retry_policy_local(),
         || async {
             info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
             Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
             .map_err(|err| {
-                // TODO: Only make transient for the following error:
-                // executed and failed with status: exit status: 128 stdout: add net default: gateway fd00:1122:3344:101::1: Network is unreachable\n  stderr: 
-                BackoffError::transient(
-                    CmdError::Failure(anyhow!(err)),
-            )})
+                match err {
+                    ExecutionError::CommandFailure(ref e) => {
+                        if e.stdout.contains("Network is unreachable") {
+                            BackoffError::transient(
+                                CmdError::Failure(anyhow!(err)),
+                            )
+                        } else {
+                            BackoffError::permanent(
+                                CmdError::Failure(anyhow!(err)),
+                            )
+                        }
+                    }
+                    _ => {
+                        BackoffError::permanent(
+                            CmdError::Failure(anyhow!(err)),
+                        )
+                    }
+                }
+        })
         },
         |err, delay| {
             info!(
