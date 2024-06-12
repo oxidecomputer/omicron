@@ -14,7 +14,6 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
 async-trait.workspace = true
-bb8.workspace = true
 camino.workspace = true
 chrono.workspace = true
 const_format.workspace = true
