@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::SocketAddr;
+
 use crate::CockroachCli;
+use anyhow::bail;
 use anyhow::Context;
 use dropshot::HttpError;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -60,12 +63,12 @@ impl ServerContext {
     }
 
     async fn read_node_id_from_cockroach(&self) -> anyhow::Result<String> {
+        let cockroach_address = self.cockroach_cli().cockroach_address();
         // TODO-cleanup This connection string is duplicated in Nexus - maybe we
         // should centralize it? I'm not sure where we could put it;
         // omicron_common, perhaps?
         let connect_url = format!(
-            "postgresql://root@{}/omicron?sslmode=disable",
-            self.cockroach_cli.cockroach_address()
+            "postgresql://root@{cockroach_address}/omicron?sslmode=disable",
         );
         let (client, connection) =
             tokio_postgres::connect(&connect_url, tokio_postgres::NoTls)
@@ -93,7 +96,42 @@ impl ServerContext {
             .await
             .context("failed to send node ID query")?;
 
-        row.try_get(0).context("failed to read results of node ID query")
+        let node_id = row
+            .try_get(0)
+            .context("failed to read results of node ID query")?;
+
+        // We'll be paranoid: While it seems unlikely we could ever get an
+        // incorrect node ID from the internal builtin, since it's not
+        // documented, we don't know for sure if it's possible for our query to
+        // be forwarded to a different node. Let's also run `NodeStatus`, and
+        // ensure that this node ID's address matches the address of our local
+        // crdb instance.
+        let node_statuses = self
+            .cockroach_cli()
+            .node_status()
+            .await
+            .context("failed to get node status")?;
+
+        let our_node_status = node_statuses
+            .iter()
+            .find(|status| status.node_id == node_id)
+            .with_context(|| {
+                format!(
+                    "node status did not include information for our node ID \
+                    ({node_id}): {node_statuses:?}"
+                )
+            })?;
+
+        if our_node_status.address != SocketAddr::V6(cockroach_address) {
+            bail!(
+                "node ID / address mismatch: we fetched node ID {node_id} \
+                from our local cockroach at {cockroach_address}, but \
+                `node status` reported this node ID at address {}",
+                our_node_status.address
+            )
+        }
+
+        Ok(node_id)
     }
 }
 
