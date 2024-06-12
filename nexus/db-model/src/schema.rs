@@ -1776,6 +1776,7 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(instance, migration);
+allow_tables_to_appear_in_same_query!(migration, vmm);
 joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(
