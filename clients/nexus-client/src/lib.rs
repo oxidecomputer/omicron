@@ -149,6 +149,49 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
             instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
+            migration_state: s.migration_state.map(Into::into),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::MigrationRuntimeState>
+    for types::MigrationRuntimeState
+{
+    fn from(
+        s: omicron_common::api::internal::nexus::MigrationRuntimeState,
+    ) -> Self {
+        Self {
+            migration_id: s.migration_id,
+            role: s.role.into(),
+            state: s.state.into(),
+            gen: s.gen,
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::MigrationRole>
+    for types::MigrationRole
+{
+    fn from(s: omicron_common::api::internal::nexus::MigrationRole) -> Self {
+        use omicron_common::api::internal::nexus::MigrationRole as Input;
+        match s {
+            Input::Source => Self::Source,
+            Input::Target => Self::Target,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::MigrationState>
+    for types::MigrationState
+{
+    fn from(s: omicron_common::api::internal::nexus::MigrationState) -> Self {
+        use omicron_common::api::internal::nexus::MigrationState as Input;
+        match s {
+            Input::Pending => Self::Pending,
+            Input::InProgress => Self::InProgress,
+            Input::Completed => Self::Completed,
+            Input::Failed => Self::Failed,
         }
     }
 }

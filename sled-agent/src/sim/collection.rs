@@ -451,6 +451,7 @@ mod test {
             instance_state: instance_vmm,
             vmm_state,
             propolis_id,
+            migration_state: None,
         };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))

@@ -46,6 +46,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::MigrationRuntimeState;
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use uuid::Uuid;
@@ -139,6 +140,25 @@ pub enum UpdaterLockError {
     /// An error occurred executing the query.
     #[error("error locking instance: {0}")]
     Query(#[from] Error),
+}
+
+/// The result of an [`DataStore::instance_and_vmm_update_runtime`] call,
+/// indicating which records were updated.
+#[derive(Copy, Clone, Debug)]
+pub struct InstanceUpdateResult {
+    /// `true` if the instance record was updated, `false` otherwise.
+    pub instance_updated: bool,
+    /// `true` if the VMM record was updated, `false` otherwise.
+    pub vmm_updated: bool,
+    /// Indicates whether a migration record for this instance was updated, if a
+    /// [`MigrationRuntimeState`] was provided to
+    /// [`DataStore::instance_and_vmm_update_runtime`].
+    ///
+    /// - `Some(true)` if a migration record was updated
+    /// - `Some(false)` if a [`MigrationRuntimeState`] was provided, but the
+    ///   migration record was not updated
+    /// - `None` if no [`MigrationRuntimeState`] was provided
+    pub migration_updated: Option<bool>,
 }
 
 impl DataStore {
@@ -372,12 +392,11 @@ impl DataStore {
     ///
     /// # Return value
     ///
-    /// - `Ok((instance_updated, vmm_updated))` if the query was issued
-    ///   successfully. `instance_updated` and `vmm_updated` are each true if
-    ///   the relevant item was updated and false otherwise. Note that an update
-    ///   can fail because it was inapplicable (i.e. the database has state with
-    ///   a newer generation already) or because the relevant record was not
-    ///   found.
+    /// - `Ok(`[`InstanceUpdateResult`]`)` if the query was issued
+    ///   successfully. The returned [`InstanceUpdateResult`] indicates which
+    ///   database record(s) were updated. Note that an update can fail because
+    ///   it was inapplicable (i.e. the database has state with a newer
+    ///   generation already) or because the relevant record was not found.
     /// - `Err` if another error occurred while accessing the database.
     pub async fn instance_and_vmm_update_runtime(
         &self,
@@ -385,12 +404,14 @@ impl DataStore {
         new_instance: &InstanceRuntimeState,
         vmm_id: &Uuid,
         new_vmm: &VmmRuntimeState,
-    ) -> Result<(bool, bool), Error> {
+        migration: &Option<MigrationRuntimeState>,
+    ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             *instance_id,
             new_instance.clone(),
             *vmm_id,
             new_vmm.clone(),
+            migration.clone(),
         );
 
         // The InstanceAndVmmUpdate query handles and indicates failure to find
@@ -413,7 +434,22 @@ impl DataStore {
             None => false,
         };
 
-        Ok((instance_updated, vmm_updated))
+        let migration_updated = if migration.is_some() {
+            Some(match result.migration_status {
+                Some(UpdateStatus::Updated) => true,
+                Some(UpdateStatus::NotUpdatedButExists) => false,
+                None => false,
+            })
+        } else {
+            debug_assert_eq!(result.migration_status, None);
+            None
+        };
+
+        Ok(InstanceUpdateResult {
+            instance_updated,
+            vmm_updated,
+            migration_updated,
+        })
     }
 
     /// Lists all instances on in-service sleds with active Propolis VMM
