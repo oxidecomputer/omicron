@@ -11,12 +11,6 @@
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
-<!-- TODO: Unsure if wicket should depend on the zone_network_setup service -->
-  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/oxide/zone-network-setup:default' />
-  </dependency>
-
   <dependency name='switch_zone_setup' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/oxide/switch_zone_setup:default' />
