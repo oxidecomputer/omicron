@@ -59,8 +59,8 @@ impl CockroachNodeIdCollector {
         Self { datastore, rx_blueprint }
     }
 
-    /// Implementation for `BackgroundTask::activate` for `BlueprintExecutor`,
-    /// added here to produce better compile errors.
+    /// Implementation for `BackgroundTask::activate`, added here to produce
+    /// better compile errors.
     ///
     /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
     /// confusion with compilation errors in the past. So separate this method
