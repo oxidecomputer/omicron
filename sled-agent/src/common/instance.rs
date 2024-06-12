@@ -332,7 +332,7 @@ impl InstanceStates {
 
                     // This is a migration source that previously reported success
                     // and removed itself from the active Propolis position. Don't
-                    // touch the instance.'
+                    // touch the instance.
                     PropolisRole::Retired => {}
                 }
             }
