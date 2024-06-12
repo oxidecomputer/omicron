@@ -4,6 +4,8 @@
 
 //! Integration tests for operating on IP Pools
 
+use std::net::Ipv4Addr;
+
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
@@ -20,8 +22,10 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
@@ -41,6 +45,7 @@ use nexus_types::external_api::params::IpPoolUpdate;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSiloLink;
@@ -1142,52 +1147,94 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let mypool_name = "mypool";
 
-    const PROJECT_NAME: &str = "myproj";
-    create_project(client, PROJECT_NAME).await;
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: Silo = object_get(client, &silo_url).await;
 
-    // create pool with range and link (as default pool) to default silo, which
-    // is the privileged user's silo
-    let mypool_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 51),
-            std::net::Ipv4Addr::new(10, 0, 0, 52),
-        )
-        .unwrap(),
+    // manually create default pool and link to test silo, as opposed to default
+    // silo, which is what the helper would do
+    let _ = create_ip_pool(&client, "default", None).await;
+    let default_name = "default";
+    link_ip_pool(&client, default_name, &silo.identity.id, true).await;
+
+    // create other pool and link to silo
+    let other_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
+            .unwrap(),
     );
-    create_ip_pool(client, mypool_name, Some(mypool_range)).await;
-    link_ip_pool(client, mypool_name, &DEFAULT_SILO.id(), true).await;
+    let other_name = "other-pool";
+    create_ip_pool(&client, other_name, Some(other_pool_range)).await;
+    link_ip_pool(&client, other_name, &silo.identity.id, false).await;
 
-    // create another pool and don't link it to anything
-    let otherpool_name = "other-pool";
-    let otherpool_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 53),
-            std::net::Ipv4Addr::new(10, 0, 0, 54),
-        )
-        .unwrap(),
+    // create third pool and don't link to silo
+    let unlinked_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
+            .unwrap(),
     );
-    create_ip_pool(client, otherpool_name, Some(otherpool_range)).await;
+    let unlinked_name = "unlinked-pool";
+    create_ip_pool(&client, unlinked_name, Some(unlinked_pool_range)).await;
 
-    let list = objects_list_page_authz::<SiloIpPool>(client, "/v1/ip-pools")
+    // Create a silo user
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Make silo collaborator
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let list = NexusRequest::object_get(client, "/v1/ip-pools")
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<ResultsPage<SiloIpPool>>()
         .await
         .items;
 
-    // only mypool shows up because it's linked to my silo
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].identity.name.to_string(), mypool_name);
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].identity.name.to_string(), default_name);
     assert!(list[0].is_default);
+    assert_eq!(list[1].identity.name.to_string(), other_name);
+    assert!(!list[1].is_default);
 
-    // fetch the pool directly too
-    let url = format!("/v1/ip-pools/{}", mypool_name);
-    let pool = object_get::<SiloIpPool>(client, &url).await;
-    assert_eq!(pool.identity.name.as_str(), mypool_name);
+    // fetch the pools directly too
+    let url = format!("/v1/ip-pools/{}", default_name);
+    let pool = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<SiloIpPool>()
+        .await;
+    assert_eq!(pool.identity.name.as_str(), default_name);
     assert!(pool.is_default);
 
+    let url = format!("/v1/ip-pools/{}", other_name);
+    let pool = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<SiloIpPool>()
+        .await;
+    assert_eq!(pool.identity.name.as_str(), other_name);
+    assert!(!pool.is_default);
+
     // fetching the other pool directly 404s
-    let url = format!("/v1/ip-pools/{}", otherpool_name);
-    object_get_error(client, &url, StatusCode::NOT_FOUND).await;
+    let url = format!("/v1/ip-pools/{}", unlinked_name);
+    let _error = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap();
+    dbg!(_error);
 }
 
 #[nexus_test]
