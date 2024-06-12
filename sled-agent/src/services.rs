@@ -1550,7 +1550,7 @@ impl ServiceManager {
         if let Some(uuid) = unique_name {
             zone_builder = zone_builder.with_unique_name(uuid);
         }
-        if let Some(vnic) = bootstrap_vnic.clone() {
+        if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
         }
         let installed_zone = zone_builder
@@ -1598,13 +1598,13 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = underlay_address;
+                let listen_addr = *underlay_address;
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &vec![listen_addr],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1651,13 +1651,13 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = underlay_address;
+                let listen_addr = *underlay_address;
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &vec![listen_addr],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1778,13 +1778,13 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
-                let listen_addr = &underlay_address;
+                let listen_addr = *underlay_address;
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &vec![listen_addr],
                 )?;
 
                 let dataset_name = DatasetName::new(
@@ -1837,13 +1837,13 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = &underlay_address;
+                let listen_addr = *underlay_address;
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &vec![listen_addr],
                 )?;
 
                 let config = PropertyGroupBuilder::new("config")
@@ -2967,7 +2967,6 @@ impl ServiceManager {
                     .add_service(pumpkind_service)
                     .add_service(mgd_service)
                     .add_service(mg_ddm_service)
-                    // TODO: I am unsure if I should add this service to the property builder
                     .add_service(sp_sim_service)
                     .add_service(uplink_service);
                 profile
@@ -2976,11 +2975,9 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Switch zone profile", err)
                     })?;
-                //  return Ok(RunningZone::boot(installed_zone).await?);
             }
         }
 
-        //        // TODO: Remove from here until end
         let running_zone = RunningZone::boot(installed_zone).await?;
 
         // Part of the process to ensure bootstrap address is to set up
@@ -3015,6 +3012,7 @@ impl ServiceManager {
                 })?;
         }
         Ok(running_zone)
+        // TODO: Remove from here until end
         //
         //        let addresses = match &request {
         //            ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -4595,10 +4593,6 @@ impl ServiceManager {
                     match service {
                         SwitchService::ManagementGatewayService => {
                             info!(self.inner.log, "configuring MGS service");
-                            // TODO: Make sure all services use delpropvalue_default_instance
-                            // and addpropvalue_default_instance instead of delpropvalue
-                            // and addpropvalue. Verify property values are correct
-
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
                             smfh.delpropvalue_default_instance(

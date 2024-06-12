@@ -602,11 +602,23 @@ async fn common_nw_set_up(
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     // TODO: Log if there are no addresses, or add a flag so that this doesn't run on the switch zone
+    if static_addrs.is_empty() {
+        info!(
+            &log,
+            "No static addresses provided, will not ensure static and auto-configured addresses are set on the IP interface"
+        );
+    }
+
     for addr in &static_addrs {
         if **addr != Ipv6Addr::LOCALHOST {
             info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?addr);
             Ipadm::create_static_and_autoconfigured_addrs(&datalink, addr)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        } else {
+            info!(
+                &log,
+                "Static address is localhost, will not ensure it's set on the IP interface"
+            );  
         }
     }
 

@@ -107,25 +107,4 @@ impl Route {
         };
         Ok(())
     }
-
-    // TODO: Perhaps get rid of this function? Or should I continue using the
-    // running zone method?
-    pub fn add_bootstrap_route(
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
-        let cmd = cmd.args(&[
-            ROUTE,
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
-            "-ifp",
-            zone_vnic_name,
-        ]);
-        execute(cmd)?;
-        Ok(())
-    }
 }
