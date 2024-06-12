@@ -1409,5 +1409,9 @@ mod tests {
             Some(dbg!(migration.id)),
             "fetched migration must be the instance's migration"
         );
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
