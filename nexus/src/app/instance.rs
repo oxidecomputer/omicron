@@ -26,6 +26,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::VolumeCheckoutReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -53,11 +54,13 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
+use sled_agent_client::types::DiskRequest;
 use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
+use sled_agent_client::types::VolumeConstructionRequest;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -192,7 +195,7 @@ impl super::Nexus {
         match instance_selector {
             params::InstanceSelector {
                 instance: NameOrId::Id(id),
-                project: None
+                project: None,
             } => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
@@ -200,26 +203,23 @@ impl super::Nexus {
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(name),
-                project: Some(project)
+                project: Some(project),
             } => {
                 let instance = self
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            params::InstanceSelector {
-                instance: NameOrId::Id(_),
-                ..
-            } => {
+            params::InstanceSelector { instance: NameOrId::Id(_), .. } => {
                 Err(Error::invalid_request(
-                    "when providing instance as an ID project should not be specified",
+                    "when providing instance as an ID project should not be \
+                    specified",
                 ))
             }
-            _ => {
-                Err(Error::invalid_request(
-                    "instance should either be UUID or project should be specified",
-                ))
-            }
+            _ => Err(Error::invalid_request(
+                "instance should either be UUID or project should be \
+                    specified",
+            )),
         }
     }
 
@@ -588,8 +588,8 @@ impl super::Nexus {
                 .await?)
         } else {
             Err(Error::conflict(
-                "instance is already migrating, or underwent an operation that \
-                 prevented this migration from proceeding"
+                "instance is already migrating, or underwent an operation \
+                that prevented this migration from proceeding",
             ))
         }
     }
@@ -866,17 +866,21 @@ impl super::Nexus {
                         )))
                     }
                     InstanceStateChangeRequest::Stop => {
-                        return Ok(InstanceStateChangeRequestAction::AlreadyDone);
+                        return Ok(
+                            InstanceStateChangeRequestAction::AlreadyDone,
+                        );
                     }
                     InstanceStateChangeRequest::Reboot => {
                         return Err(Error::invalid_request(&format!(
-                            "cannot reboot an instance in state {} with no VMM",
+                            "cannot reboot an instance in state {} with no \
+                            VMM",
                             effective_state
                         )))
                     }
                     InstanceStateChangeRequest::Migrate(_) => {
                         return Err(Error::invalid_request(&format!(
-                            "cannot migrate an instance in state {} with no VMM",
+                            "cannot migrate an instance in state {} with no \
+                            VMM",
                             effective_state
                         )))
                     }
@@ -887,9 +891,9 @@ impl super::Nexus {
                 // Return a specific error message explaining the problem.
                 InstanceState::Creating => {
                     return Err(Error::invalid_request(
-                                "cannot change instance state while it is \
-                                still being created"
-                                ))
+                        "cannot change instance state while it is \
+                                still being created",
+                    ))
                 }
 
                 // If the instance has no sled beacuse it's been destroyed or
@@ -913,7 +917,7 @@ impl super::Nexus {
                            "state" => ?effective_state);
 
                     return Err(Error::internal_error(
-                        "instance is active but not resident on a sled"
+                        "instance is active but not resident on a sled",
                     ));
                 }
             }
@@ -998,7 +1002,8 @@ impl super::Nexus {
                 // the caller to let it decide how to handle it.
                 //
                 // When creating the zone for the first time, we just get
-                // Ok(None) here, which is a no-op in write_returned_instance_state.
+                // Ok(None) here, which is a no-op in
+                // write_returned_instance_state.
                 match instance_put_result {
                     Ok(state) => self
                         .write_returned_instance_state(&instance_id, state)
@@ -1064,10 +1069,13 @@ impl super::Nexus {
             let slot = match disk.slot {
                 Some(s) => s,
                 None => {
-                    error!(self.log, "attached disk has no PCI slot assignment";
+                    error!(
+                        self.log,
+                        "attached disk has no PCI slot assignment";
                        "disk_id" => %disk.id(),
                        "disk_name" => disk.name().to_string(),
-                       "instance_id" => ?disk.runtime_state.attach_instance_id);
+                       "instance_id" => ?disk.runtime_state.attach_instance_id,
+                    );
 
                     return Err(Error::internal_error(&format!(
                         "disk {} is attached but has no PCI slot assignment",
@@ -1081,22 +1089,61 @@ impl super::Nexus {
                 .volume_checkout(
                     disk.volume_id,
                     match operation {
-                        InstanceRegisterReason::Start { vmm_id } =>
-                            db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
-                        InstanceRegisterReason::Migrate { vmm_id, target_vmm_id } =>
-                            db::datastore::VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id },
-                    }
+                        InstanceRegisterReason::Start { vmm_id } => {
+                            VolumeCheckoutReason::InstanceStart { vmm_id }
+                        }
+                        InstanceRegisterReason::Migrate {
+                            vmm_id,
+                            target_vmm_id,
+                        } => VolumeCheckoutReason::InstanceMigrate {
+                            vmm_id,
+                            target_vmm_id,
+                        },
+                    },
                 )
                 .await?;
 
-            disk_reqs.push(sled_agent_client::types::DiskRequest {
+            let volume_construction_request: VolumeConstructionRequest =
+                match operation {
+                    InstanceRegisterReason::Start { .. } => {
+                        serde_json::from_str(&volume.data())?
+                    }
+
+                    InstanceRegisterReason::Migrate { .. } => {
+                        // If migrating, multiple identical copies of the
+                        // read-only parent's Upstairs UUIDs will cause conflict
+                        // connecting to the same set of Downstairs - randomize
+                        // the read-only parent's IDs in this case.
+                        let mut volume_construction_request =
+                            serde_json::from_str(&volume.data())?;
+
+                        if let VolumeConstructionRequest::Volume {
+                            read_only_parent,
+                            ..
+                        } = &mut volume_construction_request
+                        {
+                            if let Some(read_only_parent) = read_only_parent {
+                                *read_only_parent = Box::new(
+                                    DataStore::randomize_ids(read_only_parent)
+                                        .map_err(|e| {
+                                            Error::internal_error(
+                                                &e.to_string(),
+                                            )
+                                        })?,
+                                );
+                            }
+                        }
+
+                        volume_construction_request
+                    }
+                };
+
+            disk_reqs.push(DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(slot.0),
                 read_only: false,
                 device: "nvme".to_string(),
-                volume_construction_request: serde_json::from_str(
-                    &volume.data(),
-                )?,
+                volume_construction_request,
             });
         }
 
@@ -1131,7 +1178,8 @@ impl super::Nexus {
         // its own time, so return a 503 to indicate a possible retry.
         if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
             return Err(Error::unavail(
-                "External IP attach/detach is in progress during instance_ensure_registered"
+                "External IP attach/detach is in progress during \
+                instance_ensure_registered",
             ));
         }
 
@@ -1493,7 +1541,9 @@ impl super::Nexus {
         // currently running. This operation therefore can operate exclusively
         // on database state.
         //
-        // To implement hot-unplug support, we should do the following in a saga:
+        // To implement hot-unplug support, we should do the following in a
+        // saga:
+        //
         // - Update the state to "Detaching", rather than "Detached".
         // - If the instance is running...
         //   - Issue a request to "disk detach" to the associated sled agent,
@@ -1660,12 +1710,14 @@ impl super::Nexus {
                 | DbVmmState::Stopped
                 | DbVmmState::Failed => {
                     Err(Error::invalid_request(format!(
-                        "cannot connect to serial console of instance in state \"{}\"",
+                        "cannot connect to serial console of instance in \
+                        state \"{}\"",
                         vmm.runtime.state,
                     )))
                 }
                 DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
-                    "cannot connect to serial console of instance in state \"Stopped\"",
+                    "cannot connect to serial console of instance in state \
+                    \"Stopped\"",
                 )),
             }
         } else {
@@ -1745,7 +1797,8 @@ impl super::Nexus {
                             propolis_conn.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Abnormal,
                                 reason: std::borrow::Cow::from(
-                                    "nexus: websocket connection to client closed unexpectedly"
+                                    "nexus: websocket connection to client \
+                                    closed unexpectedly"
                                 ),
                             }))).await?;
                             break;
@@ -1754,7 +1807,8 @@ impl super::Nexus {
                             propolis_conn.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Error,
                                 reason: std::borrow::Cow::from(
-                                    format!("nexus: error in websocket connection to client: {}", e)
+                                    format!("nexus: error in websocket \
+                                    connection to client: {}", e)
                                 ),
                             }))).await?;
                             return Err(e);
@@ -1769,7 +1823,8 @@ impl super::Nexus {
                         Some(Ok(WebSocketMessage::Binary(data))) => {
                             debug_assert!(
                                 buffered_input.is_none(),
-                                "attempted to drop buffered_input message ({buffered_input:?})",
+                                "attempted to drop buffered_input message \
+                                ({buffered_input:?})",
                             );
                             buffered_input = Some(WebSocketMessage::Binary(data))
                         }
@@ -1781,7 +1836,8 @@ impl super::Nexus {
                     let permit = result?;
                     let message = buffered_output
                         .take()
-                        .expect("nexus_reserve is only active when buffered_output is Some");
+                        .expect("nexus_reserve is only active when \
+                        buffered_output is Some");
                     permit.send(message)?.await?;
                 }
                 msg = propolis_read => {
@@ -1795,7 +1851,8 @@ impl super::Nexus {
                                 nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                                     code: CloseCode::Error,
                                     reason: std::borrow::Cow::from(
-                                        format!("nexus: error in websocket connection to serial port: {}", e)
+                                        format!("nexus: error in websocket \
+                                        connection to serial port: {}", e)
                                     ),
                                 }))).await?;
                                 return Err(e);
@@ -1813,7 +1870,8 @@ impl super::Nexus {
                             Ok(WebSocketMessage::Binary(data)) => {
                                 debug_assert!(
                                     buffered_output.is_none(),
-                                    "attempted to drop buffered_output message ({buffered_output:?})",
+                                    "attempted to drop buffered_output \
+                                    message ({buffered_output:?})",
                                 );
                                 buffered_output = Some(WebSocketMessage::Binary(data))
                             }
@@ -1824,7 +1882,8 @@ impl super::Nexus {
                         nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                             code: CloseCode::Abnormal,
                             reason: std::borrow::Cow::from(
-                                "nexus: websocket connection to serial port closed unexpectedly"
+                                "nexus: websocket connection to serial port \
+                                closed unexpectedly"
                             ),
                         }))).await?;
                         break;
@@ -1834,7 +1893,8 @@ impl super::Nexus {
                     let permit = result?;
                     let message = buffered_input
                         .take()
-                        .expect("propolis_reserve is only active when buffered_input is Some");
+                        .expect("propolis_reserve is only active when \
+                        buffered_input is Some");
                     permit.send(message)?.await?;
                 }
             }
@@ -2165,7 +2225,9 @@ mod tests {
         let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
         let (propolis_client_conn, propolis_server_conn) =
             tokio::io::duplex(1024);
-        // The address doesn't matter -- it's just a key to look up the connection with.
+
+        // The address doesn't matter -- it's just a key to look up the
+        // connection with.
         let address =
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
         let propolis_conn = InstanceSerialConsoleHelper::new_test(
