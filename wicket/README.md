@@ -148,7 +148,18 @@ it on an as-needed basis.
 
 ### Using a real SP
 
-TODO
+The easiest way is to change the mgs config to point to a running SP instead
+of a simulated SP
+
+```
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled1"
+# Your SP address here
+addr = "[fe80::c1d:93ff:fe20:ffe0%2]:11111"
+ignition-target = 3
+location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
+```
 
 ### Running wicketd
 
