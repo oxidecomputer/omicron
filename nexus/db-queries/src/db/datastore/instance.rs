@@ -1253,7 +1253,7 @@ mod tests {
     async fn test_instance_fetch_all() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_fetch_all");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let authz_instance = create_test_instance(&datastore, &opctx).await;
         let snapshot =
