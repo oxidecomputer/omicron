@@ -282,7 +282,7 @@ mod tests {
                 ),
             };
 
-        // Add a three CRDB zones with known addresses; the first and third are
+        // Add three CRDB zones with known addresses; the first and third are
         // in service, and the second is expunged. Only the first and third
         // should show up when we ask for addresses below.
         let crdb_id1 = OmicronZoneUuid::new_v4();
@@ -459,7 +459,7 @@ mod tests {
         //
         // 1. Node 1 will succeed
         // 2. Node 2 will fail
-        // 3. Node 3 will succeed, but will report an unexpeted zone ID
+        // 3. Node 3 will succeed, but will report an unexpected zone ID
         //
         // We should see one success and two errors in the activation result. We
         // need to start three fake cockroach-admin servers to handle the

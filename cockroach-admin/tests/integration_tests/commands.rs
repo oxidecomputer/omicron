@@ -13,10 +13,10 @@ use std::path::PathBuf;
 use subprocess::Exec;
 
 // path to executable
-const CMD_WICKETD: &str = env!("CARGO_BIN_EXE_cockroach-admin");
+const CMD_COCKROACH_ADMIN: &str = env!("CARGO_BIN_EXE_cockroach-admin");
 
 fn path_to_cockroach_admin() -> PathBuf {
-    path_to_executable(CMD_WICKETD)
+    path_to_executable(CMD_COCKROACH_ADMIN)
 }
 
 #[test]

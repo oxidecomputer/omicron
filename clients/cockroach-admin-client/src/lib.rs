@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for making API requests to a Bootstrap Agent
+//! Interface for making API requests to an Omicron CockroachDB admin server
 
 progenitor::generate_api!(
     spec = "../../openapi/cockroach-admin.json",
