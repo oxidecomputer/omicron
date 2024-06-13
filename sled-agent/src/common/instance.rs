@@ -616,6 +616,7 @@ mod test {
         // but should not change the instance's migration IDs.
         let observed = ObservedPropolisState {
             vmm_state: PropolisInstanceState(Observed::Failed),
+            migration_status: ObservedMigrationStatus::Failed,
             time: Utc::now(),
         };
 
