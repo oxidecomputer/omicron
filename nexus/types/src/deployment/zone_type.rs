@@ -13,6 +13,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::OmicronZoneDataset;
 use sled_agent_client::types::OmicronZoneType;
 use sled_agent_client::ZoneKind;
 
@@ -137,6 +138,41 @@ impl BlueprintZoneType {
             | BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Nexus(_)
             | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
+
+    // Returns the dataset associated with this zone.
+    //
+    // TODO-cleanup This currently returns `None` for zones that only have
+    // transient datasets. This should change to a non-optional value once Nexus
+    // is aware of them.
+    pub fn dataset(&self) -> Option<&OmicronZoneDataset> {
+        match self {
+            BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { dataset, .. },
+            )
+            | BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
+            )
+            | BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { dataset, .. },
+            )
+            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                dataset,
+                ..
+            })
+            | BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dataset, .. },
+            )
+            | BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns { dataset, .. },
+            ) => Some(dataset),
+            // Transient-dataset-only zones
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::Oximeter(_) => None,
         }
     }
 }
