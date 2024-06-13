@@ -1771,6 +1771,9 @@ pub struct Address {
 
     /// The address and prefix length of this address.
     pub address: IpNet,
+
+    /// Optional VLAN ID for this address
+    pub vlan_id: Option<u16>,
 }
 
 /// Select a port settings object by an optional name or id.

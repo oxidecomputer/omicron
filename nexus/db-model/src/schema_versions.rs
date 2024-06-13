@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(70, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(76, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -29,8 +29,14 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(70, "nic-spoof-allow"),
-        KnownVersion::new(69, "vpc-subnet-routing"),
+        KnownVersion::new(76, "nic-spoof-allow"),
+        KnownVersion::new(75, "vpc-subnet-routing"),
+        KnownVersion::new(74, "add-migration-table"),
+        KnownVersion::new(73, "add-vlan-to-uplink"),
+        KnownVersion::new(72, "fix-provisioning-counters"),
+        KnownVersion::new(71, "add-saga-unwound-vmm-state"),
+        KnownVersion::new(70, "separate-instance-and-vmm-states"),
+        KnownVersion::new(69, "expose-stage0"),
         KnownVersion::new(68, "filter-v2p-mapping-by-instance-state"),
         KnownVersion::new(67, "add-instance-updater-lock"),
         KnownVersion::new(66, "blueprint-crdb-preserve-downgrade"),

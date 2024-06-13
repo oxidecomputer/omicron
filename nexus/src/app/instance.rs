@@ -20,10 +20,12 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::instance::InstanceUpdateResult;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -43,6 +45,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
@@ -477,7 +480,7 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state.0 != InstanceState::Running
+            || vmm.as_ref().unwrap().runtime.state != DbVmmState::Running
         {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
@@ -561,25 +564,27 @@ impl super::Nexus {
         // outright fails, this operation fails. If the operation nominally
         // succeeds but nothing was updated, this action is outdated and the
         // caller should not proceed with migration.
-        let (updated, _) = match instance_put_result {
-            Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?
-            }
-            Err(e) => {
-                if e.instance_unhealthy() {
-                    let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
-                        .await;
+        let InstanceUpdateResult { instance_updated, .. } =
+            match instance_put_result {
+                Ok(state) => {
+                    self.write_returned_instance_state(&instance_id, state)
+                        .await?
                 }
-                return Err(e.into());
-            }
-        };
+                Err(e) => {
+                    if e.instance_unhealthy() {
+                        let _ = self
+                            .mark_instance_failed(
+                                &instance_id,
+                                &prev_instance_runtime,
+                                &e,
+                            )
+                            .await;
+                    }
+                    return Err(e.into());
+                }
+            };
 
-        if updated {
+        if instance_updated {
             Ok(self
                 .db_datastore
                 .instance_refetch(opctx, &authz_instance)
@@ -707,16 +712,16 @@ impl super::Nexus {
         let (instance, vmm) = (state.instance(), state.vmm());
 
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Rebooting => {
+            match vmm.runtime.state {
+                DbVmmState::Starting
+                | DbVmmState::Running
+                | DbVmmState::Rebooting => {
                     debug!(self.log, "asked to start an active instance";
                            "instance_id" => %authz_instance.id());
 
                     return Ok(state);
                 }
-                InstanceState::Stopped => {
+                DbVmmState::Stopped => {
                     let propolis_id = instance
                         .runtime()
                         .propolis_id
@@ -733,7 +738,7 @@ impl super::Nexus {
                 _ => {
                     return Err(Error::conflict(&format!(
                         "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                         InstanceState::Stopped
                     )));
                 }
@@ -841,9 +846,9 @@ impl super::Nexus {
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
         let effective_state = if let Some(vmm) = vmm_state {
-            vmm.runtime.state.0
+            vmm.runtime.state.into()
         } else {
-            instance_state.runtime().nexus_state.0
+            instance_state.runtime().nexus_state.into()
         };
 
         // Requests that operate on active instances have to be directed to the
@@ -1319,7 +1324,7 @@ impl super::Nexus {
         &self,
         instance_id: &Uuid,
         state: Option<nexus::SledInstanceState>,
-    ) -> Result<(bool, bool), Error> {
+    ) -> Result<InstanceUpdateResult, Error> {
         slog::debug!(&self.log,
                      "writing instance state returned from sled agent";
                      "instance_id" => %instance_id,
@@ -1333,6 +1338,7 @@ impl super::Nexus {
                     &state.instance_state.into(),
                     &state.propolis_id,
                     &state.vmm_state.into(),
+                    &state.migration_state,
                 )
                 .await;
 
@@ -1344,7 +1350,13 @@ impl super::Nexus {
 
             update_result
         } else {
-            Ok((false, false))
+            // There was no instance state to write back, so --- perhaps
+            // obviously --- nothing happened.
+            Ok(InstanceUpdateResult {
+                instance_updated: false,
+                vmm_updated: false,
+                migration_updated: None,
+            })
         }
     }
 
@@ -1362,7 +1374,7 @@ impl super::Nexus {
                "error" => ?reason);
 
         let new_runtime = db::model::InstanceRuntimeState {
-            nexus_state: db::model::InstanceState::new(InstanceState::Failed),
+            nexus_state: db::model::InstanceState::Failed,
 
             // TODO(#4226): Clearing the Propolis ID is required to allow the
             // instance to be deleted, but this doesn't actually terminate the
@@ -1648,25 +1660,23 @@ impl super::Nexus {
 
         let (instance, vmm) = (state.instance(), state.vmm());
         if let Some(vmm) = vmm {
-            match vmm.runtime.state.0 {
-                InstanceState::Running
-                | InstanceState::Rebooting
-                | InstanceState::Migrating
-                | InstanceState::Repairing => {
+            match vmm.runtime.state {
+                DbVmmState::Running
+                | DbVmmState::Rebooting
+                | DbVmmState::Migrating => {
                     Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Failed => {
+                DbVmmState::Starting
+                | DbVmmState::Stopping
+                | DbVmmState::Stopped
+                | DbVmmState::Failed => {
                     Err(Error::invalid_request(format!(
                         "cannot connect to serial console of instance in state \"{}\"",
-                        vmm.runtime.state.0,
+                        vmm.runtime.state,
                     )))
                 }
-                InstanceState::Destroyed => Err(Error::invalid_request(
-                    "cannot connect to serial console of destroyed instance",
+                DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
+                    "cannot connect to serial console of instance in state \"Stopped\"",
                 )),
             }
         } else {
@@ -1955,16 +1965,6 @@ impl super::Nexus {
     }
 }
 
-/// Records what aspects of an instance's state were actually changed in a
-/// [`notify_instance_updated`] call.
-///
-/// This is (presently) used for debugging purposes only.
-#[derive(Copy, Clone)]
-pub(crate) struct InstanceUpdated {
-    pub instance_updated: bool,
-    pub vmm_updated: bool,
-}
-
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
 #[allow(clippy::too_many_arguments)] // :(
@@ -1977,14 +1977,15 @@ pub(crate) async fn notify_instance_updated(
     instance_id: &Uuid,
     new_runtime_state: &nexus::SledInstanceState,
     v2p_notification_tx: tokio::sync::watch::Sender<()>,
-) -> Result<Option<InstanceUpdated>, Error> {
+) -> Result<Option<InstanceUpdateResult>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
     info!(log, "received new runtime state from sled agent";
             "instance_id" => %instance_id,
             "instance_state" => ?new_runtime_state.instance_state,
             "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state);
+            "vmm_state" => ?new_runtime_state.vmm_state,
+            "migration_state" => ?new_runtime_state.migration_state);
 
     // Grab the current state of the instance in the DB to reason about
     // whether this update is stale or not.
@@ -2072,8 +2073,43 @@ pub(crate) async fn notify_instance_updated(
             &db::model::VmmRuntimeState::from(
                 new_runtime_state.vmm_state.clone(),
             ),
+            &new_runtime_state.migration_state,
         )
         .await;
+
+    // Has a migration terminated? If so,mark the migration record as deleted if
+    // and only if both sides of the migration are in a terminal state.
+    if let Some(nexus::MigrationRuntimeState {
+        migration_id,
+        state,
+        role,
+        ..
+    }) = new_runtime_state.migration_state
+    {
+        if state.is_terminal() {
+            info!(
+                log,
+                "migration has terminated, trying to delete it...";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "migration_id" => %propolis_id,
+                "migration_state" => %state,
+                "migration_role" => %role,
+            );
+            if !datastore.migration_terminate(opctx, migration_id).await? {
+                info!(
+                    log,
+                    "did not mark migration record as deleted (the other half \
+                    may not yet have reported termination)";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "migration_id" => %propolis_id,
+                    "migration_state" => %state,
+                    "migration_role" => %role,
+                );
+            }
+        }
+    }
 
     // If the VMM is now in a terminal state, make sure its resources get
     // cleaned up.
@@ -2093,7 +2129,7 @@ pub(crate) async fn notify_instance_updated(
     if result.is_ok() {
         let propolis_terminated = matches!(
             new_runtime_state.vmm_state.state,
-            InstanceState::Destroyed | InstanceState::Failed
+            VmmState::Destroyed | VmmState::Failed
         );
 
         if propolis_terminated {
@@ -2113,13 +2149,14 @@ pub(crate) async fn notify_instance_updated(
     }
 
     match result {
-        Ok((instance_updated, vmm_updated)) => {
+        Ok(result) => {
             info!(log, "instance and vmm updated by sled agent";
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id,
-                    "instance_updated" => instance_updated,
-                    "vmm_updated" => vmm_updated);
-            Ok(Some(InstanceUpdated { instance_updated, vmm_updated }))
+                    "instance_updated" => result.instance_updated,
+                    "vmm_updated" => result.vmm_updated,
+                    "migration_updated" => ?result.migration_updated);
+            Ok(Some(result))
         }
 
         // The update command should swallow object-not-found errors and

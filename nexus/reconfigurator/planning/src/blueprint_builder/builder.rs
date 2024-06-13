@@ -58,6 +58,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -112,9 +113,52 @@ pub enum Ensure {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum EnsureMultiple {
     /// action was taken, and multiple items were added
-    Added(usize),
+    Changed { added: usize, removed: usize },
+
     /// no action was necessary
     NotNeeded,
+}
+
+/// Describes operations which the BlueprintBuilder has performed to arrive
+/// at its state.
+///
+/// This information is meant to act as a more strongly-typed flavor of
+/// "comment", identifying which operations have occurred on the blueprint.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum Operation {
+    AddZone { sled_id: SledUuid, kind: sled_agent_client::ZoneKind },
+    UpdateDisks { sled_id: SledUuid, added: usize, removed: usize },
+    ZoneExpunged { sled_id: SledUuid, reason: ZoneExpungeReason, count: usize },
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AddZone { sled_id, kind } => {
+                write!(f, "sled {sled_id}: added zone: {kind}")
+            }
+            Self::UpdateDisks { sled_id, added, removed } => {
+                write!(f, "sled {sled_id}: added {added} disks, removed {removed} disks")
+            }
+            Self::ZoneExpunged { sled_id, reason, count } => {
+                let reason = match reason {
+                    ZoneExpungeReason::DiskExpunged => {
+                        "zone using expunged disk"
+                    }
+                    ZoneExpungeReason::SledDecommissioned => {
+                        "sled state is decomissioned"
+                    }
+                    ZoneExpungeReason::SledExpunged => {
+                        "sled policy is expunged"
+                    }
+                };
+                write!(
+                    f,
+                    "sled {sled_id}: expunged {count} zones because: {reason}"
+                )
+            }
+        }
+    }
 }
 
 /// Helper for assembling a blueprint
@@ -152,6 +196,7 @@ pub struct BlueprintBuilder<'a> {
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
     creator: String,
+    operations: Vec<Operation>,
     comments: Vec<String>,
 
     // Random number generator for new UUIDs
@@ -274,6 +319,7 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
             creator: creator.to_owned(),
+            operations: Vec::new(),
             comments: Vec::new(),
             rng: BlueprintBuilderRng::new(),
         })
@@ -320,7 +366,12 @@ impl<'a> BlueprintBuilder<'a> {
                 .cockroachdb_setting_preserve_downgrade,
             time_created: now_db_precision(),
             creator: self.creator,
-            comment: self.comments.join(", "),
+            comment: self
+                .comments
+                .into_iter()
+                .chain(self.operations.iter().map(|op| op.to_string()))
+                .collect::<Vec<String>>()
+                .join(", "),
         }
     }
 
@@ -342,15 +393,21 @@ impl<'a> BlueprintBuilder<'a> {
         self
     }
 
-    /// Sets the blueprints "comment"
-    ///
     /// This is a short human-readable string summarizing the changes reflected
-    /// in the blueprint.  This is only intended for debugging.
+    /// in the blueprint. This is only intended for debugging.
     pub fn comment<S>(&mut self, comment: S)
     where
         String: From<S>,
     {
         self.comments.push(String::from(comment));
+    }
+
+    /// Records an operation to the blueprint, identifying what changes have
+    /// occurred.
+    ///
+    /// This is currently intended only for debugging.
+    pub(crate) fn record_operation(&mut self, operation: Operation) {
+        self.operations.push(operation);
     }
 
     /// Expunges all zones requiring expungement from a sled.
@@ -456,15 +513,17 @@ impl<'a> BlueprintBuilder<'a> {
             };
         }
         let count_and_reason = [
-            (count_disk_expunged, "zone was using expunged disk"),
-            (count_sled_decommissioned, "sled state is decommissioned"),
-            (count_sled_expunged, "sled policy is expunged"),
+            (count_disk_expunged, ZoneExpungeReason::DiskExpunged),
+            (count_sled_decommissioned, ZoneExpungeReason::SledDecommissioned),
+            (count_sled_expunged, ZoneExpungeReason::SledExpunged),
         ];
         for (count, reason) in count_and_reason {
             if count > 0 {
-                self.comment(format!(
-                    "sled {sled_id} ({reason}): {count} zones expunged",
-                ));
+                self.record_operation(Operation::ZoneExpunged {
+                    sled_id,
+                    reason,
+                    count,
+                });
             }
         }
 
@@ -483,7 +542,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         resources: &SledResources,
-    ) -> Result<Ensure, Error> {
+    ) -> Result<EnsureMultiple, Error> {
         let (mut additions, removals) = {
             // These are the disks known to our (last?) blueprint
             let blueprint_disks: BTreeMap<_, _> = self
@@ -533,8 +592,10 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         if additions.is_empty() && removals.is_empty() {
-            return Ok(Ensure::NotNeeded);
+            return Ok(EnsureMultiple::NotNeeded);
         }
+        let added = additions.len();
+        let removed = removals.len();
 
         let disks = &mut self.disks.change_sled_disks(sled_id).disks;
 
@@ -543,7 +604,7 @@ impl<'a> BlueprintBuilder<'a> {
             !removals.contains(&PhysicalDiskUuid::from_untyped_uuid(config.id))
         });
 
-        Ok(Ensure::Added)
+        Ok(EnsureMultiple::Changed { added, removed })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -780,7 +841,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Added(num_nexus_to_add))
+        Ok(EnsureMultiple::Changed { added: num_nexus_to_add, removed: 0 })
     }
 
     pub fn cockroachdb_preserve_downgrade(
@@ -1450,7 +1511,7 @@ pub mod test {
                     builder
                         .sled_ensure_disks(sled_id, &sled_resources)
                         .unwrap(),
-                    Ensure::Added,
+                    EnsureMultiple::Changed { added: 10, removed: 0 },
                 );
             }
 
@@ -1598,7 +1659,7 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 1)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Added(1));
+            assert_eq!(added, EnsureMultiple::Changed { added: 1, removed: 0 });
         }
 
         {
@@ -1616,7 +1677,7 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 3)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Added(3));
+            assert_eq!(added, EnsureMultiple::Changed { added: 3, removed: 0 });
         }
 
         {

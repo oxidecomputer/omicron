@@ -174,6 +174,8 @@ impl<'a> Collector<'a> {
                     CabooseWhich::SpSlot1 => ("sp", 1),
                     CabooseWhich::RotSlotA => ("rot", 0),
                     CabooseWhich::RotSlotB => ("rot", 1),
+                    CabooseWhich::Stage0 => ("stage0", 0),
+                    CabooseWhich::Stage0Next => ("stage0", 1),
                 };
 
                 let result = client

@@ -2584,6 +2584,25 @@
           "sps"
         ]
       },
+      "RotImageError": {
+        "description": "RotImageError\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
+        ]
+      },
       "RotInventory": {
         "description": "RoT-related data that isn't already supplied in [`SpState`].",
         "type": "object",
@@ -2600,6 +2619,22 @@
             ]
           },
           "caboose_b": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_stage0": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_stage0next": {
             "nullable": true,
             "allOf": [
               {
@@ -2646,7 +2681,7 @@
         ]
       },
       "RotState": {
-        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"enabled\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } } ] } ``` </details>",
+        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2676,7 +2711,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "enabled"
+                  "v2"
                 ]
               },
               "transient_boot_preference": {
@@ -2709,6 +2744,92 @@
             },
             "required": [
               "message",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_a_fwid": {
+                "type": "string"
+              },
+              "slot_b_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_b_fwid": {
+                "type": "string"
+              },
+              "stage0_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0_fwid": {
+                "type": "string"
+              },
+              "stage0next_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0next_fwid": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "v3"
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "persistent_boot_preference",
+              "slot_a_fwid",
+              "slot_b_fwid",
+              "stage0_fwid",
+              "stage0next_fwid",
               "state"
             ]
           }
@@ -4878,6 +4999,24 @@
           }
         ]
       },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
       "UserSpecifiedBgpPeerConfig": {
         "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.\n\n[`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig",
         "type": "object",
@@ -5023,13 +5162,13 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of [`PortConfigV1`].\n\nAll of [`PortConfigV1`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV1`]. So this has all of the fields other than the port name.\n\n[`PortConfigV1`]: omicron_common::api::internal::shared::PortConfigV1",
+        "description": "User-specified version of [`PortConfigV2`].\n\nAll of [`PortConfigV2`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV2`]. So this has all of the fields other than the port name.\n\n[`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2",
         "type": "object",
         "properties": {
           "addresses": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {

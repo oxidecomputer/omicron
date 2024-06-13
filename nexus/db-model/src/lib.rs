@@ -42,6 +42,8 @@ pub mod ipv6;
 mod ipv6net;
 mod l4_port_range;
 mod macaddr;
+mod migration;
+mod migration_state;
 mod name;
 mod network_interface;
 mod oximeter_info;
@@ -56,6 +58,7 @@ mod semver_version;
 mod switch_interface;
 mod switch_port;
 mod v2p_mapping;
+mod vmm_state;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -151,6 +154,8 @@ pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
 pub use l4_port_range::*;
+pub use migration::*;
+pub use migration_state::*;
 pub use name::*;
 pub use network_interface::*;
 pub use oximeter_info::*;
@@ -197,6 +202,7 @@ pub use v2p_mapping::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
+pub use vmm_state::*;
 pub use vni::*;
 pub use volume::*;
 pub use volume_repair::*;

@@ -153,13 +153,17 @@ pub enum SourceNatConfigError {
     UnalignedPortPair { first_port: u16, last_port: u16 },
 }
 
+// We alias [`PortConfig`] to the current version of the protocol, so
+// that we can convert between versions as necessary.
+pub type PortConfig = PortConfigV2;
+
 // We alias [`RackNetworkConfig`] to the current version of the protocol, so
 // that we can convert between versions as necessary.
-pub type RackNetworkConfig = RackNetworkConfigV1;
+pub type RackNetworkConfig = RackNetworkConfigV2;
 
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfigV1 {
+pub struct RackNetworkConfigV2 {
     pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
@@ -167,7 +171,7 @@ pub struct RackNetworkConfigV1 {
     /// Last ip address to be used for configuring network infrastructure
     pub infra_ip_last: Ipv4Addr,
     /// Uplinks for connecting the rack to external networks
-    pub ports: Vec<PortConfigV1>,
+    pub ports: Vec<PortConfig>,
     /// BGP configurations for connecting the rack to external networks
     pub bgp: Vec<BgpConfig>,
     /// BFD configuration for connecting the rack to external networks
@@ -300,12 +304,81 @@ pub struct RouteConfig {
     pub vlan_id: Option<u16>,
 }
 
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+)]
+pub struct UplinkAddressConfig {
+    pub address: IpNet,
+    /// The VLAN id (if any) associated with this address.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+impl UplinkAddressConfig {
+    pub fn addr(&self) -> IpAddr {
+        self.address.addr()
+    }
+}
+
+impl std::fmt::Display for UplinkAddressConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.vlan_id {
+            None => write!(f, "{}", self.address),
+            Some(v) => write!(f, "{};{}", self.address, v),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UplinkAddressConfigError(String);
+
+impl std::fmt::Display for UplinkAddressConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse switch location error: {}", self.0)
+    }
+}
+
+/// Convert a string into an UplinkAddressConfig.
+/// 192.168.1.1/24 => UplinkAddressConfig { 192.168.1.1/24, None }
+/// 192.168.1.1/24;200 => UplinkAddressConfig { 192.168.1.1/24, Some(200) }
+impl FromStr for UplinkAddressConfig {
+    type Err = UplinkAddressConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let fields: Vec<&str> = s.split(';').collect();
+        let (address, vlan_id) = match fields.len() {
+            1 => Ok((fields[0], None)),
+            2 => Ok((fields[0], Some(fields[1]))),
+            _ => Err(UplinkAddressConfigError(format!(
+                "not a valid uplink address: {s}"
+            ))),
+        }?;
+        let address = address.parse().map_err(|_| {
+            UplinkAddressConfigError(format!(
+                "not a valid ip address: {address}"
+            ))
+        })?;
+        let vlan_id = match vlan_id {
+            None => Ok(None),
+            Some(v) => match v.parse() {
+                Err(_) => Err(format!("invalid vlan id: {v}")),
+                Ok(vlan_id) if vlan_id > 1 && vlan_id < 4096 => {
+                    Ok(Some(vlan_id))
+                }
+                Ok(vlan_id) => Err(format!("vlan id out of range: {vlan_id}")),
+            },
+        }
+        .map_err(|e| UplinkAddressConfigError(e))?;
+        Ok(UplinkAddressConfig { address, vlan_id })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct PortConfigV1 {
+pub struct PortConfigV2 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
-    /// This port's addresses.
-    pub addresses: Vec<IpNet>,
+    /// This port's addresses and optional vlan IDs
+    pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
     pub switch: SwitchLocation,
     /// Nmae of the port this config applies to.
@@ -321,46 +394,6 @@ pub struct PortConfigV1 {
     pub autoneg: bool,
 }
 
-impl From<UplinkConfig> for PortConfigV1 {
-    fn from(value: UplinkConfig) -> Self {
-        PortConfigV1 {
-            routes: vec![RouteConfig {
-                destination: "0.0.0.0/0".parse().unwrap(),
-                nexthop: value.gateway_ip.into(),
-                vlan_id: None,
-            }],
-            addresses: vec![value.uplink_cidr.into()],
-            switch: value.switch,
-            port: value.uplink_port,
-            uplink_port_speed: value.uplink_port_speed,
-            uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: vec![],
-            autoneg: false,
-        }
-    }
-}
-
-/// Deprecated, use PortConfigV1 instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct UplinkConfig {
-    /// Gateway address
-    pub gateway_ip: Ipv4Addr,
-    /// Switch to use for uplink
-    pub switch: SwitchLocation,
-    /// Switchport to use for external connectivity
-    pub uplink_port: String,
-    /// Speed for the Switchport
-    pub uplink_port_speed: PortSpeed,
-    /// Forward Error Correction setting for the uplink port
-    pub uplink_port_fec: PortFec,
-    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub uplink_cidr: Ipv4Net,
-    /// VLAN id to use for uplink
-    pub uplink_vid: Option<u16>,
-}
-
 /// A set of switch uplinks.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchPorts {
@@ -373,12 +406,12 @@ pub struct HostPortConfig {
     pub port: String,
 
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub addrs: Vec<IpNet>,
+    /// (must be in infra_ip pool).  May also include an optional VLAN ID.
+    pub addrs: Vec<UplinkAddressConfig>,
 }
 
-impl From<PortConfigV1> for HostPortConfig {
-    fn from(x: PortConfigV1) -> Self {
+impl From<PortConfigV2> for HostPortConfig {
+    fn from(x: PortConfigV2) -> Self {
         Self { port: x.port, addrs: x.addresses }
     }
 }

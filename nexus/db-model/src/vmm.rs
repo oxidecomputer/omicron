@@ -12,7 +12,7 @@
 //! state updates to each other without sending parameters that are useless to
 //! sled agent or that sled agent will never update (like the sled ID).
 
-use super::{Generation, InstanceState};
+use super::{Generation, VmmState};
 use crate::schema::vmm;
 use crate::SqlU16;
 use chrono::{DateTime, Utc};
@@ -21,7 +21,14 @@ use uuid::Uuid;
 
 /// An individual VMM process that incarnates a specific instance.
 #[derive(
-    Clone, Queryable, Debug, Selectable, Serialize, Deserialize, Insertable,
+    Clone,
+    Queryable,
+    Debug,
+    Selectable,
+    Serialize,
+    Deserialize,
+    Insertable,
+    PartialEq,
 )]
 #[diesel(table_name = vmm)]
 pub struct Vmm {
@@ -68,12 +75,10 @@ impl Vmm {
         propolis_port: u16,
         initial_state: VmmInitialState,
     ) -> Self {
-        use omicron_common::api::external::InstanceState as ApiInstanceState;
-
         let now = Utc::now();
-        let api_state = match initial_state {
-            VmmInitialState::Starting => ApiInstanceState::Starting,
-            VmmInitialState::Migrating => ApiInstanceState::Migrating,
+        let state = match initial_state {
+            VmmInitialState::Starting => VmmState::Starting,
+            VmmInitialState::Migrating => VmmState::Migrating,
         };
 
         Self {
@@ -85,7 +90,7 @@ impl Vmm {
             propolis_ip,
             propolis_port: SqlU16(propolis_port),
             runtime: VmmRuntimeState {
-                state: InstanceState::new(api_state),
+                state,
                 time_state_updated: now,
                 gen: Generation::new(),
             },
@@ -103,19 +108,20 @@ impl Vmm {
     Queryable,
     Serialize,
     Deserialize,
+    PartialEq,
 )]
 #[diesel(table_name = vmm)]
 pub struct VmmRuntimeState {
-    /// The state of this VMM. If this VMM is the active VMM for a given
-    /// instance, this state is the instance's logical state.
-    pub state: InstanceState,
-
     /// The time at which this state was most recently updated.
     pub time_state_updated: DateTime<Utc>,
 
     /// The generation number protecting this VMM's state and update time.
     #[diesel(column_name = state_generation)]
     pub gen: Generation,
+
+    /// The state of this VMM. If this VMM is the active VMM for a given
+    /// instance, this state is the instance's logical state.
+    pub state: VmmState,
 }
 
 impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
@@ -125,7 +131,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
         value: omicron_common::api::internal::nexus::VmmRuntimeState,
     ) -> Self {
         Self {
-            state: InstanceState::new(value.state),
+            state: value.state.into(),
             time_state_updated: value.time_updated,
             gen: value.gen.into(),
         }

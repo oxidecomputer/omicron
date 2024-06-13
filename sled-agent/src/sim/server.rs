@@ -529,7 +529,7 @@ pub async fn run_standalone_server(
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),
         ),
-        rack_network_config: NexusTypes::RackNetworkConfigV1 {
+        rack_network_config: NexusTypes::RackNetworkConfigV2 {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,

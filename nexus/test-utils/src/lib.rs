@@ -65,7 +65,7 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfigV1;
+use sled_agent_client::types::RackNetworkConfigV2;
 use slog::{debug, error, o, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -940,7 +940,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .write_network_bootstore_config(&EarlyNetworkConfig {
                 body: EarlyNetworkConfigBody {
                     ntp_servers: Vec::new(),
-                    rack_network_config: Some(RackNetworkConfigV1 {
+                    rack_network_config: Some(RackNetworkConfigV2 {
                         bfd: Vec::new(),
                         bgp: Vec::new(),
                         infra_ip_first: "192.0.2.10".parse().unwrap(),
@@ -952,7 +952,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     }),
                 },
                 generation: 1,
-                schema_version: 1,
+                schema_version: 2,
             })
             .await
             .expect("Failed to write early networking config to bootstore");

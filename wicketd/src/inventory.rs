@@ -48,6 +48,10 @@ pub struct RotInventory {
     pub active: RotSlot,
     pub caboose_a: Option<SpComponentCaboose>,
     pub caboose_b: Option<SpComponentCaboose>,
+    // stage0 information is not available on all RoT versions
+    // `None` indicates we don't need to read
+    pub caboose_stage0: Option<Option<SpComponentCaboose>>,
+    pub caboose_stage0next: Option<Option<SpComponentCaboose>>,
 }
 
 /// The current state of the v1 Rack as known to wicketd

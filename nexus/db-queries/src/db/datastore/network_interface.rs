@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -724,8 +723,7 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null())
                 .select(Instance::as_select())
         };
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
+        let stopped = db::model::InstanceState::NoVmm;
 
         // This is the actual query to update the target interface.
         // Unlike Postgres, CockroachDB doesn't support inserting or updating a view
@@ -756,7 +754,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_runtime =
@@ -802,7 +799,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_state =
@@ -940,7 +936,7 @@ mod tests {
             .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
-        let mut macs = external::MacAddr::iter_system();
+        let mut macs = omicron_common::api::external::MacAddr::iter_system();
         let mut service_nics = Vec::new();
         for (i, ip) in ip_range.enumerate() {
             let name = format!("service-nic-{i}");
@@ -948,7 +944,7 @@ mod tests {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 NEXUS_VPC_SUBNET.clone(),
-                external::IdentityMetadataCreateParams {
+                omicron_common::api::external::IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: name,
                 },

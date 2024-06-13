@@ -6,13 +6,14 @@
 
 use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::InstanceState as ApiInstanceState;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
+    InstanceRuntimeState, MigrationRole, MigrationRuntimeState, MigrationState,
+    SledInstanceState, VmmRuntimeState, VmmState,
 };
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
-    MigrationState,
+    MigrationState as PropolisMigrationState,
 };
 use uuid::Uuid;
 
@@ -22,6 +23,7 @@ pub struct InstanceStates {
     instance: InstanceRuntimeState,
     vmm: VmmRuntimeState,
     propolis_id: Uuid,
+    migration: Option<MigrationRuntimeState>,
 }
 
 /// Newtype to allow conversion from Propolis API states (returned by the
@@ -35,7 +37,7 @@ impl From<PropolisApiState> for PropolisInstanceState {
     }
 }
 
-impl From<PropolisInstanceState> for ApiInstanceState {
+impl From<PropolisInstanceState> for VmmState {
     fn from(value: PropolisInstanceState) -> Self {
         use propolis_client::types::InstanceState as State;
         match value.0 {
@@ -43,25 +45,28 @@ impl From<PropolisInstanceState> for ApiInstanceState {
             // when an instance has an active VMM. A Propolis that is "creating"
             // its virtual machine objects is "starting" from the external API's
             // perspective.
-            State::Creating | State::Starting => ApiInstanceState::Starting,
-            State::Running => ApiInstanceState::Running,
-            State::Stopping => ApiInstanceState::Stopping,
+            State::Creating | State::Starting => VmmState::Starting,
+            State::Running => VmmState::Running,
+            State::Stopping => VmmState::Stopping,
             // A Propolis that is stopped but not yet destroyed should still
             // appear to be Stopping from an external API perspective, since
             // they cannot be restarted yet. Instances become logically Stopped
             // once Propolis reports that the VM is Destroyed (see below).
-            State::Stopped => ApiInstanceState::Stopping,
-            State::Rebooting => ApiInstanceState::Rebooting,
-            State::Migrating => ApiInstanceState::Migrating,
-            State::Repairing => ApiInstanceState::Repairing,
-            State::Failed => ApiInstanceState::Failed,
+            State::Stopped => VmmState::Stopping,
+            State::Rebooting => VmmState::Rebooting,
+            State::Migrating => VmmState::Migrating,
+            State::Failed => VmmState::Failed,
             // Nexus needs to learn when a VM has entered the "destroyed" state
             // so that it can release its resource reservation. When this
             // happens, this module also clears the active VMM ID from the
             // instance record, which will accordingly set the Nexus-owned
             // instance state to Stopped, preventing this state from being used
             // as an externally-visible instance state.
-            State::Destroyed => ApiInstanceState::Destroyed,
+            State::Destroyed => VmmState::Destroyed,
+            // Propolis never actually uses the Repairing state, so this should
+            // be unreachable, but since these states come from another process,
+            // program defensively and convert Repairing to Running.
+            State::Repairing => VmmState::Running,
         }
     }
 }
@@ -121,10 +126,10 @@ impl ObservedPropolisState {
                     if this_id == propolis_migration.migration_id =>
                 {
                     match propolis_migration.state {
-                        MigrationState::Finish => {
+                        PropolisMigrationState::Finish => {
                             ObservedMigrationStatus::Succeeded
                         }
-                        MigrationState::Error => {
+                        PropolisMigrationState::Error => {
                             ObservedMigrationStatus::Failed
                         }
                         _ => ObservedMigrationStatus::InProgress,
@@ -170,11 +175,11 @@ pub enum PublishedVmmState {
     Rebooting,
 }
 
-impl From<PublishedVmmState> for ApiInstanceState {
+impl From<PublishedVmmState> for VmmState {
     fn from(value: PublishedVmmState) -> Self {
         match value {
-            PublishedVmmState::Stopping => ApiInstanceState::Stopping,
-            PublishedVmmState::Rebooting => ApiInstanceState::Rebooting,
+            PublishedVmmState::Stopping => VmmState::Stopping,
+            PublishedVmmState::Rebooting => VmmState::Rebooting,
         }
     }
 }
@@ -206,7 +211,22 @@ impl InstanceStates {
         vmm: VmmRuntimeState,
         propolis_id: Uuid,
     ) -> Self {
-        InstanceStates { instance, vmm, propolis_id }
+        let migration = instance.migration_id.map(|migration_id| {
+            let dst_propolis_id = instance.dst_propolis_id.expect("if an instance has a migration ID, it should also have a target VMM ID");
+            let role = if dst_propolis_id == propolis_id {
+                MigrationRole::Target
+            } else {
+                MigrationRole::Source
+            };
+            MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::InProgress,
+                role,
+                gen: Generation::new(),
+                time_updated: Utc::now(),
+            }
+        });
+        InstanceStates { instance, vmm, propolis_id, migration }
     }
 
     pub fn instance(&self) -> &InstanceRuntimeState {
@@ -221,6 +241,10 @@ impl InstanceStates {
         self.propolis_id
     }
 
+    pub(crate) fn migration(&self) -> Option<&MigrationRuntimeState> {
+        self.migration.as_ref()
+    }
+
     /// Creates a `SledInstanceState` structure containing the entirety of this
     /// structure's runtime state. This requires cloning; for simple read access
     /// use the `instance` or `vmm` accessors instead.
@@ -229,6 +253,25 @@ impl InstanceStates {
             instance_state: self.instance.clone(),
             vmm_state: self.vmm.clone(),
             propolis_id: self.propolis_id,
+            migration_state: self.migration.clone(),
+        }
+    }
+
+    fn transition_migration(
+        &mut self,
+        state: MigrationState,
+        time_updated: DateTime<Utc>,
+    ) {
+        let migration = self.migration.as_mut().expect(
+            "an ObservedMigrationState should only be constructed when the \
+            VMM has an active migration",
+        );
+        // Don't generate spurious state updates if the migration is already in
+        // the state we're transitioning to.
+        if migration.state != state {
+            migration.state = state;
+            migration.time_updated = time_updated;
+            migration.gen = migration.gen.next();
         }
     }
 
@@ -254,58 +297,76 @@ impl InstanceStates {
         // Update the instance record to reflect the result of any completed
         // migration.
         match observed.migration_status {
-            ObservedMigrationStatus::Succeeded => match self.propolis_role() {
-                // This is a successful migration out. Point the instance to the
-                // target VMM, but don't clear migration IDs; let the target do
-                // that so that the instance will continue to appear to be
-                // migrating until it is safe to migrate again.
-                PropolisRole::Active => {
-                    self.switch_propolis_id_to_target(observed.time);
+            ObservedMigrationStatus::Succeeded => {
+                self.transition_migration(
+                    MigrationState::Completed,
+                    observed.time,
+                );
+                match self.propolis_role() {
+                    // This is a successful migration out. Point the instance to the
+                    // target VMM, but don't clear migration IDs; let the target do
+                    // that so that the instance will continue to appear to be
+                    // migrating until it is safe to migrate again.
+                    PropolisRole::Active => {
+                        self.switch_propolis_id_to_target(observed.time);
 
-                    assert_eq!(self.propolis_role(), PropolisRole::Retired);
+                        assert_eq!(self.propolis_role(), PropolisRole::Retired);
+                    }
+
+                    // This is a successful migration in. Point the instance to the
+                    // target VMM and clear migration IDs so that another migration
+                    // in can begin. Propolis will continue reporting that this
+                    // migration was successful, but because its ID has been
+                    // discarded the observed migration status will change from
+                    // Succeeded to NoMigration.
+                    //
+                    // Note that these calls increment the instance's generation
+                    // number twice. This is by design and allows the target's
+                    // migration-ID-clearing update to overtake the source's update.
+                    PropolisRole::MigrationTarget => {
+                        self.switch_propolis_id_to_target(observed.time);
+                        self.clear_migration_ids(observed.time);
+
+                        assert_eq!(self.propolis_role(), PropolisRole::Active);
+                    }
+
+                    // This is a migration source that previously reported success
+                    // and removed itself from the active Propolis position. Don't
+                    // touch the instance.
+                    PropolisRole::Retired => {}
                 }
+            }
+            ObservedMigrationStatus::Failed => {
+                self.transition_migration(
+                    MigrationState::Failed,
+                    observed.time,
+                );
 
-                // This is a successful migration in. Point the instance to the
-                // target VMM and clear migration IDs so that another migration
-                // in can begin. Propolis will continue reporting that this
-                // migration was successful, but because its ID has been
-                // discarded the observed migration status will change from
-                // Succeeded to NoMigration.
-                //
-                // Note that these calls increment the instance's generation
-                // number twice. This is by design and allows the target's
-                // migration-ID-clearing update to overtake the source's update.
-                PropolisRole::MigrationTarget => {
-                    self.switch_propolis_id_to_target(observed.time);
-                    self.clear_migration_ids(observed.time);
+                match self.propolis_role() {
+                    // This is a failed migration out. CLear migration IDs so that
+                    // Nexus can try again.
+                    PropolisRole::Active => {
+                        self.clear_migration_ids(observed.time);
+                    }
 
-                    assert_eq!(self.propolis_role(), PropolisRole::Active);
+                    // This is a failed migration in. Leave the migration IDs alone
+                    // so that the migration won't appear to have concluded until
+                    // the source is ready to start a new one.
+                    PropolisRole::MigrationTarget => {}
+
+                    // This VMM was part of a failed migration and was subsequently
+                    // removed from the instance record entirely. There's nothing to
+                    // update.
+                    PropolisRole::Retired => {}
                 }
-
-                // This is a migration source that previously reported success
-                // and removed itself from the active Propolis position. Don't
-                // touch the instance.
-                PropolisRole::Retired => {}
-            },
-            ObservedMigrationStatus::Failed => match self.propolis_role() {
-                // This is a failed migration out. CLear migration IDs so that
-                // Nexus can try again.
-                PropolisRole::Active => {
-                    self.clear_migration_ids(observed.time);
-                }
-
-                // This is a failed migration in. Leave the migration IDs alone
-                // so that the migration won't appear to have concluded until
-                // the source is ready to start a new one.
-                PropolisRole::MigrationTarget => {}
-
-                // This VMM was part of a failed migration and was subsequently
-                // removed from the instance record entirely. There's nothing to
-                // update.
-                PropolisRole::Retired => {}
-            },
+            }
+            ObservedMigrationStatus::InProgress => {
+                self.transition_migration(
+                    MigrationState::InProgress,
+                    observed.time,
+                );
+            }
             ObservedMigrationStatus::NoMigration
-            | ObservedMigrationStatus::InProgress
             | ObservedMigrationStatus::Pending => {}
         }
 
@@ -324,6 +385,16 @@ impl InstanceStates {
             if self.propolis_role() == PropolisRole::Active {
                 self.clear_migration_ids(observed.time);
                 self.retire_active_propolis(observed.time);
+            }
+            // If there's an active migration and the VMM is suddenly gone,
+            // that should constitute a migration failure!
+            if let Some(MigrationState::Pending | MigrationState::InProgress) =
+                self.migration.as_ref().map(|m| m.state)
+            {
+                self.transition_migration(
+                    MigrationState::Failed,
+                    observed.time,
+                );
             }
             Some(Action::Destroy)
         } else {
@@ -429,12 +500,29 @@ impl InstanceStates {
         ids: &Option<InstanceMigrationSourceParams>,
         now: DateTime<Utc>,
     ) {
-        if let Some(ids) = ids {
-            self.instance.migration_id = Some(ids.migration_id);
-            self.instance.dst_propolis_id = Some(ids.dst_propolis_id);
+        if let Some(InstanceMigrationSourceParams {
+            migration_id,
+            dst_propolis_id,
+        }) = *ids
+        {
+            self.instance.migration_id = Some(migration_id);
+            self.instance.dst_propolis_id = Some(dst_propolis_id);
+            let role = if dst_propolis_id == self.propolis_id {
+                MigrationRole::Target
+            } else {
+                MigrationRole::Source
+            };
+            self.migration = Some(MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::Pending,
+                role,
+                gen: Generation::new(),
+                time_updated: now,
+            })
         } else {
             self.instance.migration_id = None;
             self.instance.dst_propolis_id = None;
+            self.migration = None;
         }
 
         self.instance.gen = self.instance.gen.next();
@@ -525,7 +613,7 @@ mod test {
         };
 
         let vmm = VmmRuntimeState {
-            state: ApiInstanceState::Starting,
+            state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: now,
         };
@@ -535,18 +623,38 @@ mod test {
 
     fn make_migration_source_instance() -> InstanceStates {
         let mut state = make_instance();
-        state.vmm.state = ApiInstanceState::Migrating;
-        state.instance.migration_id = Some(Uuid::new_v4());
+        state.vmm.state = VmmState::Migrating;
+        let migration_id = Uuid::new_v4();
+        state.instance.migration_id = Some(migration_id);
         state.instance.dst_propolis_id = Some(Uuid::new_v4());
+        state.migration = Some(MigrationRuntimeState {
+            migration_id,
+            state: MigrationState::InProgress,
+            role: MigrationRole::Source,
+            // advance the generation once, since we are starting out in the
+            // `InProgress` state.
+            gen: Generation::new().next(),
+            time_updated: Utc::now(),
+        });
         state
     }
 
     fn make_migration_target_instance() -> InstanceStates {
         let mut state = make_instance();
-        state.vmm.state = ApiInstanceState::Migrating;
-        state.instance.migration_id = Some(Uuid::new_v4());
+        state.vmm.state = VmmState::Migrating;
+        let migration_id = Uuid::new_v4();
+        state.instance.migration_id = Some(migration_id);
         state.propolis_id = Uuid::new_v4();
         state.instance.dst_propolis_id = Some(state.propolis_id);
+        state.migration = Some(MigrationRuntimeState {
+            migration_id,
+            state: MigrationState::InProgress,
+            role: MigrationRole::Target,
+            // advance the generation once, since we are starting out in the
+            // `InProgress` state.
+            gen: Generation::new().next(),
+            time_updated: Utc::now(),
+        });
         state
     }
 
@@ -621,6 +729,37 @@ mod test {
         }
     }
 
+    fn test_termination_fails_in_progress_migration(
+        mk_instance: impl Fn() -> InstanceStates,
+    ) {
+        for state in [Observed::Destroyed, Observed::Failed] {
+            let mut instance_state = mk_instance();
+            let original_migration = instance_state.clone().migration.unwrap();
+            let requested_action = instance_state
+                .apply_propolis_observation(&make_observed_state(state.into()));
+
+            let migration =
+                instance_state.migration.expect("state must have a migration");
+            assert_eq!(migration.state, MigrationState::Failed);
+            assert!(migration.gen > original_migration.gen);
+            assert!(matches!(requested_action, Some(Action::Destroy)));
+        }
+    }
+
+    #[test]
+    fn source_termination_fails_in_progress_migration() {
+        test_termination_fails_in_progress_migration(
+            make_migration_source_instance,
+        )
+    }
+
+    #[test]
+    fn target_termination_fails_in_progress_migration() {
+        test_termination_fails_in_progress_migration(
+            make_migration_target_instance,
+        )
+    }
+
     #[test]
     fn destruction_after_migration_out_does_not_transition() {
         let mut state = make_migration_source_instance();
@@ -649,6 +788,17 @@ mod test {
         assert_eq!(state.instance.propolis_id, state.instance.dst_propolis_id);
         assert!(state.instance.migration_id.is_some());
 
+        // The migration state should transition to "completed"
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert!(migration.gen > prev_migration.gen);
+        let prev_migration = migration;
+
         // Once a successful migration is observed, the VMM's state should
         // continue to update, but the instance's state shouldn't change
         // anymore.
@@ -661,8 +811,17 @@ mod test {
         // The Stopped state is translated internally to Stopping to prevent
         // external viewers from perceiving that the instance is stopped before
         // the VMM is fully retired.
-        assert_eq!(state.vmm.state, ApiInstanceState::Stopping);
+        assert_eq!(state.vmm.state, VmmState::Stopping);
         assert!(state.vmm.gen > prev.vmm.gen);
+
+        // Now that the migration has completed, it should not transition again.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert_eq!(migration.gen, prev_migration.gen);
+        let prev_migration = migration;
 
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Destroyed);
@@ -672,8 +831,15 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Destroyed);
+        assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
+
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert_eq!(migration.gen, prev_migration.gen);
     }
 
     #[test]
@@ -695,8 +861,16 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Failed);
+        assert_eq!(state.vmm.state, VmmState::Failed);
         assert!(state.vmm.gen > prev.vmm.gen);
+
+        // The migration state should transition.
+        let migration =
+            state.migration.expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Failed);
+        assert!(migration.gen > prev_migration.gen);
     }
 
     // Verifies that the rude-termination state change doesn't update the
@@ -715,6 +889,14 @@ mod test {
 
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
+
+        // The migration state should transition.
+        let migration =
+            state.migration.expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Failed);
+        assert!(migration.gen > prev_migration.gen);
     }
 
     #[test]
@@ -734,14 +916,25 @@ mod test {
         assert!(state.instance.migration_id.is_none());
         assert!(state.instance.dst_propolis_id.is_none());
         assert!(state.instance.gen > prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Running);
+        assert_eq!(state.vmm.state, VmmState::Running);
         assert!(state.vmm.gen > prev.vmm.gen);
 
+        // The migration state should transition to completed.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        let prev_migration =
+            prev.migration.expect("previous state must have a migration");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert!(migration.gen > prev_migration.gen);
+
         // Pretend Nexus set some new migration IDs.
+        let migration_id = Uuid::new_v4();
         let prev = state.clone();
         state.set_migration_ids(
             &Some(InstanceMigrationSourceParams {
-                migration_id: Uuid::new_v4(),
+                migration_id,
                 dst_propolis_id: Uuid::new_v4(),
             }),
             Utc::now(),
@@ -749,6 +942,15 @@ mod test {
         assert_state_change_has_gen_change(&prev, &state);
         assert!(state.instance.gen > prev.instance.gen);
         assert_eq!(state.vmm.gen, prev.vmm.gen);
+
+        // There should be a new, pending migration state.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Pending);
+        assert_eq!(migration.migration_id, migration_id);
+        let prev_migration = migration;
 
         // Mark that the new migration out is in progress. This doesn't change
         // anything in the instance runtime state, but does update the VMM state
@@ -766,9 +968,18 @@ mod test {
             state.instance.dst_propolis_id.unwrap(),
             prev.instance.dst_propolis_id.unwrap()
         );
-        assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
+        assert_eq!(state.vmm.state, VmmState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.gen, prev.instance.gen);
+
+        // The migration state should transition to in progress.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::InProgress);
+        assert!(migration.gen > prev_migration.gen);
+        let prev_migration = migration;
 
         // Propolis will publish that the migration succeeds before changing any
         // state. This should transfer control to the target but should not
@@ -778,7 +989,7 @@ mod test {
         observed.migration_status = ObservedMigrationStatus::Succeeded;
         assert!(state.apply_propolis_observation(&observed).is_none());
         assert_state_change_has_gen_change(&prev, &state);
-        assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
+        assert_eq!(state.vmm.state, VmmState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
         assert_eq!(state.instance.migration_id, prev.instance.migration_id);
         assert_eq!(
@@ -787,6 +998,14 @@ mod test {
         );
         assert_eq!(state.instance.propolis_id, state.instance.dst_propolis_id);
         assert!(state.instance.gen > prev.instance.gen);
+
+        // The migration state should transition to completed.
+        let migration = state
+            .migration
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert!(migration.gen > prev_migration.gen);
 
         // The rest of the destruction sequence is covered by other tests.
     }

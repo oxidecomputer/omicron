@@ -981,6 +981,12 @@ pub enum AllowedMethod {
     /// always fail in the correct way.
     #[allow(dead_code)]
     GetUnimplemented,
+    /// HTTP "GET" method, but where the response data may change for reasons
+    /// other than successful user interaction.  This should be uncommon; in
+    /// most cases resources do not change merely due to the passage of time,
+    /// although one common case is when the response data is updated by a
+    /// background task.
+    GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
     /// HTTP "POST" method, with sample input (which should be valid input for
@@ -996,10 +1002,11 @@ impl AllowedMethod {
     pub fn http_method(&self) -> &'static http::Method {
         match self {
             AllowedMethod::Delete => &Method::DELETE,
-            AllowedMethod::Get => &Method::GET,
-            AllowedMethod::GetNonexistent => &Method::GET,
-            AllowedMethod::GetUnimplemented => &Method::GET,
-            AllowedMethod::GetWebsocket => &Method::GET,
+            AllowedMethod::Get
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetVolatile
+            | AllowedMethod::GetWebsocket => &Method::GET,
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -1015,6 +1022,7 @@ impl AllowedMethod {
             | AllowedMethod::Get
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
@@ -2060,7 +2068,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::Get,
+                AllowedMethod::GetVolatile,
             ],
         },
 
