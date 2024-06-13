@@ -76,6 +76,7 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
+    target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
@@ -124,8 +125,15 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+
+        // TODO-cleanup This is wrong, but we don't currently set up any CRDB
+        // nodes in our fake system, so this prevents downstream test issues
+        // with the planner thinking our system is out of date from the gate.
+        let target_cockroachdb_zone_count = 0;
+
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
+
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -140,6 +148,7 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_nexus_zone_count,
+            target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
@@ -307,6 +316,7 @@ impl SystemDescription {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
         };
@@ -454,8 +464,10 @@ impl Sled {
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
-        let mut zpool_rng =
-            TypedUuidRng::from_seed("SystemSimultatedSled", "ZpoolUuid");
+        let mut zpool_rng = TypedUuidRng::from_seed(
+            "SystemSimultatedSled",
+            (sled_id, "ZpoolUuid"),
+        );
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
                 let zpool = ZpoolUuid::from(zpool_rng.next());

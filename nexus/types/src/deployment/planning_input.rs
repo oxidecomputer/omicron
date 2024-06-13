@@ -91,6 +91,10 @@ impl PlanningInput {
         self.policy.target_nexus_zone_count
     }
 
+    pub fn target_cockroachdb_zone_count(&self) -> usize {
+        self.policy.target_cockroachdb_zone_count
+    }
+
     pub fn target_cockroachdb_cluster_version(
         &self,
     ) -> CockroachDbClusterVersion {
@@ -632,6 +636,9 @@ pub struct Policy {
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
+    /// desired total number of deployed CockroachDB zones
+    pub target_cockroachdb_zone_count: usize,
+
     /// desired CockroachDB `cluster.preserve_downgrade_option` setting.
     /// at present this is hardcoded based on the version of CockroachDB we
     /// presently ship and the tick-tock pattern described in RFD 469.
@@ -684,6 +691,7 @@ impl PlanningInputBuilder {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
                 target_nexus_zone_count: 0,
+                target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
             },
