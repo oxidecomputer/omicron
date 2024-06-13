@@ -5,6 +5,7 @@
 //! Tests that EarlyNetworkConfig deserializes across versions.
 
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::{
@@ -48,8 +49,8 @@ fn early_network_blobs_deserialize() {
             });
 
         // Attempt to deserialize this blob.
-        let config = serde_json::from_str::<EarlyNetworkConfig>(blob_json)
-            .unwrap_or_else(|error| {
+        let config =
+            EarlyNetworkConfig::from_str(blob_json).unwrap_or_else(|error| {
                 panic!(
                     "error deserializing early_network_blobs.txt \
                     \"{blob_desc}\" (line {blob_lineno}): {error}",
@@ -113,7 +114,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
     let description = "2023-12-06 config";
     let config = EarlyNetworkConfig {
         generation: 20,
-        schema_version: 1,
+        schema_version: EarlyNetworkConfig::schema_version(),
         body: EarlyNetworkConfigBody {
             ntp_servers: vec!["ntp.example.com".to_owned()],
             rack_network_config: Some(RackNetworkConfig {

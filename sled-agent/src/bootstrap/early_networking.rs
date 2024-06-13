@@ -14,9 +14,11 @@ use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
+use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
+use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
+use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
-    CheckerSource, ImportExportPolicy as MgImportExportPolicy, Prefix, Prefix4,
+    AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
     Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
 };
 use mg_admin_client::Client as MgdClient;
@@ -24,8 +26,9 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::external::{BfdMode, ImportExportPolicy};
 use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfig, PortConfigV2, PortFec, PortSpeed, RackNetworkConfig,
-    RackNetworkConfigV2, RouteConfig, SwitchLocation, UplinkAddressConfig,
+    BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfig, PortConfigV2, PortFec,
+    PortSpeed, RackNetworkConfig, RackNetworkConfigV2, RouteConfig,
+    SwitchLocation, UplinkAddressConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -39,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -459,7 +463,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         );
 
         let mut config: Option<BgpConfig> = None;
-        let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+        let mut bgp_peer_configs =
+            HashMap::<String, Vec<MgBgpPeerConfig>>::new();
 
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
@@ -488,7 +493,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
 
-                let bpc = BgpPeerConfig {
+                let bpc = MgBgpPeerConfig {
                     name: format!("{}", peer.addr),
                     host: format!("{}:179", peer.addr),
                     hold_time: peer.hold_time.unwrap_or(6),
@@ -622,7 +627,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             if spec.switch != switch_location {
                 continue;
             }
-            let cfg = BfdPeerConfig {
+            let cfg = MgBfdPeerConfig {
                 detection_threshold: spec.detection_threshold,
                 listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
                 mode: match spec.mode {
@@ -723,54 +728,6 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
         .build()
 }
 
-// The first production version of the `EarlyNetworkConfig`.
-//
-// If this version is in the bootstore than we need to convert it to
-// `EarlyNetworkConfigV2`.
-//
-// Once we do this for all customers that have initialized racks with the
-// old version we can go ahead and remove this type and its conversion code
-// altogether.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct EarlyNetworkConfigV0 {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub generation: u64,
-
-    pub rack_subnet: Ipv6Addr,
-
-    /// The external NTP server addresses.
-    pub ntp_servers: Vec<String>,
-
-    // Rack network configuration as delivered from RSS and only existing at
-    // generation 1
-    pub rack_network_config: Option<RackNetworkConfigV0>,
-}
-
-// The second production version of the `EarlyNetworkConfig`.
-//
-// If this version is in the bootstore than we need to convert it to
-// `EarlyNetworkConfigV2`.
-//
-// Once we do this for all customers that have initialized racks with the
-// old version we can go ahead and remove this type and its conversion code
-// altogether.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct EarlyNetworkConfigV1 {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub generation: u64,
-
-    // Which version of the data structure do we have. This is to help with
-    // deserialization and conversion in future updates.
-    pub schema_version: u32,
-
-    // The actual configuration details
-    pub body: EarlyNetworkConfigBodyV1,
-}
-
 /// Network configuration required to bring up the control plane
 ///
 /// The fields in this structure are those from
@@ -792,7 +749,42 @@ pub struct EarlyNetworkConfig {
     pub body: EarlyNetworkConfigBody,
 }
 
+impl FromStr for EarlyNetworkConfig {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        #[derive(Deserialize)]
+        struct ShadowConfig {
+            generation: u64,
+            schema_version: u32,
+            body: EarlyNetworkConfigBody,
+        }
+
+        let v2_err = match serde_json::from_str::<ShadowConfig>(&value) {
+            Ok(cfg) => {
+                return Ok(EarlyNetworkConfig {
+                    generation: cfg.generation,
+                    schema_version: cfg.schema_version,
+                    body: cfg.body,
+                })
+            }
+            Err(e) => format!("unable to parse EarlyNetworkConfig: {e:?}"),
+        };
+        serde_json::from_str::<back_compat::EarlyNetworkConfigV1>(&value)
+            .map(|v1| EarlyNetworkConfig {
+                generation: v1.generation,
+                schema_version: Self::schema_version(),
+                body: v1.body.into(),
+            })
+            .map_err(|_| v2_err)
+    }
+}
+
 impl EarlyNetworkConfig {
+    pub fn schema_version() -> u32 {
+        2
+    }
+
     // Note: This currently only converts between v0 and v1 or deserializes v1 of
     // `EarlyNetworkConfig`.
     pub fn deserialize_bootstore_config(
@@ -817,18 +809,15 @@ impl EarlyNetworkConfig {
                 }
             };
 
-        match serde_json::from_slice::<EarlyNetworkConfigV1>(&config.blob) {
-            Ok(val) => {
+        match serde_json::from_slice::<back_compat::EarlyNetworkConfigV1>(
+            &config.blob,
+        ) {
+            Ok(v1) => {
                 // Convert from v1 to v2
                 return Ok(EarlyNetworkConfig {
-                    generation: val.generation,
-                    schema_version: 2,
-                    body: EarlyNetworkConfigBody {
-                        ntp_servers: val.body.ntp_servers,
-                        rack_network_config: val.body.rack_network_config.map(
-                            |v1_config| RackNetworkConfigV1::to_v2(v1_config),
-                        ),
-                    },
+                    generation: v1.generation,
+                    schema_version: EarlyNetworkConfig::schema_version(),
+                    body: v1.body.into(),
                 });
             }
             Err(error) => {
@@ -842,7 +831,9 @@ impl EarlyNetworkConfig {
             }
         };
 
-        match serde_json::from_slice::<EarlyNetworkConfigV0>(&config.blob) {
+        match serde_json::from_slice::<back_compat::EarlyNetworkConfigV0>(
+            &config.blob,
+        ) {
             Ok(val) => {
                 // Convert from v0 to v2
                 return Ok(EarlyNetworkConfig {
@@ -852,7 +843,7 @@ impl EarlyNetworkConfig {
                         ntp_servers: val.ntp_servers,
                         rack_network_config: val.rack_network_config.map(
                             |v0_config| {
-                                RackNetworkConfigV0::to_v2(
+                                back_compat::RackNetworkConfigV0::to_v2(
                                     val.rack_subnet,
                                     v0_config,
                                 )
@@ -905,185 +896,245 @@ impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct EarlyNetworkConfigBodyV1 {
-    /// The external NTP server addresses.
-    pub ntp_servers: Vec<String>,
+/// Structures and routines used to maintain backwards compatibility.  The
+/// contents of this module should only be used to convert older data into the
+/// current format, and not for any ongoing run-time operations.
+pub mod back_compat {
+    use super::*;
 
-    // Rack network configuration as delivered from RSS or Nexus
-    pub rack_network_config: Option<RackNetworkConfigV1>,
-}
+    #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+    pub struct EarlyNetworkConfigBodyV1 {
+        /// The external NTP server addresses.
+        pub ntp_servers: Vec<String>,
 
-/// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-///
-/// Our first version of `RackNetworkConfig`. If this exists in the bootstore, we
-/// upgrade out of it into `RackNetworkConfigV1` or later versions if possible.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-struct RackNetworkConfigV0 {
-    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
-    /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
-    /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
-    /// Uplinks for connecting the rack to external networks
-    pub uplinks: Vec<UplinkConfig>,
-}
+        // Rack network configuration as delivered from RSS or Nexus
+        pub rack_network_config: Option<RackNetworkConfigV1>,
+    }
 
-impl RackNetworkConfigV0 {
-    /// Convert from `RackNetworkConfigV0` to `RackNetworkConfigV1`
+    impl From<EarlyNetworkConfigBodyV1> for EarlyNetworkConfigBody {
+        fn from(v1: EarlyNetworkConfigBodyV1) -> Self {
+            EarlyNetworkConfigBody {
+                ntp_servers: v1.ntp_servers,
+                rack_network_config: v1
+                    .rack_network_config
+                    .map(|v1_config| v1_config.into()),
+            }
+        }
+    }
+
+    /// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
+    /// <https://github.com/serde-rs/serde/issues/2195>
     ///
-    /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV2`
-    /// because the `rack_subnet` field does not exist in `RackNetworkConfigV0`
-    /// and must be passed in from the `EarlyNetworkConfigV0` struct which
-    /// contains the `RackNetworkConfigV0` struct.
-    pub fn to_v2(
-        rack_subnet: Ipv6Addr,
-        v0: RackNetworkConfigV0,
-    ) -> RackNetworkConfigV2 {
-        RackNetworkConfigV2 {
-            rack_subnet: Ipv6Net::new(rack_subnet, 56).unwrap(),
-            infra_ip_first: v0.infra_ip_first,
-            infra_ip_last: v0.infra_ip_last,
-            ports: v0
-                .uplinks
-                .into_iter()
-                .map(|uplink| PortConfigV2::from(uplink))
-                .collect(),
-            bgp: vec![],
-            bfd: vec![],
+    /// Our first version of `RackNetworkConfig`. If this exists in the bootstore, we
+    /// upgrade out of it into `RackNetworkConfigV1` or later versions if possible.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+    pub(crate) struct RackNetworkConfigV0 {
+        // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
+        /// First ip address to be used for configuring network infrastructure
+        pub infra_ip_first: Ipv4Addr,
+        /// Last ip address to be used for configuring network infrastructure
+        pub infra_ip_last: Ipv4Addr,
+        /// Uplinks for connecting the rack to external networks
+        pub uplinks: Vec<UplinkConfig>,
+    }
+
+    impl RackNetworkConfigV0 {
+        /// Convert from `RackNetworkConfigV0` to `RackNetworkConfigV1`
+        ///
+        /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV2`
+        /// because the `rack_subnet` field does not exist in `RackNetworkConfigV0`
+        /// and must be passed in from the `EarlyNetworkConfigV0` struct which
+        /// contains the `RackNetworkConfigV0` struct.
+        pub fn to_v2(
+            rack_subnet: Ipv6Addr,
+            v0: RackNetworkConfigV0,
+        ) -> RackNetworkConfigV2 {
+            RackNetworkConfigV2 {
+                rack_subnet: Ipv6Net::new(rack_subnet, 56).unwrap(),
+                infra_ip_first: v0.infra_ip_first,
+                infra_ip_last: v0.infra_ip_last,
+                ports: v0
+                    .uplinks
+                    .into_iter()
+                    .map(|uplink| PortConfigV2::from(uplink))
+                    .collect(),
+                bgp: vec![],
+                bfd: vec![],
+            }
         }
     }
-}
 
-/// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct PortConfigV1 {
-    /// The set of routes associated with this port.
-    pub routes: Vec<RouteConfig>,
-    /// This port's addresses and optional vlan IDs
-    pub addresses: Vec<IpNet>,
-    /// Switch the port belongs to.
-    pub switch: SwitchLocation,
-    /// Nmae of the port this config applies to.
-    pub port: String,
-    /// Port speed.
-    pub uplink_port_speed: PortSpeed,
-    /// Port forward error correction type.
-    pub uplink_port_fec: PortFec,
-    /// BGP peers on this port
-    pub bgp_peers: Vec<BgpPeerConfig>,
-    /// Whether or not to set autonegotiation
-    #[serde(default)]
-    pub autoneg: bool,
-}
+    /// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
+    /// <https://github.com/serde-rs/serde/issues/2195>
+    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+    pub struct PortConfigV1 {
+        /// The set of routes associated with this port.
+        pub routes: Vec<RouteConfig>,
+        /// This port's addresses and optional vlan IDs
+        pub addresses: Vec<IpNet>,
+        /// Switch the port belongs to.
+        pub switch: SwitchLocation,
+        /// Nmae of the port this config applies to.
+        pub port: String,
+        /// Port speed.
+        pub uplink_port_speed: PortSpeed,
+        /// Port forward error correction type.
+        pub uplink_port_fec: PortFec,
+        /// BGP peers on this port
+        pub bgp_peers: Vec<BgpPeerConfig>,
+        /// Whether or not to set autonegotiation
+        #[serde(default)]
+        pub autoneg: bool,
+    }
 
-impl From<PortConfigV1> for PortConfigV2 {
-    fn from(value: PortConfigV1) -> Self {
-        PortConfigV2 {
-            routes: value.routes.clone(),
-            addresses: value
-                .addresses
-                .iter()
-                .map(|a| UplinkAddressConfig { address: *a, vlan_id: None })
-                .collect(),
-            switch: value.switch,
-            port: value.port,
-            uplink_port_speed: value.uplink_port_speed,
-            uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: vec![],
-            autoneg: false,
+    impl From<PortConfigV1> for PortConfigV2 {
+        fn from(v1: PortConfigV1) -> Self {
+            PortConfigV2 {
+                routes: v1.routes.clone(),
+                addresses: v1
+                    .addresses
+                    .iter()
+                    .map(|a| UplinkAddressConfig { address: *a, vlan_id: None })
+                    .collect(),
+                switch: v1.switch,
+                port: v1.port,
+                uplink_port_speed: v1.uplink_port_speed,
+                uplink_port_fec: v1.uplink_port_fec,
+                bgp_peers: v1.bgp_peers.clone(),
+                autoneg: v1.autoneg,
+            }
         }
     }
-}
 
-/// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-struct UplinkConfig {
-    /// Gateway address
-    pub gateway_ip: Ipv4Addr,
-    /// Switch to use for uplink
-    pub switch: SwitchLocation,
-    /// Switchport to use for external connectivity
-    pub uplink_port: String,
-    /// Speed for the Switchport
-    pub uplink_port_speed: PortSpeed,
-    /// Forward Error Correction setting for the uplink port
-    pub uplink_port_fec: PortFec,
-    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub uplink_cidr: Ipv4Net,
-    /// VLAN id to use for uplink
-    pub uplink_vid: Option<u16>,
-}
+    /// Deprecated, use PortConfigV2 instead. Cannot actually deprecate due to
+    /// <https://github.com/serde-rs/serde/issues/2195>
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+    pub(crate) struct UplinkConfig {
+        /// Gateway address
+        pub gateway_ip: Ipv4Addr,
+        /// Switch to use for uplink
+        pub switch: SwitchLocation,
+        /// Switchport to use for external connectivity
+        pub uplink_port: String,
+        /// Speed for the Switchport
+        pub uplink_port_speed: PortSpeed,
+        /// Forward Error Correction setting for the uplink port
+        pub uplink_port_fec: PortFec,
+        /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
+        /// (must be in infra_ip pool)
+        pub uplink_cidr: Ipv4Net,
+        /// VLAN id to use for uplink
+        pub uplink_vid: Option<u16>,
+    }
 
-impl From<UplinkConfig> for PortConfigV2 {
-    fn from(value: UplinkConfig) -> Self {
-        PortConfigV2 {
-            routes: vec![RouteConfig {
-                destination: "0.0.0.0/0".parse().unwrap(),
-                nexthop: value.gateway_ip.into(),
-                vlan_id: value.uplink_vid,
-            }],
-            addresses: vec![UplinkAddressConfig {
-                address: value.uplink_cidr.into(),
-                vlan_id: value.uplink_vid,
-            }],
-            switch: value.switch,
-            port: value.uplink_port,
-            uplink_port_speed: value.uplink_port_speed,
-            uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: vec![],
-            autoneg: false,
+    impl From<UplinkConfig> for PortConfigV2 {
+        fn from(value: UplinkConfig) -> Self {
+            PortConfigV2 {
+                routes: vec![RouteConfig {
+                    destination: "0.0.0.0/0".parse().unwrap(),
+                    nexthop: value.gateway_ip.into(),
+                    vlan_id: value.uplink_vid,
+                }],
+                addresses: vec![UplinkAddressConfig {
+                    address: value.uplink_cidr.into(),
+                    vlan_id: value.uplink_vid,
+                }],
+                switch: value.switch,
+                port: value.uplink_port,
+                uplink_port_speed: value.uplink_port_speed,
+                uplink_port_fec: value.uplink_port_fec,
+                bgp_peers: vec![],
+                autoneg: false,
+            }
         }
     }
-}
 
-/// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-///
-/// Our second version of `RackNetworkConfig`. If this exists in the bootstore,
-/// we upgrade out of it into `RackNetworkConfigV1` or later versions if
-/// possible.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct RackNetworkConfigV1 {
-    pub rack_subnet: Ipv6Net,
-    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
-    /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
-    /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
-    /// Uplinks for connecting the rack to external networks
-    pub ports: Vec<PortConfigV1>,
-    /// BGP configurations for connecting the rack to external networks
-    pub bgp: Vec<BgpConfig>,
-    /// BFD configuration for connecting the rack to external networks
-    #[serde(default)]
-    pub bfd: Vec<omicron_common::api::internal::shared::BfdPeerConfig>,
-}
-
-impl RackNetworkConfigV1 {
-    /// Convert from `RackNetworkConfigV1` to `RackNetworkConfigV2`
+    /// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
+    /// <https://github.com/serde-rs/serde/issues/2195>
     ///
-    /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV1`
-    /// because the `rack_subnet` field does not exist in `RackNetworkConfigV0`
-    /// and must be passed in from the `EarlyNetworkConfigV0` struct which
-    /// contains the `RackNetworkConfivV0` struct.
-    pub fn to_v2(v1: RackNetworkConfigV1) -> RackNetworkConfigV2 {
-        RackNetworkConfigV2 {
-            rack_subnet: v1.rack_subnet,
-            infra_ip_first: v1.infra_ip_first,
-            infra_ip_last: v1.infra_ip_last,
-            ports: v1
-                .ports
-                .into_iter()
-                .map(|ports| PortConfigV2::from(ports))
-                .collect(),
-            bgp: v1.bgp.clone(),
-            bfd: v1.bfd.clone(),
+    /// Our second version of `RackNetworkConfig`. If this exists in the bootstore,
+    /// we upgrade out of it into `RackNetworkConfigV1` or later versions if
+    /// possible.
+    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+    pub struct RackNetworkConfigV1 {
+        pub rack_subnet: Ipv6Net,
+        // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
+        /// First ip address to be used for configuring network infrastructure
+        pub infra_ip_first: Ipv4Addr,
+        /// Last ip address to be used for configuring network infrastructure
+        pub infra_ip_last: Ipv4Addr,
+        /// Uplinks for connecting the rack to external networks
+        pub ports: Vec<PortConfigV1>,
+        /// BGP configurations for connecting the rack to external networks
+        pub bgp: Vec<BgpConfig>,
+        /// BFD configuration for connecting the rack to external networks
+        #[serde(default)]
+        pub bfd: Vec<BfdPeerConfig>,
+    }
+
+    impl From<RackNetworkConfigV1> for RackNetworkConfigV2 {
+        fn from(v1: RackNetworkConfigV1) -> Self {
+            RackNetworkConfigV2 {
+                rack_subnet: v1.rack_subnet,
+                infra_ip_first: v1.infra_ip_first,
+                infra_ip_last: v1.infra_ip_last,
+                ports: v1
+                    .ports
+                    .into_iter()
+                    .map(|ports| PortConfigV2::from(ports))
+                    .collect(),
+                bgp: v1.bgp.clone(),
+                bfd: v1.bfd.clone(),
+            }
         }
+    }
+
+    // The second production version of the `EarlyNetworkConfig`.
+    //
+    // If this version is in the bootstore than we need to convert it to
+    // `EarlyNetworkConfigV2`.
+    //
+    // Once we do this for all customers that have initialized racks with the
+    // old version we can go ahead and remove this type and its conversion code
+    // altogether.
+    #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+    pub struct EarlyNetworkConfigV1 {
+        // The current generation number of data as stored in CRDB.
+        // The initial generation is set during RSS time and then only mutated
+        // by Nexus.
+        pub generation: u64,
+
+        // Which version of the data structure do we have. This is to help with
+        // deserialization and conversion in future updates.
+        pub schema_version: u32,
+
+        // The actual configuration details
+        pub body: EarlyNetworkConfigBodyV1,
+    }
+
+    // The first production version of the `EarlyNetworkConfig`.
+    //
+    // If this version is in the bootstore than we need to convert it to
+    // `EarlyNetworkConfigV2`.
+    //
+    // Once we do this for all customers that have initialized racks with the
+    // old version we can go ahead and remove this type and its conversion code
+    // altogether.
+    #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+    pub(crate) struct EarlyNetworkConfigV0 {
+        // The current generation number of data as stored in CRDB.
+        // The initial generation is set during RSS time and then only mutated
+        // by Nexus.
+        pub generation: u64,
+
+        pub rack_subnet: Ipv6Addr,
+
+        /// The external NTP server addresses.
+        pub ntp_servers: Vec<String>,
+
+        // Rack network configuration as delivered from RSS and only existing at
+        // generation 1
+        pub rack_network_config: Option<RackNetworkConfigV0>,
     }
 }
 
@@ -1125,14 +1176,14 @@ mod tests {
         let logctx = test_setup_log(
             "serialized_early_network_config_v0_to_v2_conversion",
         );
-        let v0 = EarlyNetworkConfigV0 {
+        let v0 = back_compat::EarlyNetworkConfigV0 {
             generation: 1,
             rack_subnet: Ipv6Addr::UNSPECIFIED,
             ntp_servers: Vec::new(),
-            rack_network_config: Some(RackNetworkConfigV0 {
+            rack_network_config: Some(back_compat::RackNetworkConfigV0 {
                 infra_ip_first: Ipv4Addr::UNSPECIFIED,
                 infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                uplinks: vec![UplinkConfig {
+                uplinks: vec![back_compat::UplinkConfig {
                     gateway_ip: Ipv4Addr::UNSPECIFIED,
                     switch: SwitchLocation::Switch0,
                     uplink_port: "Port0".to_string(),
@@ -1157,7 +1208,7 @@ mod tests {
         let uplink = v0_rack_network_config.uplinks[0].clone();
         let expected = EarlyNetworkConfig {
             generation: 1,
-            schema_version: 2,
+            schema_version: EarlyNetworkConfig::schema_version(),
             body: EarlyNetworkConfigBody {
                 ntp_servers: v0.ntp_servers.clone(),
                 rack_network_config: Some(RackNetworkConfigV2 {
@@ -1198,17 +1249,17 @@ mod tests {
             "serialized_early_network_config_v1_to_v2_conversion",
         );
 
-        let v1 = EarlyNetworkConfigV1 {
+        let v1 = back_compat::EarlyNetworkConfigV1 {
             generation: 1,
             schema_version: 1,
-            body: EarlyNetworkConfigBodyV1 {
+            body: back_compat::EarlyNetworkConfigBodyV1 {
                 ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfigV1 {
+                rack_network_config: Some(back_compat::RackNetworkConfigV1 {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: Ipv4Addr::UNSPECIFIED,
                     infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                    ports: vec![PortConfigV1 {
+                    ports: vec![back_compat::PortConfigV1 {
                         routes: vec![RouteConfig {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: "192.168.0.2".parse().unwrap(),
@@ -1241,7 +1292,7 @@ mod tests {
         let port = v1_rack_network_config.ports[0].clone();
         let expected = EarlyNetworkConfig {
             generation: 1,
-            schema_version: 2,
+            schema_version: EarlyNetworkConfig::schema_version(),
             body: EarlyNetworkConfigBody {
                 ntp_servers: v1.body.ntp_servers.clone(),
                 rack_network_config: Some(RackNetworkConfigV2 {
