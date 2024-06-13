@@ -53,6 +53,7 @@ progenitor::generate_api!(
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,

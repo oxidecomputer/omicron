@@ -562,8 +562,8 @@ impl SledAgent {
         self.disks.size().await
     }
 
-    pub async fn instance_poke(&self, id: Uuid) {
-        self.instances.sim_poke(id, PokeMode::Drain).await;
+    pub async fn instance_poke(&self, id: InstanceUuid) {
+        self.instances.sim_poke(id.into_untyped_uuid(), PokeMode::Drain).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {

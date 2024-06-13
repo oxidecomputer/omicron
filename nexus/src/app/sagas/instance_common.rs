@@ -477,7 +477,10 @@ pub async fn instance_ip_add_opte(
                 "sled agent client went away mid-attach/detach",
             ))
         })?
-        .instance_put_external_ip(&authz_instance.id(), &sled_agent_body)
+        .instance_put_external_ip(
+            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            &sled_agent_body,
+        )
         .await
         .map_err(|e| {
             ActionError::action_failed(match e {
@@ -532,7 +535,10 @@ pub async fn instance_ip_remove_opte(
                 "sled agent client went away mid-attach/detach",
             ))
         })?
-        .instance_delete_external_ip(&authz_instance.id(), &sled_agent_body)
+        .instance_delete_external_ip(
+            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            &sled_agent_body,
+        )
         .await
         .map_err(|e| {
             ActionError::action_failed(match e {

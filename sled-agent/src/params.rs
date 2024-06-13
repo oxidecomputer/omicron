@@ -118,7 +118,7 @@ pub struct InstanceEnsureBody {
     /// The ID of the VMM being registered. This may not be the active VMM ID in
     /// the instance runtime state (e.g. if the new VMM is going to be a
     /// migration target).
-    pub propolis_id: Uuid,
+    pub propolis_id: PropolisUuid,
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,

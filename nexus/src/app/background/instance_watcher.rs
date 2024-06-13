@@ -81,7 +81,11 @@ impl InstanceWatcher {
 
         async move {
             slog::trace!(opctx.log, "checking on instance...");
-            let rsp = client.instance_get_state(&target.instance_id).await;
+            let rsp = client
+                .instance_get_state(&InstanceUuid::from_untyped_uuid(
+                    target.instance_id,
+                ))
+                .await;
             let mut check =
                 Check { target, outcome: Default::default(), result: Ok(()) };
             let state = match rsp {

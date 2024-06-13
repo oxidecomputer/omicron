@@ -155,7 +155,7 @@ async fn create_instance_and_attach_disk(
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-        set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_id).await;
 
     let url_instance_attach_disk =

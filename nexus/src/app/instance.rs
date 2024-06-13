@@ -554,7 +554,7 @@ impl super::Nexus {
         let sa = self.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
-                &instance_id.into_untyped_uuid(),
+                &instance_id,
                 &InstancePutMigrationIdsBody {
                     old_runtime: prev_instance_runtime.clone().into(),
                     migration_params: Some(migration_params),
@@ -627,7 +627,7 @@ impl super::Nexus {
         let sa = self.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
-                &instance_id.into_untyped_uuid(),
+                &instance_id,
                 &InstancePutMigrationIdsBody {
                     old_runtime: prev_instance_runtime.clone().into(),
                     migration_params: None,
@@ -820,14 +820,14 @@ impl super::Nexus {
     {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.sled_client(&sled_id).await?;
-        sa.instance_unregister(&authz_instance.id())
-            .await
-            .map(|res| res.into_inner().updated_runtime.map(Into::into))
-            .map_err(|e| {
-                InstanceStateChangeError::SledAgent(SledAgentInstancePutError(
-                    e,
-                ))
-            })
+        sa.instance_unregister(&InstanceUuid::from_untyped_uuid(
+            authz_instance.id(),
+        ))
+        .await
+        .map(|res| res.into_inner().updated_runtime.map(Into::into))
+        .map_err(|e| {
+            InstanceStateChangeError::SledAgent(SledAgentInstancePutError(e))
+        })
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -994,7 +994,7 @@ impl super::Nexus {
                 let sa = self.sled_client(&sled_id).await?;
                 let instance_put_result = sa
                     .instance_put_state(
-                        &instance_id.into_untyped_uuid(),
+                        &instance_id,
                         &InstancePutStateBody { state: requested.into() },
                     )
                     .await
@@ -1275,17 +1275,18 @@ impl super::Nexus {
             )),
         };
 
+        let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
         let sa = self
             .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
             .await?;
         let instance_register_result = sa
             .instance_register(
-                &db_instance.id(),
+                &instance_id,
                 &sled_agent_client::types::InstanceEnsureBody {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
                     vmm_runtime: initial_vmm.clone().into(),
-                    propolis_id: propolis_id.into_untyped_uuid(),
+                    propolis_id: *propolis_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
                         initial_vmm.propolis_port.into(),
@@ -1298,7 +1299,6 @@ impl super::Nexus {
             .map(|res| Some(res.into_inner().into()))
             .map_err(|e| SledAgentInstancePutError(e));
 
-        let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
         match instance_register_result {
             Ok(state) => {
                 self.write_returned_instance_state(&instance_id, state).await?;
