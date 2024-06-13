@@ -6,8 +6,9 @@
 // TODO-design Need TLS support (the types below hardcode NoTls).
 
 use super::Config as DbConfig;
+use crate::db::pool_connection::DieselPgConnector;
+
 use qorb::backend;
-use qorb::connectors::diesel_pg::DieselPgConnector;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
 use qorb::resolvers::dns::{DnsResolver, DnsResolverConfig};

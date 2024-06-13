@@ -7449,15 +7449,12 @@ dependencies = [
 [[package]]
 name = "qorb"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=master#6b39fd4c08790036ec4cc7cf18a0bcbbb0fcd34e"
+source = "git+https://github.com/oxidecomputer/qorb?branch=master#bb432c9574c393bf2eb7b19516b996aa5584573e"
 dependencies = [
  "anyhow",
- "async-bb8-diesel",
  "async-trait",
  "debug-ignore",
  "derive-where",
- "diesel",
- "diesel-dtrace",
  "dropshot 0.10.1",
  "futures",
  "hickory-resolver",

@@ -29,7 +29,7 @@ oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-qorb = { workspace = true, features = [ "diesel_pg", "qtop" ] }
+qorb = { workspace = true, features = [ "qtop" ] }
 rand.workspace = true
 ref-cast.workspace = true
 schemars.workspace = true
