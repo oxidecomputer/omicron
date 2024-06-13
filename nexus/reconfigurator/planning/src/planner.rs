@@ -520,7 +520,7 @@ impl<'a> Planner<'a> {
                         self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
                     );
-                    total_added += added;
+                    new_zones_added += added;
                 }
                 // This is only possible if we asked the sled to ensure the same
                 // number of zones it already has, but that's impossible based

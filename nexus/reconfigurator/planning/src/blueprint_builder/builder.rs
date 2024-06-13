@@ -903,7 +903,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Added(num_crdb_to_add))
+        Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
     }
 
     fn sled_add_zone(
@@ -2054,7 +2054,10 @@ pub mod test {
                 num_sled_zpools,
             )
             .expect("ensured multiple CRDB zones");
-        assert_eq!(ensure_result, EnsureMultiple::Added(num_sled_zpools));
+        assert_eq!(
+            ensure_result,
+            EnsureMultiple::Changed { added: num_sled_zpools, removed: 0 }
+        );
 
         let blueprint = builder.build();
         verify_blueprint(&blueprint);
