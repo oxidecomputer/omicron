@@ -748,7 +748,10 @@ fn cmd_blueprint_edit(
             let added = builder
                 .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
                 .context("failed to add Nexus zone")?;
-            assert_matches::assert_matches!(added, EnsureMultiple::Added(1));
+            assert_matches::assert_matches!(
+                added,
+                EnsureMultiple::Changed { added: 1, removed: 0 }
+            );
             format!("added Nexus zone to sled {}", sled_id)
         }
     };

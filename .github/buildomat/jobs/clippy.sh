@@ -3,7 +3,7 @@
 #: name = "clippy (helios)"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.78.0"
+#: rust_toolchain = true
 #: output_rules = []
 
 # Run clippy on illumos (not just other systems) because a bunch of our code

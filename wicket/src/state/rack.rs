@@ -102,13 +102,8 @@ impl RackState {
     pub fn left_or_right(&mut self) {
         match self.selected {
             ComponentId::Sled(i) => {
-                if self.left_column {
-                    self.left_column = false;
-                    self.selected = ComponentId::Sled(i + 1);
-                } else {
-                    self.left_column = true;
-                    self.selected = ComponentId::Sled(i - 1);
-                }
+                self.selected = ComponentId::Sled(i ^ 1);
+                self.set_column();
             }
             _ => (),
         }

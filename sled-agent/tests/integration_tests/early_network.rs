@@ -10,7 +10,7 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::{
     external::{ImportExportPolicy, SwitchLocation},
     internal::shared::{
-        BgpConfig, BgpPeerConfig, PortConfigV1, PortFec, PortSpeed,
+        BgpConfig, BgpPeerConfig, PortConfigV2, PortFec, PortSpeed,
         RackNetworkConfig, RouteConfig,
     },
 };
@@ -120,7 +120,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                 rack_subnet: "ff01::0/32".parse().unwrap(),
                 infra_ip_first: Ipv4Addr::new(127, 0, 0, 1),
                 infra_ip_last: Ipv4Addr::new(127, 1, 0, 1),
-                ports: vec![PortConfigV1 {
+                ports: vec![PortConfigV2 {
                     routes: vec![RouteConfig {
                         destination: "10.1.9.32/16".parse().unwrap(),
                         nexthop: "10.1.9.32".parse().unwrap(),

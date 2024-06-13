@@ -183,8 +183,8 @@ impl DataStore {
         //
         // We currently only permit attaching disks to stopped instances.
         let ok_to_attach_instance_states = vec![
-            db::model::InstanceState(api::external::InstanceState::Creating),
-            db::model::InstanceState(api::external::InstanceState::Stopped),
+            db::model::InstanceState::Creating,
+            db::model::InstanceState::NoVmm,
         ];
 
         let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
@@ -321,9 +321,9 @@ impl DataStore {
         //
         // We currently only permit detaching disks from stopped instances.
         let ok_to_detach_instance_states = vec![
-            db::model::InstanceState(api::external::InstanceState::Creating),
-            db::model::InstanceState(api::external::InstanceState::Stopped),
-            db::model::InstanceState(api::external::InstanceState::Failed),
+            db::model::InstanceState::Creating,
+            db::model::InstanceState::NoVmm,
+            db::model::InstanceState::Failed,
         ];
 
         let detached_label = api::external::DiskState::Detached.label();

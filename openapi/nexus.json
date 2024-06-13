@@ -8996,6 +8996,13 @@
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Optional VLAN ID for this address",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -17282,6 +17289,13 @@
             "description": "The port settings object this address configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "An optional VLAN ID",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [

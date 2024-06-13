@@ -1540,9 +1540,9 @@ mod tests {
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
     use internal_dns::resolver::Resolver;
     use omicron_common::api::external::{
-        ByteCount, Generation, Hostname, InstanceCpuCount, InstanceState,
+        ByteCount, Generation, Hostname, InstanceCpuCount,
     };
-    use omicron_common::api::internal::nexus::InstanceProperties;
+    use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
     use omicron_common::FileKv;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::Ipv6Addr;
@@ -1782,7 +1782,7 @@ mod tests {
                 time_updated: Default::default(),
             },
             vmm_runtime: VmmRuntimeState {
-                state: InstanceState::Creating,
+                state: VmmState::Starting,
                 gen: Generation::new(),
                 time_updated: Default::default(),
             },
@@ -1881,7 +1881,7 @@ mod tests {
             TIMEOUT_DURATION,
             state_rx.wait_for(|maybe_state| match maybe_state {
                 ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == InstanceState::Running
+                    sled_inst_state.vmm_state.state == VmmState::Running
                 }
                 _ => false,
             }),
@@ -1954,7 +1954,7 @@ mod tests {
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 
         if let ReceivedInstanceState::InstancePut(SledInstanceState {
-            vmm_state: VmmRuntimeState { state: InstanceState::Running, .. },
+            vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
             ..
         }) = state_rx.borrow().to_owned()
         {
@@ -2036,7 +2036,7 @@ mod tests {
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 
         if let ReceivedInstanceState::InstancePut(SledInstanceState {
-            vmm_state: VmmRuntimeState { state: InstanceState::Running, .. },
+            vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
             ..
         }) = state_rx.borrow().to_owned()
         {
@@ -2139,7 +2139,7 @@ mod tests {
             TIMEOUT_DURATION,
             state_rx.wait_for(|maybe_state| match maybe_state {
                 ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == InstanceState::Running
+                    sled_inst_state.vmm_state.state == VmmState::Running
                 }
                 _ => false,
             }),

@@ -483,16 +483,18 @@ impl Sled {
                         model: model.clone(),
                         power_state: PowerState::A2,
                         revision,
-                        rot: RotState::Enabled {
+                        rot: RotState::V3 {
                             active: RotSlot::A,
                             pending_persistent_boot_preference: None,
                             persistent_boot_preference: RotSlot::A,
-                            slot_a_sha3_256_digest: Some(String::from(
-                                "slotAdigest1",
-                            )),
-                            slot_b_sha3_256_digest: Some(String::from(
-                                "slotBdigest1",
-                            )),
+                            slot_a_fwid: String::from("slotAdigest1"),
+                            slot_b_fwid: String::from("slotBdigest1"),
+                            stage0_fwid: String::from("stage0_fwid"),
+                            stage0next_fwid: String::from("stage0next_fwid"),
+                            slot_a_error: None,
+                            slot_b_error: None,
+                            stage0_error: None,
+                            stage0next_error: None,
                             transient_boot_preference: None,
                         },
                         serial_number: serial.clone(),
@@ -582,35 +584,86 @@ impl Sled {
             .unwrap_or(sled_agent_client::types::Baseboard::Unknown);
 
         let inventory_sp = inventory_sp.map(|sledhw| {
-            let sp_state = SpState {
-                base_mac_address: [0; 6],
-                hubris_archive_id: sledhw.sp.hubris_archive.clone(),
-                model: sledhw.baseboard_id.part_number.clone(),
-                power_state: sledhw.sp.power_state,
-                revision: sledhw.sp.baseboard_revision,
-                rot: RotState::Enabled {
-                    active: sledhw.rot.active_slot,
-                    pending_persistent_boot_preference: sledhw
-                        .rot
-                        .pending_persistent_boot_preference,
-                    persistent_boot_preference: sledhw
-                        .rot
-                        .persistent_boot_preference,
-                    slot_a_sha3_256_digest: sledhw
-                        .rot
-                        .slot_a_sha3_256_digest
-                        .clone(),
-                    slot_b_sha3_256_digest: sledhw
-                        .rot
-                        .slot_b_sha3_256_digest
-                        .clone(),
-                    transient_boot_preference: sledhw
-                        .rot
-                        .transient_boot_preference,
-                },
-                serial_number: sledhw.baseboard_id.serial_number.clone(),
+            // RotStateV3 unconditionally sets all of these
+            let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
+                && sledhw.rot.slot_b_sha3_256_digest.is_some()
+                && sledhw.rot.stage0_digest.is_some()
+                && sledhw.rot.stage0next_digest.is_some()
+            {
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: sledhw.sp.hubris_archive.clone(),
+                    model: sledhw.baseboard_id.part_number.clone(),
+                    power_state: sledhw.sp.power_state,
+                    revision: sledhw.sp.baseboard_revision,
+                    rot: RotState::V3 {
+                        active: sledhw.rot.active_slot,
+                        pending_persistent_boot_preference: sledhw
+                            .rot
+                            .pending_persistent_boot_preference,
+                        persistent_boot_preference: sledhw
+                            .rot
+                            .persistent_boot_preference,
+                        slot_a_fwid: sledhw
+                            .rot
+                            .slot_a_sha3_256_digest
+                            .clone()
+                            .expect("slot_a_fwid should be set"),
+                        slot_b_fwid: sledhw
+                            .rot
+                            .slot_b_sha3_256_digest
+                            .clone()
+                            .expect("slot_b_fwid should be set"),
+                        stage0_fwid: sledhw
+                            .rot
+                            .stage0_digest
+                            .clone()
+                            .expect("stage0 fwid should be set"),
+                        stage0next_fwid: sledhw
+                            .rot
+                            .stage0next_digest
+                            .clone()
+                            .expect("stage0 fwid should be set"),
+                        transient_boot_preference: sledhw
+                            .rot
+                            .transient_boot_preference,
+                        slot_a_error: sledhw.rot.slot_a_error,
+                        slot_b_error: sledhw.rot.slot_b_error,
+                        stage0_error: sledhw.rot.stage0_error,
+                        stage0next_error: sledhw.rot.stage0next_error,
+                    },
+                    serial_number: sledhw.baseboard_id.serial_number.clone(),
+                }
+            } else {
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: sledhw.sp.hubris_archive.clone(),
+                    model: sledhw.baseboard_id.part_number.clone(),
+                    power_state: sledhw.sp.power_state,
+                    revision: sledhw.sp.baseboard_revision,
+                    rot: RotState::V2 {
+                        active: sledhw.rot.active_slot,
+                        pending_persistent_boot_preference: sledhw
+                            .rot
+                            .pending_persistent_boot_preference,
+                        persistent_boot_preference: sledhw
+                            .rot
+                            .persistent_boot_preference,
+                        slot_a_sha3_256_digest: sledhw
+                            .rot
+                            .slot_a_sha3_256_digest
+                            .clone(),
+                        slot_b_sha3_256_digest: sledhw
+                            .rot
+                            .slot_b_sha3_256_digest
+                            .clone(),
+                        transient_boot_preference: sledhw
+                            .rot
+                            .transient_boot_preference,
+                    },
+                    serial_number: sledhw.baseboard_id.serial_number.clone(),
+                }
             };
-
             (sledhw.sp.sp_slot, sp_state)
         });
 

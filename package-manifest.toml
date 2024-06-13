@@ -121,7 +121,7 @@ source.paths = [
 ]
 output.type = "zone"
 setup_hint = """
-- Run `./tools/ci_download_console` to download the web console assets
+- Run `cargo xtask download console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 output.intermediate_only = true
@@ -170,7 +170,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
 service_name = "clickhouse_keeper"
@@ -196,7 +196,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.cockroachdb]
 service_name = "cockroachdb"
@@ -223,7 +223,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download cockroach` to download the necessary binaries"
 
 [package.omicron-cockroach-admin]
 service_name = "cockroach-admin"
@@ -548,10 +548,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c9824727eedc66d4920e42e7260df05050841ab8"
+source.commit = "e63f6d408908b3332d7cd89a4dd44a0f980d931d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "4ba6bb87fe9bd2dcb69b27a218e0f9f10767fa8eb3c1439fbf0fa5f5a1921dd9"
+source.sha256 = "fb1a9c24f160afb3f87b57544869f2b54876b2b4bb2f6922411e2eb04ecd4a61"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -564,10 +564,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c9824727eedc66d4920e42e7260df05050841ab8"
+source.commit = "e63f6d408908b3332d7cd89a4dd44a0f980d931d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "45918b2ef4fe2be048cc8934155335a1b20e91fea6d818c385fe3964a3e8fdec"
+source.sha256 = "07a534a6dd6975cd13c629414382f6fdb8d0a11406dd626ec93c6d50d0e7e041"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -579,10 +579,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c9824727eedc66d4920e42e7260df05050841ab8"
+source.commit = "e63f6d408908b3332d7cd89a4dd44a0f980d931d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "6ae4bc3b332e91706c1c6633a7fc218aac65b7feff5643ee2dbbe79b841e0df3"
+source.sha256 = "cf7b30a650a6501030743485f29bd556e6a379333bac2b89e746e2d389423ded"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -628,8 +628,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6334bf74fa21790c15f1c4e494ea2ec0edd1c83c"
-source.sha256 = "5929f9abf0daf4bbf17d835e5d69fc842b9617b312fb5644fa99daf785203700"
+source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
+source.sha256 = "1db849892c60b22f600fb081d4b0145d8ecd98acce9fad3094499a5d2159d001"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -653,8 +653,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6334bf74fa21790c15f1c4e494ea2ec0edd1c83c"
-source.sha256 = "0294a1911212c4764d1034b5e0ca00cc9dfc51df482a9f6e5547b191b4481ad8"
+source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
+source.sha256 = "00b2b9372145bc8974f3c75ba7a59d8f2a8178c67cc1869086d29c7f3a2deb36"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -671,8 +671,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6334bf74fa21790c15f1c4e494ea2ec0edd1c83c"
-source.sha256 = "1a188da01dccf565058145b43573a549a2eb4d71fe8800170152b823af27a010"
+source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
+source.sha256 = "b0b62b22c0e781edb0790b8730b99bb6e635c95ad3e83c2afbb2b15956153d66"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -686,7 +686,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download transceiver-control` to download the necessary binaries"
 
 [package.thundermuffin]
 service_name = "thundermuffin"
