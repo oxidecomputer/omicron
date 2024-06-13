@@ -4669,6 +4669,15 @@
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
         "properties": {
+          "migration_state": {
+            "nullable": true,
+            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
             "allOf": [
