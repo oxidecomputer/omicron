@@ -185,7 +185,7 @@ async fn ensure_node_id_known(
     let admin_client =
         cockroach_admin_client::Client::new(&admin_url, opctx.log.clone());
     let node = admin_client
-        .node_id()
+        .local_node_id()
         .await
         .with_context(|| {
             format!("failed to fetch node ID for zone {zone_id} at {admin_url}")
@@ -497,7 +497,7 @@ mod tests {
 
         // Node 1 succeeds.
         admin1.expect(Expectation::matching(any()).times(1).respond_with(
-            json_encoded(cockroach_admin_client::types::NodeId {
+            json_encoded(cockroach_admin_client::types::LocalNodeId {
                 zone_id: crdb_zone_id1,
                 node_id: crdb_node_id1.to_string(),
             }),
@@ -510,7 +510,7 @@ mod tests {
         );
         // Node 3 succeeds, but with an unexpected zone_id.
         admin3.expect(Expectation::matching(any()).times(1).respond_with(
-            json_encoded(cockroach_admin_client::types::NodeId {
+            json_encoded(cockroach_admin_client::types::LocalNodeId {
                 zone_id: crdb_zone_id4,
                 node_id: crdb_node_id3.to_string(),
             }),
