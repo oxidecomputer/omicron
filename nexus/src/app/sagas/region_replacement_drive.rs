@@ -89,6 +89,7 @@
 //! This saga handles the following region replacement request state
 //! transitions:
 //!
+//! ```text
 //!         Running  <--
 //!                    |
 //!            |       |
@@ -100,6 +101,7 @@
 //!            v
 //!
 //!     ReplacementDone
+//! ```
 //!
 //! The first thing this saga does is set itself as the "operating saga" for the
 //! request, and change the state to "Driving". Then, it performs the following

@@ -6,6 +6,7 @@
 //! process is straight forward. This saga is responsible for the following
 //! region replacement request state transitions:
 //!
+//! ```text
 //!     ReplacementDone  <--
 //!                         |
 //!            |            |
@@ -17,6 +18,7 @@
 //!            v
 //!
 //!        Completed
+//! ```
 //!
 //! It will set itself as the "operating saga" for a region replacement request,
 //! change the state to "Completing", and:
