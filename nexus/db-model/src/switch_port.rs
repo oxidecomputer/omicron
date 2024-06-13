@@ -722,6 +722,7 @@ pub struct SwitchPortAddressConfig {
     pub rsvd_address_lot_block_id: Uuid,
     pub address: IpNetwork,
     pub interface_name: String,
+    pub vlan_id: Option<SqlU16>,
 }
 
 impl SwitchPortAddressConfig {
@@ -731,6 +732,7 @@ impl SwitchPortAddressConfig {
         rsvd_address_lot_block_id: Uuid,
         address: IpNetwork,
         interface_name: String,
+        vlan_id: Option<u16>,
     ) -> Self {
         Self {
             port_settings_id,
@@ -738,6 +740,7 @@ impl SwitchPortAddressConfig {
             rsvd_address_lot_block_id,
             address,
             interface_name,
+            vlan_id: vlan_id.map(|x| x.into()),
         }
     }
 }
@@ -749,6 +752,7 @@ impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),
             interface_name: self.interface_name,
+            vlan_id: self.vlan_id.map(|x| x.into()),
         }
     }
 }

@@ -149,6 +149,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         AddressConfig {
             addresses: vec![Address {
                 address: "203.0.113.10/24".parse().unwrap(),
+                vlan_id: None,
                 address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
             }],
         },

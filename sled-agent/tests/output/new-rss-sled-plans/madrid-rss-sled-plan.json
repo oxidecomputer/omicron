@@ -132,7 +132,10 @@
             }
           ],
           "addresses": [
-            "172.20.15.38/29"
+            {
+              "address": "172.20.15.38/29",
+              "vlan_id": null
+            }
           ],
           "switch": "switch0",
           "port": "qsfp0",
@@ -150,7 +153,10 @@
             }
           ],
           "addresses": [
-            "172.20.15.37/29"
+            {
+              "address": "172.20.15.37/29",
+              "vlan_id": null
+            }
           ],
           "switch": "switch1",
           "port": "qsfp0",

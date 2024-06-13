@@ -133,7 +133,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::TransceiverControl => {
                         downloader.download_transceiver_control().await
                     }
-                }.context("Failed to download {target:?}")?;
+                }.context(format!("Failed to download {target:?}"))?;
 
                 info!(&log, "Download complete");
                 Ok(())

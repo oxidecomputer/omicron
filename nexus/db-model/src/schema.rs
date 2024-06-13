@@ -322,6 +322,7 @@ table! {
         rsvd_address_lot_block_id -> Uuid,
         address -> Inet,
         interface_name -> Text,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -1616,6 +1617,13 @@ table! {
 }
 
 table! {
+    cockroachdb_zone_id_to_node_id (omicron_zone_id, crdb_node_id) {
+        omicron_zone_id -> Uuid,
+        crdb_node_id -> Text,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
@@ -1757,6 +1765,26 @@ table! {
         target_version -> Nullable<Text>,
     }
 }
+
+table! {
+    migration (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        source_state -> crate::MigrationStateEnum,
+        source_propolis_id -> Uuid,
+        source_gen -> Int8,
+        time_source_updated -> Nullable<Timestamptz>,
+        target_state -> crate::MigrationStateEnum,
+        target_propolis_id -> Uuid,
+        target_gen -> Int8,
+        time_target_updated -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(instance, migration);
+allow_tables_to_appear_in_same_query!(migration, vmm);
+joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,

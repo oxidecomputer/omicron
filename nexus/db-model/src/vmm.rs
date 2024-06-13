@@ -21,7 +21,14 @@ use uuid::Uuid;
 
 /// An individual VMM process that incarnates a specific instance.
 #[derive(
-    Clone, Queryable, Debug, Selectable, Serialize, Deserialize, Insertable,
+    Clone,
+    Queryable,
+    Debug,
+    Selectable,
+    Serialize,
+    Deserialize,
+    Insertable,
+    PartialEq,
 )]
 #[diesel(table_name = vmm)]
 pub struct Vmm {
@@ -101,6 +108,7 @@ impl Vmm {
     Queryable,
     Serialize,
     Deserialize,
+    PartialEq,
 )]
 #[diesel(table_name = vmm)]
 pub struct VmmRuntimeState {

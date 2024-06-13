@@ -61,7 +61,7 @@ fn make_dns_resolver(
         bootstrap_dns,
         DnsResolverConfig {
             query_interval: tokio::time::Duration::from_secs(10),
-            hardcoded_ttl: Some(std::time::Duration::from_secs(60)),
+            hardcoded_ttl: Some(tokio::time::Duration::MAX),
             ..Default::default()
         },
     ))

@@ -4,6 +4,7 @@ members = [
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
+    "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
@@ -89,6 +90,7 @@ default-members = [
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
+    "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
@@ -239,6 +241,7 @@ ciborium = "0.2.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 colored = "2.1"
 const_format = "0.2.32"
 cookie = "0.18"

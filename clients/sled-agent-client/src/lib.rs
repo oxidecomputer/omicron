@@ -33,8 +33,9 @@ progenitor::generate_api!(
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
-        PortConfigV1 = { derives = [Eq, Hash] },
+        PortConfigV2 = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
+        UplinkAddressConfig = { derives = [Eq, Hash] },
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
@@ -327,6 +328,47 @@ impl From<types::SledInstanceState>
             instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
+            migration_state: s.migration_state.map(Into::into),
+        }
+    }
+}
+
+impl From<types::MigrationRuntimeState>
+    for omicron_common::api::internal::nexus::MigrationRuntimeState
+{
+    fn from(s: types::MigrationRuntimeState) -> Self {
+        Self {
+            migration_id: s.migration_id,
+            state: s.state.into(),
+            role: s.role.into(),
+            gen: s.gen,
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<types::MigrationRole>
+    for omicron_common::api::internal::nexus::MigrationRole
+{
+    fn from(r: types::MigrationRole) -> Self {
+        use omicron_common::api::internal::nexus::MigrationRole as Output;
+        match r {
+            types::MigrationRole::Source => Output::Source,
+            types::MigrationRole::Target => Output::Target,
+        }
+    }
+}
+
+impl From<types::MigrationState>
+    for omicron_common::api::internal::nexus::MigrationState
+{
+    fn from(s: types::MigrationState) -> Self {
+        use omicron_common::api::internal::nexus::MigrationState as Output;
+        match s {
+            types::MigrationState::Pending => Output::Pending,
+            types::MigrationState::InProgress => Output::InProgress,
+            types::MigrationState::Failed => Output::Failed,
+            types::MigrationState::Completed => Output::Completed,
         }
     }
 }

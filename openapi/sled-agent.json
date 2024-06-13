@@ -2613,7 +2613,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           }
@@ -2707,10 +2707,10 @@
         "type": "object",
         "properties": {
           "addrs": {
-            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool).  May also include an optional VLAN ID.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "port": {
@@ -3406,6 +3406,88 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MigrationRole": {
+        "oneOf": [
+          {
+            "description": "This update concerns the source VMM of a migration.",
+            "type": "string",
+            "enum": [
+              "source"
+            ]
+          },
+          {
+            "description": "This update concerns the target VMM of a migration.",
+            "type": "string",
+            "enum": [
+              "target"
+            ]
+          }
+        ]
+      },
+      "MigrationRuntimeState": {
+        "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MigrationRole"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MigrationState"
+          },
+          "time_updated": {
+            "description": "Timestamp for the migration state update.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "migration_id",
+          "role",
+          "state",
+          "time_updated"
+        ]
+      },
+      "MigrationState": {
+        "description": "The state of an instance's live migration.",
+        "oneOf": [
+          {
+            "description": "The migration has not started for this VMM.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The migration is in progress.",
+            "type": "string",
+            "enum": [
+              "in_progress"
+            ]
+          },
+          {
+            "description": "The migration has failed.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The migration has completed.",
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          }
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
@@ -3974,14 +4056,14 @@
           "zones"
         ]
       },
-      "PortConfigV1": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -4094,7 +4176,7 @@
         "minItems": 2,
         "maxItems": 2
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -4127,7 +4209,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
@@ -4184,6 +4266,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          },
+          "migration_state": {
+            "nullable": true,
+            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
               }
             ]
           },
@@ -4441,6 +4532,24 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ]
       },
       "VirtualNetworkInterfaceHost": {
