@@ -54,9 +54,10 @@ impl BlueprintExecutor {
         let update = self.rx_blueprint.borrow_and_update().clone();
 
         let Some(update) = update else {
-            warn!(&opctx.log,
-                      "Blueprint execution: skipped";
-                      "reason" => "no blueprint");
+            warn!(
+                &opctx.log, "Blueprint execution: skipped";
+                "reason" => "no blueprint",
+            );
             return json!({"error": "no blueprint" });
         };
 

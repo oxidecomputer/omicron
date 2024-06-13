@@ -1063,6 +1063,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
+name = "cockroach-admin-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5246,22 +5260,30 @@ dependencies = [
  "clap",
  "csv",
  "dropshot",
+ "expectorate",
  "http 0.2.12",
  "illumos-utils",
  "nexus-test-utils",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
+ "openapi-lint",
+ "openapiv3",
  "pq-sys",
  "schemars",
  "serde",
+ "serde_json",
  "slog",
  "slog-async",
  "slog-dtrace",
  "slog-error-chain",
+ "subprocess",
  "thiserror",
  "tokio",
+ "tokio-postgres",
  "toml 0.8.13",
  "url",
 ]
@@ -5432,6 +5454,7 @@ dependencies = [
  "cancel-safe-futures",
  "chrono",
  "clap",
+ "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",

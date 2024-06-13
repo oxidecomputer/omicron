@@ -22,6 +22,7 @@ camino.workspace = true
 camino-tempfile.workspace = true
 clap.workspace = true
 chrono.workspace = true
+cockroach-admin-client.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
 dns-service-client.workspace = true
@@ -118,6 +119,7 @@ hyper-rustls.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 hubtools.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true

@@ -4,6 +4,7 @@
 
 use context::ServerContext;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::debug;
 use slog::error;
 use slog::Drain;
@@ -51,6 +52,7 @@ pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
 
 /// Start the dropshot server
 pub async fn start_server(
+    zone_id: OmicronZoneUuid,
     cockroach_cli: CockroachCli,
     server_config: Config,
 ) -> Result<Server, StartError> {
@@ -72,7 +74,11 @@ pub async fn start_server(
         }
     }
 
-    let context = ServerContext { cockroach_cli };
+    let context = ServerContext::new(
+        zone_id,
+        cockroach_cli,
+        log.new(slog::o!("component" => "ServerContext")),
+    );
     let http_server_starter = dropshot::HttpServerStarter::new(
         &server_config.dropshot,
         http_entrypoints::api(),

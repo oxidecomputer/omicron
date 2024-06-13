@@ -3493,6 +3493,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     PRIMARY KEY (blueprint_id, id)
 );
 
+-- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
+-- by the blueprint tables above, but is used by the more general Reconfigurator
+-- system along with them (e.g., to decommission expunged CRDB nodes).
+CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
+    omicron_zone_id UUID NOT NULL UNIQUE,
+    crdb_node_id TEXT NOT NULL UNIQUE,
+
+    -- We require the pair to be unique, and also require each column to be
+    -- unique: there should only be one entry for a given zone ID, one entry for
+    -- a given node ID, and we need a unique requirement on the pair (via this
+    -- primary key) to support `ON CONFLICT DO NOTHING` idempotent inserts.
+    PRIMARY KEY (omicron_zone_id, crdb_node_id)
+);
+
 /*******************************************************************/
 
 /*
@@ -4126,7 +4140,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '74.0.0', NULL)
+    (TRUE, NOW(), NOW(), '75.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
