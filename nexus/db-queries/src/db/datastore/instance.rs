@@ -373,19 +373,32 @@ impl DataStore {
 
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::migration::dsl as migration_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use db::schema::vmm;
 
-        let mut results = instance_dsl::instance
+        // Create a Diesel alias to allow us to LEFT JOIN the `instance` table
+        // with the `vmm` table twice; once on the `active_propolis_id` and once
+        // on the `target_propolis_id`.
+        let (active_vmm, target_vmm) =
+            diesel::alias!(vmm as active_vmm, vmm as target_vmm);
+        let vmm_selection =
+            <Vmm as Selectable<diesel::pg::Pg>>::construct_selection();
+
+        let query = instance_dsl::instance
             .filter(instance_dsl::id.eq(authz_instance.id()))
             .filter(instance_dsl::time_deleted.is_null())
             .left_join(
-                vmm_dsl::vmm.on((vmm_dsl::id
+                active_vmm.on(active_vmm
+                    .field(vmm::id)
                     .nullable()
                     .eq(instance_dsl::active_propolis_id)
-                    .or(vmm_dsl::id
-                        .nullable()
-                        .eq(instance_dsl::target_propolis_id)))
-                .and(vmm_dsl::time_deleted.is_null())),
+                    .and(active_vmm.field(vmm::time_deleted).is_null())),
+            )
+            .left_join(
+                target_vmm.on(target_vmm
+                    .field(vmm::id)
+                    .nullable()
+                    .eq(instance_dsl::target_propolis_id)
+                    .and(target_vmm.field(vmm::time_deleted).is_null())),
             )
             .left_join(
                 migration_dsl::migration.on(migration_dsl::id
@@ -395,77 +408,33 @@ impl DataStore {
             )
             .select((
                 Instance::as_select(),
-                Option::<Vmm>::as_select(),
+                active_vmm.fields(vmm_selection).nullable(),
+                target_vmm.fields(vmm_selection).nullable(),
                 Option::<Migration>::as_select(),
-            ))
-            .load_async::<(Instance, Option<Vmm>, Option<Migration>)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(authz_instance.id()),
-                    ),
+            ));
+
+        let (instance, active_vmm, target_vmm, migration) =
+            query
+                .first_async::<(
+                    Instance,
+                    Option<Vmm>,
+                    Option<Vmm>,
+                    Option<Migration>,
+                )>(
+                    &*self.pool_connection_authorized(opctx).await?
                 )
-            })?
-            .into_iter();
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::Instance,
+                            LookupType::ById(authz_instance.id()),
+                        ),
+                    )
+                })?;
 
-        // Because we join with the `vmm` table on VMMs whose ID is the active
-        // *or* target VMM ID in the instance record, this query may return a
-        // result set with multiple rows. If it does, we have to iterate over
-        // them and determine which VMM result is the active VMM and which is the
-        // target. The instance and migration records should be identical, so we
-        // only need the first ones.
-        //
-        // Yes, this code is a bit unfortunate, but Diesel doesn't like the idea
-        // of joining with the same table twice on different columns...so, this,
-        // at least, works.
-        let (instance, vmm, migration) = results.next().ok_or_else(|| {
-            LookupType::ById(authz_instance.id())
-                .into_not_found(ResourceType::Instance)
-        })?;
-        let mut snapshot = InstanceSnapshot {
-            instance,
-            migration,
-            active_vmm: None,
-            target_vmm: None,
-        };
-
-        impl InstanceSnapshot {
-            fn add_vmm(&mut self, vmm: Vmm) {
-                match vmm.id {
-                    id if self.instance.runtime_state.propolis_id == Some(id) => {
-                        self.active_vmm = Some(vmm)
-                    }
-                    id if self.instance.runtime_state.dst_propolis_id == Some(id) => {
-                        self.target_vmm = Some(vmm)
-                    }
-                    _ => debug_assert!(
-                    false,
-                    "tried to add a VMM to an instance snapshot that was neither \
-                    the active nor target VMM...was this VMM actually returned by \
-                    the instance snapshot query?",
-                ),
-                }
-            }
-        }
-        if let Some(vmm) = vmm {
-            snapshot.add_vmm(vmm);
-        }
-        if let Some((_, Some(vmm), _)) = results.next() {
-            snapshot.add_vmm(vmm);
-        }
-
-        debug_assert!(
-            results.next().is_none(),
-            "instance snapshot query should not return more than two rows, as \
-            as an instance has 0-1 active and 0-1 target VMMs"
-        );
-
-        Ok(snapshot)
+        Ok(InstanceSnapshot { instance, migration, active_vmm, target_vmm })
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
