@@ -824,7 +824,8 @@ impl EarlyNetworkConfig {
         match serde_json::from_slice::<EarlyNetworkConfigV1>(&config.blob) {
             Ok(val) => {
                 // Convert from v1 to v2
-                return Ok(EarlyNetworkConfig {
+                debug!(log, "upgrading from v1: {val:#?}");
+                let v2 = EarlyNetworkConfig {
                     generation: val.generation,
                     schema_version: 2,
                     body: EarlyNetworkConfigBody {
@@ -833,7 +834,9 @@ impl EarlyNetworkConfig {
                             |v1_config| RackNetworkConfigV1::to_v2(v1_config),
                         ),
                     },
-                });
+                };
+                debug!(log, "to v2: {v2:#?}");
+                return Ok(v2);
             }
             Err(error) => {
                 // Log this error.
