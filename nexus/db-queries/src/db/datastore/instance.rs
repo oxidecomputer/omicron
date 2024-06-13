@@ -552,10 +552,9 @@ impl DataStore {
         migration: &Option<MigrationRuntimeState>,
     ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
-            *instance_id,
-            new_instance.clone(),
             *vmm_id,
             new_vmm.clone(),
+            Some((*instance_id, new_instance.clone())),
             migration.clone(),
         );
 
