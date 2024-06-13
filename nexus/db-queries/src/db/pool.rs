@@ -58,7 +58,11 @@ fn make_dns_resolver(
     Box::new(DnsResolver::new(
         service::Name(internal_dns::ServiceName::Cockroach.srv_name()),
         bootstrap_dns,
-        DnsResolverConfig::default(),
+        DnsResolverConfig {
+            query_interval: tokio::time::Duration::from_secs(10),
+            hardcoded_ttl: Some(std::time::Duration::from_secs(60)),
+            ..Default::default()
+        },
     ))
 }
 
