@@ -15,6 +15,7 @@ use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
+pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
 use omicron_common::api::external::ByteCount;
@@ -256,6 +257,13 @@ pub struct RotState {
     pub transient_boot_preference: Option<RotSlot>,
     pub slot_a_sha3_256_digest: Option<String>,
     pub slot_b_sha3_256_digest: Option<String>,
+    pub stage0_digest: Option<String>,
+    pub stage0next_digest: Option<String>,
+
+    pub slot_a_error: Option<RotImageError>,
+    pub slot_b_error: Option<RotImageError>,
+    pub stage0_error: Option<RotImageError>,
+    pub stage0next_error: Option<RotImageError>,
 }
 
 /// Describes which caboose this is (which component, which slot)
@@ -276,6 +284,8 @@ pub enum CabooseWhich {
     SpSlot1,
     RotSlotA,
     RotSlotB,
+    Stage0,
+    Stage0Next,
 }
 
 /// Root of trust page contents found during a collection

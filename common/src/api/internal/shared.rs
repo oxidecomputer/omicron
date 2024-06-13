@@ -6,9 +6,9 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, ImportExportPolicy, IpNet, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, Name},
 };
-use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -53,7 +53,7 @@ pub struct NetworkInterface {
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
+    pub subnet: IpNet,
     pub vni: external::Vni,
     pub primary: bool,
     pub slot: u8,
@@ -152,21 +152,25 @@ pub enum SourceNatConfigError {
     UnalignedPortPair { first_port: u16, last_port: u16 },
 }
 
+// We alias [`PortConfig`] to the current version of the protocol, so
+// that we can convert between versions as necessary.
+pub type PortConfig = PortConfigV2;
+
 // We alias [`RackNetworkConfig`] to the current version of the protocol, so
 // that we can convert between versions as necessary.
-pub type RackNetworkConfig = RackNetworkConfigV1;
+pub type RackNetworkConfig = RackNetworkConfigV2;
 
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfigV1 {
-    pub rack_subnet: Ipv6Network,
+pub struct RackNetworkConfigV2 {
+    pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,
     /// Last ip address to be used for configuring network infrastructure
     pub infra_ip_last: Ipv4Addr,
     /// Uplinks for connecting the rack to external networks
-    pub ports: Vec<PortConfigV1>,
+    pub ports: Vec<PortConfig>,
     /// BGP configurations for connecting the rack to external networks
     pub bgp: Vec<BgpConfig>,
     /// BFD configuration for connecting the rack to external networks
@@ -179,7 +183,7 @@ pub struct BgpConfig {
     /// The autonomous system number for the BGP configuration.
     pub asn: u32,
     /// The set of prefixes for the BGP router to originate.
-    pub originate: Vec<Ipv4Network>,
+    pub originate: Vec<Ipv4Net>,
 
     /// Shaper to apply to outgoing messages.
     #[serde(default)]
@@ -291,7 +295,7 @@ pub struct BfdPeerConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct RouteConfig {
     /// The destination of the route.
-    pub destination: IpNetwork,
+    pub destination: IpNet,
     /// The nexthop/gateway address.
     pub nexthop: IpAddr,
     /// The VLAN id associated with this route.
@@ -299,12 +303,81 @@ pub struct RouteConfig {
     pub vlan_id: Option<u16>,
 }
 
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+)]
+pub struct UplinkAddressConfig {
+    pub address: IpNet,
+    /// The VLAN id (if any) associated with this address.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+impl UplinkAddressConfig {
+    pub fn addr(&self) -> IpAddr {
+        self.address.addr()
+    }
+}
+
+impl std::fmt::Display for UplinkAddressConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.vlan_id {
+            None => write!(f, "{}", self.address),
+            Some(v) => write!(f, "{};{}", self.address, v),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UplinkAddressConfigError(String);
+
+impl std::fmt::Display for UplinkAddressConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse switch location error: {}", self.0)
+    }
+}
+
+/// Convert a string into an UplinkAddressConfig.
+/// 192.168.1.1/24 => UplinkAddressConfig { 192.168.1.1/24, None }
+/// 192.168.1.1/24;200 => UplinkAddressConfig { 192.168.1.1/24, Some(200) }
+impl FromStr for UplinkAddressConfig {
+    type Err = UplinkAddressConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let fields: Vec<&str> = s.split(';').collect();
+        let (address, vlan_id) = match fields.len() {
+            1 => Ok((fields[0], None)),
+            2 => Ok((fields[0], Some(fields[1]))),
+            _ => Err(UplinkAddressConfigError(format!(
+                "not a valid uplink address: {s}"
+            ))),
+        }?;
+        let address = address.parse().map_err(|_| {
+            UplinkAddressConfigError(format!(
+                "not a valid ip address: {address}"
+            ))
+        })?;
+        let vlan_id = match vlan_id {
+            None => Ok(None),
+            Some(v) => match v.parse() {
+                Err(_) => Err(format!("invalid vlan id: {v}")),
+                Ok(vlan_id) if vlan_id > 1 && vlan_id < 4096 => {
+                    Ok(Some(vlan_id))
+                }
+                Ok(vlan_id) => Err(format!("vlan id out of range: {vlan_id}")),
+            },
+        }
+        .map_err(|e| UplinkAddressConfigError(e))?;
+        Ok(UplinkAddressConfig { address, vlan_id })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct PortConfigV1 {
+pub struct PortConfigV2 {
     /// The set of routes associated with this port.
     pub routes: Vec<RouteConfig>,
-    /// This port's addresses.
-    pub addresses: Vec<IpNetwork>,
+    /// This port's addresses and optional vlan IDs
+    pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
     pub switch: SwitchLocation,
     /// Nmae of the port this config applies to.
@@ -320,46 +393,6 @@ pub struct PortConfigV1 {
     pub autoneg: bool,
 }
 
-impl From<UplinkConfig> for PortConfigV1 {
-    fn from(value: UplinkConfig) -> Self {
-        PortConfigV1 {
-            routes: vec![RouteConfig {
-                destination: "0.0.0.0/0".parse().unwrap(),
-                nexthop: value.gateway_ip.into(),
-                vlan_id: None,
-            }],
-            addresses: vec![value.uplink_cidr.into()],
-            switch: value.switch,
-            port: value.uplink_port,
-            uplink_port_speed: value.uplink_port_speed,
-            uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: vec![],
-            autoneg: false,
-        }
-    }
-}
-
-/// Deprecated, use PortConfigV1 instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct UplinkConfig {
-    /// Gateway address
-    pub gateway_ip: Ipv4Addr,
-    /// Switch to use for uplink
-    pub switch: SwitchLocation,
-    /// Switchport to use for external connectivity
-    pub uplink_port: String,
-    /// Speed for the Switchport
-    pub uplink_port_speed: PortSpeed,
-    /// Forward Error Correction setting for the uplink port
-    pub uplink_port_fec: PortFec,
-    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub uplink_cidr: Ipv4Network,
-    /// VLAN id to use for uplink
-    pub uplink_vid: Option<u16>,
-}
-
 /// A set of switch uplinks.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchPorts {
@@ -372,12 +405,12 @@ pub struct HostPortConfig {
     pub port: String,
 
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool)
-    pub addrs: Vec<IpNetwork>,
+    /// (must be in infra_ip pool).  May also include an optional VLAN ID.
+    pub addrs: Vec<UplinkAddressConfig>,
 }
 
-impl From<PortConfigV1> for HostPortConfig {
-    fn from(x: PortConfigV1) -> Self {
+impl From<PortConfigV2> for HostPortConfig {
+    fn from(x: PortConfigV2) -> Self {
         Self { port: x.port, addrs: x.addresses }
     }
 }
@@ -527,9 +560,9 @@ impl TryFrom<Vec<IpNet>> for AllowedSourceIps {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for AllowedSourceIps {
+impl TryFrom<&[ipnetwork::IpNetwork]> for AllowedSourceIps {
     type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
         IpAllowList::try_from(list).map(Self::List)
     }
 }
@@ -580,45 +613,43 @@ impl TryFrom<Vec<IpNet>> for IpAllowList {
     }
 }
 
-impl TryFrom<&[IpNetwork]> for IpAllowList {
+impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     type Error = &'static str;
-    fn try_from(list: &[IpNetwork]) -> Result<Self, Self::Error> {
+
+    fn try_from(list: &[ipnetwork::IpNetwork]) -> Result<Self, Self::Error> {
         if list.is_empty() {
             return Err("IP allowlist must not be empty");
         }
-        Ok(Self(list.iter().copied().map(Into::into).collect()))
+        Ok(Self(list.into_iter().map(|net| (*net).into()).collect()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::api::{
-        external::{IpNet, Ipv4Net, Ipv6Net},
-        internal::shared::AllowedSourceIps,
-    };
-    use ipnetwork::{Ipv4Network, Ipv6Network};
+    use crate::api::internal::shared::AllowedSourceIps;
+    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn test_deserialize_allowed_source_ips() {
         let parsed: AllowedSourceIps = serde_json::from_str(
-            r#"{"allow":"list","ips":["127.0.0.1","10.0.0.0/24","fd00::1/64"]}"#,
+            r#"{"allow":"list","ips":["127.0.0.1/32","10.0.0.0/24","fd00::1/64"]}"#,
         )
         .unwrap();
         assert_eq!(
             parsed,
             AllowedSourceIps::try_from(vec![
-                IpNet::V4(Ipv4Net::single(Ipv4Addr::LOCALHOST)),
-                IpNet::V4(Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
-                )),
-                IpNet::V6(Ipv6Net(
-                    Ipv6Network::new(
+                Ipv4Net::host_net(Ipv4Addr::LOCALHOST).into(),
+                IpNet::V4(
+                    Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap()
+                ),
+                IpNet::V6(
+                    Ipv6Net::new(
                         Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
                         64
                     )
                     .unwrap()
-                )),
+                ),
             ])
             .unwrap()
         );

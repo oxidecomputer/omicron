@@ -56,7 +56,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
@@ -66,6 +65,7 @@ use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
@@ -660,14 +660,6 @@ async fn test_instance_start_creates_networking_state(
         .await
         .unwrap();
 
-    let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .unwrap();
-
-    let sled_id =
-        instance_state.sled_id().expect("running instance should have a sled");
-
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
@@ -675,18 +667,42 @@ async fn test_instance_start_creates_networking_state(
 
     assert_eq!(guest_nics.len(), 1);
     for agent in &sled_agents {
-        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
-        // itself.
-        if agent.id != sled_id {
-            assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
-        } else {
-            assert!(agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
     }
 }
 
 #[nexus_test]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
+    use nexus_db_model::Migration;
+    use omicron_common::api::internal::nexus::MigrationState;
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_queries::db::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
@@ -743,7 +759,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     let migrate_url =
         format!("/v1/instances/{}/migrate", &instance_id.to_string());
-    let _ = NexusRequest::new(
+    let instance = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &migrate_url)
             .body(Some(&params::InstanceMigrate { dst_sled_id }))
             .expect_status(Some(StatusCode::OK)),
@@ -763,12 +779,40 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(current_sled, original_sled);
 
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::Pending.into());
+
     // Explicitly simulate the migration action on the target. Simulated
     // migrations always succeed. The state transition on the target is
     // sufficient to move the instance back into a Running state (strictly
     // speaking no further updates from the source are required if the target
     // successfully takes over).
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    // Ensure that both sled agents report that the migration has completed.
+    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
@@ -779,6 +823,11 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .expect("migrated instance should still have a sled");
 
     assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Completed.into());
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert!(migration.time_deleted.is_some());
 }
 
 #[nexus_test]
@@ -861,24 +910,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
     for sled_agent in &sled_agents {
-        // Starting the instance should have programmed V2P mappings to all the
-        // sleds except the one where the instance is running.
-        //
-        // TODO(#3107): In practice, the instance's sled also has V2P mappings, but
-        // these are established during VMM setup (i.e. as part of creating the
-        // instance's OPTE ports) instead of being established by explicit calls
-        // from Nexus. Simulated sled agent handles the latter calls but does
-        // not currently update any mappings during simulated instance creation,
-        // so the check below verifies that no mappings exist on the instance's
-        // own sled instead of checking for a real mapping. Once Nexus programs
-        // all mappings explicitly (without skipping the instance's current
-        // sled) this bifurcation should be removed.
-        if sled_agent.id != original_sled_id {
-            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
-                .await;
-        } else {
-            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
     let dst_sled_id = if original_sled_id == cptestctx.sled_agent.sled_agent.id
@@ -1714,7 +1746,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             name: non_default_subnet_name.clone(),
             description: String::from("A non-default subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
     };
     let _response = NexusRequest::objects_post(
@@ -1860,7 +1892,7 @@ async fn test_instance_create_delete_network_interface(
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
     };
     let _response = NexusRequest::objects_post(
@@ -2101,7 +2133,7 @@ async fn test_instance_update_network_interfaces(
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
     };
     let _response = NexusRequest::objects_post(
@@ -4545,14 +4577,6 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .unwrap();
-
-    let sled_id =
-        instance_state.sled_id().expect("running instance should have a sled");
-
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
@@ -4565,14 +4589,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     sled_agents.push(&cptestctx.sled_agent.sled_agent);
 
     for sled_agent in &sled_agents {
-        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
-        // itself.
-        if sled_agent.id != sled_id {
-            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
-                .await;
-        } else {
-            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
     // Delete the instance
@@ -4589,8 +4606,21 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
-        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-        assert!(v2p_mappings.is_empty());
+        let condition = || async {
+            let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+            if v2p_mappings.is_empty() {
+                Ok(())
+            } else {
+                Err(CondCheckError::NotYet::<()>)
+            }
+        };
+        wait_for_condition(
+            condition,
+            &Duration::from_secs(1),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("v2p mappings should be empty");
     }
 }
 
@@ -4687,14 +4717,28 @@ async fn assert_sled_v2p_mappings(
     nic: &InstanceNetworkInterface,
     vni: Vni,
 ) {
-    let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-    assert!(!v2p_mappings.is_empty());
+    let condition = || async {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        let mapping = v2p_mappings.iter().find(|mapping| {
+            mapping.virtual_ip == nic.ip
+                && mapping.virtual_mac == nic.mac
+                && mapping.physical_host_ip == sled_agent.ip
+                && mapping.vni == vni
+        });
 
-    let mapping = v2p_mappings.get(&nic.identity.id).unwrap().last().unwrap();
-    assert_eq!(mapping.virtual_ip, nic.ip);
-    assert_eq!(mapping.virtual_mac, nic.mac);
-    assert_eq!(mapping.physical_host_ip, sled_agent.ip);
-    assert_eq!(mapping.vni, vni);
+        if mapping.is_some() {
+            Ok(())
+        } else {
+            Err(CondCheckError::NotYet::<()>)
+        }
+    };
+    wait_for_condition(
+        condition,
+        &Duration::from_secs(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect("matching v2p mapping should be present");
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we

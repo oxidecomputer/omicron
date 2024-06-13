@@ -41,26 +41,26 @@ use uuid::Uuid;
 
 // States an instance must be in to operate on its network interfaces, in
 // most situations.
-static INSTANCE_STOPPED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Stopped));
+const INSTANCE_STOPPED: db::model::InstanceState =
+    db::model::InstanceState::NoVmm;
 
-static INSTANCE_FAILED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Failed));
+const INSTANCE_FAILED: db::model::InstanceState =
+    db::model::InstanceState::Failed;
 
 // An instance can be in the creating state while we manipulate its
 // interfaces. The intention is for this only to be the case during sagas.
-static INSTANCE_CREATING: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Creating));
+const INSTANCE_CREATING: db::model::InstanceState =
+    db::model::InstanceState::Creating;
 
 // A sentinel value for the instance state when the instance actually does
 // not exist.
-static INSTANCE_DESTROYED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Destroyed));
+const INSTANCE_DESTROYED: db::model::InstanceState =
+    db::model::InstanceState::Destroyed;
 
 // A sentinel value for the instance state when the instance has an active
 // VMM, irrespective of that VMM's actual state.
-static INSTANCE_RUNNING: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Running));
+const INSTANCE_RUNNING: db::model::InstanceState =
+    db::model::InstanceState::Vmm;
 
 static NO_INSTANCE_SENTINEL_STRING: Lazy<String> =
     Lazy::new(|| String::from(NO_INSTANCE_SENTINEL));
@@ -1061,7 +1061,7 @@ impl InsertQuery {
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
-            interface.subnet.ipv4_block.0 .0,
+            interface.subnet.ipv4_block.0.into(),
             interface.subnet.identity.id,
         );
         let next_slot_subquery = NextNicSlot::new(interface.parent_id);
@@ -1853,14 +1853,13 @@ mod tests {
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
+    use crate::db::model::InstanceState;
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
     use crate::db::queries::network_interface::NextMacShifts;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use model::NetworkInterfaceKind;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
@@ -1871,11 +1870,11 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceCpuCount;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
@@ -1931,21 +1930,22 @@ mod tests {
         db_datastore: &DataStore,
     ) -> Instance {
         let instance = create_instance(opctx, project_id, db_datastore).await;
-        instance_set_state(
-            db_datastore,
-            instance,
-            external::InstanceState::Stopped,
-        )
-        .await
+        instance_set_state(db_datastore, instance, InstanceState::NoVmm).await
     }
 
     async fn instance_set_state(
         db_datastore: &DataStore,
         mut instance: Instance,
-        state: external::InstanceState,
+        state: InstanceState,
     ) -> Instance {
+        let propolis_id = match state {
+            InstanceState::Vmm => Some(Uuid::new_v4()),
+            _ => None,
+        };
+
         let new_runtime = model::InstanceRuntimeState {
-            nexus_state: model::InstanceState::new(state),
+            nexus_state: state,
+            propolis_id,
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
@@ -1953,33 +1953,6 @@ mod tests {
             .instance_update_runtime(&instance.id(), &new_runtime)
             .await;
         assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
-        instance
-    }
-
-    /// Sets or clears the active Propolis ID in the supplied instance record.
-    /// This can be used to exercise the "does this instance have an active
-    /// VMM?" test that determines in part whether an instance's network
-    /// interfaces can change.
-    ///
-    /// Note that this routine does not construct a VMM record for the
-    /// corresponding ID, so any functions that expect such a record to exist
-    /// will fail in strange and exciting ways.
-    async fn instance_set_active_vmm(
-        db_datastore: &DataStore,
-        mut instance: Instance,
-        propolis_id: Option<Uuid>,
-    ) -> Instance {
-        let new_runtime = model::InstanceRuntimeState {
-            propolis_id,
-            gen: instance.runtime_state.gen.next().into(),
-            ..instance.runtime_state.clone()
-        };
-
-        let res = db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime)
-            .await;
-        assert!(matches!(res, Ok(true)), "Failed to change instance VMM ref");
         instance.runtime_state = new_runtime;
         instance
     }
@@ -1995,25 +1968,13 @@ mod tests {
             let vpc_id = Uuid::new_v4();
             let mut subnets = Vec::with_capacity(n_subnets as _);
             for i in 0..n_subnets {
-                let ipv4net = Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap(),
-                );
-                let ipv6net = Ipv6Net(
-                    Ipv6Network::new(
-                        Ipv6Addr::new(
-                            0xfd12,
-                            0x3456,
-                            0x7890,
-                            i.into(),
-                            0,
-                            0,
-                            0,
-                            0,
-                        ),
-                        64,
-                    )
-                    .unwrap(),
-                );
+                let ipv4net =
+                    Ipv4Net::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap();
+                let ipv6net = Ipv6Net::new(
+                    Ipv6Addr::new(0xfd12, 0x3456, 0x7890, i.into(), 0, 0, 0, 0),
+                    64,
+                )
+                .unwrap();
                 let subnet = VpcSubnet::new(
                     Uuid::new_v4(),
                     vpc_id,
@@ -2033,9 +1994,11 @@ mod tests {
             self.subnets
                 .iter()
                 .map(|subnet| {
-                    subnet.ipv4_block.size() as usize
-                        - NUM_INITIAL_RESERVED_IP_ADDRESSES
-                        - 1
+                    let size_minus_1 = match subnet.ipv4_block.size() {
+                        Some(n) => n - 1,
+                        None => u32::MAX,
+                    } as usize;
+                    size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES
                 })
                 .collect()
         }
@@ -2114,13 +2077,13 @@ mod tests {
                     &self.db_datastore,
                 )
                 .await,
-                external::InstanceState::Stopped,
+                InstanceState::NoVmm,
             )
             .await
         }
 
         async fn create_running_instance(&self) -> Instance {
-            let instance = instance_set_state(
+            instance_set_state(
                 &self.db_datastore,
                 create_instance(
                     &self.opctx,
@@ -2128,14 +2091,7 @@ mod tests {
                     &self.db_datastore,
                 )
                 .await,
-                external::InstanceState::Starting,
-            )
-            .await;
-
-            instance_set_active_vmm(
-                &self.db_datastore,
-                instance,
-                Some(Uuid::new_v4()),
+                InstanceState::Vmm,
             )
             .await
         }
@@ -2148,7 +2104,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let interface = IncompleteNetworkInterface::new_service(
@@ -2316,7 +2272,7 @@ mod tests {
             TestContext::new("test_insert_sequential_ip_allocation", 2).await;
         let addresses = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
@@ -2412,7 +2368,7 @@ mod tests {
         let service_id = Uuid::new_v4();
         let ip = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let mac = MacAddr::random_system();
@@ -2447,7 +2403,7 @@ mod tests {
         let mut used_macs = HashSet::new();
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
         for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
             let service_id = Uuid::new_v4();
@@ -2487,7 +2443,7 @@ mod tests {
 
         let mut ips = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         // Insert a service NIC
@@ -2547,12 +2503,12 @@ mod tests {
 
         let ip0 = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
         let ip1 = context.net1.subnets[1]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .unwrap();
 

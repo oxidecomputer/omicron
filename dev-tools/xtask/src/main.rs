@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 mod check_workspace_deps;
 mod clippy;
+mod download;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 
@@ -33,15 +34,21 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Cmds {
+    /// Run Argon2 hash with specific parameters (quick performance check)
+    Argon2(external::External),
+
     /// Check that dependencies are not duplicated in any packages in the
     /// workspace
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
+    /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
+    Download(download::DownloadArgs),
 
     #[cfg(target_os = "illumos")]
     /// Build a TUF repo
     Releng(external::External),
+
     /// Verify we are not leaking library bindings outside of intended
     /// crates
     #[cfg(target_os = "illumos")]
@@ -61,15 +68,19 @@ enum Cmds {
     VirtualHardware,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
+        Cmds::Argon2(external) => {
+            external.cargo_args(["--release"]).exec_example("argon2")
+        }
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
-
+        Cmds::Download(args) => download::run_cmd(args).await,
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
-            external.cargo_args(["--release"]).exec("omicron-releng")
+            external.cargo_args(["--release"]).exec_bin("omicron-releng")
         }
         #[cfg(target_os = "illumos")]
         Cmds::VerifyLibraries(args) => verify_libraries::run_cmd(args),

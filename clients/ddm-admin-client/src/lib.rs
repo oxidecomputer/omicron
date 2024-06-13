@@ -82,7 +82,7 @@ impl Client {
         let me = self.clone();
         tokio::spawn(async move {
             let prefix =
-                Ipv6Prefix { addr: address.net().network(), len: SLED_PREFIX };
+                Ipv6Prefix { addr: address.net().prefix(), len: SLED_PREFIX };
             retry_notify(retry_policy_internal_service_aggressive(), || async {
                 info!(
                     me.log, "Sending prefix to ddmd for advertisement";

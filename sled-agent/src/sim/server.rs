@@ -36,6 +36,7 @@ use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -401,7 +402,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "nexus".parse().unwrap(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -444,7 +445,7 @@ pub async fn run_standalone_server(
                     kind: NetworkInterfaceKind::Service { id },
                     name: "external-dns".parse().unwrap(),
                     ip: DNS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
@@ -526,8 +527,8 @@ pub async fn run_standalone_server(
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),
         ),
-        rack_network_config: NexusTypes::RackNetworkConfigV1 {
-            rack_subnet: Ipv6Addr::LOCALHOST.into(),
+        rack_network_config: NexusTypes::RackNetworkConfigV2 {
+            rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,
             ports: Vec::new(),

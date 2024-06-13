@@ -39,7 +39,7 @@
       }
     ],
     "datum_type": "cumulative_u64",
-    "created": "2024-05-17T01:26:16.797600385Z"
+    "created": "2024-06-04T20:49:05.675711686Z"
   },
   "oximeter_collector:failed_collections": {
     "timeseries_name": "oximeter_collector:failed_collections",
@@ -86,6 +86,6 @@
       }
     ],
     "datum_type": "cumulative_u64",
-    "created": "2024-05-17T01:26:16.798713487Z"
+    "created": "2024-06-04T20:49:05.676050088Z"
   }
 }

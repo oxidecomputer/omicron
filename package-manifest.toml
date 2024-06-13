@@ -121,7 +121,7 @@ source.paths = [
 ]
 output.type = "zone"
 setup_hint = """
-- Run `./tools/ci_download_console` to download the web console assets
+- Run `cargo xtask download console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 output.intermediate_only = true
@@ -170,7 +170,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
 service_name = "clickhouse_keeper"
@@ -196,7 +196,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.cockroachdb]
 service_name = "cockroachdb"
@@ -204,6 +204,7 @@ only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "cockroachdb-service.tar.gz",
+  "omicron-cockroach-admin.tar.gz",
   "internal-dns-cli.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
@@ -222,7 +223,21 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download cockroach` to download the necessary binaries"
+
+[package.omicron-cockroach-admin]
+service_name = "cockroach-admin"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["cockroach-admin"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/cockroach-admin/manifest.xml", to = "/var/svc/manifest/site/cockroach-admin/manifest.xml" },
+  { from = "smf/cockroach-admin/config.toml", to = "/opt/oxide/lib/svc/cockroach-admin/config.toml" },
+  { from = "smf/cockroach-admin/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroach-admin.sh" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 [package.internal-dns-cli]
 service_name = "internal-dns-cli"
@@ -533,10 +548,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "f2ee54b6a654daa1c1f817440317e9b11c5ddc71249df261bb5cfa0e6057dc24"
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
+source.sha256 = "33e3b09408551be860debac08de50a840909d4e6c6bed9aecaef63fe8bef2d69"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -549,10 +564,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "bb98815f759f38abee9f5aea0978cd33e66e75079cc8c171036be21bf9049c96"
+source.sha256 = "81674afa17873f84bb49a800c8511938d1c2e871026cbb17e5eed2b645b1eb55"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -564,10 +579,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "025389ff39d594bf2b815377e2c1dc4dd23b1f96"
+source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "e0907de39ca9f8ab45d40d361a1dbeed4bd8e9b157f8d3d8fe0a4bc259d933bd"
+source.sha256 = "5e8bdd6774ef6041189621306577d0e0d174d596d216e53740ce6f035316c5af"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -613,8 +628,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6334bf74fa21790c15f1c4e494ea2ec0edd1c83c"
-source.sha256 = "5929f9abf0daf4bbf17d835e5d69fc842b9617b312fb5644fa99daf785203700"
+source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
+source.sha256 = "1db849892c60b22f600fb081d4b0145d8ecd98acce9fad3094499a5d2159d001"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -638,8 +653,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6334bf74fa21790c15f1c4e494ea2ec0edd1c83c"
-source.sha256 = "0294a1911212c4764d1034b5e0ca00cc9dfc51df482a9f6e5547b191b4481ad8"
+source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
+source.sha256 = "00b2b9372145bc8974f3c75ba7a59d8f2a8178c67cc1869086d29c7f3a2deb36"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -656,8 +671,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6334bf74fa21790c15f1c4e494ea2ec0edd1c83c"
-source.sha256 = "1a188da01dccf565058145b43573a549a2eb4d71fe8800170152b823af27a010"
+source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
+source.sha256 = "b0b62b22c0e781edb0790b8730b99bb6e635c95ad3e83c2afbb2b15956153d66"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -671,7 +686,7 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
-setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
+setup_hint = "Run `cargo xtask download transceiver-control` to download the necessary binaries"
 
 [package.thundermuffin]
 service_name = "thundermuffin"

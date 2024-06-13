@@ -379,6 +379,10 @@ pub struct BackgroundTaskConfig {
     pub instance_watcher: InstanceWatcherConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
+    /// configuration for v2p mapping propagation task
+    pub v2p_mapping_propagation: V2PMappingPropagationConfig,
+    /// configuration for abandoned VMM reaper task
+    pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
 }
 
 #[serde_as]
@@ -513,6 +517,11 @@ pub struct BlueprintTasksConfig {
     /// executes the latest target blueprint
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_execute: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// collects the node IDs of CockroachDB zones
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_collect_crdb_node_ids: Duration,
 }
 
 #[serde_as]
@@ -534,6 +543,22 @@ pub struct InstanceWatcherConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ServiceFirewallPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct V2PMappingPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AbandonedVmmReaperConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -772,11 +797,14 @@ mod test {
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
+            blueprints.period_secs_collect_crdb_node_ids = 180
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
+            v2p_mapping_propagation.period_secs = 30
+            abandoned_vmm_reaper.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -893,7 +921,9 @@ mod test {
                         },
                         blueprints: BlueprintTasksConfig {
                             period_secs_load: Duration::from_secs(10),
-                            period_secs_execute: Duration::from_secs(60)
+                            period_secs_execute: Duration::from_secs(60),
+                            period_secs_collect_crdb_node_ids:
+                                Duration::from_secs(180),
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
@@ -911,7 +941,13 @@ mod test {
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
-                            }
+                            },
+                        v2p_mapping_propagation: V2PMappingPropagationConfig {
+                            period_secs: Duration::from_secs(30)
+                        },
+                        abandoned_vmm_reaper: AbandonedVmmReaperConfig {
+                            period_secs: Duration::from_secs(60),
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -975,11 +1011,14 @@ mod test {
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
+            blueprints.period_secs_collect_crdb_node_ids = 180
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
+            v2p_mapping_propagation.period_secs = 30
+            abandoned_vmm_reaper.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,

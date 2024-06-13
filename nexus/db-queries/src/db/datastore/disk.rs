@@ -183,8 +183,8 @@ impl DataStore {
         //
         // We currently only permit attaching disks to stopped instances.
         let ok_to_attach_instance_states = vec![
-            db::model::InstanceState(api::external::InstanceState::Creating),
-            db::model::InstanceState(api::external::InstanceState::Stopped),
+            db::model::InstanceState::Creating,
+            db::model::InstanceState::NoVmm,
         ];
 
         let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
@@ -321,9 +321,9 @@ impl DataStore {
         //
         // We currently only permit detaching disks from stopped instances.
         let ok_to_detach_instance_states = vec![
-            db::model::InstanceState(api::external::InstanceState::Creating),
-            db::model::InstanceState(api::external::InstanceState::Stopped),
-            db::model::InstanceState(api::external::InstanceState::Failed),
+            db::model::InstanceState::Creating,
+            db::model::InstanceState::NoVmm,
+            db::model::InstanceState::Failed,
         ];
 
         let detached_label = api::external::DiskState::Detached.label();
@@ -810,6 +810,22 @@ impl DataStore {
             })
             .map(|(disk, _, _)| disk)
             .collect())
+    }
+
+    pub async fn disk_for_volume_id(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Disk>> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        use db::schema::disk::dsl;
+        dsl::disk
+            .filter(dsl::volume_id.eq(volume_id))
+            .select(Disk::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

@@ -4,10 +4,12 @@
 
 //! Background tasks
 
+mod abandoned_vmm_reaper;
 mod bfd;
 mod blueprint_execution;
 mod blueprint_load;
 mod common;
+mod crdb_node_id_collector;
 mod dns_config;
 mod dns_propagation;
 mod dns_servers;
@@ -25,5 +27,6 @@ mod service_firewall_rules;
 mod status;
 mod sync_service_zone_nat;
 mod sync_switch_configuration;
+mod v2p_mappings;
 
 pub use init::BackgroundTasks;

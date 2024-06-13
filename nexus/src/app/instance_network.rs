@@ -6,7 +6,6 @@
 
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
-use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatEntry;
@@ -15,23 +14,19 @@ use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::SledFilter;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::retry_until_known_result;
-use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
-use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use std::collections::HashSet;
 use std::str::FromStr;
 use uuid::Uuid;
+
+use super::background::BackgroundTasks;
 
 impl super::Nexus {
     /// Returns the set of switches with uplinks configured and boundary
@@ -41,41 +36,6 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<HashSet<SwitchLocation>, Error> {
         boundary_switches(&self.db_datastore, opctx).await
-    }
-
-    /// Ensures that V2P mappings exist that indicate that the instance with ID
-    /// `instance_id` is resident on the sled with ID `sled_id`.
-    pub(crate) async fn create_instance_v2p_mappings(
-        &self,
-        opctx: &OpContext,
-        instance_id: Uuid,
-        sled_id: Uuid,
-    ) -> Result<(), Error> {
-        create_instance_v2p_mappings(
-            &self.db_datastore,
-            &self.log,
-            opctx,
-            &self.opctx_alloc,
-            instance_id,
-            sled_id,
-        )
-        .await
-    }
-
-    /// Ensure that the necessary v2p mappings for an instance are deleted
-    pub(crate) async fn delete_instance_v2p_mappings(
-        &self,
-        opctx: &OpContext,
-        instance_id: Uuid,
-    ) -> Result<(), Error> {
-        delete_instance_v2p_mappings(
-            &self.db_datastore,
-            &self.log,
-            opctx,
-            &self.opctx_alloc,
-            instance_id,
-        )
-        .await
     }
 
     /// Ensures that the Dendrite configuration for the supplied instance is
@@ -239,6 +199,7 @@ impl super::Nexus {
             opctx,
             &self.opctx_alloc,
             probe_id,
+            &self.background_tasks,
         )
         .await
     }
@@ -303,6 +264,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
     authz_instance: &authz::Instance,
     prev_instance_state: &db::model::InstanceRuntimeState,
     new_instance_state: &nexus::InstanceRuntimeState,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 ) -> Result<(), Error> {
     let instance_id = authz_instance.id();
 
@@ -333,6 +295,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
             opctx,
             opctx_alloc,
             authz_instance,
+            v2p_notification_tx,
         )
         .await?;
         return Ok(());
@@ -412,15 +375,13 @@ pub(crate) async fn ensure_updated_instance_network_config(
         Err(e) => return Err(e),
     };
 
-    create_instance_v2p_mappings(
-        datastore,
-        log,
-        opctx,
-        opctx_alloc,
-        instance_id,
-        new_sled_id,
-    )
-    .await?;
+    if let Err(e) = v2p_notification_tx.send(()) {
+        error!(
+            log,
+            "error notifying background task of v2p change";
+            "error" => ?e
+        )
+    };
 
     let (.., sled) =
         LookupPath::new(opctx, datastore).sled_id(new_sled_id).fetch().await?;
@@ -549,8 +510,7 @@ pub(crate) async fn instance_ensure_dpd_config(
         ));
     }
 
-    let sled_address =
-        Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
+    let sled_address = Ipv6Net::host_net(*sled_ip_address.ip());
 
     // If all of our IPs are attached or are guaranteed to be owned
     // by the saga calling this fn, then we need to disregard and
@@ -691,7 +651,7 @@ pub(crate) async fn probe_ensure_dpd_config(
         }
     }
 
-    let sled_address = Ipv6Net(Ipv6Network::new(sled_ip_address, 128).unwrap());
+    let sled_address = Ipv6Net::host_net(sled_ip_address);
 
     for target_ip in ips
         .iter()
@@ -735,20 +695,19 @@ pub(crate) async fn probe_ensure_dpd_config(
 async fn clear_instance_networking_state(
     datastore: &DataStore,
     log: &slog::Logger,
-
     resolver: &internal_dns::resolver::Resolver,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     authz_instance: &authz::Instance,
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 ) -> Result<(), Error> {
-    delete_instance_v2p_mappings(
-        datastore,
-        log,
-        opctx,
-        opctx_alloc,
-        authz_instance.id(),
-    )
-    .await?;
+    if let Err(e) = v2p_notification_tx.send(()) {
+        error!(
+            log,
+            "error notifying background task of v2p change";
+            "error" => ?e
+        )
+    };
 
     instance_delete_dpd_config(
         datastore,
@@ -769,253 +728,6 @@ async fn clear_instance_networking_state(
         true,
     )
     .await
-}
-
-/// Ensures that V2P mappings exist that indicate that the instance with ID
-/// `instance_id` is resident on the sled with ID `sled_id`.
-pub(crate) async fn create_instance_v2p_mappings(
-    datastore: &DataStore,
-    log: &slog::Logger,
-    opctx: &OpContext,
-    opctx_alloc: &OpContext,
-    instance_id: Uuid,
-    sled_id: Uuid,
-) -> Result<(), Error> {
-    info!(log, "creating V2P mappings for instance";
-            "instance_id" => %instance_id,
-            "sled_id" => %sled_id);
-
-    // For every sled that isn't the sled this instance was allocated to, create
-    // a virtual to physical mapping for each of this instance's NICs.
-    //
-    // For the mappings to be correct, a few invariants must hold:
-    //
-    // - mappings must be set whenever an instance's sled changes (eg.
-    //   during instance creation, migration, stop + start)
-    //
-    // - an instances' sled must not change while its corresponding mappings
-    //   are being created
-    //
-    // - the same mapping creation must be broadcast to all sleds
-    //
-    // A more targeted approach would be to see what other instances share
-    // the VPC this instance is in (or more generally, what instances should
-    // have connectivity to this one), see what sleds those are allocated
-    // to, and only create V2P mappings for those sleds.
-    //
-    // There's additional work with this approach:
-    //
-    // - it means that delete calls are required as well as set calls,
-    //   meaning that now the ordering of those matters (this may also
-    //   necessitate a generation number for V2P mappings)
-    //
-    // - V2P mappings have to be bidirectional in order for both instances's
-    //   packets to make a round trip. This isn't a problem with the
-    //   broadcast approach because one of the sides will exist already, but
-    //   it is something to orchestrate with a more targeted approach.
-    //
-    // TODO-correctness Default firewall rules currently will block
-    // instances in different VPCs from connecting to each other. If it ever
-    // stops doing this, the broadcast approach will create V2P mappings
-    // that shouldn't exist.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
-        .lookup_for(authz::Action::Read)
-        .await?;
-
-    let instance_nics = datastore
-        .derive_guest_network_interface_info(&opctx, &authz_instance)
-        .await?;
-
-    // Look up the supplied sled's physical host IP.
-    let physical_host_ip =
-        nexus_networking::sled_lookup(&datastore, &opctx_alloc, sled_id)?
-            .fetch()
-            .await?
-            .1
-            .ip
-            .into();
-
-    let mut last_sled_id: Option<Uuid> = None;
-    loop {
-        let pagparams = DataPageParams {
-            marker: last_sled_id.as_ref(),
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(10).unwrap(),
-        };
-
-        let sleds_page = datastore
-            // XXX: InService might not be exactly correct
-            .sled_list(&opctx_alloc, &pagparams, SledFilter::InService)
-            .await?;
-        let mut join_handles =
-            Vec::with_capacity(sleds_page.len() * instance_nics.len());
-
-        for sled in &sleds_page {
-            // set_v2p not required for sled instance was allocated to, OPTE
-            // currently does that automatically
-            //
-            // TODO(#3107): Remove this when XDE stops creating mappings
-            // implicitly.
-            if sled.id() == sled_id {
-                continue;
-            }
-
-            for nic in &instance_nics {
-                let client = nexus_networking::sled_client(
-                    datastore,
-                    opctx_alloc,
-                    sled.id(),
-                    log,
-                )
-                .await?;
-                let nic_id = nic.id;
-                let mapping = SetVirtualNetworkInterfaceHost {
-                    virtual_ip: nic.ip,
-                    virtual_mac: nic.mac,
-                    physical_host_ip,
-                    vni: nic.vni,
-                };
-
-                let log = log.clone();
-
-                // This function is idempotent: calling the set_v2p ioctl with
-                // the same information is a no-op.
-                join_handles.push(tokio::spawn(futures::future::lazy(
-                    move |_ctx| async move {
-                        retry_until_known_result(&log, || async {
-                            client.set_v2p(&nic_id, &mapping).await
-                        })
-                        .await
-                    },
-                )));
-            }
-        }
-
-        // Concurrently run each future to completion, but return the last
-        // error seen.
-        let mut error = None;
-        for join_handle in join_handles {
-            let result = join_handle
-                .await
-                .map_err(|e| Error::internal_error(&e.to_string()))?
-                .await;
-
-            if result.is_err() {
-                error!(log, "{:?}", result);
-                error = Some(result);
-            }
-        }
-        if let Some(e) = error {
-            return e.map(|_| ()).map_err(|e| e.into());
-        }
-
-        if sleds_page.len() < 10 {
-            break;
-        }
-
-        if let Some(last) = sleds_page.last() {
-            last_sled_id = Some(last.id());
-        }
-    }
-
-    Ok(())
-}
-
-/// Ensure that the necessary v2p mappings for an instance are deleted
-pub(crate) async fn delete_instance_v2p_mappings(
-    datastore: &DataStore,
-    log: &slog::Logger,
-    opctx: &OpContext,
-    opctx_alloc: &OpContext,
-    instance_id: Uuid,
-) -> Result<(), Error> {
-    // For every sled that isn't the sled this instance was allocated to, delete
-    // the virtual to physical mapping for each of this instance's NICs. If
-    // there isn't a V2P mapping, del_v2p should be a no-op.
-    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-        .instance_id(instance_id)
-        .lookup_for(authz::Action::Read)
-        .await?;
-
-    let instance_nics = datastore
-        .derive_guest_network_interface_info(&opctx, &authz_instance)
-        .await?;
-
-    let mut last_sled_id: Option<Uuid> = None;
-
-    loop {
-        let pagparams = DataPageParams {
-            marker: last_sled_id.as_ref(),
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(10).unwrap(),
-        };
-
-        let sleds_page = datastore
-            // XXX: InService might not be exactly correct
-            .sled_list(&opctx_alloc, &pagparams, SledFilter::InService)
-            .await?;
-        let mut join_handles =
-            Vec::with_capacity(sleds_page.len() * instance_nics.len());
-
-        for sled in &sleds_page {
-            for nic in &instance_nics {
-                let client = nexus_networking::sled_client(
-                    &datastore,
-                    &opctx_alloc,
-                    sled.id(),
-                    &log,
-                )
-                .await?;
-                let nic_id = nic.id;
-                let mapping = DeleteVirtualNetworkInterfaceHost {
-                    virtual_ip: nic.ip,
-                    vni: nic.vni,
-                };
-
-                let log = log.clone();
-
-                // This function is idempotent: calling the set_v2p ioctl with
-                // the same information is a no-op.
-                join_handles.push(tokio::spawn(futures::future::lazy(
-                    move |_ctx| async move {
-                        retry_until_known_result(&log, || async {
-                            client.del_v2p(&nic_id, &mapping).await
-                        })
-                        .await
-                    },
-                )));
-            }
-        }
-
-        // Concurrently run each future to completion, but return the last
-        // error seen.
-        let mut error = None;
-        for join_handle in join_handles {
-            let result = join_handle
-                .await
-                .map_err(|e| Error::internal_error(&e.to_string()))?
-                .await;
-
-            if result.is_err() {
-                error!(log, "{:?}", result);
-                error = Some(result);
-            }
-        }
-        if let Some(e) = error {
-            return e.map(|_| ()).map_err(|e| e.into());
-        }
-
-        if sleds_page.len() < 10 {
-            break;
-        }
-
-        if let Some(last) = sleds_page.last() {
-            last_sled_id = Some(last.id());
-        }
-    }
-
-    Ok(())
 }
 
 /// Attempts to delete all of the Dendrite NAT configuration for the
@@ -1083,6 +795,7 @@ pub(crate) async fn probe_delete_dpd_config(
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     probe_id: Uuid,
+    background_tasks: &BackgroundTasks,
 ) -> Result<(), Error> {
     info!(log, "deleting probe dpd configuration";
             "probe_id" => %probe_id);
@@ -1139,6 +852,7 @@ pub(crate) async fn probe_delete_dpd_config(
             }
         };
 
+        background_tasks.activate(&background_tasks.task_v2p_manager);
         // Notify dendrite that there are changes for it to reconcile.
         // In the event of a failure to notify dendrite, we'll log an error
         // and rely on dendrite's RPW timer to catch it up.
@@ -1295,7 +1009,7 @@ async fn ensure_nat_entry(
     match target_ip.ip {
         IpNetwork::V4(v4net) => {
             let nat_entry = Ipv4NatValues {
-                external_address: Ipv4Net(v4net).into(),
+                external_address: Ipv4Net::from(v4net).into(),
                 first_port: target_ip.first_port,
                 last_port: target_ip.last_port,
                 sled_address: sled_address.into(),

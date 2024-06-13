@@ -286,6 +286,17 @@ table! {
 }
 
 table! {
+    v2p_mapping_view (nic_id) {
+        nic_id -> Uuid,
+        sled_id -> Uuid,
+        sled_ip -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        ip -> Inet,
+    }
+}
+
+table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -311,6 +322,7 @@ table! {
         rsvd_address_lot_block_id -> Uuid,
         address -> Inet,
         interface_name -> Text,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -413,12 +425,14 @@ table! {
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        updater_id -> Nullable<Uuid>,
+        updater_gen-> Int8,
+        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -431,9 +445,9 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        state -> crate::VmmStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -446,7 +460,7 @@ table! {
         project_name -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
         active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -1025,6 +1039,8 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(zpool, dataset);
+
 table! {
     region (id) {
         id -> Uuid,
@@ -1039,6 +1055,8 @@ table! {
         extent_count -> Int8,
     }
 }
+
+allow_tables_to_appear_in_same_query!(zpool, region);
 
 table! {
     region_snapshot (dataset_id, region_id, snapshot_id) {
@@ -1353,6 +1371,13 @@ table! {
         slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
         slot_a_sha3_256 -> Nullable<Text>,
         slot_b_sha3_256 -> Nullable<Text>,
+        stage0_fwid -> Nullable<Text>,
+        stage0next_fwid -> Nullable<Text>,
+
+        slot_a_error -> Nullable<crate::RotImageErrorEnum>,
+        slot_b_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0next_error -> Nullable<crate::RotImageErrorEnum>,
     }
 }
 
@@ -1489,6 +1514,9 @@ table! {
 
         internal_dns_version -> Int8,
         external_dns_version -> Int8,
+        cockroachdb_fingerprint -> Text,
+
+        cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
     }
 }
 
@@ -1585,6 +1613,13 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    cockroachdb_zone_id_to_node_id (omicron_zone_id, crdb_node_id) {
+        omicron_zone_id -> Uuid,
+        crdb_node_id -> Text,
     }
 }
 
@@ -1687,6 +1722,41 @@ table! {
 }
 
 table! {
+    region_replacement (id) {
+        id -> Uuid,
+        request_time -> Timestamptz,
+        old_region_id -> Uuid,
+        volume_id -> Uuid,
+        old_region_volume_id -> Nullable<Uuid>,
+        new_region_id -> Nullable<Uuid>,
+        replacement_state -> crate::RegionReplacementStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    volume_repair (volume_id) {
+        volume_id -> Uuid,
+        repair_id -> Uuid,
+    }
+}
+
+table! {
+    region_replacement_step (replacement_id, step_time, step_type) {
+        replacement_id -> Uuid,
+        step_time -> Timestamptz,
+        step_type -> crate::RegionReplacementStepTypeEnum,
+
+        step_associated_instance_id -> Nullable<Uuid>,
+        step_associated_vmm_id -> Nullable<Uuid>,
+
+        step_associated_pantry_ip -> Nullable<Inet>,
+        step_associated_pantry_port -> Nullable<Int4>,
+        step_associated_pantry_job_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
@@ -1695,6 +1765,26 @@ table! {
         target_version -> Nullable<Text>,
     }
 }
+
+table! {
+    migration (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        source_state -> crate::MigrationStateEnum,
+        source_propolis_id -> Uuid,
+        source_gen -> Int8,
+        time_source_updated -> Nullable<Timestamptz>,
+        target_state -> crate::MigrationStateEnum,
+        target_propolis_id -> Uuid,
+        target_gen -> Int8,
+        time_target_updated -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(instance, migration);
+allow_tables_to_appear_in_same_query!(migration, vmm);
+joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,

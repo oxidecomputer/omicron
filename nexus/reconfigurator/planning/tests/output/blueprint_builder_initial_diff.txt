@@ -110,6 +110,10 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
     nexus          29278a22-1ba1-4117-bfdb-39fcb9ae7fd1   in service    fd00:1122:3344:102::22
 
 
+ COCKROACHDB SETTINGS:
++   state fingerprint:::::::::::::::::   (not present in collection) -> (none)
++   cluster.preserve_downgrade_option:   (not present in collection) -> (do not modify)
+
  METADATA:
 +   internal DNS version:   (not present in collection) -> 1
 +   external DNS version:   (not present in collection) -> 1

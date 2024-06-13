@@ -138,6 +138,10 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 +   internal_ntp   2d73d30e-ca47-46a8-9c12-917d4ab824b6   in service    fd00:1122:3344:104::21
 
 
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)

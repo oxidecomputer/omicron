@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -68,9 +67,9 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
         nic: NicInfo,
     ) -> omicron_common::api::internal::shared::NetworkInterface {
         let ip_subnet = if nic.ip.is_ipv4() {
-            external::IpNet::V4(nic.ipv4_block.0)
+            oxnet::IpNet::V4(nic.ipv4_block.0)
         } else {
-            external::IpNet::V6(nic.ipv6_block.0)
+            oxnet::IpNet::V6(nic.ipv6_block.0)
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
@@ -681,8 +680,7 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null())
                 .select(Instance::as_select())
         };
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
+        let stopped = db::model::InstanceState::NoVmm;
 
         // This is the actual query to update the target interface.
         // Unlike Postgres, CockroachDB doesn't support inserting or updating a view
@@ -713,7 +711,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_runtime =
@@ -759,7 +756,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_state =
@@ -792,14 +788,70 @@ impl DataStore {
             public_error_from_diesel(e, ErrorHandler::Server)
         })
     }
+
+    /// List all network interfaces associated with all instances, making as
+    /// many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    ///
+    /// This particular method was added for propagating v2p mappings via RPWs
+    pub async fn instance_network_interfaces_all_list_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_interfaces = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .instance_network_interfaces_all_list(
+                    opctx,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|nic: &InstanceNetworkInterface| {
+                    nic.id()
+                });
+            all_interfaces.extend(batch);
+        }
+        Ok(all_interfaces)
+    }
+
+    /// List one page of all network interfaces associated with instances
+    pub async fn instance_network_interfaces_all_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        use db::schema::instance_network_interface::dsl;
+
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+
+        paginated(dsl::instance_network_interface, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(InstanceNetworkInterface::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
@@ -838,11 +890,10 @@ mod tests {
 
         // Insert 10 Nexus NICs
         let ip_range = NEXUS_OPTE_IPV4_SUBNET
-            .0
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
-        let mut macs = external::MacAddr::iter_system();
+        let mut macs = omicron_common::api::external::MacAddr::iter_system();
         let mut service_nics = Vec::new();
         for (i, ip) in ip_range.enumerate() {
             let name = format!("service-nic-{i}");
@@ -850,7 +901,7 @@ mod tests {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 NEXUS_VPC_SUBNET.clone(),
-                external::IdentityMetadataCreateParams {
+                omicron_common::api::external::IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: name,
                 },

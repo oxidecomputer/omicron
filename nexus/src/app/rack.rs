@@ -24,6 +24,7 @@ use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
@@ -53,6 +54,7 @@ use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
@@ -61,6 +63,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
@@ -228,6 +231,33 @@ impl super::Nexus {
         let mut blueprint = request.blueprint;
         blueprint.external_dns_version = blueprint.external_dns_version.next();
 
+        // Fill in the CockroachDB metadata for the initial blueprint, and set
+        // the `cluster.preserve_downgrade_option` setting ahead of blueprint
+        // execution.
+        let cockroachdb_settings = self
+            .datastore()
+            .cockroachdb_settings(opctx)
+            .await
+            .internal_context(
+                "fetching cockroachdb settings for rack initialization",
+            )?;
+        self.datastore()
+            .cockroachdb_setting_set_string(
+                opctx,
+                cockroachdb_settings.state_fingerprint.clone(),
+                "cluster.preserve_downgrade_option",
+                CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            )
+            .await
+            .internal_context(
+                "setting `cluster.preserve_downgrade_option` \
+                for rack initialization",
+            )?;
+        blueprint.cockroachdb_fingerprint =
+            cockroachdb_settings.state_fingerprint;
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into();
+
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
         let mapped_fleet_roles = BTreeMap::from([(
@@ -257,7 +287,8 @@ impl super::Nexus {
         // The `rack` row is created with the rack ID we know when Nexus starts,
         // but we didn't know the rack subnet until now. Set it.
         let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        rack.rack_subnet = Some(rack_network_config.rack_subnet.into());
+        rack.rack_subnet =
+            Some(IpNet::from(rack_network_config.rack_subnet).into());
         self.datastore().update_rack_subnet(opctx, &rack).await?;
 
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
@@ -398,8 +429,8 @@ impl super::Nexus {
                             .originate
                             .iter()
                             .map(|o| AddressLotBlockCreate {
-                                first_address: o.network().into(),
-                                last_address: o.broadcast().into(),
+                                first_address: o.first_addr().into(),
+                                last_address: o.last_addr().into(),
                             })
                             .collect(),
                     },
@@ -431,13 +462,13 @@ impl super::Nexus {
                         announcement: bgp_config
                             .originate
                             .iter()
-                            .map(|x| BgpAnnouncementCreate {
+                            .map(|ipv4_net| BgpAnnouncementCreate {
                                 address_lot_block: NameOrId::Name(
                                     format!("as{}", bgp_config.asn)
                                         .parse()
                                         .unwrap(),
                                 ),
-                                network: IpNetwork::from(*x).into(),
+                                network: (*ipv4_net).into(),
                             })
                             .collect(),
                     },
@@ -523,7 +554,8 @@ impl super::Nexus {
                 .iter()
                 .map(|a| Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: (*a).into(),
+                    address: a.address,
+                    vlan_id: a.vlan_id,
                 })
                 .collect();
 
@@ -535,9 +567,9 @@ impl super::Nexus {
                 .routes
                 .iter()
                 .map(|r| Route {
-                    dst: r.destination.into(),
+                    dst: r.destination,
                     gw: r.nexthop,
-                    vid: None,
+                    vid: r.vlan_id,
                 })
                 .collect();
 
@@ -631,7 +663,8 @@ impl super::Nexus {
             .rack_set_initialized(
                 opctx,
                 RackInit {
-                    rack_subnet: rack_network_config.rack_subnet.into(),
+                    rack_subnet: IpNet::from(rack_network_config.rack_subnet)
+                        .into(),
                     rack_id,
                     blueprint,
                     physical_disks,
@@ -823,8 +856,7 @@ impl super::Nexus {
                             rack_subnet,
                             allocation.subnet_octet.try_into().unwrap(),
                         )
-                        .net()
-                        .into(),
+                        .net(),
                     },
                 },
             },

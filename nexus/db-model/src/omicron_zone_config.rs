@@ -92,7 +92,7 @@ impl OmicronZone {
                 let (first_port, last_port) = snat_cfg.port_range_raw();
                 ntp_ntp_servers = Some(ntp_servers.clone());
                 ntp_dns_servers = Some(dns_servers.clone());
-                ntp_ntp_domain = domain.clone();
+                ntp_ntp_domain.clone_from(domain);
                 snat_ip = Some(IpNetwork::from(snat_cfg.ip));
                 snat_first_port = Some(SqlU16::from(first_port));
                 snat_last_port = Some(SqlU16::from(last_port));
@@ -162,7 +162,7 @@ impl OmicronZone {
             } => {
                 ntp_ntp_servers = Some(ntp_servers.clone());
                 ntp_dns_servers = Some(dns_servers.clone());
-                ntp_ntp_domain = domain.clone();
+                ntp_ntp_domain.clone_from(domain);
                 (ZoneType::InternalNtp, address, None)
             }
             OmicronZoneType::Nexus {

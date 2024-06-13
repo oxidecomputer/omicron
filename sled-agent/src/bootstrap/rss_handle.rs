@@ -299,11 +299,3 @@ impl BootstrapAgentHandleReceiver {
         tx.send(Ok(())).unwrap();
     }
 }
-
-struct AbortOnDrop<T>(JoinHandle<T>);
-
-impl<T> Drop for AbortOnDrop<T> {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}

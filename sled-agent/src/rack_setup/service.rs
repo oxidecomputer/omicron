@@ -93,7 +93,8 @@ use nexus_client::{
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig, InvalidOmicronZoneType,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -733,16 +734,16 @@ impl ServiceInner {
 
         let rack_network_config = {
             let config = &config.rack_network_config;
-            NexusTypes::RackNetworkConfigV1 {
+            NexusTypes::RackNetworkConfigV2 {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
                 ports: config
                     .ports
                     .iter()
-                    .map(|config| NexusTypes::PortConfigV1 {
+                    .map(|config| NexusTypes::PortConfigV2 {
                         port: config.port.clone(),
-                        routes: config
+			routes: config
                             .routes
                             .iter()
                             .map(|r| NexusTypes::RouteConfig {
@@ -751,7 +752,14 @@ impl ServiceInner {
                                 vlan_id: r.vlan_id,
                             })
                             .collect(),
-                        addresses: config.addresses.clone(),
+			addresses: config
+			    .addresses
+			    .iter()
+			    .map(|a| NexusTypes::UplinkAddressConfig {
+				    address: a.address,
+				    vlan_id: a.vlan_id
+			    })
+			    .collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
@@ -787,7 +795,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config.originate.clone(),
+                        originate: config.originate.iter().cloned().map(Into::into).collect(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                     })
@@ -1128,7 +1136,7 @@ impl ServiceInner {
         // from the bootstore".
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
-            schema_version: 1,
+            schema_version: 2,
             body: EarlyNetworkConfigBody {
                 ntp_servers: config.ntp_servers.clone(),
                 rack_network_config: Some(config.rack_network_config.clone()),
@@ -1435,6 +1443,10 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // generation of 1. Nexus will bump this up when it updates external DNS
         // (including creating the recovery silo).
         external_dns_version: Generation::new(),
+        // Nexus will fill in the CockroachDB values during initialization.
+        cockroachdb_fingerprint: String::new(),
+        cockroachdb_setting_preserve_downgrade:
+            CockroachDbPreserveDowngrade::DoNotModify,
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

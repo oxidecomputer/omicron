@@ -17,7 +17,7 @@ use anyhow::Result;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
 use bootstrap_agent_client::types::Name;
-use bootstrap_agent_client::types::PortConfigV1 as BaPortConfigV1;
+use bootstrap_agent_client::types::PortConfigV2 as BaPortConfigV2;
 use bootstrap_agent_client::types::RackInitializeRequest;
 use bootstrap_agent_client::types::RecoverySiloConfig;
 use bootstrap_agent_client::types::UserId;
@@ -609,7 +609,7 @@ pub(crate) enum BgpAuthKeyError {
 fn validate_rack_network_config(
     config: &UserSpecifiedRackNetworkConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfigV1> {
+) -> Result<bootstrap_agent_client::types::RackNetworkConfigV2> {
     use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
 
     // Ensure that there is at least one uplink
@@ -631,8 +631,8 @@ fn validate_rack_network_config(
     for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
             // ... and check that it contains `uplink_ip`.
-            if addr.ip() < infra_ip_range.first
-                || addr.ip() > infra_ip_range.last
+            if addr.addr() < infra_ip_range.first
+                || addr.addr() > infra_ip_range.last
             {
                 bail!(
                 "`uplink_cidr`'s IP address must be in the range defined by \
@@ -651,7 +651,7 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
+    Ok(bootstrap_agent_client::types::RackNetworkConfigV2 {
         rack_subnet: RACK_SUBNET.net(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
@@ -676,7 +676,7 @@ fn validate_rack_network_config(
     })
 }
 
-/// Builds a `BaPortConfigV1` from a `UserSpecifiedPortConfig`.
+/// Builds a `BaPortConfigV2` from a `UserSpecifiedPortConfig`.
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
@@ -684,16 +684,17 @@ fn build_port_config(
     port: &str,
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> BaPortConfigV1 {
+) -> BaPortConfigV2 {
     use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
 
-    BaPortConfigV1 {
+    BaPortConfigV2 {
         port: port.to_owned(),
         routes: config
             .routes
@@ -704,7 +705,14 @@ fn build_port_config(
                 vlan_id: r.vlan_id,
             })
             .collect(),
-        addresses: config.addresses.clone(),
+        addresses: config
+            .addresses
+            .iter()
+            .map(|a| BaUplinkAddressConfig {
+                address: a.address,
+                vlan_id: a.vlan_id,
+            })
+            .collect(),
         bgp_peers: config
             .bgp_peers
             .iter()

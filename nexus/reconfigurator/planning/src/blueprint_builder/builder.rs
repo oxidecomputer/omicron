@@ -5,6 +5,7 @@
 //! Low-level facility for generating Blueprints
 
 use crate::ip_allocator::IpAllocator;
+use crate::planner::zone_needs_expungement;
 use crate::planner::DiscretionaryOmicronZone;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
@@ -21,10 +22,12 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
@@ -58,6 +61,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -116,9 +120,52 @@ pub enum Ensure {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum EnsureMultiple {
     /// action was taken, and multiple items were added
-    Added(usize),
+    Changed { added: usize, removed: usize },
+
     /// no action was necessary
     NotNeeded,
+}
+
+/// Describes operations which the BlueprintBuilder has performed to arrive
+/// at its state.
+///
+/// This information is meant to act as a more strongly-typed flavor of
+/// "comment", identifying which operations have occurred on the blueprint.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum Operation {
+    AddZone { sled_id: SledUuid, kind: sled_agent_client::ZoneKind },
+    UpdateDisks { sled_id: SledUuid, added: usize, removed: usize },
+    ZoneExpunged { sled_id: SledUuid, reason: ZoneExpungeReason, count: usize },
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AddZone { sled_id, kind } => {
+                write!(f, "sled {sled_id}: added zone: {kind}")
+            }
+            Self::UpdateDisks { sled_id, added, removed } => {
+                write!(f, "sled {sled_id}: added {added} disks, removed {removed} disks")
+            }
+            Self::ZoneExpunged { sled_id, reason, count } => {
+                let reason = match reason {
+                    ZoneExpungeReason::DiskExpunged => {
+                        "zone using expunged disk"
+                    }
+                    ZoneExpungeReason::SledDecommissioned => {
+                        "sled state is decomissioned"
+                    }
+                    ZoneExpungeReason::SledExpunged => {
+                        "sled policy is expunged"
+                    }
+                };
+                write!(
+                    f,
+                    "sled {sled_id}: expunged {count} zones because: {reason}"
+                )
+            }
+        }
+    }
 }
 
 /// Helper for assembling a blueprint
@@ -153,8 +200,10 @@ pub struct BlueprintBuilder<'a> {
     pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
     sled_state: BTreeMap<SledUuid, SledState>,
+    cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
     creator: String,
+    operations: Vec<Operation>,
     comments: Vec<String>,
 
     // Random number generator for new UUIDs
@@ -215,6 +264,9 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -271,7 +323,10 @@ impl<'a> BlueprintBuilder<'a> {
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
             sled_state,
+            cockroachdb_setting_preserve_downgrade: parent_blueprint
+                .cockroachdb_setting_preserve_downgrade,
             creator: creator.to_owned(),
+            operations: Vec::new(),
             comments: Vec::new(),
             rng: BlueprintBuilderRng::new(),
         })
@@ -309,9 +364,21 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
+            cockroachdb_fingerprint: self
+                .input
+                .cockroachdb_settings()
+                .state_fingerprint
+                .clone(),
+            cockroachdb_setting_preserve_downgrade: self
+                .cockroachdb_setting_preserve_downgrade,
             time_created: now_db_precision(),
             creator: self.creator,
-            comment: self.comments.join(", "),
+            comment: self
+                .comments
+                .into_iter()
+                .chain(self.operations.iter().map(|op| op.to_string()))
+                .collect::<Vec<String>>()
+                .join(", "),
         }
     }
 
@@ -333,10 +400,8 @@ impl<'a> BlueprintBuilder<'a> {
         self
     }
 
-    /// Sets the blueprints "comment"
-    ///
     /// This is a short human-readable string summarizing the changes reflected
-    /// in the blueprint.  This is only intended for debugging.
+    /// in the blueprint. This is only intended for debugging.
     pub fn comment<S>(&mut self, comment: S)
     where
         String: From<S>,
@@ -344,33 +409,80 @@ impl<'a> BlueprintBuilder<'a> {
         self.comments.push(String::from(comment));
     }
 
-    /// Expunges all zones from a sled.
+    /// Records an operation to the blueprint, identifying what changes have
+    /// occurred.
+    ///
+    /// This is currently intended only for debugging.
+    pub(crate) fn record_operation(&mut self, operation: Operation) {
+        self.operations.push(operation);
+    }
+
+    /// Expunges all zones requiring expungement from a sled.
     ///
     /// Returns a list of zone IDs expunged (excluding zones that were already
     /// expunged). If the list is empty, then the operation was a no-op.
-    pub(crate) fn expunge_all_zones_for_sled(
+    pub(crate) fn expunge_zones_for_sled(
         &mut self,
         sled_id: SledUuid,
-        reason: ZoneExpungeReason,
-    ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
+        sled_details: &SledDetails,
+    ) -> Result<BTreeMap<OmicronZoneUuid, ZoneExpungeReason>, Error> {
         let log = self.log.new(o!(
             "sled_id" => sled_id.to_string(),
         ));
 
         // Do any zones need to be marked expunged?
-        let mut zones_to_expunge = BTreeSet::new();
+        let mut zones_to_expunge = BTreeMap::new();
 
         let sled_zones = self.zones.current_sled_zones(sled_id);
-        for (z, state) in sled_zones {
+        for (zone_config, state) in sled_zones {
+            let zone_id = zone_config.id;
+            let log = log.new(o!(
+                "zone_id" => zone_id.to_string()
+            ));
+
+            let Some(reason) =
+                zone_needs_expungement(sled_details, zone_config)
+            else {
+                continue;
+            };
+
             let is_expunged =
-                is_already_expunged(z, state).map_err(|error| {
+                is_already_expunged(zone_config, state).map_err(|error| {
                     Error::Planner(anyhow!(error).context(format!(
                         "for sled {sled_id}, error computing zones to expunge"
                     )))
                 })?;
 
             if !is_expunged {
-                zones_to_expunge.insert(z.id);
+                match reason {
+                    ZoneExpungeReason::DiskExpunged => {
+                        info!(
+                            &log,
+                            "expunged disk with non-expunged zone was found"
+                        );
+                    }
+                    ZoneExpungeReason::SledDecommissioned => {
+                        // A sled marked as decommissioned should have no resources
+                        // allocated to it. If it does, it's an illegal state, possibly
+                        // introduced by a bug elsewhere in the system -- we need to
+                        // produce a loud warning (i.e. an ERROR-level log message) on
+                        // this, while still removing the zones.
+                        error!(
+                            &log,
+                            "sled has state Decommissioned, yet has zone \
+                             allocated to it; will expunge it"
+                        );
+                    }
+                    ZoneExpungeReason::SledExpunged => {
+                        // This is the expected situation.
+                        info!(
+                            &log,
+                            "expunged sled with non-expunged zone found"
+                        );
+                    }
+                }
+
+                zones_to_expunge.insert(zone_id, reason);
             }
         }
 
@@ -382,51 +494,45 @@ impl<'a> BlueprintBuilder<'a> {
             return Ok(zones_to_expunge);
         }
 
-        match reason {
-            ZoneExpungeReason::SledDecommissioned { policy } => {
-                // A sled marked as decommissioned should have no resources
-                // allocated to it. If it does, it's an illegal state, possibly
-                // introduced by a bug elsewhere in the system -- we need to
-                // produce a loud warning (i.e. an ERROR-level log message) on
-                // this, while still removing the zones.
-                error!(
-                    &log,
-                    "sled has state Decommissioned, yet has zones \
-                     allocated to it; will expunge them \
-                     (sled policy is \"{policy:?}\")"
-                );
-            }
-            ZoneExpungeReason::SledExpunged => {
-                // This is the expected situation.
-                info!(
-                    &log,
-                    "expunged sled with {} non-expunged zones found \
-                     (will expunge all zones)",
-                    zones_to_expunge.len()
-                );
-            }
-        }
-
         // Now expunge all the zones that need it.
         let change = self.zones.change_sled_zones(sled_id);
-        change.expunge_zones(zones_to_expunge.clone()).map_err(|error| {
-            anyhow!(error)
-                .context(format!("for sled {sled_id}, error expunging zones"))
-        })?;
+        change
+            .expunge_zones(zones_to_expunge.keys().cloned().collect())
+            .map_err(|error| {
+                anyhow!(error).context(format!(
+                    "for sled {sled_id}, error expunging zones"
+                ))
+            })?;
 
-        // Finally, add a comment describing what happened.
-        let reason = match reason {
-            ZoneExpungeReason::SledDecommissioned { .. } => {
-                "sled state is decommissioned"
+        // Finally, add comments describing what happened.
+        //
+        // Group the zones by their reason for expungement.
+        let mut count_disk_expunged = 0;
+        let mut count_sled_decommissioned = 0;
+        let mut count_sled_expunged = 0;
+        for reason in zones_to_expunge.values() {
+            match reason {
+                ZoneExpungeReason::DiskExpunged => count_disk_expunged += 1,
+                ZoneExpungeReason::SledDecommissioned => {
+                    count_sled_decommissioned += 1;
+                }
+                ZoneExpungeReason::SledExpunged => count_sled_expunged += 1,
+            };
+        }
+        let count_and_reason = [
+            (count_disk_expunged, ZoneExpungeReason::DiskExpunged),
+            (count_sled_decommissioned, ZoneExpungeReason::SledDecommissioned),
+            (count_sled_expunged, ZoneExpungeReason::SledExpunged),
+        ];
+        for (count, reason) in count_and_reason {
+            if count > 0 {
+                self.record_operation(Operation::ZoneExpunged {
+                    sled_id,
+                    reason,
+                    count,
+                });
             }
-            ZoneExpungeReason::SledExpunged => "sled policy is expunged",
-        };
-
-        self.comment(format!(
-            "sled {} ({reason}): {} zones expunged",
-            sled_id,
-            zones_to_expunge.len(),
-        ));
+        }
 
         Ok(zones_to_expunge)
     }
@@ -443,7 +549,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         resources: &SledResources,
-    ) -> Result<Ensure, Error> {
+    ) -> Result<EnsureMultiple, Error> {
         let (mut additions, removals) = {
             // These are the disks known to our (last?) blueprint
             let blueprint_disks: BTreeMap<_, _> = self
@@ -493,8 +599,10 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         if additions.is_empty() && removals.is_empty() {
-            return Ok(Ensure::NotNeeded);
+            return Ok(EnsureMultiple::NotNeeded);
         }
+        let added = additions.len();
+        let removed = removals.len();
 
         let disks = &mut self.disks.change_sled_disks(sled_id).disks;
 
@@ -503,7 +611,7 @@ impl<'a> BlueprintBuilder<'a> {
             !removals.contains(&PhysicalDiskUuid::from_untyped_uuid(config.id))
         });
 
-        Ok(Ensure::Added)
+        Ok(EnsureMultiple::Changed { added, removed })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -533,7 +641,7 @@ impl<'a> BlueprintBuilder<'a> {
         // these are at known, fixed addresses relative to the AZ subnet
         // (which itself is a known-prefix parent subnet of the sled subnet).
         let dns_servers =
-            get_internal_dns_server_addresses(sled_subnet.net().network());
+            get_internal_dns_server_addresses(sled_subnet.net().prefix());
 
         // The list of boundary NTP servers is not necessarily stored
         // anywhere (unless there happens to be another internal NTP zone
@@ -743,7 +851,14 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Added(num_nexus_to_add))
+        Ok(EnsureMultiple::Changed { added: num_nexus_to_add, removed: 0 })
+    }
+
+    pub fn cockroachdb_preserve_downgrade(
+        &mut self,
+        version: CockroachDbPreserveDowngrade,
+    ) {
+        self.cockroachdb_setting_preserve_downgrade = version;
     }
 
     pub fn sled_ensure_zone_multiple_cockroachdb(
@@ -814,7 +929,7 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
         let allocator =
             self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
-                let sled_subnet_addr = sled_subnet.net().network();
+                let sled_subnet_addr = sled_subnet.net().prefix();
                 let minimum = sled_subnet_addr
                     .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
                 let maximum = sled_subnet_addr
@@ -1519,7 +1634,7 @@ pub mod test {
                     builder
                         .sled_ensure_disks(sled_id, &sled_resources)
                         .unwrap(),
-                    Ensure::Added,
+                    EnsureMultiple::Changed { added: 10, removed: 0 },
                 );
             }
 
@@ -1667,7 +1782,7 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 1)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Added(1));
+            assert_eq!(added, EnsureMultiple::Changed { added: 1, removed: 0 });
         }
 
         {
@@ -1685,7 +1800,7 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 3)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Added(3));
+            assert_eq!(added, EnsureMultiple::Changed { added: 3, removed: 0 });
         }
 
         {

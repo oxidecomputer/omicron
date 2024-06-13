@@ -97,10 +97,14 @@ WARNING: Zones exist without physical disks!
 
 
 
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none)
+    cluster.preserve_downgrade_option:   (do not modify)
+
  METADATA:
     created by:::::::::::   test_blueprint2
     created at:::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9 (sled policy is expunged): 12 zones expunged
+    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9: expunged 12 zones because: sled policy is expunged
     internal DNS version:   1
     external DNS version:   1
 

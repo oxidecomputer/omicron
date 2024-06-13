@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
-    InstanceState, IpNet, SemverVersion, Vni,
+    SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
@@ -16,6 +16,7 @@ use omicron_uuid_kinds::UpstairsSessionKind;
 use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
 use strum::{EnumIter, IntoEnumIterator};
@@ -60,11 +61,36 @@ pub struct InstanceRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
+/// One of the states that a VMM can be in.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VmmState {
+    /// The VMM is initializing and has not started running guest CPUs yet.
+    Starting,
+    /// The VMM has finished initializing and may be running guest CPUs.
+    Running,
+    /// The VMM is shutting down.
+    Stopping,
+    /// The VMM's guest has stopped, and the guest will not run again, but the
+    /// VMM process may not have released all of its resources yet.
+    Stopped,
+    /// The VMM is being restarted or its guest OS is rebooting.
+    Rebooting,
+    /// The VMM is part of a live migration.
+    Migrating,
+    /// The VMM process reported an internal failure.
+    Failed,
+    /// The VMM process has been destroyed and its resources have been released.
+    Destroyed,
+}
+
 /// The dynamic runtime properties of an individual VMM process.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VmmRuntimeState {
     /// The last state reported by this VMM.
-    pub state: InstanceState,
+    pub state: VmmState,
     /// The generation number for this VMM's state.
     pub gen: Generation,
     /// Timestamp for the VMM's state.
@@ -83,6 +109,97 @@ pub struct SledInstanceState {
 
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
+
+    /// The current state of any in-progress migration for this instance, as
+    /// understood by this sled.
+    pub migration_state: Option<MigrationRuntimeState>,
+}
+
+/// An update from a sled regarding the state of a migration, indicating the
+/// role of the VMM whose migration state was updated.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MigrationRuntimeState {
+    pub migration_id: Uuid,
+    pub state: MigrationState,
+    pub role: MigrationRole,
+    pub gen: Generation,
+
+    /// Timestamp for the migration state update.
+    pub time_updated: DateTime<Utc>,
+}
+
+/// The state of an instance's live migration.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationState {
+    /// The migration has not started for this VMM.
+    #[default]
+    Pending,
+    /// The migration is in progress.
+    InProgress,
+    /// The migration has failed.
+    Failed,
+    /// The migration has completed.
+    Completed,
+}
+
+impl MigrationState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+    /// Returns `true` if this migration state means that the migration is no
+    /// longer in progress (it has either succeeded or failed).
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, MigrationState::Completed | MigrationState::Failed)
+    }
+}
+
+impl fmt::Display for MigrationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MigrationRole {
+    /// This update concerns the source VMM of a migration.
+    Source,
+    /// This update concerns the target VMM of a migration.
+    Target,
+}
+
+impl MigrationRole {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Target => "target",
+        }
+    }
+}
+
+impl fmt::Display for MigrationRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 // Oximeter producer/collector objects.
@@ -251,7 +368,7 @@ mod tests {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum HostIdentifier {
-    Ip(IpNet),
+    Ip(oxnet::IpNet),
     Vpc(Vni),
 }
 

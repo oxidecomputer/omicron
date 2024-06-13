@@ -34,6 +34,36 @@ pub enum BlueprintZoneType {
 }
 
 impl BlueprintZoneType {
+    /// Returns the zpool being used by this zone, if any.
+    pub fn zpool(&self) -> Option<&omicron_common::zpool_name::ZpoolName> {
+        match self {
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dataset, .. },
+            )
+            | BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { dataset, .. },
+            )
+            | BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
+            )
+            | BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { dataset, .. },
+            )
+            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                dataset,
+                ..
+            })
+            | BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns { dataset, .. },
+            ) => Some(&dataset.pool_name),
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::Oximeter(_)
+            | BlueprintZoneType::CruciblePantry(_) => None,
+        }
+    }
+
     pub fn external_networking(
         &self,
     ) -> Option<(OmicronZoneExternalIp, &NetworkInterface)> {
