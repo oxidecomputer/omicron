@@ -4009,22 +4009,27 @@ impl ServiceManager {
 
                             // Restore the localhost address that we always add
                             // when setting up MGS.
-                            smfh.addpropvalue_default_instance(
+                            smfh.addpropvalue_type_default_instance(
                                 "config/address",
                                 &format!("[::1]:{MGS_PORT}"),
+                                "astring",
                             )?;
 
                             // Add the underlay address.
-                            smfh.addpropvalue_default_instance(
+                            smfh.addpropvalue_type_default_instance(
                                 "config/address",
                                 &format!("[{address}]:{MGS_PORT}"),
+                                "astring",
                             )?;
 
                             // It should be impossible for the `sled_info` not
                             // to be set here, as the underlay is set at the
                             // same time.
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop("config/rack_id", info.rack_id)?;
+                                smfh.setprop_default_instance(
+                                    "config/rack_id",
+                                    info.rack_id,
+                                )?;
                             } else {
                                 error!(
                                     self.inner.log,
@@ -4047,8 +4052,11 @@ impl ServiceManager {
                                 "configuring dendrite service"
                             );
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop("config/rack_id", info.rack_id)?;
-                                smfh.setprop(
+                                smfh.setprop_default_instance(
+                                    "config/rack_id",
+                                    info.rack_id,
+                                )?;
+                                smfh.setprop_default_instance(
                                     "config/sled_id",
                                     info.config.sled_id,
                                 )?;
@@ -4062,11 +4070,15 @@ impl ServiceManager {
                                 "config/address",
                                 "*",
                             )?;
-                            smfh.delpropvalue("config/dns_server", "*")?;
+                            smfh.delpropvalue_default_instance(
+                                "config/dns_server",
+                                "*",
+                            )?;
                             for address in &request.addresses {
-                                smfh.addpropvalue_default_instance(
+                                smfh.addpropvalue_type_default_instance(
                                     "config/address",
                                     &format!("[{}]:{}", address, DENDRITE_PORT),
+                                    "astring",
                                 )?;
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
@@ -4074,9 +4086,10 @@ impl ServiceManager {
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
-                                        smfh.addpropvalue(
+                                        smfh.addpropvalue_type_default_instance(
                                             "config/dns_server",
                                             &format!("{addr}"),
+                                            "astring",
                                         )?;
                                     }
                                 }
@@ -4094,7 +4107,7 @@ impl ServiceManager {
                                     "rack_subnet" => %rack_subnet.net().addr(),
                                 );
 
-                                smfh.setprop(
+                                smfh.setprop_default_instance(
                                     "config/rack-subnet",
                                     &rack_subnet.net().addr().to_string(),
                                 )?;
@@ -4115,9 +4128,10 @@ impl ServiceManager {
                                 "*",
                             )?;
                             for address in &request.addresses {
-                                smfh.addpropvalue_default_instance(
+                                smfh.addpropvalue_type_default_instance(
                                     "config/address",
                                     &format!("[{}]:{}", address, LLDP_PORT),
+                                    "astring",
                                 )?;
                             }
                             smfh.refresh()?;
@@ -4142,10 +4156,16 @@ impl ServiceManager {
                         }
                         SwitchService::Mgd => {
                             info!(self.inner.log, "configuring mgd service");
-                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            smfh.delpropvalue_default_instance(
+                                "config/dns_servers",
+                                "*",
+                            )?;
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop("config/rack_uuid", info.rack_id)?;
-                                smfh.setprop(
+                                smfh.setprop_default_instance(
+                                    "config/rack_uuid",
+                                    info.rack_id,
+                                )?;
+                                smfh.setprop_default_instance(
                                     "config/sled_uuid",
                                     info.config.sled_id,
                                 )?;
@@ -4157,9 +4177,10 @@ impl ServiceManager {
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
-                                        smfh.addpropvalue(
+                                        smfh.addpropvalue_type_default_instance(
                                             "config/dns_servers",
                                             &format!("{addr}"),
+                                            "astring",
                                         )?;
                                     }
                                     break;
@@ -4173,16 +4194,29 @@ impl ServiceManager {
                         }
                         SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "configuring mg-ddm service");
-                            smfh.delpropvalue("config/mode", "*")?;
-                            smfh.addpropvalue("config/mode", &mode)?;
+                            smfh.delpropvalue_default_instance(
+                                "config/mode",
+                                "*",
+                            )?;
+                            smfh.addpropvalue_type_default_instance(
+                                "config/mode",
+                                &mode,
+                                "astring",
+                            )?;
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop("config/rack_uuid", info.rack_id)?;
-                                smfh.setprop(
+                                smfh.setprop_default_instance(
+                                    "config/rack_uuid",
+                                    info.rack_id,
+                                )?;
+                                smfh.setprop_default_instance(
                                     "config/sled_uuid",
                                     info.config.sled_id,
                                 )?;
                             }
-                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            smfh.delpropvalue_default_instance(
+                                "config/dns_servers",
+                                "*",
+                            )?;
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
@@ -4190,9 +4224,10 @@ impl ServiceManager {
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
-                                        smfh.addpropvalue(
+                                        smfh.addpropvalue_type_default_instance(
                                             "config/dns_servers",
                                             &format!("{addr}"),
+                                            "astring",
                                         )?;
                                     }
                                     break;

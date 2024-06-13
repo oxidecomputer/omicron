@@ -35,7 +35,11 @@ impl<'t> SmfHelper<'t> {
         SmfHelper { running_zone, _service_name, smf_name, default_smf_name }
     }
 
-    pub fn setprop<P, V>(&self, prop: P, val: V) -> Result<(), Error>
+    pub fn setprop_default_instance<P, V>(
+        &self,
+        prop: P,
+        val: V,
+    ) -> Result<(), Error>
     where
         P: ToString,
         V: ToString,
@@ -44,7 +48,7 @@ impl<'t> SmfHelper<'t> {
             .run_cmd(&[
                 illumos_utils::zone::SVCCFG,
                 "-s",
-                &self.smf_name,
+                &self.default_smf_name,
                 "setprop",
                 &format!("{}={}", prop.to_string(), val.to_string()),
             ])
@@ -83,35 +87,16 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
-    pub fn addpropvalue<P, V>(&self, prop: P, val: V) -> Result<(), Error>
-    where
-        P: ToString,
-        V: ToString,
-    {
-        self.running_zone
-            .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
-                "-s",
-                &self.smf_name,
-                "addpropvalue",
-                &prop.to_string(),
-                &val.to_string(),
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: format!("add {} smf property value", prop.to_string()),
-                err,
-            })?;
-        Ok(())
-    }
-
-    pub fn addpropvalue_default_instance<P, V>(
+    pub fn addpropvalue_type_default_instance<P, V, T>(
         &self,
         prop: P,
         val: V,
+        valtype: T,
     ) -> Result<(), Error>
     where
         P: ToString,
         V: ToString,
+        T: ToString,
     {
         self.running_zone
             .run_cmd(&[
@@ -120,6 +105,7 @@ impl<'t> SmfHelper<'t> {
                 &self.default_smf_name,
                 "addpropvalue",
                 &prop.to_string(),
+                &format!("{}:", valtype.to_string()),
                 &val.to_string(),
             ])
             .map_err(|err| Error::ZoneCommand {
@@ -180,27 +166,6 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
-    pub fn delpropvalue<P, V>(&self, prop: P, val: V) -> Result<(), Error>
-    where
-        P: ToString,
-        V: ToString,
-    {
-        self.running_zone
-            .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
-                "-s",
-                &self.smf_name,
-                "delpropvalue",
-                &prop.to_string(),
-                &val.to_string(),
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: format!("del {} smf property value", prop.to_string()),
-                err,
-            })?;
-        Ok(())
-    }
-
     pub fn delpropvalue_default_instance<P, V>(
         &self,
         prop: P,
@@ -210,7 +175,8 @@ impl<'t> SmfHelper<'t> {
         P: ToString,
         V: ToString,
     {
-        self.running_zone
+        match self
+            .running_zone
             .run_cmd(&[
                 illumos_utils::zone::SVCCFG,
                 "-s",
@@ -222,7 +188,17 @@ impl<'t> SmfHelper<'t> {
             .map_err(|err| Error::ZoneCommand {
                 intent: format!("del {} smf property value", prop.to_string()),
                 err,
-            })?;
+            }) {
+            Ok(_) => (),
+            Err(e) => {
+                // If a property already doesn't exist we don't need to
+                // return an error
+                if !e.to_string().contains("No such property") {
+                    return Err(e);
+                }
+            }
+        };
+
         Ok(())
     }
 
