@@ -447,7 +447,26 @@ impl PortManager {
         if let Some(blocks) = &nic.transit_ips {
             for block in blocks {
                 #[cfg(target_os = "illumos")]
-                hdl.allow_cidr(&port_name, super::net_to_cidr(*block))?;
+                {
+                    use oxide_vpc::api::Direction;
+
+                    // In principle if this were an operation on an existing
+                    // port, we would explicitly undo the In addition if the
+                    // Out addition fails.
+                    // However, failure here will just destroy the port
+                    // outright -- this should only happen if an excessive
+                    // number of rules are specified.
+                    hdl.allow_cidr(
+                        &port_name,
+                        super::net_to_cidr(*block),
+                        Direction::In,
+                    )?;
+                    hdl.allow_cidr(
+                        &port_name,
+                        super::net_to_cidr(*block),
+                        Direction::Out,
+                    )?;
+                }
 
                 debug!(
                     self.inner.log,
