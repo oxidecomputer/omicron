@@ -746,11 +746,10 @@ mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance_id)
-                .await
-                .instance()
-                .clone();
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
 
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -762,14 +761,13 @@ mod test {
         nexus.run_saga(saga).await.expect("Start saga should succeed");
 
         test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        let vmm_state =
-            test_helpers::instance_fetch(cptestctx, instance_id)
-                .await
-                .vmm()
-                .as_ref()
-                .expect("running instance should have a vmm")
-                .runtime
-                .state;
+        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a vmm")
+            .runtime
+            .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
@@ -848,11 +846,10 @@ mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance_id)
-                .await
-                .instance()
-                .clone();
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
 
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -862,14 +859,13 @@ mod test {
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
         test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        let vmm_state =
-            test_helpers::instance_fetch(cptestctx, instance_id)
-                .await
-                .vmm()
-                .as_ref()
-                .expect("running instance should have a vmm")
-                .runtime
-                .state;
+        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a vmm")
+            .runtime
+            .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
@@ -890,11 +886,10 @@ mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance_id)
-                .await
-                .instance()
-                .clone();
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
 
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
