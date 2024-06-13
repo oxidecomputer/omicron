@@ -115,15 +115,40 @@ impl ObservedPropolisState {
     /// Propolis.
     pub fn new(
         instance_runtime: &InstanceRuntimeState,
+        propolis_id: PropolisUuid,
         propolis_state: &InstanceStateMonitorResponse,
     ) -> Self {
+        // Decide which of Propolis's reported migrations to pay attention to.
+        // If this Propolis is currently a migration target (evidenced by its ID
+        // appearing in the `dst_propolis_id` field in the instance record),
+        // look at the current migration in. Otherwise, look at the reported
+        // migration out.
+        let role = if instance_runtime
+            .dst_propolis_id
+            .is_some_and(|id| id == propolis_id)
+        {
+            MigrationRole::Target
+        } else {
+            MigrationRole::Source
+        };
+
+        let propolis_migration = match role {
+            MigrationRole::Source => &propolis_state.migration.migration_out,
+            MigrationRole::Target => &propolis_state.migration.migration_in,
+        };
+
+        // Determine the status of the current active migration, if there is
+        // one. This procedure assumes that when a Propolis participates in a
+        // migration, its sled agent learns about that migration (and records
+        // the migration ID in its runtime state) before Propolis itself starts
+        // reporting that migration's status.
         let migration_status =
-            match (instance_runtime.migration_id, &propolis_state.migration) {
+            match (instance_runtime.migration_id, propolis_migration) {
                 // If the runtime state and Propolis state agree that there's
                 // a migration in progress, and they agree on its ID, the
                 // Propolis migration state determines the migration status.
                 (Some(this_id), Some(propolis_migration))
-                    if this_id == propolis_migration.migration_id =>
+                    if this_id == propolis_migration.id =>
                 {
                     match propolis_migration.state {
                         PropolisMigrationState::Finish => {
@@ -136,22 +161,26 @@ impl ObservedPropolisState {
                     }
                 }
 
-                // If both sides have a migration ID, but the IDs don't match,
-                // assume the instance's migration ID is newer. This can happen
-                // if Propolis was initialized via migration in and has not yet
-                // been told to migrate out.
+                // Propolis continues to report the status of failed migrations
+                // until they are supplanted by new attempts to migrate. If both
+                // sides have a migration ID, but the IDs don't match, assume
+                // that Propolis is reporting stale status from an earlier
+                // migration and that a new migration is about to begin.
                 (Some(_), Some(_)) => ObservedMigrationStatus::Pending,
-
-                // If only Propolis has a migration ID, assume it was from a
-                // prior migration in and report that no migration is in
-                // progress. This could be improved with propolis#508.
-                (None, Some(_)) => ObservedMigrationStatus::NoMigration,
 
                 // A migration source's migration IDs get set before its
                 // Propolis actually gets asked to migrate, so it's possible for
                 // the runtime state to contain an ID while the Propolis has
                 // none, in which case the migration is pending.
                 (Some(_), None) => ObservedMigrationStatus::Pending,
+
+                // If the instance runtime state has no migration ID, don't
+                // report any migration status, even if Propolis had some status
+                // to report. (Nexus and sled agent won't remove migration IDs
+                // from an instance's runtime state until the migration is
+                // actually finished, so the migration Propolis is reporting in
+                // this case must be stale.)
+                (None, Some(_)) => ObservedMigrationStatus::NoMigration,
 
                 // If neither side has a migration ID, then there's clearly no
                 // migration.

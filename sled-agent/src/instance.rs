@@ -374,6 +374,7 @@ impl InstanceRunner {
                         Some(Update { state, tx }) => {
                             let observed = ObservedPropolisState::new(
                                 self.state.instance(),
+                                self.state.propolis_id(),
                                 &state,
                             );
                             let reaction = self.observe_state(&observed).await;
