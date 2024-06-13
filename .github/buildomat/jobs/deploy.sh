@@ -35,7 +35,7 @@ _exit_trap() {
 	#
 	# Stop cron in all zones (to stop logadm log rotation)
 	#
-	svcadm -Z disable -s cron
+	pfexec svcadm -Z disable -s cron
 
 	[[ $status -eq 0 ]] && exit 0
 
