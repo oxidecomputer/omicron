@@ -14,9 +14,11 @@ use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
+use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
+use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
+use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BfdPeerConfig, BgpPeerConfig,
-    CheckerSource, ImportExportPolicy as MgImportExportPolicy, Prefix, Prefix4,
+    AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
     Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
 };
 use mg_admin_client::Client as MgdClient;
@@ -24,8 +26,9 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::external::{BfdMode, ImportExportPolicy};
 use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfig, PortConfigV2, PortFec, PortSpeed, RackNetworkConfig,
-    RackNetworkConfigV2, RouteConfig, SwitchLocation, UplinkAddressConfig,
+    BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfig, PortConfigV2, PortFec,
+    PortSpeed, RackNetworkConfig, RackNetworkConfigV2, RouteConfig,
+    SwitchLocation, UplinkAddressConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -459,7 +462,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         );
 
         let mut config: Option<BgpConfig> = None;
-        let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+        let mut bgp_peer_configs =
+            HashMap::<String, Vec<MgBgpPeerConfig>>::new();
 
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
@@ -488,7 +492,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
 
-                let bpc = BgpPeerConfig {
+                let bpc = MgBgpPeerConfig {
                     name: format!("{}", peer.addr),
                     host: format!("{}:179", peer.addr),
                     hold_time: peer.hold_time.unwrap_or(6),
@@ -622,7 +626,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             if spec.switch != switch_location {
                 continue;
             }
-            let cfg = BfdPeerConfig {
+            let cfg = MgBfdPeerConfig {
                 detection_threshold: spec.detection_threshold,
                 listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
                 mode: match spec.mode {
@@ -1061,7 +1065,7 @@ struct RackNetworkConfigV1 {
     pub bgp: Vec<BgpConfig>,
     /// BFD configuration for connecting the rack to external networks
     #[serde(default)]
-    pub bfd: Vec<omicron_common::api::internal::shared::BfdPeerConfig>,
+    pub bfd: Vec<BfdPeerConfig>,
 }
 
 impl RackNetworkConfigV1 {
