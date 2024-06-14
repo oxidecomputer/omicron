@@ -10,6 +10,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_queries::db::fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE_NAME;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -316,15 +317,21 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             // `nexus_db_queries::fixed_data::vpc_firewall_rule` for those
             // rules.) If those rules change to include any filter hosts, this
             // logic needs to change as well.
-            (None, Some(allowed_ips)) => match allowed_ips {
-                AllowedSourceIps::Any => None,
-                AllowedSourceIps::List(list) => Some(
-                    list.iter()
-                        .copied()
-                        .map(|ip| HostIdentifier::Ip(ip).into())
-                        .collect(),
-                ),
-            },
+            (None, Some(allowed_ips)) => {
+                if allowlist_applies_to_firewall_rule(rule) {
+                    match allowed_ips {
+                        AllowedSourceIps::Any => None,
+                        AllowedSourceIps::List(list) => Some(
+                            list.iter()
+                                .copied()
+                                .map(|ip| HostIdentifier::Ip(ip).into())
+                                .collect(),
+                        ),
+                    }
+                } else {
+                    None
+                }
+            }
 
             // No rules exist, and we don't need to add anything for the
             // allowlist.
@@ -519,6 +526,18 @@ pub async fn plumb_service_firewall_rules(
 /// Return true if the user-facing services allowlist applies to a VPC.
 fn allowlist_applies_to_vpc(vpc: &db::model::Vpc) -> bool {
     vpc.id() == *SERVICES_VPC_ID
+}
+
+/// Return true if the user-facing services allowlist applies to a firewall
+/// rule.
+///
+/// Today, we only apply the allowlist to Nexus. That lives in its own VPC, and
+/// has exactly one firewall rule that allows inbound TCP traffic on HTTP(s)
+/// ports. If either of those things change, this will also need to change.
+fn allowlist_applies_to_firewall_rule(
+    rule: &db::model::VpcFirewallRule,
+) -> bool {
+    rule.name().as_str() == NEXUS_VPC_FW_RULE_NAME
 }
 
 /// Return the list of allowed IPs from the database.
