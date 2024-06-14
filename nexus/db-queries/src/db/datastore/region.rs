@@ -27,6 +27,29 @@ use omicron_common::api::external::LookupResult;
 use slog::Logger;
 use uuid::Uuid;
 
+pub enum RegionAllocationFor {
+    /// Allocate region(s) for a disk volume
+    DiskVolume { volume_id: Uuid },
+
+    /// Allocate region(s) for a snapshot volume, which may have read-only
+    /// targets.
+    SnapshotVolume { volume_id: Uuid, snapshot_id: Uuid },
+}
+
+/// Describe the region(s) to be allocated
+pub enum RegionAllocationParameters<'a> {
+    FromDiskSource {
+        disk_source: &'a params::DiskSource,
+        size: external::ByteCount,
+    },
+
+    FromRaw {
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+    },
+}
+
 impl DataStore {
     pub(super) fn get_allocated_regions_query(
         volume_id: Uuid,
@@ -156,9 +179,8 @@ impl DataStore {
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         self.arbitrary_region_allocate(
             opctx,
-            volume_id,
-            disk_source,
-            size,
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource { disk_source, size },
             allocation_strategy,
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -175,47 +197,59 @@ impl DataStore {
     /// level for a volume. If a single region is allocated in isolation this
     /// could land on the same dataset as one of the existing volume's regions.
     ///
+    /// For allocating for snapshot volumes, it's important to take into account
+    /// `region_snapshot`s that may be used as some of the targets in the region
+    /// set, representing read-only downstairs served out of a ZFS snapshot
+    /// instead of a dataset.
+    ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
     pub async fn arbitrary_region_allocate(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
-        disk_source: &params::DiskSource,
-        size: external::ByteCount,
+        region_for: RegionAllocationFor,
+        region_parameters: RegionAllocationParameters<'_>,
         allocation_strategy: &RegionAllocationStrategy,
         num_regions_required: usize,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        let block_size =
-            self.get_block_size_from_disk_source(opctx, &disk_source).await?;
-        let (blocks_per_extent, extent_count) =
-            Self::get_crucible_allocation(&block_size, size);
+        let (volume_id, maybe_snapshot_id) = match region_for {
+            RegionAllocationFor::DiskVolume { volume_id } => (volume_id, None),
 
-        self.arbitrary_region_allocate_direct(
-            opctx,
-            volume_id,
-            u64::from(block_size.to_bytes()),
-            blocks_per_extent,
-            extent_count,
-            allocation_strategy,
-            num_regions_required,
-        )
-        .await
-    }
+            RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id } => {
+                (volume_id, Some(snapshot_id))
+            }
+        };
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn arbitrary_region_allocate_direct(
-        &self,
-        opctx: &OpContext,
-        volume_id: Uuid,
-        block_size: u64,
-        blocks_per_extent: u64,
-        extent_count: u64,
-        allocation_strategy: &RegionAllocationStrategy,
-        num_regions_required: usize,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        let (block_size, blocks_per_extent, extent_count) =
+            match region_parameters {
+                RegionAllocationParameters::FromDiskSource {
+                    disk_source,
+                    size,
+                } => {
+                    let block_size = self
+                        .get_block_size_from_disk_source(opctx, &disk_source)
+                        .await?;
+
+                    let (blocks_per_extent, extent_count) =
+                        Self::get_crucible_allocation(&block_size, size);
+
+                    (
+                        u64::from(block_size.to_bytes()),
+                        blocks_per_extent,
+                        extent_count,
+                    )
+                }
+
+                RegionAllocationParameters::FromRaw {
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
+                } => (block_size, blocks_per_extent, extent_count),
+            };
+
         let query = crate::db::queries::region_allocation::allocation_query(
             volume_id,
+            maybe_snapshot_id,
             block_size,
             blocks_per_extent,
             extent_count,
@@ -234,6 +268,7 @@ impl DataStore {
             self.log,
             "Allocated regions for volume";
             "volume_id" => %volume_id,
+            "maybe_snapshot_id" => ?maybe_snapshot_id,
             "datasets_and_regions" => ?dataset_and_regions,
         );
 
