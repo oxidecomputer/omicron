@@ -6,6 +6,7 @@
 
 use crate::Sled;
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use cockroach_admin_client::types::NodeDecommission;
 use cockroach_admin_client::types::NodeId;
@@ -27,6 +28,7 @@ use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -186,25 +188,23 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
 // Helper trait that is implemented by `Resolver`, but allows unit tests to
 // inject a fake resolver that points to a mock server.
 pub(crate) trait CleanupResolver {
-    async fn resolve_cockroach_admin_address(
+    async fn resolve_cockroach_admin_addresses(
         &self,
-    ) -> anyhow::Result<SocketAddr>;
+    ) -> anyhow::Result<impl Iterator<Item = SocketAddr>>;
 }
 
 impl CleanupResolver for Resolver {
-    async fn resolve_cockroach_admin_address(
+    async fn resolve_cockroach_admin_addresses(
         &self,
-    ) -> anyhow::Result<SocketAddr> {
-        let crdb_ip = self
-            .lookup_ipv6(ServiceName::Cockroach)
+    ) -> anyhow::Result<impl Iterator<Item = SocketAddr>> {
+        let crdb_ips = self
+            .lookup_all_ipv6(ServiceName::Cockroach)
             .await
-            .context("failed to resolve cockroach IP in internal DNS")?;
-        Ok(SocketAddr::V6(SocketAddrV6::new(
-            crdb_ip,
-            COCKROACH_ADMIN_PORT,
-            0,
-            0,
-        )))
+            .context("failed to resolve cockroach IPs in internal DNS")?;
+        let ip_to_admin_addr = |ip| {
+            SocketAddr::V6(SocketAddrV6::new(ip, COCKROACH_ADMIN_PORT, 0, 0))
+        };
+        Ok(crdb_ips.into_iter().map(ip_to_admin_addr))
     }
 }
 
@@ -248,51 +248,64 @@ async fn decommission_cockroachdb_node<R: CleanupResolver>(
     };
 
     // To decommission a CRDB node, we need to talk to one of the still-running
-    // nodes; look one up in DNS and construct a client. We'll just do a DNS
-    // lookup and take the first result; this might fail (e.g., if DNS still has
-    // an entry for the expunged zone we're trying to decommission!), but we're
-    // running from an RPW so any failure will be retried soon.
+    // nodes; look them up in DNS try them all in order. (It would probably be
+    // fine to try them all concurrently, but this isn't a very common
+    // operation, so keeping it simple seems fine.)
     //
     // TODO-cleanup: Replace this with a qorb-based connection pool once it's
     // ready.
-    //
-    // TODO-john loop through all crdbs, not just the first one!
-    let admin_addr = resolver.resolve_cockroach_admin_address().await?;
-    let admin_url = format!("http://{admin_addr}");
-    let log = log.new(slog::o!("admin_url" => admin_url.clone()));
-    let client = cockroach_admin_client::Client::new(&admin_url, log.clone());
+    let admin_addrs = resolver.resolve_cockroach_admin_addresses().await?;
 
-    let body = NodeId { node_id: node_id.clone() };
-    let NodeDecommission {
-        is_decommissioning,
-        is_draining,
-        is_live,
-        membership,
-        node_id: _,
-        notes,
-        replicas,
-    } = client
-        .node_decommission(&body)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to decommission cockroach zone {zone_id} \
-                (node id {node_id})"
-            )
-        })?
-        .into_inner();
+    let mut num_admin_addrs_tried = 0;
+    for admin_addr in admin_addrs {
+        let admin_url = format!("http://{admin_addr}");
+        let log = log.new(slog::o!("admin_url" => admin_url.clone()));
+        let client =
+            cockroach_admin_client::Client::new(&admin_url, log.clone());
 
-    info!(
-        log, "successfully sent cockroach decommission request";
-        "is_decommissioning" => is_decommissioning,
-        "is_draining" => is_draining,
-        "is_live" => is_live,
-        "membership" => ?membership,
-        "notes" => ?notes,
-        "replicas" => replicas,
+        let body = NodeId { node_id: node_id.clone() };
+        match client
+            .node_decommission(&body)
+            .await
+            .map(|response| response.into_inner())
+        {
+            Ok(NodeDecommission {
+                is_decommissioning,
+                is_draining,
+                is_live,
+                membership,
+                node_id: _,
+                notes,
+                replicas,
+            }) => {
+                info!(
+                    log, "successfully sent cockroach decommission request";
+                    "is_decommissioning" => is_decommissioning,
+                    "is_draining" => is_draining,
+                    "is_live" => is_live,
+                    "membership" => ?membership,
+                    "notes" => ?notes,
+                    "replicas" => replicas,
+                );
+
+                return Ok(());
+            }
+
+            Err(err) => {
+                warn!(
+                    log, "failed sending decommission request \
+                          (will try other servers)";
+                    "err" => InlineErrorChain::new(&err),
+                );
+                num_admin_addrs_tried += 1;
+            }
+        }
+    }
+
+    bail!(
+        "failed to decommission cockroach zone {zone_id} (node {node_id}): \
+         failed to contact {num_admin_addrs_tried} admin servers"
     );
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -584,15 +597,15 @@ mod test {
         let mut mock_admin = httptest::Server::run();
 
         // Create our fake resolver that will point to our mock server.
-        struct FixedResolver(SocketAddr);
+        struct FixedResolver(Vec<SocketAddr>);
         impl CleanupResolver for FixedResolver {
-            async fn resolve_cockroach_admin_address(
+            async fn resolve_cockroach_admin_addresses(
                 &self,
-            ) -> anyhow::Result<SocketAddr> {
-                Ok(self.0)
+            ) -> anyhow::Result<impl Iterator<Item = SocketAddr>> {
+                Ok(self.0.clone().into_iter())
             }
         }
-        let fake_resolver = FixedResolver(mock_admin.addr());
+        let fake_resolver = FixedResolver(vec![mock_admin.addr()]);
 
         // We haven't yet inserted a mapping from zone ID to cockroach node ID
         // in the db, so trying to clean up the zone should log a warning but
@@ -622,23 +635,29 @@ mod test {
 
         // Cleaning up the zone should now contact the mock-admin server and
         // attempt to decommission it.
-        mock_admin.expect(
-            Expectation::matching(all_of![
-                request::method_path("POST", "/node/decommission"),
-                request::body(json_decoded(move |n: &NodeId| {
-                    n.node_id == crdb_node_id
-                }))
-            ])
-            .respond_with(json_encoded(NodeDecommission {
-                is_decommissioning: true,
-                is_draining: true,
-                is_live: false,
-                membership: NodeMembership::Decommissioning,
-                node_id: crdb_node_id.to_string(),
-                notes: vec![],
-                replicas: 0,
-            })),
-        );
+        let add_decommission_expecation =
+            move |mock_server: &mut httptest::Server| {
+                mock_server.expect(
+                    Expectation::matching(all_of![
+                        request::method_path("POST", "/node/decommission"),
+                        request::body(json_decoded(move |n: &NodeId| {
+                            n.node_id == crdb_node_id
+                        }))
+                    ])
+                    .respond_with(json_encoded(
+                        NodeDecommission {
+                            is_decommissioning: true,
+                            is_draining: true,
+                            is_live: false,
+                            membership: NodeMembership::Decommissioning,
+                            node_id: crdb_node_id.to_string(),
+                            notes: vec![],
+                            replicas: 0,
+                        },
+                    )),
+                );
+            };
+        add_decommission_expecation(&mut mock_admin);
         clean_up_expunged_zones(
             &opctx,
             datastore,
@@ -647,6 +666,67 @@ mod test {
         )
         .await
         .expect("decommissioned test node");
+        mock_admin.verify_and_clear();
+
+        // If we have multiple cockroach-admin servers, and the first N of them
+        // don't respond successfully, we should keep trying until we find one
+        // that does (or they all fail). We'll start with the "all fail" case.
+        let mut mock_bad1 = httptest::Server::run();
+        let mut mock_bad2 = httptest::Server::run();
+        let add_decommission_failure_expecation =
+            move |mock_server: &mut httptest::Server| {
+                mock_server.expect(
+                    Expectation::matching(all_of![
+                        request::method_path("POST", "/node/decommission"),
+                        request::body(json_decoded(move |n: &NodeId| {
+                            n.node_id == crdb_node_id
+                        }))
+                    ])
+                    .respond_with(status_code(503)),
+                );
+            };
+        add_decommission_failure_expecation(&mut mock_bad1);
+        add_decommission_failure_expecation(&mut mock_bad2);
+        let mut fake_resolver =
+            FixedResolver(vec![mock_bad1.addr(), mock_bad2.addr()]);
+        let mut err = clean_up_expunged_zones(
+            &opctx,
+            datastore,
+            &fake_resolver,
+            iter::once((any_sled_id, &crdb_zone)),
+        )
+        .await
+        .expect_err("no successful response should result in failure");
+        assert_eq!(err.len(), 1);
+        let err = err.pop().unwrap();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "failed to decommission cockroach zone {} \
+                 (node {crdb_node_id}): failed to contact 2 admin servers",
+                crdb_zone.id
+            )
+        );
+        mock_bad1.verify_and_clear();
+        mock_bad2.verify_and_clear();
+        mock_admin.verify_and_clear();
+
+        // Now we try again, but put the good server at the end of the list; we
+        // should contact the two bad servers, but then succeed on the good one.
+        add_decommission_failure_expecation(&mut mock_bad1);
+        add_decommission_failure_expecation(&mut mock_bad2);
+        add_decommission_expecation(&mut mock_admin);
+        fake_resolver.0.push(mock_admin.addr());
+        clean_up_expunged_zones(
+            &opctx,
+            datastore,
+            &fake_resolver,
+            iter::once((any_sled_id, &crdb_zone)),
+        )
+        .await
+        .expect("decommissioned test node");
+        mock_bad1.verify_and_clear();
+        mock_bad2.verify_and_clear();
         mock_admin.verify_and_clear();
     }
 }
