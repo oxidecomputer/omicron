@@ -1328,11 +1328,10 @@ impl super::Nexus {
         if let Some(state) = state {
             let update_result = self
                 .db_datastore
-                .vmm_update_runtime(
-                    &state.propolis_id,
+                .vmm_and_migration_update_runtime(
+                    state.propolis_id,
                     &state.vmm_state.into(),
-                    // TODO(eliza): re-enable writing back migrations!
-                    // &state.migration_state,
+                    state.migration_state.as_ref(),
                 )
                 .await;
 
@@ -1341,11 +1340,11 @@ impl super::Nexus {
                          "instance_id" => %instance_id,
                          "propolis_id" => %state.propolis_id,
                          "result" => ?update_result);
-
+            let (vmm_updated, migration_updated) = update_result?;
             Ok(InstanceUpdateResult {
                 instance_updated: false,
-                vmm_updated: update_result?,
-                migration_updated: None,
+                vmm_updated,
+                migration_updated,
             })
         } else {
             // There was no instance state to write back, so --- perhaps
@@ -1524,20 +1523,24 @@ impl super::Nexus {
         instance_id: &InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
+        let migration = new_runtime_state.migration_state.as_ref();
         let propolis_id = new_runtime_state.propolis_id;
         info!(opctx.log, "received new VMM runtime state from sled agent";
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state);
+            "vmm_state" => ?new_runtime_state.vmm_state,
+            "migration_state" => ?migration);
 
-        let updated = self
+        let (vmm_updated, migration_updated) = self
             .db_datastore
-            .vmm_update_runtime(
-                &propolis_id,
+            .vmm_and_migration_update_runtime(
+                propolis_id,
                 // TODO(eliza): probably should take this by value...
                 &new_runtime_state.vmm_state.clone().into(),
+                migration,
             )
             .await?;
+        let updated = vmm_updated || migration_updated.unwrap_or(false);
         if updated {
             let (.., authz_instance) =
                 LookupPath::new(&opctx, &self.db_datastore)

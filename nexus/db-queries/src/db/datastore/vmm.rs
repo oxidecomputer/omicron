@@ -27,6 +27,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::internal::nexus::MigrationRuntimeState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use std::net::SocketAddr;
@@ -139,6 +140,49 @@ impl DataStore {
             })?;
 
         Ok(updated)
+    }
+
+    pub async fn vmm_and_migration_update_runtime(
+        &self,
+        vmm_id: Uuid,
+        new_runtime: &VmmRuntimeState,
+        migration: Option<&MigrationRuntimeState>,
+    ) -> Result<(bool, Option<bool>), Error> {
+        let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
+            vmm_id,
+            new_runtime.clone(),
+            None,
+            migration.cloned(),
+        );
+
+        // The InstanceAndVmmUpdate query handles and indicates failure to find
+        // either the VMM or the migration, so a query failure here indicates
+        // some kind of internal error and not a failed lookup.
+        let result = query
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        debug_assert_eq!(result.instance_status, None);
+
+        let vmm_updated = match result.vmm_status {
+            Some(UpdateStatus::Updated) => true,
+            Some(UpdateStatus::NotUpdatedButExists) => false,
+            None => false,
+        };
+
+        let migration_updated = if migration.is_some() {
+            Some(match result.migration_status {
+                Some(UpdateStatus::Updated) => true,
+                Some(UpdateStatus::NotUpdatedButExists) => false,
+                None => false,
+            })
+        } else {
+            debug_assert_eq!(result.migration_status, None);
+            None
+        };
+
+        Ok((vmm_updated, migration_updated))
     }
 
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
