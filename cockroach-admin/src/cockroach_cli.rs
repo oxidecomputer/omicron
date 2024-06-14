@@ -233,7 +233,7 @@ impl NodeStatus {
 // node membership, but there are only three meaningful values per
 // https://github.com/cockroachdb/cockroach/blob/0c92c710d2baadfdc5475be8d2238cf26cb152ca/pkg/kv/kvserver/liveness/livenesspb/liveness.go#L96,
 // so we'll convert into a Rust enum and leave the "unknown" case for future
-// changes the expand or reword these values.
+// changes that expand or reword these values.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum NodeMembership {

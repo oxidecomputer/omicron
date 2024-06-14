@@ -100,7 +100,7 @@ pub(crate) async fn deploy_zones(
     }
 }
 
-/// Itempontently perform any cleanup actions necessary for expunged zones.
+/// Idempontently perform any cleanup actions necessary for expunged zones.
 ///
 /// # Panics
 ///
@@ -115,7 +115,8 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
         .filter_map(|(sled_id, config)| async move {
             // It is a programmer error to call this function on a non-expunged
-            // zone.
+            // zone; 'tis better to crash than attempt to clean up a zone that
+            // isn't really expunged!
             assert_eq!(
                 config.disposition,
                 BlueprintZoneDisposition::Expunged,
@@ -186,7 +187,8 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
 }
 
 // Helper trait that is implemented by `Resolver`, but allows unit tests to
-// inject a fake resolver that points to a mock server.
+// inject a fake resolver that points to a mock server when calling
+// `decommission_cockroachdb_node()`.
 pub(crate) trait CleanupResolver {
     async fn resolve_cockroach_admin_addresses(
         &self,
