@@ -257,6 +257,7 @@ impl BackgroundTasks {
         // Background task: blueprint executor
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
             datastore.clone(),
+            resolver.clone(),
             rx_blueprint.clone(),
             nexus_id.to_string(),
         );

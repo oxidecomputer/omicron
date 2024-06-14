@@ -914,8 +914,8 @@ impl Nexus {
         *mid
     }
 
-    pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
-        self.internal_resolver.clone()
+    pub fn resolver(&self) -> &internal_dns::resolver::Resolver {
+        &self.internal_resolver
     }
 
     /// Reliable persistent workflows can request that sagas be executed by
@@ -959,16 +959,16 @@ impl Nexus {
     pub(crate) async fn dpd_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-        let resolver = self.resolver().await;
-        dpd_clients(&resolver, &self.log).await
+        let resolver = self.resolver();
+        dpd_clients(resolver, &self.log).await
     }
 
     pub(crate) async fn mg_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
-        let resolver = self.resolver().await;
+        let resolver = self.resolver();
         let mappings =
-            switch_zone_address_mappings(&resolver, &self.log).await?;
+            switch_zone_address_mappings(resolver, &self.log).await?;
         let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
             vec![];
         for (location, addr) in &mappings {

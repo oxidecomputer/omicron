@@ -70,7 +70,7 @@ impl super::Nexus {
         instance_ensure_dpd_config(
             &self.db_datastore,
             &self.log,
-            &self.resolver().await,
+            self.resolver(),
             opctx,
             &self.opctx_alloc,
             instance_id,
@@ -131,11 +131,10 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
     ) -> Result<(), Error> {
-        let resolver = self.resolver().await;
         instance_delete_dpd_config(
             &self.db_datastore,
             &self.log,
-            &resolver,
+            self.resolver(),
             opctx,
             &self.opctx_alloc,
             authz_instance,
@@ -174,7 +173,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         delete_dpd_config_by_entry(
             &self.db_datastore,
-            &self.resolver().await,
+            self.resolver(),
             &self.log,
             opctx,
             &self.opctx_alloc,
@@ -195,7 +194,7 @@ impl super::Nexus {
         probe_delete_dpd_config(
             &self.db_datastore,
             &self.log,
-            &self.resolver().await,
+            self.resolver(),
             opctx,
             &self.opctx_alloc,
             probe_id,

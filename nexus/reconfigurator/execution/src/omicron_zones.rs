@@ -28,6 +28,7 @@ use slog::info;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
 /// Idempotently ensure that the specified Omicron zones are deployed to the
@@ -103,10 +104,10 @@ pub(crate) async fn deploy_zones(
 ///
 /// Panics if any of the zones yielded by the `expunged_zones` iterator has a
 /// disposition other than `Expunged`.
-pub(crate) async fn clean_up_expunged_zones(
+pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     opctx: &OpContext,
     datastore: &DataStore,
-    resolver: &Resolver,
+    resolver: &R,
     expunged_zones: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
@@ -182,10 +183,35 @@ pub(crate) async fn clean_up_expunged_zones(
     }
 }
 
-async fn decommission_cockroachdb_node(
+// Helper trait that is implemented by `Resolver`, but allows unit tests to
+// inject a fake resolver that points to a mock server.
+pub(crate) trait CleanupResolver {
+    async fn resolve_cockroach_admin_address(
+        &self,
+    ) -> anyhow::Result<SocketAddr>;
+}
+
+impl CleanupResolver for Resolver {
+    async fn resolve_cockroach_admin_address(
+        &self,
+    ) -> anyhow::Result<SocketAddr> {
+        let crdb_ip = self
+            .lookup_ipv6(ServiceName::Cockroach)
+            .await
+            .context("failed to resolve cockroach IP in internal DNS")?;
+        Ok(SocketAddr::V6(SocketAddrV6::new(
+            crdb_ip,
+            COCKROACH_ADMIN_PORT,
+            0,
+            0,
+        )))
+    }
+}
+
+async fn decommission_cockroachdb_node<R: CleanupResolver>(
     opctx: &OpContext,
     datastore: &DataStore,
-    resolver: &Resolver,
+    resolver: &R,
     zone_id: OmicronZoneUuid,
     log: &Logger,
 ) -> anyhow::Result<()> {
@@ -204,6 +230,10 @@ async fn decommission_cockroachdb_node(
     // But if the address could be reused, that risks decommissioning a live
     // node! We'll just log a warning and require a human to figure out how to
     // clean this up.
+    //
+    // TODO-cleanup Can we decommission nodes in this state automatically? If
+    // not, can we be noisier than just a `warn!` log without failing blueprint
+    // exeuction entirely?
     let Some(node_id) =
         datastore.cockroachdb_node_id(opctx, zone_id).await.with_context(
             || format!("failed to look up node ID of cockroach zone {zone_id}"),
@@ -225,16 +255,12 @@ async fn decommission_cockroachdb_node(
     //
     // TODO-cleanup: Replace this with a qorb-based connection pool once it's
     // ready.
-    let crdb_ip = resolver
-        .lookup_ipv6(ServiceName::Cockroach)
-        .await
-        .context("failed to resolve cockroach IP in internal DNS")?;
-    let crdb_addr = format!(
-        "http://{}",
-        SocketAddrV6::new(crdb_ip, COCKROACH_ADMIN_PORT, 0, 0)
-    );
-    let log = log.new(slog::o!("crdb_addr" => crdb_addr.clone()));
-    let client = cockroach_admin_client::Client::new(&crdb_addr, log.clone());
+    //
+    // TODO-john loop through all crdbs, not just the first one!
+    let admin_addr = resolver.resolve_cockroach_admin_address().await?;
+    let admin_url = format!("http://{admin_addr}");
+    let log = log.new(slog::o!("admin_url" => admin_url.clone()));
+    let client = cockroach_admin_client::Client::new(&admin_url, log.clone());
 
     let body = NodeId { node_id: node_id.clone() };
     let NodeDecommission {
@@ -251,7 +277,7 @@ async fn decommission_cockroachdb_node(
         .with_context(|| {
             format!(
                 "failed to decommission cockroach zone {zone_id} \
-            (node id {node_id})"
+                (node id {node_id})"
             )
         })?
         .into_inner();
@@ -271,27 +297,23 @@ async fn decommission_cockroachdb_node(
 
 #[cfg(test)]
 mod test {
-    use super::deploy_zones;
+    use super::*;
     use crate::Sled;
+    use cockroach_admin_client::types::NodeMembership;
     use httptest::matchers::{all_of, json_decoded, request};
-    use httptest::responders::status_code;
+    use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
-    use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        blueprint_zone_type, BlueprintZoneType, CockroachDbPreserveDowngrade,
-        OmicronZonesConfig,
-    };
-    use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZonesConfig,
+        blueprint_zone_type, Blueprint, BlueprintTarget,
+        CockroachDbPreserveDowngrade, OmicronZonesConfig,
     };
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeMap;
-    use std::net::SocketAddr;
+    use std::iter;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -526,5 +548,105 @@ mod test {
             .expect("failed to deploy last round of zones");
         s1.verify_and_clear();
         s2.verify_and_clear();
+    }
+
+    #[nexus_test]
+    async fn test_clean_up_cockroach_zones(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        // Test setup boilerplate.
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Construct the cockroach zone we're going to try to clean up.
+        let any_sled_id = SledUuid::new_v4();
+        let crdb_zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::Expunged,
+            id: OmicronZoneUuid::new_v4(),
+            underlay_address: "::1".parse().unwrap(),
+            zone_type: BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb {
+                    address: "[::1]:0".parse().unwrap(),
+                    dataset: OmicronZoneDataset {
+                        pool_name: format!("oxp_{}", Uuid::new_v4())
+                            .parse()
+                            .unwrap(),
+                    },
+                },
+            ),
+        };
+
+        // Start a mock cockroach-admin server.
+        let mut mock_admin = httptest::Server::run();
+
+        // Create our fake resolver that will point to our mock server.
+        struct FixedResolver(SocketAddr);
+        impl CleanupResolver for FixedResolver {
+            async fn resolve_cockroach_admin_address(
+                &self,
+            ) -> anyhow::Result<SocketAddr> {
+                Ok(self.0)
+            }
+        }
+        let fake_resolver = FixedResolver(mock_admin.addr());
+
+        // We haven't yet inserted a mapping from zone ID to cockroach node ID
+        // in the db, so trying to clean up the zone should log a warning but
+        // otherwise succeed, without attempting to contact our mock admin
+        // server. (We don't have a good way to confirm the warning was logged,
+        // so we'll just check for an Ok return and no contact to mock_admin.)
+        clean_up_expunged_zones(
+            &opctx,
+            datastore,
+            &fake_resolver,
+            iter::once((any_sled_id, &crdb_zone)),
+        )
+        .await
+        .expect("unknown node ID: no cleanup");
+        mock_admin.verify_and_clear();
+
+        // Record a zone ID <-> node ID mapping.
+        let crdb_node_id = "test-node";
+        datastore
+            .set_cockroachdb_node_id(
+                &opctx,
+                crdb_zone.id,
+                crdb_node_id.to_string(),
+            )
+            .await
+            .expect("assigned node ID");
+
+        // Cleaning up the zone should now contact the mock-admin server and
+        // attempt to decommission it.
+        mock_admin.expect(
+            Expectation::matching(all_of![
+                request::method_path("POST", "/node/decommission"),
+                request::body(json_decoded(move |n: &NodeId| {
+                    n.node_id == crdb_node_id
+                }))
+            ])
+            .respond_with(json_encoded(NodeDecommission {
+                is_decommissioning: true,
+                is_draining: true,
+                is_live: false,
+                membership: NodeMembership::Decommissioning,
+                node_id: crdb_node_id.to_string(),
+                notes: vec![],
+                replicas: 0,
+            })),
+        );
+        clean_up_expunged_zones(
+            &opctx,
+            datastore,
+            &fake_resolver,
+            iter::once((any_sled_id, &crdb_zone)),
+        )
+        .await
+        .expect("decommissioned test node");
+        mock_admin.verify_and_clear();
     }
 }
