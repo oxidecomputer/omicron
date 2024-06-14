@@ -384,20 +384,6 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         out.push_identifier(vmm_dsl::id::NAME)?;
         out.push_sql(" = vmm_updated.");
         out.push_identifier(vmm_dsl::id::NAME)?;
-        out.push_sql("), ");
-
-        out.push_sql("instance_result AS (");
-        out.push_sql("SELECT instance_found.");
-        out.push_identifier(instance_dsl::id::NAME)?;
-        out.push_sql(" AS found, instance_updated.");
-        out.push_identifier(instance_dsl::id::NAME)?;
-        out.push_sql(" AS updated");
-        out.push_sql(
-            " FROM instance_found LEFT JOIN instance_updated ON instance_found.",
-        );
-        out.push_identifier(instance_dsl::id::NAME)?;
-        out.push_sql(" = instance_updated.");
-        out.push_identifier(instance_dsl::id::NAME)?;
         out.push_sql(") ");
 
         out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
