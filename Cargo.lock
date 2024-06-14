@@ -11384,9 +11384,11 @@ dependencies = [
  "slog-term",
  "strum",
  "swrite",
+ "tabled",
  "tar",
  "tokio",
  "toml 0.8.13",
+ "usdt",
 ]
 
 [[package]]
