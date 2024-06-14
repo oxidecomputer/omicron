@@ -188,6 +188,7 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
             nexus.authz.clone(),
@@ -234,6 +235,7 @@ mod test {
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
+            resolver.clone(),
             blueprint_rx,
             String::from("test-suite"),
         );
