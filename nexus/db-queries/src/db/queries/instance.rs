@@ -409,3 +409,115 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::model::Generation;
+    use crate::db::model::VmmState;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+    use chrono::Utc;
+    use omicron_common::api::internal::nexus::MigrationRole;
+    use omicron_common::api::internal::nexus::MigrationRuntimeState;
+    use omicron_common::api::internal::nexus::MigrationState;
+    use uuid::Uuid;
+
+    // These tests are a bit of a "change detector", but they're here to help
+    // with debugging too. If you change this query, it can be useful to see
+    // exactly how the output SQL has been altered.
+
+    fn mk_vmm_state() -> VmmRuntimeState {
+        VmmRuntimeState {
+            time_state_updated: Utc::now(),
+            gen: Generation::new(),
+            state: VmmState::Starting,
+        }
+    }
+
+    fn mk_migration_state() -> MigrationRuntimeState {
+        let migration_id = Uuid::nil();
+        MigrationRuntimeState {
+            migration_id,
+            state: MigrationState::Pending,
+            role: MigrationRole::Source,
+            gen: Generation::new().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    fn mk_instance_state() -> (Uuid, InstanceRuntimeState) {
+        let id = Uuid::nil();
+        let state = InstanceRuntimeState {
+            time_updated: Utc::now(),
+            gen: Generation::new(),
+            propolis_id: Some(Uuid::nil()),
+            dst_propolis_id: Some(Uuid::nil()),
+            migration_id: Some(Uuid::nil()),
+            nexus_state: nexus_db_model::InstanceState::Vmm,
+        };
+        (id, state)
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_only_vmm() {
+        let vmm_id = Uuid::nil();
+        let vmm_state = mk_vmm_state();
+
+        let query = InstanceAndVmmUpdate::new(vmm_id, vmm_state, None, None);
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_only.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_and_instance() {
+        let vmm_id = Uuid::nil();
+        let vmm_state = mk_vmm_state();
+        let instance = mk_instance_state();
+
+        let query =
+            InstanceAndVmmUpdate::new(vmm_id, vmm_state, Some(instance), None);
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_and_instance.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_and_migration() {
+        let vmm_id = Uuid::nil();
+        let vmm_state = mk_vmm_state();
+        let migration = mk_migration_state();
+
+        let query =
+            InstanceAndVmmUpdate::new(vmm_id, vmm_state, None, Some(migration));
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_and_imigration.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_instance_and_migration() {
+        let vmm_id = Uuid::nil();
+        let vmm_state = mk_vmm_state();
+        let instance = mk_instance_state();
+        let migration = mk_migration_state();
+
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            Some(instance),
+            Some(migration),
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_instance_and_migration.sql",
+        )
+        .await;
+    }
+}
