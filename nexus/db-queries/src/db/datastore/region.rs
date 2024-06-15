@@ -216,6 +216,7 @@ impl DataStore {
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         let query = crate::db::queries::region_allocation::allocation_query(
             volume_id,
+            None,
             block_size,
             blocks_per_extent,
             extent_count,
@@ -234,6 +235,76 @@ impl DataStore {
             self.log,
             "Allocated regions for volume";
             "volume_id" => %volume_id,
+            "datasets_and_regions" => ?dataset_and_regions,
+        );
+
+        Ok(dataset_and_regions)
+    }
+
+    /// Allocate new regions for a snapshot volume
+    #[allow(clippy::too_many_arguments)]
+    pub async fn arbitrary_region_allocate_for_snapshot(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+        snapshot_id: Uuid,
+        disk_source: &params::DiskSource,
+        size: external::ByteCount,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        let block_size =
+            self.get_block_size_from_disk_source(opctx, &disk_source).await?;
+        let (blocks_per_extent, extent_count) =
+            Self::get_crucible_allocation(&block_size, size);
+
+        self.arbitrary_region_allocate_for_snapshot_direct(
+            opctx,
+            volume_id,
+            snapshot_id,
+            u64::from(block_size.to_bytes()),
+            blocks_per_extent,
+            extent_count,
+            allocation_strategy,
+            num_regions_required,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn arbitrary_region_allocate_for_snapshot_direct(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+        snapshot_id: Uuid,
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        let query = crate::db::queries::region_allocation::allocation_query(
+            volume_id,
+            Some(snapshot_id),
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            allocation_strategy,
+            num_regions_required,
+        );
+
+        let conn = self.pool_connection_authorized(&opctx).await?;
+
+        let dataset_and_regions: Vec<(Dataset, Region)> =
+            query.get_results_async(&*conn).await.map_err(|e| {
+                crate::db::queries::region_allocation::from_diesel(e)
+            })?;
+
+        info!(
+            self.log,
+            "Allocated regions for snapshot volume";
+            "volume_id" => %volume_id,
+            "snapshot_id" => %snapshot_id,
             "datasets_and_regions" => ?dataset_and_regions,
         );
 
