@@ -10,9 +10,9 @@ use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
 
+pub use crate::bootstrap::params::back_compat::RackInitializeRequestV1 as SetupServiceConfigV1;
 use crate::bootstrap::params::Certificate;
 pub use crate::bootstrap::params::RackInitializeRequest as SetupServiceConfig;
-pub use crate::bootstrap::params::RackInitializeRequestV1 as SetupServiceConfigV1;
 
 impl SetupServiceConfig {
     pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, ConfigError> {
