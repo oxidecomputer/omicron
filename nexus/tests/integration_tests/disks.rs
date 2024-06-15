@@ -13,6 +13,8 @@ use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::RegionAllocationFor;
+use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
 use nexus_db_queries::db::lookup::LookupPath;
@@ -2033,11 +2035,13 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
             },
-            ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
             1,
         )
@@ -2173,11 +2177,13 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
             },
-            ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -2191,11 +2197,13 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
             },
-            ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
             REGION_REDUNDANCY_THRESHOLD + 1,
         )
@@ -2262,14 +2270,16 @@ async fn test_single_region_allocate_for_replace(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_replace.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        region_to_replace.block_size().to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: region_total_size,
             },
-            region_total_size,
             &RegionAllocationStrategy::Random { seed: None },
             one_more,
         )
@@ -2348,14 +2358,16 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let result = datastore
         .arbitrary_region_allocate(
             &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_replace.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        region_to_replace.block_size().to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: region_total_size,
             },
-            region_total_size,
             &RegionAllocationStrategy::Random { seed: None },
             one_more,
         )
@@ -2367,14 +2379,16 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_replace.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        region_to_replace.block_size().to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: region_total_size,
             },
-            region_total_size,
             &RegionAllocationStrategy::Random { seed: None },
             allocated_regions.len(),
         )

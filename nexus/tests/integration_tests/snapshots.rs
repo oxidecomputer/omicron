@@ -13,6 +13,8 @@ use nexus_config::RegionAllocationStrategy;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::RegionAllocationFor;
+use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -1524,17 +1526,21 @@ async fn test_region_allocation_for_snapshot(
     // region to be allocated.
 
     datastore
-        .arbitrary_region_allocate_for_snapshot(
+        .arbitrary_region_allocate(
             &opctx,
-            db_snapshot.volume_id,
-            snapshot.identity.id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    disk.block_size.to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: snapshot.identity.id,
             },
-            disk.size,
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        disk.block_size.to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: disk.size,
+            },
             &RegionAllocationStrategy::Random { seed: None },
             1,
         )
@@ -1575,17 +1581,21 @@ async fn test_region_allocation_for_snapshot(
     // Ensure the function is idempotent
 
     datastore
-        .arbitrary_region_allocate_for_snapshot(
+        .arbitrary_region_allocate(
             &opctx,
-            db_snapshot.volume_id,
-            snapshot.identity.id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    disk.block_size.to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: snapshot.identity.id,
             },
-            disk.size,
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        disk.block_size.to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: disk.size,
+            },
             &RegionAllocationStrategy::Random { seed: None },
             1,
         )
@@ -1601,17 +1611,21 @@ async fn test_region_allocation_for_snapshot(
     disk_test.add_zpool_with_dataset(&cptestctx).await;
 
     datastore
-        .arbitrary_region_allocate_for_snapshot(
+        .arbitrary_region_allocate(
             &opctx,
-            db_snapshot.volume_id,
-            snapshot.identity.id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    disk.block_size.to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: snapshot.identity.id,
             },
-            disk.size,
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        disk.block_size.to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: disk.size,
+            },
             &RegionAllocationStrategy::Random { seed: None },
             2,
         )
