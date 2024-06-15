@@ -33,10 +33,17 @@ pub static DNS_VPC_FW_RULE: Lazy<VpcFirewallRuleUpdate> =
         priority: VpcFirewallRulePriority(65534),
     });
 
+/// The name for the built-in VPC firewall rule for Nexus.
+pub const NEXUS_VPC_FW_RULE_NAME: &str = "nexus-inbound";
+
 /// Built-in VPC firewall rule for Nexus.
+///
+/// Note that we currently rely on this being exactly one rule to implement the
+/// Nexus allowlist. See `nexus/networking/src/firewall_rules.rs` for more
+/// details.
 pub static NEXUS_VPC_FW_RULE: Lazy<VpcFirewallRuleUpdate> =
     Lazy::new(|| VpcFirewallRuleUpdate {
-        name: "nexus-inbound".parse().unwrap(),
+        name: NEXUS_VPC_FW_RULE_NAME.parse().unwrap(),
         description:
             "allow inbound connections for console & api from anywhere"
                 .to_string(),

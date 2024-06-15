@@ -15,6 +15,7 @@ mod clippy;
 mod download;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
+mod usdt;
 
 #[cfg(target_os = "illumos")]
 mod verify_libraries;
@@ -66,6 +67,15 @@ enum Cmds {
     /// (this command is only available on illumos)
     #[cfg(not(target_os = "illumos"))]
     VirtualHardware,
+
+    /// Print USDT probes in Omicron binaries.
+    Probes {
+        /// An optional filter applied to binary names.
+        ///
+        /// This is a simple substring match. Any binary with the filter as a
+        /// substring of its name will be examined for probes.
+        filter: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -91,6 +101,7 @@ async fn main() -> Result<()> {
         Cmds::Releng | Cmds::VerifyLibraries | Cmds::VirtualHardware => {
             anyhow::bail!("this command is only available on illumos");
         }
+        Cmds::Probes { filter } => usdt::print_probes(filter),
     }
 }
 

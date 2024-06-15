@@ -54,6 +54,7 @@ mod bfd;
 mod bgp;
 mod bootstore;
 mod certificate;
+mod cockroachdb_node_id;
 mod cockroachdb_settings;
 mod console_session;
 mod dataset;

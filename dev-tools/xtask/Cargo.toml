@@ -15,6 +15,7 @@ cargo_metadata.workspace = true
 clap.workspace = true
 flate2.workspace = true
 futures.workspace = true
+fs-err.workspace = true
 macaddr.workspace = true
 md5 = "0.7.0"
 reqwest = { workspace = true, features = [ "default-tls" ] }
@@ -25,8 +26,9 @@ slog-async.workspace = true
 slog-bunyan.workspace = true
 slog-term.workspace = true
 strum.workspace = true
+swrite.workspace = true
+tabled.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
-fs-err.workspace = true
-swrite.workspace = true
+usdt.workspace = true
