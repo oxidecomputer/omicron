@@ -2980,7 +2980,7 @@ impl ServiceManager {
 
         // Part of the process to ensure bootstrap address is to set up
         // an IPv6 address within the Global Zone.
-        // This means we cannot run bootsrap setup via a service running on
+        // This means we cannot run bootstrap setup via a service running on
         // the switch zone itself.
         if let Some((bootstrap_name, bootstrap_address)) =
             bootstrap_name_and_address.as_ref()
