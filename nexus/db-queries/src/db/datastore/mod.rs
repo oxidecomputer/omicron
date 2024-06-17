@@ -115,6 +115,8 @@ use nexus_db_model::AllSchemaVersions;
 pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
+pub use region::RegionAllocationFor;
+pub use region::RegionAllocationParameters;
 pub use silo::Discoverability;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
