@@ -101,10 +101,16 @@ impl super::Nexus {
     ) -> LookupResult<(db::model::IpPool, db::model::IpPoolResource)> {
         let (authz_pool, pool) = self
             .ip_pool_lookup(opctx, pool)?
-            // TODO: This is a smell. This works because it is the permission
-            // for allocating IPs from a pool, which any authenticated user has.
-            // But what we really want to say is that any authenticated user has
-            // actual Read permission on any IP pool linked to their silo.
+            // TODO-robustness: https://github.com/oxidecomputer/omicron/issues/3995
+            // Checking CreateChild works because it is the permission for
+            // allocating IPs from a pool, which any authenticated user has.
+            // But what we really want to say is that any authenticated user
+            // has actual Read permission on any IP pool linked to their silo.
+            // Instead we are backing into this with the next line: never fail
+            // this auth check as long as you're authed, then 404 if unlinked.
+            // This is not a correctness issue per se because the logic as-is is
+            // correct. The main problem is that it is fiddly to get right and
+            // has to be done manually each time.
             .fetch_for(authz::Action::CreateChild)
             .await?;
 
