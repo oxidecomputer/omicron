@@ -21,18 +21,16 @@ pub trait Service {
 
 pub struct SmfHelper<'t> {
     running_zone: &'t RunningZone,
-    _service_name: String,
     smf_name: String,
     default_smf_name: String,
 }
 
 impl<'t> SmfHelper<'t> {
     pub fn new(running_zone: &'t RunningZone, service: &impl Service) -> Self {
-        let _service_name = service.service_name();
         let smf_name = service.smf_name();
         let default_smf_name = format!("{}:default", smf_name);
 
-        SmfHelper { running_zone, _service_name, smf_name, default_smf_name }
+        SmfHelper { running_zone, smf_name, default_smf_name }
     }
 
     pub fn setprop_default_instance<P, V>(
