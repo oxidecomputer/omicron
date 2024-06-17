@@ -283,15 +283,10 @@ impl Server {
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(10);
         const NUM_RETRIES: usize = 3;
 
-        let client = reqwest::Client::builder()
-            .connect_timeout(CLIENT_TIMEOUT)
-            .timeout(CLIENT_TIMEOUT)
-            .build()
-            .context("failed to construct reqwest Client")?;
-
         let client = wicketd_client::Client::new_with_client(
             &format!("http://{address}"),
-            client,
+            shared_client::try_timeout::<{ CLIENT_TIMEOUT.as_secs() }>()
+                .context("failed to construct reqwest Client")?,
             log,
         );
         let log = client.inner();

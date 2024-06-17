@@ -26,6 +26,7 @@ thiserror.workspace = true
 typed-rng.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+shared-client.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

@@ -35,7 +35,8 @@ pub(crate) async fn ensure_region_in_dataset(
     region: &db::model::Region,
 ) -> Result<crucible_agent_client::types::Region, Error> {
     let url = format!("http://{}", dataset.address());
-    let client = CrucibleAgentClient::new(&url);
+    let client =
+        CrucibleAgentClient::new_with_client(&url, shared_client::new());
     let Ok(extent_count) = u32::try_from(region.extent_count()) else {
         return Err(Error::internal_error(
             "Extent count out of range for a u32",
@@ -327,7 +328,10 @@ pub(super) async fn delete_crucible_regions(
     futures::stream::iter(datasets_and_regions)
         .map(|(dataset, region)| async move {
             let url = format!("http://{}", dataset.address());
-            let client = CrucibleAgentClient::new(&url);
+            let client = CrucibleAgentClient::new_with_client(
+                &url,
+                shared_client::new(),
+            );
 
             delete_crucible_region(&log, &client, region.id()).await
         })
@@ -678,7 +682,10 @@ pub(super) async fn delete_crucible_snapshots(
     futures::stream::iter(datasets_and_snapshots)
         .map(|(dataset, region_snapshot)| async move {
             let url = format!("http://{}", dataset.address());
-            let client = CrucibleAgentClient::new(&url);
+            let client = CrucibleAgentClient::new_with_client(
+                &url,
+                shared_client::new(),
+            );
 
             delete_crucible_snapshot(
                 &log,
@@ -719,7 +726,10 @@ pub(super) async fn delete_crucible_running_snapshots(
     futures::stream::iter(datasets_and_snapshots)
         .map(|(dataset, region_snapshot)| async move {
             let url = format!("http://{}", dataset.address());
-            let client = CrucibleAgentClient::new(&url);
+            let client = CrucibleAgentClient::new_with_client(
+                &url,
+                shared_client::new(),
+            );
 
             delete_crucible_running_snapshot(
                 &log,
@@ -795,7 +805,10 @@ pub(crate) async fn call_pantry_attach_for_disk(
             )))
         })?;
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        shared_client::new(),
+    );
 
     let attach_request = crucible_pantry_client::types::AttachRequest {
         volume_construction_request,
@@ -821,7 +834,10 @@ pub(crate) async fn call_pantry_detach_for_disk(
 
     info!(log, "sending detach for disk {disk_id} to endpoint {endpoint}");
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        shared_client::new(),
+    );
 
     retry_until_known_result(log, || async {
         client.detach(&disk_id.to_string()).await

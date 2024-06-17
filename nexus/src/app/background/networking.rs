@@ -21,8 +21,9 @@ pub(crate) fn build_mgd_clients(
         let port = MGD_PORT;
         let socketaddr =
             std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-        let client = mg_admin_client::Client::new(
-            format!("http://{}", socketaddr).as_str(),
+        let client = mg_admin_client::Client::new_with_client(
+            &format!("http://{}", socketaddr),
+            shared_client::new(),
             log.clone(),
         );
         clients.push((*location, client));
@@ -46,8 +47,9 @@ pub(crate) fn build_dpd_clients(
                 )),
             };
 
-            let dpd_client = dpd_client::Client::new(
+            let dpd_client = dpd_client::Client::new_with_client(
                 &format!("http://[{addr}]:{port}"),
+                shared_client::new(),
                 client_state,
             );
             (*location, dpd_client)

@@ -43,11 +43,9 @@ pub fn sled_client_from_address(
     log: &Logger,
 ) -> SledAgentClient {
     let log = log.new(o!("SledAgent" => sled_id.to_string()));
-    let dur = std::time::Duration::from_secs(60);
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()
-        .unwrap();
-    SledAgentClient::new_with_client(&format!("http://{address}"), client, log)
+    SledAgentClient::new_with_client(
+        &format!("http://{address}"),
+        shared_client::timeout::<60>(),
+        log,
+    )
 }

@@ -119,7 +119,6 @@ use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -332,15 +331,11 @@ impl ServiceInner {
         sled_address: SocketAddrV6,
         storage_config: SledAgentTypes::OmicronPhysicalDisksConfig,
     ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
         let log = self.log.new(o!("sled_address" => sled_address.to_string()));
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(SetupServiceError::HttpClient)?,
             log.clone(),
         );
 
@@ -415,15 +410,11 @@ impl ServiceInner {
         sled_address: SocketAddrV6,
         zones_config: &OmicronZonesConfig,
     ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
         let log = self.log.new(o!("sled_address" => sled_address.to_string()));
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(SetupServiceError::HttpClient)?,
             log.clone(),
         );
 
@@ -547,8 +538,9 @@ impl ServiceInner {
         for ip_addr in dns_server_ips {
             let log = log.new(o!("dns_config_addr" => ip_addr.to_string()));
             info!(log, "Configuring DNS server");
-            let dns_config_client = dns_service_client::Client::new(
+            let dns_config_client = dns_service_client::Client::new_with_client(
                 &format!("http://{}", ip_addr),
+                shared_client::new(),
                 log.clone(),
             );
 
@@ -590,16 +582,10 @@ impl ServiceInner {
         &self,
         sled_address: &SocketAddrV6,
     ) -> Result<TimeSync, SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(SetupServiceError::HttpClient)?,
             self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
@@ -693,16 +679,10 @@ impl ServiceInner {
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
-        const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
-        let client = reqwest::Client::builder()
-            .connect_timeout(CLIENT_TIMEOUT)
-            .timeout(CLIENT_TIMEOUT)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-
         let nexus_client = NexusClient::new_with_client(
             &format!("http://{}", nexus_address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(SetupServiceError::HttpClient)?,
             self.log.new(o!("component" => "NexusClient")),
         );
 
@@ -941,14 +921,10 @@ impl ServiceInner {
                 }
             })
             .expect("Should not create service plans without CockroachDb");
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(SetupServiceError::HttpClient)?,
             self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
         let initialize_db = || async {

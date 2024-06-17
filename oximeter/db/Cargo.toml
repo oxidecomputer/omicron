@@ -25,6 +25,7 @@ oximeter.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shared-client.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true

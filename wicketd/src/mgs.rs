@@ -115,13 +115,11 @@ pub fn make_mgs_client(
     // timeout?
     let endpoint = format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
     info!(log, "MGS Endpoint: {}", endpoint);
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(MGS_TIMEOUT)
-        .timeout(MGS_TIMEOUT)
-        .build()
-        .unwrap();
-
-    gateway_client::Client::new_with_client(&endpoint, client, log)
+    gateway_client::Client::new_with_client(
+        &endpoint,
+        shared_client::timeout::<{ MGS_TIMEOUT.as_secs() }>(),
+        log,
+    )
 }
 
 /// The entity responsible for interacting with MGS

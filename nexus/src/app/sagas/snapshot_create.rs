@@ -765,7 +765,8 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
         let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new_with_client(&url, shared_client::new());
 
         delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
             .await?;
@@ -1045,7 +1046,10 @@ async fn ssc_call_pantry_snapshot_for_disk(
         endpoint,
     );
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        shared_client::new(),
+    );
 
     retry_until_known_result(log, || async {
         client
@@ -1091,7 +1095,8 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
         let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new_with_client(&url, shared_client::new());
 
         delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
             .await?;
@@ -1231,7 +1236,8 @@ async fn ssc_start_running_snapshot(
     for (dataset, region) in datasets_and_regions {
         // Create a Crucible agent client
         let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new_with_client(&url, shared_client::new());
 
         info!(
             log,
@@ -1351,7 +1357,8 @@ async fn ssc_start_running_snapshot_undo(
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
         let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new_with_client(&url, shared_client::new());
 
         delete_crucible_running_snapshot(
             &log,

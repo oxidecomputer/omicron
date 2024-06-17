@@ -50,6 +50,7 @@ update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
+shared-client.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

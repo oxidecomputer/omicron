@@ -44,8 +44,9 @@ enum OximeterCommands {
 
 impl OximeterArgs {
     fn client(&self, log: &Logger) -> Client {
-        Client::new(
+        Client::new_with_client(
             &self.oximeter_url,
+            shared_client::new(),
             log.new(slog::o!("component" => "oximeter-client")),
         )
     }

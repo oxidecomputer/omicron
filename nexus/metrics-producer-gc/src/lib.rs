@@ -154,8 +154,11 @@ impl ExpiredProducers {
             let client_log =
                 opctx.log.new(o!("oximeter-collector" => info.id.to_string()));
             let address = SocketAddr::new(info.ip.ip(), *info.port);
-            let client =
-                OximeterClient::new(&format!("http://{address}"), client_log);
+            let client = OximeterClient::new_with_client(
+                &format!("http://{address}"),
+                shared_client::new(),
+                client_log,
+            );
             entry.insert(client);
         }
 

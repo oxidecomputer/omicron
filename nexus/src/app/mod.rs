@@ -152,13 +152,6 @@ pub struct Nexus {
     /// The metric producer server from which oximeter collects metric data.
     producer_server: std::sync::Mutex<Option<ProducerServer>>,
 
-    /// Reusable `reqwest::Client`, to be cloned and used with the Progenitor-
-    /// generated `Client::new_with_client`.
-    ///
-    /// (This does not need to be in an `Arc` because `reqwest::Client` uses
-    /// `Arc` internally.)
-    reqwest_client: reqwest::Client,
-
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
 
@@ -263,17 +256,19 @@ impl Nexus {
         // Currently static dpd configuration mappings are still required for
         // testing
         for (location, config) in &config.pkg.dendrite {
-            let address = config.address.ip().to_string();
+            let address = config.address.ip();
             let port = config.address.port();
-            let dpd_client = dpd_client::Client::new(
+            let dpd_client = dpd_client::Client::new_with_client(
                 &format!("http://[{address}]:{port}"),
+                shared_client::new(),
                 client_state.clone(),
             );
             dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(
+            let mg_client = mg_admin_client::Client::new_with_client(
                 &format!("http://{}", config.address),
+                shared_client::new(),
                 log.clone(),
             );
             mg_clients.insert(*location, Arc::new(mg_client));
@@ -295,10 +290,12 @@ impl Nexus {
                         .await;
                         for (location, addr) in &mappings {
                             let port = DENDRITE_PORT;
-                            let dpd_client = dpd_client::Client::new(
-                                &format!("http://[{addr}]:{port}"),
-                                client_state.clone(),
-                            );
+                            let dpd_client =
+                                dpd_client::Client::new_with_client(
+                                    &format!("http://[{addr}]:{port}"),
+                                    shared_client::new(),
+                                    client_state.clone(),
+                                );
                             dpd_clients.insert(*location, Arc::new(dpd_client));
                         }
                         break;
@@ -330,16 +327,18 @@ impl Nexus {
                         .await;
                         for (location, addr) in &mappings {
                             let port = MGD_PORT;
-                            let mgd_client = mg_admin_client::Client::new(
-                                &format!(
-                                    "http://{}",
-                                    &std::net::SocketAddr::new(
-                                        (*addr).into(),
-                                        port,
-                                    )
-                                ),
-                                log.clone(),
-                            );
+                            let mgd_client =
+                                mg_admin_client::Client::new_with_client(
+                                    &format!(
+                                        "http://{}",
+                                        &std::net::SocketAddr::new(
+                                            (*addr).into(),
+                                            port,
+                                        )
+                                    ),
+                                    shared_client::new(),
+                                    log.clone(),
+                                );
                             mg_clients.insert(*location, Arc::new(mgd_client));
                         }
                         break;
@@ -352,12 +351,6 @@ impl Nexus {
                 }
             }
         }
-
-        let reqwest_client = reqwest::ClientBuilder::new()
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
 
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
@@ -431,7 +424,6 @@ impl Nexus {
             internal_server: std::sync::Mutex::new(None),
             producer_server: std::sync::Mutex::new(None),
             populate_status,
-            reqwest_client,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
@@ -943,8 +935,9 @@ impl Nexus {
             let port = MGD_PORT;
             let socketaddr =
                 std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = mg_admin_client::Client::new(
-                format!("http://{}", socketaddr).as_str(),
+            let client = mg_admin_client::Client::new_with_client(
+                &format!("http://{}", socketaddr),
+                shared_client::new(),
                 self.log.clone(),
             );
             clients.push((*location, client));
@@ -986,8 +979,9 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
-            let dpd_client = dpd_client::Client::new(
+            let dpd_client = dpd_client::Client::new_with_client(
                 &format!("http://[{addr}]:{port}"),
+                shared_client::new(),
                 client_state,
             );
             (*location, dpd_client)
@@ -1029,8 +1023,9 @@ async fn map_switch_zone_addrs(
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
     for addr in switch_zone_addresses {
-        let mgs_client = MgsClient::new(
+        let mgs_client = MgsClient::new_with_client(
             &format!("http://[{}]:{}", addr, MGS_PORT),
+            shared_client::new(),
             log.new(o!("component" => "MgsClient")),
         );
 

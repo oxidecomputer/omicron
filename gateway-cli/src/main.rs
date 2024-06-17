@@ -380,6 +380,7 @@ async fn main() -> Result<()> {
     // in URLs by adding an override to resolve the given domain
     // (mgs.localhorse) to the desired address, scope-id and all.
     // Note the port must still be passed via the URL.
+    #[allow(clippy::disallowed_methods)]
     let reqwest_client = reqwest::Client::builder()
         .resolve_to_addrs("mgs.localhorse", &[args.server.into()])
         .build()?;

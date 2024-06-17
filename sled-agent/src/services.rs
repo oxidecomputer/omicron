@@ -1213,8 +1213,9 @@ impl ServiceManager {
         let dpd_clients: Vec<DpdClient> = uplinked_switch_zone_addrs
             .iter()
             .map(|addr| {
-                DpdClient::new(
+                DpdClient::new_with_client(
                     &format!("http://[{}]:{}", addr, DENDRITE_PORT),
+                    shared_client::new(),
                     dpd_client::ClientState {
                         tag: "sled-agent".to_string(),
                         log: self.inner.log.new(o!(

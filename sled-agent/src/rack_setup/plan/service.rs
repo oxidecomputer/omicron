@@ -234,15 +234,10 @@ impl Plan {
         log: &Logger,
         address: SocketAddrV6,
     ) -> Result<bool, PlanError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(PlanError::HttpClient)?;
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(PlanError::HttpClient)?,
             log.new(o!("SledAgentClient" => address.to_string())),
         );
 
@@ -257,15 +252,10 @@ impl Plan {
         log: &Logger,
         address: SocketAddrV6,
     ) -> Result<SledAgentTypes::Inventory, PlanError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(PlanError::HttpClient)?;
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", address),
-            client,
+            shared_client::try_timeout::<60>()
+                .map_err(PlanError::HttpClient)?,
             log.new(o!("SledAgentClient" => address.to_string())),
         );
 

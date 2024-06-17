@@ -16,6 +16,7 @@ omicron-common.workspace = true
 oximeter.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
+shared-client.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 tokio.workspace = true

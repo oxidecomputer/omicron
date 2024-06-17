@@ -26,6 +26,7 @@ uuid.workspace = true
 pq-sys = "*"
 
 omicron-workspace-hack.workspace = true
+shared-client.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

@@ -44,6 +44,7 @@ tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+shared-client.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

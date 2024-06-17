@@ -85,7 +85,7 @@ impl Client {
             "component" => "clickhouse-client",
             "id" => id.to_string(),
         ));
-        let client = reqwest::Client::new();
+        let client = shared_client::no_timeout();
         let url = format!("http://{}", address);
         let schema = Mutex::new(BTreeMap::new());
         Self { _id: id, log, url, client, schema }

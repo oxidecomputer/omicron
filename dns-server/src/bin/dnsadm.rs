@@ -117,7 +117,8 @@ async fn main() -> Result<()> {
     let addr = opt.address.unwrap_or_else(|| "localhost".to_string());
 
     let endpoint = format!("http://{}", addr);
-    let client = Client::new(&endpoint, log.clone());
+    let client =
+        Client::new_with_client(&endpoint, shared_client::new(), log.clone());
 
     match opt.subcommand {
         SubCommand::ListRecords => {

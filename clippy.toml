@@ -10,4 +10,27 @@ disallowed-methods = [
     # `IncompleteOnConflictExt::as_partial_index` in `nexus-db-queries`.
     # See the documentation of that method for more.
     "diesel::upsert::DecoratableTarget::filter_target",
+
+    # All of these methods build a new `reqwest::Client`, which is expensive. If
+    # you don't need a client with a custom resolver, use one of the methods in
+    # the `shared-client` crate (see clients/shared/src/lib.rs).
+    "reqwest::Client::new",
+    "reqwest::ClientBuilder::build",
+    "reqwest::get",
+    "bootstrap_agent_client::Client::new",
+    "crucible_agent_client::Client::new",
+    "crucible_pantry_client::Client::new",
+    "ddm_admin_client::Client::new",
+    "dns_service_client::Client::new",
+    "dpd_client::Client::new",
+    "gateway_client::Client::new",
+    "installinator_artifact_client::Client::new",
+    "mg_admin_client::Client::new",
+    "nexus_client::Client::new",
+    "omicron_client::Client::new",
+    "oxide_client::Client::new",
+    "oximeter_client::Client::new",
+    "propolis_client::Client::new",
+    "sled_agent_client::Client::new",
+    "wicketd_client::Client::new",
 ]

@@ -1686,7 +1686,10 @@ impl super::Nexus {
         let client_addr = self
             .propolis_addr_for_instance(opctx, instance_lookup, action)
             .await?;
-        Ok(propolis_client::Client::new(&format!("http://{}", client_addr)))
+        Ok(propolis_client::Client::new_with_client(
+            &format!("http://{}", client_addr),
+            shared_client::new(),
+        ))
     }
 
     async fn proxy_instance_serial_ws(

@@ -4,6 +4,8 @@
 
 //! Interface for making API requests to wicketd
 
+#![allow(clippy::disallowed_methods)]
+
 progenitor::generate_api!(
     spec = "../../openapi/wicketd.json",
     inner_type = slog::Logger,

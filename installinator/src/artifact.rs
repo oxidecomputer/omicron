@@ -70,19 +70,15 @@ impl ArtifactClient {
     pub(crate) fn new(addr: SocketAddr, log: &slog::Logger) -> Self {
         // NOTE: the production code path is always IPv6. IPv4 is supported for
         // testing only.
-        let endpoint = match addr {
-            SocketAddr::V4(addr) => {
-                format!("http://{}:{}", addr.ip(), addr.port())
-            }
-            SocketAddr::V6(addr) => {
-                format!("http://[{}]:{}", addr.ip(), addr.port())
-            }
-        };
+        let endpoint = format!("http://{}", addr);
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client =
-            installinator_artifact_client::Client::new(&endpoint, log.clone());
+        let client = installinator_artifact_client::Client::new_with_client(
+            &endpoint,
+            shared_client::new(),
+            log.clone(),
+        );
         Self { log, client }
     }
 

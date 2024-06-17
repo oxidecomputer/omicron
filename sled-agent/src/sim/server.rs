@@ -72,8 +72,9 @@ impl Server {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
-        let nexus_client = Arc::new(NexusClient::new(
+        let nexus_client = Arc::new(NexusClient::new_with_client(
             &format!("http://{}", config.nexus_address),
+            shared_client::new(),
             client_log,
         ));
         let sa_log = log.new(o!(
@@ -246,8 +247,9 @@ async fn handoff_to_nexus(
     config: &Config,
     request: &NexusTypes::RackInitializationRequest,
 ) -> Result<(), anyhow::Error> {
-    let nexus_client = NexusClient::new(
+    let nexus_client = NexusClient::new_with_client(
         &format!("http://{}", config.nexus_address),
+        shared_client::new(),
         log.new(o!("component" => "NexusClient")),
     );
     let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");

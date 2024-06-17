@@ -268,8 +268,9 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mgs_query_futures =
             switch_zone_addrs.iter().copied().map(|addr| async move {
-                let mgs_client = MgsClient::new(
+                let mgs_client = MgsClient::new_with_client(
                     &format!("http://[{}]:{}", addr, MGS_PORT),
+                    shared_client::new(),
                     self.log.new(o!("component" => "MgsClient")),
                 );
 
@@ -367,8 +368,9 @@ impl<'a> EarlyNetworkSetup<'a> {
             "Determining physical location of our switch zone at \
              {switch_zone_underlay_ip}",
         );
-        let mgs_client = MgsClient::new(
+        let mgs_client = MgsClient::new_with_client(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
+            shared_client::new(),
             self.log.new(o!("component" => "MgsClient")),
         );
         let switch_slot = retry_notify(
@@ -416,8 +418,9 @@ impl<'a> EarlyNetworkSetup<'a> {
              {switch_zone_underlay_ip}",
             our_ports.len(),
         );
-        let dpd = DpdClient::new(
+        let dpd = DpdClient::new_with_client(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
+            shared_client::new(),
             dpd_client::ClientState {
                 tag: OMICRON_DPD_TAG.into(),
                 log: self.log.new(o!("component" => "DpdClient")),
@@ -450,11 +453,12 @@ impl<'a> EarlyNetworkSetup<'a> {
             })?;
         }
 
-        let mgd = MgdClient::new(
+        let mgd = MgdClient::new_with_client(
             &format!(
                 "http://{}",
                 &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
             ),
+            shared_client::new(),
             self.log.clone(),
         );
 

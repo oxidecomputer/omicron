@@ -357,7 +357,7 @@ async fn download_prebuilt(
         commit,
         path.file_name().unwrap(),
     );
-    let response = reqwest::Client::new()
+    let response = shared_client::new()
         .get(&url)
         .send()
         .await

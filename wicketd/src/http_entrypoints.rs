@@ -430,8 +430,9 @@ async fn get_rack_setup_state(
         .bootstrap_agent_addr()
         .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
 
-    let client = bootstrap_agent_client::Client::new(
+    let client = bootstrap_agent_client::Client::new_with_client(
         &format!("http://{}", sled_agent_addr),
+        shared_client::new(),
         ctx.log.new(slog::o!("component" => "bootstrap client")),
     );
 
@@ -492,8 +493,9 @@ async fn post_run_rack_setup(
         "Sending RSS initialize request to {}",
         sled_agent_addr
     );
-    let client = bootstrap_agent_client::Client::new(
+    let client = bootstrap_agent_client::Client::new_with_client(
         &format!("http://{}", sled_agent_addr),
+        shared_client::new(),
         ctx.log.new(slog::o!("component" => "bootstrap client")),
     );
 
@@ -539,8 +541,9 @@ async fn post_run_rack_reset(
         .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
 
     slog::info!(ctx.log, "Sending RSS reset request to {}", sled_agent_addr);
-    let client = bootstrap_agent_client::Client::new(
+    let client = bootstrap_agent_client::Client::new_with_client(
         &format!("http://{}", sled_agent_addr),
+        shared_client::new(),
         ctx.log.new(slog::o!("component" => "bootstrap client")),
     );
 

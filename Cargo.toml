@@ -3,6 +3,8 @@ members = [
     "api_identity",
     "bootstore",
     "certificates",
+    # Adding a new Progenitor-generated client? Please update
+    # `disallowed-methods` in clippy.toml.
     "clients/bootstrap-agent-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -12,6 +14,7 @@ members = [
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
+    "clients/shared",
     "clients/sled-agent-client",
     "clients/wicketd-client",
     "common",
@@ -94,6 +97,7 @@ default-members = [
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
+    "clients/shared",
     "clients/sled-agent-client",
     "clients/wicketd-client",
     "common",
@@ -418,6 +422,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "3.7.0"
 sha2 = "0.10.8"
 sha3 = "0.10.8"
+shared-client = { path = "clients/shared" }
 shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }

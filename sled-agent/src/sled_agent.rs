@@ -1211,8 +1211,9 @@ pub async fn sled_add(
         .map(|ip| {
             let log = log.clone();
             async move {
-                let client = bootstrap_agent_client::Client::new(
+                let client = bootstrap_agent_client::Client::new_with_client(
                     &format!("http://[{ip}]"),
+                    shared_client::new(),
                     log,
                 );
                 let result = client.baseboard_get().await;

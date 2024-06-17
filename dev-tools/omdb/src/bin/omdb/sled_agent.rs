@@ -76,8 +76,11 @@ impl SledAgentArgs {
                 OMDB_SLED_AGENT_URL"
             );
         };
-        let client =
-            sled_agent_client::Client::new(sled_agent_url, log.clone());
+        let client = sled_agent_client::Client::new_with_client(
+            sled_agent_url,
+            shared_client::new(),
+            log.clone(),
+        );
 
         match &self.command {
             SledAgentCommands::Zones(ZoneCommands::List) => {

@@ -6,6 +6,8 @@
 
 //! Interface for API requests to an Oximeter metric collection server
 
+#![allow(clippy::disallowed_methods)]
+
 omicron_common::generate_logging_api!("../../openapi/oximeter.json");
 
 impl omicron_common::api::external::ClientError for types::Error {

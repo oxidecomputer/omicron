@@ -82,7 +82,11 @@ impl MgsArgs {
             }
         };
         eprintln!("note: using MGS URL {}", &mgs_url);
-        Ok(gateway_client::Client::new(&mgs_url, log.clone()))
+        Ok(gateway_client::Client::new_with_client(
+            &mgs_url,
+            shared_client::new(),
+            log.clone(),
+        ))
     }
 
     pub(crate) async fn run_cmd(

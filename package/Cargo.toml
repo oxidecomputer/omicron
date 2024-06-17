@@ -23,6 +23,7 @@ reqwest = { workspace = true, features = [ "rustls-tls" ] }
 ring.workspace = true
 semver.workspace = true
 serde.workspace = true
+shared-client.workspace = true
 sled-hardware.workspace = true
 slog.workspace = true
 slog-async.workspace = true

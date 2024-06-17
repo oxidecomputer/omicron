@@ -260,8 +260,9 @@ impl Oximeter {
                     0,
                 ))
             };
-            let client = nexus_client::Client::new(
+            let client = nexus_client::Client::new_with_client(
                 &format!("http://{nexus_address}"),
+                shared_client::new(),
                 log.clone(),
             );
             client.cpapi_collectors_post(&our_info).await.map_err(|e| {
@@ -337,7 +338,7 @@ impl Oximeter {
         info!(log, "started oximeter standalone server");
 
         // Notify the standalone nexus.
-        let client = reqwest::Client::new();
+        let client = shared_client::no_timeout();
         let notify_nexus = || async {
             debug!(log, "contacting nexus");
             client

@@ -152,7 +152,7 @@ async fn collection_task(
     outbox: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
 ) {
     let mut log = orig_log.new(o!("address" => producer.address));
-    let client = reqwest::Client::new();
+    let client = shared_client::no_timeout();
     let mut collection_timer = interval(producer.interval);
     collection_timer.tick().await; // completes immediately
     debug!(
@@ -758,7 +758,11 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
         let nexus_addr =
             resolve_nexus_with_backoff(&agent.log, &resolver).await;
         let url = format!("http://{}", nexus_addr);
-        let client = nexus_client::Client::new(&url, agent.log.clone());
+        let client = nexus_client::Client::new_with_client(
+            &url,
+            shared_client::new(),
+            agent.log.clone(),
+        );
         let mut stream = client.cpapi_assigned_producers_list_stream(
             &agent.id,
             // This is a _total_ limit, not a page size, so `None` means "get

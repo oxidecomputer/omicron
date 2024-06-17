@@ -748,6 +748,11 @@ impl super::Nexus {
                 // introduce attack surface to download it each time it was
                 // required.
                 let dur = std::time::Duration::from_secs(5);
+
+                // `ClientBuilder::build` is permitted here because we are using
+                // a custom resolver. Silo creation is not a hot path, so we are
+                // less concerned about reusing this client.
+                #[allow(clippy::disallowed_methods)]
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)

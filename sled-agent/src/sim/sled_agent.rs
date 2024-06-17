@@ -785,7 +785,10 @@ impl SledAgent {
         })?
         .start();
         let addr = srv.local_addr();
-        let client = propolis_client::Client::new(&format!("http://{}", addr));
+        let client = propolis_client::Client::new_with_client(
+            &format!("http://{}", addr),
+            shared_client::new(),
+        );
         *mock_lock = Some((srv, client));
         Ok(addr)
     }

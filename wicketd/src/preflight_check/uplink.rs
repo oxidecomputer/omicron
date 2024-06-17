@@ -75,8 +75,9 @@ pub(super) async fn run_local_uplink_preflight_check(
     event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: &Logger,
 ) {
-    let dpd_client = DpdClient::new(
+    let dpd_client = DpdClient::new_with_client(
         &format!("http://[::1]:{DENDRITE_PORT}"),
+        shared_client::new(),
         DpdClientState {
             tag: WICKETD_TAG.to_string(),
             log: log.new(o!("component" => "DpdClient")),

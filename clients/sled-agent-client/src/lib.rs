@@ -4,6 +4,8 @@
 
 //! Interface for making API requests to a Sled Agent
 
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Context;
 use async_trait::async_trait;
 use omicron_common::api::internal::shared::NetworkInterface;

@@ -47,6 +47,7 @@ tokio-util.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+shared-client.workspace = true
 
 [features]
 omicron-dev = ["omicron-test-utils/seed-gen"]

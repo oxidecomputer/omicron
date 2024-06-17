@@ -1426,8 +1426,9 @@ fn build_sled_agent_clients(
             .map(|(location, addr)| {
                 // build sled agent address from switch zone address
                 let addr = get_sled_address(Ipv6Subnet::new(*addr));
-                let client = sled_agent_client::Client::new(
+                let client = sled_agent_client::Client::new_with_client(
                     &format!("http://{}", addr),
+                    shared_client::new(),
                     log.clone(),
                 );
                 (*location, client)

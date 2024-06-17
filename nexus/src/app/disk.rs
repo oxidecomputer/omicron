@@ -490,7 +490,7 @@ impl super::Nexus {
 
             let client = crucible_pantry_client::Client::new_with_client(
                 &format!("http://{}", endpoint),
-                self.reqwest_client.clone(),
+                shared_client::new(),
             );
             let request = crucible_pantry_client::types::BulkWriteRequest {
                 offset: param.offset,

@@ -4,6 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
+#![allow(clippy::disallowed_methods)]
 #![allow(clippy::redundant_closure_call)]
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::match_single_binding)]

@@ -150,8 +150,9 @@ impl TransientServer {
         log: &slog::Logger,
         dns_config: &dns_service_client::types::DnsConfigParams,
     ) -> Result<(), anyhow::Error> {
-        let dns_config_client = dns_service_client::Client::new(
+        let dns_config_client = dns_service_client::Client::new_with_client(
             &format!("http://{}", self.dropshot_server.local_addr()),
+            shared_client::new(),
             log.clone(),
         );
         dns_config_client

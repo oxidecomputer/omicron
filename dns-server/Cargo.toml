@@ -19,6 +19,7 @@ pretty-hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shared-client.workspace = true
 sled.workspace = true
 slog.workspace = true
 slog-term.workspace = true

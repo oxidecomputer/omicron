@@ -318,9 +318,7 @@ async fn main() -> anyhow::Result<()> {
     // We'll build one manually first, because the default uses quite a low
     // timeout, and some operations around creating or transferring bundles can
     // take a bit.
-    let client = reqwest::ClientBuilder::new()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
+    let client = shared_client::try_timeout::<300>()
         .context("failed to build client")?;
     let client = Client::new_with_client(&addr, client, log);
     match args.cmd {

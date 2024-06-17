@@ -265,15 +265,9 @@ impl BootstrapAgentHandleReceiver {
                             "target_sled" => %bootstrap_addr,
                         );
 
-                        let dur = std::time::Duration::from_secs(60);
-                        let client = reqwest::ClientBuilder::new()
-                            .connect_timeout(dur)
-                            .timeout(dur)
-                            .build()
-                            .map_err(|e| e.to_string())?;
                         let client = BootstrapAgentClient::new_with_client(
                             &format!("http://{}", bootstrap_addr),
-                            client,
+                            shared_client::try_timeout::<60>().map_err(|e| e.to_string())?,
                             log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
                         );
                         client.sled_reset().await.map_err(|e| e.to_string())?;

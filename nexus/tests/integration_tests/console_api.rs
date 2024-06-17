@@ -462,16 +462,13 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to 401 on unauthed request");
 
     // That's true even if we use spoof authentication.
-    let reqwest_builder = reqwest::ClientBuilder::new();
     let base_url = format!(
         "http://{}:{}",
         testctx.bind_address.ip(),
         testctx.bind_address.port()
     );
     assert!(
-        omicron_test_utils::test_spoof_works(reqwest_builder, &base_url)
-            .await
-            .unwrap(),
+        omicron_test_utils::test_spoof_works(&base_url).await.unwrap(),
         "unexpectedly failed to use spoof authn from test suite"
     );
 

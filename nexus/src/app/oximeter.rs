@@ -333,8 +333,11 @@ fn build_oximeter_client(
     address: SocketAddr,
 ) -> OximeterClient {
     let client_log = log.new(o!("oximeter-collector" => id.to_string()));
-    let client =
-        OximeterClient::new(&format!("http://{}", address), client_log);
+    let client = OximeterClient::new_with_client(
+        &format!("http://{}", address),
+        shared_client::new(),
+        client_log,
+    );
     info!(
         log,
         "registered oximeter collector client";

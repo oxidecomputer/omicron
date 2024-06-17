@@ -298,7 +298,11 @@ impl NexusArgs {
             }
         };
         eprintln!("note: using Nexus URL {}", &nexus_url);
-        let client = nexus_client::Client::new(&nexus_url, log.clone());
+        let client = nexus_client::Client::new_with_client(
+            &nexus_url,
+            shared_client::new(),
+            log.clone(),
+        );
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {

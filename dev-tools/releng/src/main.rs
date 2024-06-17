@@ -8,7 +8,6 @@ mod job;
 mod tuf;
 
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::bail;
@@ -231,12 +230,6 @@ async fn main() -> Result<()> {
     )?);
     let opte_version =
         fs::read_to_string(WORKSPACE_DIR.join("tools/opte_version")).await?;
-
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(15))
-        .build()
-        .context("failed to build reqwest client")?;
 
     // PREFLIGHT ==============================================================
     let mut preflight_ok = true;
@@ -566,7 +559,6 @@ async fn main() -> Result<()> {
             format!("hubris-{}", name),
             hubris::fetch_hubris_artifacts(
                 base_url,
-                client.clone(),
                 WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
                 args.output_dir.join(format!("hubris-{}", name)),
             ),

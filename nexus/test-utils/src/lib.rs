@@ -707,8 +707,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .expect("Must start internal DNS server first")
             .dropshot_server
             .local_addr();
-        let dns_config_client = dns_service_client::Client::new(
+        let dns_config_client = dns_service_client::Client::new_with_client(
             &format!("http://{}", internal_dns_address),
+            shared_client::new(),
             log.clone(),
         );
 
@@ -924,8 +925,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let Some(sled_agent) = field else {
             panic!("expected sled agent has not been created");
         };
-        let client = sled_agent_client::Client::new(
+        let client = sled_agent_client::Client::new_with_client(
             &format!("http://{}", sled_agent.http_server.local_addr()),
+            shared_client::new(),
             self.logctx.log.clone(),
         );
         client

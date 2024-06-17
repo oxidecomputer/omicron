@@ -1431,12 +1431,12 @@ impl InstanceRunner {
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(self.log, "Propolis SMF service is online");
 
-        // We use a custom client builder here because the default progenitor
-        // one has a timeout of 15s but we want to be able to wait indefinitely.
-        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        // Most uses of `reqwest::Client` throughout Sled Agent have explicit
+        // timeouts, but when talking with propolis we want to be able to wait
+        // indefinitely.
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", &self.propolis_addr),
-            reqwest_client,
+            shared_client::no_timeout(),
         ));
 
         // Although the instance is online, the HTTP server may not be running

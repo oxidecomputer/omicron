@@ -160,8 +160,7 @@ impl WicketdManager {
         let addr = self.wicketd_addr;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let update_client =
-                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let update_client = create_wicketd_client(&log, addr);
             let params = StartUpdateParams {
                 targets: vec![component_id.into()],
                 options,
@@ -193,8 +192,7 @@ impl WicketdManager {
         let addr = self.wicketd_addr;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let update_client =
-                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let update_client = create_wicketd_client(&log, addr);
             let sp: SpIdentifier = component_id.into();
             let response = match update_client
                 .post_abort_update(&sp.type_, sp.slot, &options)
@@ -225,8 +223,7 @@ impl WicketdManager {
         let addr = self.wicketd_addr;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let update_client =
-                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let update_client = create_wicketd_client(&log, addr);
             let params = ClearUpdateStateParams {
                 targets: vec![component_id.into()],
                 options,
@@ -261,7 +258,7 @@ impl WicketdManager {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let sp: SpIdentifier = component_id.into();
             let res =
                 client.post_ignition_command(&sp.type_, sp.slot, command).await;
@@ -286,7 +283,7 @@ impl WicketdManager {
         let addr = self.wicketd_addr;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let response = match client.post_run_rack_setup().await {
                 Ok(_) => Ok(()),
                 Err(error) => Err(error.to_string()),
@@ -304,7 +301,7 @@ impl WicketdManager {
         let addr = self.wicketd_addr;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let response = match client.post_run_rack_reset().await {
                 Ok(_) => Ok(()),
                 Err(error) => Err(error.to_string()),
@@ -322,7 +319,7 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -348,7 +345,7 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -403,7 +400,7 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -436,7 +433,7 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
@@ -473,7 +470,7 @@ impl WicketdManager {
         let addr = self.wicketd_addr;
 
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_wicketd_client(&log, addr);
             let mut ticker = interval(WICKETD_POLL_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
@@ -521,15 +518,9 @@ impl WicketdManager {
 pub(crate) fn create_wicketd_client(
     log: &Logger,
     wicketd_addr: SocketAddrV6,
-    timeout: Duration,
 ) -> wicketd_client::Client {
-    let endpoint =
-        format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(timeout)
-        .timeout(timeout)
-        .build()
-        .unwrap();
+    let endpoint = format!("http://{wicketd_addr}");
+    let client = shared_client::timeout::<{ WICKETD_TIMEOUT.as_secs() }>();
 
     wicketd_client::Client::new_with_client(&endpoint, client, log.clone())
 }

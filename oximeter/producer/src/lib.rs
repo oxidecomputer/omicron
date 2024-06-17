@@ -428,8 +428,11 @@ async fn register_with_backoff(
     // better reporting, such as a counter or way to fetch the last registration
     // result.
     let do_register = || async {
-        let client =
-            nexus_client::Client::new(&format!("http://{}", addr), log.clone());
+        let client = nexus_client::Client::new_with_client(
+            &format!("http://{}", addr),
+            shared_client::new(),
+            log.clone(),
+        );
         client
             .cpapi_producers_post(&endpoint.into())
             .await

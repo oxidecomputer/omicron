@@ -25,7 +25,6 @@ use update_engine::{
 use wicket_common::{
     rack_update::ClearUpdateStateResponse,
     update_events::{EventReport, WicketdEngineSpec},
-    WICKETD_TIMEOUT,
 };
 use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
@@ -121,7 +120,7 @@ impl StartRackUpdateArgs {
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr);
 
         let update_ids = self.component_ids.to_component_ids()?;
         let options = CreateStartUpdateOptions {
@@ -183,7 +182,7 @@ impl AttachArgs {
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr);
 
         let update_ids = self.component_ids.to_component_ids()?;
         do_attach_to_updates(log, client, update_ids, global_opts, output).await
@@ -323,7 +322,7 @@ impl ClearArgs {
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr);
 
         let update_ids = self.component_ids.to_component_ids()?;
         let response =
@@ -413,7 +412,7 @@ pub(crate) struct DumpArgs {
 
 impl DumpArgs {
     async fn exec(self, log: Logger, wicketd_addr: SocketAddrV6) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr);
 
         let response = client
             .get_artifacts_and_event_reports()

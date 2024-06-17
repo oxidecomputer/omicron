@@ -307,16 +307,11 @@ impl<'a> Collector<'a> {
 
         for url in urls {
             let log = self.log.new(o!("SledAgent" => url.clone()));
-            let reqwest_client = reqwest::ClientBuilder::new()
-                .connect_timeout(SLED_AGENT_TIMEOUT)
-                .timeout(SLED_AGENT_TIMEOUT)
-                .build()
-                .unwrap();
-            let client = Arc::new(sled_agent_client::Client::new_with_client(
+            let client = sled_agent_client::Client::new_with_client(
                 &url,
-                reqwest_client,
+                shared_client::timeout::<{ SLED_AGENT_TIMEOUT.as_secs() }>(),
                 log,
-            ));
+            );
 
             if let Err(error) = self.collect_one_sled_agent(&client).await {
                 error!(

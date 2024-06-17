@@ -4,6 +4,8 @@
 
 //! Interface for making API requests to the Oxide control plane.
 
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::anyhow;
 use anyhow::Context;
 use futures::FutureExt;

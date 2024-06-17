@@ -71,10 +71,12 @@ async fn scan_for_peers(
             .map(|ip| {
                 let log = &log;
                 async move {
-                    let client = bootstrap_agent_client::Client::new(
-                        &format!("http://[{ip}]"),
-                        log.clone(),
-                    );
+                    let client =
+                        bootstrap_agent_client::Client::new_with_client(
+                            &format!("http://[{ip}]"),
+                            shared_client::new(),
+                            log.clone(),
+                        );
                     let result = client.baseboard_get().await;
 
                     (ip, result)

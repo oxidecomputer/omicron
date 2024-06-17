@@ -25,7 +25,6 @@ use std::io;
 use std::io::Read;
 use std::mem;
 use std::net::SocketAddrV6;
-use std::time::Duration;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -44,8 +43,6 @@ mod config_toml;
 use config_toml::TomlTemplate;
 
 use super::GlobalOpts;
-
-const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SetupArgs {
@@ -89,7 +86,7 @@ impl SetupArgs {
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr);
 
         match self {
             SetupArgs::GetConfig => {

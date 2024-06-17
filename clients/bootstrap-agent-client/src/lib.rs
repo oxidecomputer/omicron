@@ -4,6 +4,8 @@
 
 //! Interface for making API requests to a Bootstrap Agent
 
+#![allow(clippy::disallowed_methods)]
+
 progenitor::generate_api!(
     spec = "../../openapi/bootstrap-agent.json",
     inner_type = slog::Logger,

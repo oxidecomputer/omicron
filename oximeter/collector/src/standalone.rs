@@ -112,8 +112,9 @@ impl StandaloneNexus {
                         String::from("No collectors available"),
                     ));
                 };
-                let client = Client::new(
+                let client = Client::new_with_client(
                     format!("http://{}", collector_info.address).as_str(),
+                    shared_client::new(),
                     self.log.clone(),
                 );
                 client.producers_post(&info.into()).await.map_err(|e| {
@@ -136,8 +137,9 @@ impl StandaloneNexus {
                 let collector_id = existing_assignment.collector_id;
                 let collector_info =
                     inner.collectors.get(&collector_id).unwrap();
-                let client = Client::new(
+                let client = Client::new_with_client(
                     format!("http://{}", collector_info.address).as_str(),
+                    shared_client::new(),
                     self.log.clone(),
                 );
                 client.producers_post(&info.into()).await.map_err(|e| {
@@ -157,8 +159,9 @@ impl StandaloneNexus {
         // If this is being registered again, send all its assignments again.
         let mut inner = self.inner.lock().await;
         if inner.collectors.insert(info.collector_id, info).is_some() {
-            let client = Client::new(
+            let client = Client::new_with_client(
                 format!("http://{}", info.address).as_str(),
+                shared_client::new(),
                 self.log.clone(),
             );
             for producer_info in

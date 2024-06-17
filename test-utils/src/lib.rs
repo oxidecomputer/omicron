@@ -21,18 +21,13 @@ extern crate slog;
 /// Tests whether legacy spoof authentication works
 ///
 /// This is used to validate configuration in different environments.
-pub async fn test_spoof_works(
-    reqwest_builder: reqwest::ClientBuilder,
-    base_url: &str,
-) -> Result<bool, anyhow::Error> {
-    let reqwest_client =
-        reqwest_builder.build().context("creating reqwest client for login")?;
+pub async fn test_spoof_works(base_url: &str) -> Result<bool, anyhow::Error> {
     let url = format!("{}/v1/me", base_url);
     let header_value = headers::authorization::Authorization::bearer(
         "oxide-spoof-001de000-05e4-4000-8000-000000004007",
     )
     .context("building authorization header")?;
-    let response = reqwest_client
+    let response = shared_client::new()
         .get(&url)
         .header(http::header::AUTHORIZATION, header_value.0.encode())
         .send()

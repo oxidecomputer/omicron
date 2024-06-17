@@ -128,7 +128,11 @@ async fn inventory_activate(
         .map(|sockaddr| {
             let url = format!("http://{}", sockaddr);
             let log = opctx.log.new(o!("gateway_url" => url.clone()));
-            Arc::new(gateway_client::Client::new(&url, log))
+            Arc::new(gateway_client::Client::new_with_client(
+                &url,
+                shared_client::new(),
+                log,
+            ))
         })
         .collect::<Vec<_>>();
 

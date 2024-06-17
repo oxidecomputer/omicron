@@ -105,6 +105,7 @@ rustls-pemfile = { workspace = true }
 update-common.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
+shared-client.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

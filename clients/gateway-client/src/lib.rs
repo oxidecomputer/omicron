@@ -6,6 +6,8 @@
 
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
+#![allow(clippy::disallowed_methods)]
+
 pub use gateway_messages::SpComponent;
 
 // We specifically want to allow consumers, such as `wicketd`, to embed

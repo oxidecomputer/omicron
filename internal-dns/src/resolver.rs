@@ -439,8 +439,9 @@ mod test {
             .await
             .unwrap();
 
-            let config_client = dns_service_client::Client::new(
+            let config_client = dns_service_client::Client::new_with_client(
                 &format!("http://{}", dropshot_server.local_addr()),
+                shared_client::new(),
                 log.new(o!("component" => "dns_client")),
             );
 

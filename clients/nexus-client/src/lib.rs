@@ -5,6 +5,8 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 
 progenitor::generate_api!(

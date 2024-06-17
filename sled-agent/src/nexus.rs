@@ -44,6 +44,9 @@ impl NexusClientWithResolver {
         resolver: Arc<Resolver>,
         port: u16,
     ) -> Self {
+        // `ClientBuilder::build` is permitted here because we are using a
+        // custom resolver.
+        #[allow(clippy::disallowed_methods)]
         let client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone())
             .build()

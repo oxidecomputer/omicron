@@ -2345,7 +2345,8 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::Client as CrucibleAgentClient;
 
         let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new_with_client(&url, shared_client::new());
 
         let actual_region_snapshots = client
             .region_get_snapshots(&RegionId(
@@ -2500,7 +2501,8 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::Client as CrucibleAgentClient;
 
         let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new_with_client(&url, shared_client::new());
 
         let actual_region_snapshots = client
             .region_get_snapshots(&RegionId(region.id().to_string()))

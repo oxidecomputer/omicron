@@ -14,8 +14,7 @@ async fn no_spoof_here() -> Result<()> {
         .timeout(Duration::from_secs(60));
     let base_url = client_params.base_url();
     assert!(
-        !omicron_test_utils::test_spoof_works(reqwest_client, &base_url)
-            .await?,
+        !omicron_test_utils::test_spoof_works(&base_url).await?,
         "unexpectedly succeeded in using spoof authn!"
     );
     Ok(())

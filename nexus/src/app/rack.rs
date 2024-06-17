@@ -301,12 +301,13 @@ impl super::Nexus {
                 info!(log, "Using automatic external switchport discovery");
 
                 for (switch, addr) in switch_mgmt_addrs {
-                    let dpd_client = DpdClient::new(
+                    let dpd_client = DpdClient::new_with_client(
                         &format!(
                             "http://[{}]:{}",
                             addr,
                             omicron_common::address::DENDRITE_PORT
                         ),
+                        shared_client::new(),
                         dpd_client::ClientState {
                             tag: "nexus".to_string(),
                             log: log.new(o!("component" => "DpdClient")),
@@ -860,18 +861,14 @@ impl super::Nexus {
         // This timeout value is fairly arbitrary (as they usually are).  As of
         // this writing, this operation is known to take close to two minutes on
         // production hardware.
-        let dur = std::time::Duration::from_secs(300);
-        let sa_url = self.get_any_sled_agent_url(opctx).await?;
-        let reqwest_client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(|e| {
+        let reqwest_client =
+            shared_client::try_timeout::<300>().map_err(|e| {
                 Error::internal_error(&format!(
                     "failed to create reqwest client for sled agent: {}",
                     InlineErrorChain::new(&e)
                 ))
             })?;
+        let sa_url = self.get_any_sled_agent_url(opctx).await?;
         let sa = sled_agent_client::Client::new_with_client(
             &sa_url,
             reqwest_client,

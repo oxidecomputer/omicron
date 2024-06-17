@@ -4,6 +4,8 @@
 
 //! Interface for making API requests to installinator-artifactd.
 
+#![allow(clippy::disallowed_methods)]
+
 progenitor::generate_api!(
     spec = "../../openapi/installinator-artifactd.json",
     inner_type = slog::Logger,

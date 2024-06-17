@@ -21,7 +21,6 @@ use tufaceous_lib::assemble::DeserializedManifest;
 
 pub(crate) async fn fetch_hubris_artifacts(
     base_url: &'static str,
-    client: reqwest::Client,
     manifest_list: Utf8PathBuf,
     output_dir: Utf8PathBuf,
 ) -> Result<()> {
@@ -30,6 +29,8 @@ pub(crate) async fn fetch_hubris_artifacts(
             output_dir.join(format!("{}.zip", $expr))
         };
     }
+
+    let client = shared_client::new();
 
     fs::create_dir_all(&output_dir).await?;
 

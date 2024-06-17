@@ -22,6 +22,7 @@ reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 sha2.workspace = true
+shared-client.workspace = true
 shell-words.workspace = true
 slog.workspace = true
 slog-async.workspace = true

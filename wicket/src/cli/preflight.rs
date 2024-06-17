@@ -26,8 +26,6 @@ use update_engine::StepSpec;
 use wicketd_client::types::PreflightUplinkCheckOptions;
 use wicketd_client::Client;
 
-const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
-
 #[derive(Debug, Subcommand)]
 pub(crate) enum PreflightArgs {
     /// Run a preflight check on the uplink configuration to ensure connectivity
@@ -52,7 +50,7 @@ impl PreflightArgs {
         log: Logger,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr);
 
         match self {
             Self::Uplink { query_dns } => {
