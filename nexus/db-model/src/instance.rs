@@ -59,13 +59,6 @@ pub struct Instance {
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
-    /// The generation number for the updater lock. This is updated whenever the
-    /// lock is acquired or released, and is used in attempts to set the
-    /// `updater_id` field to ensure that the snapshot which indicated that the
-    /// lock was not held is still valid when setting the lock ID.
-    #[diesel(column_name = updater_gen)]
-    pub updater_gen: Generation,
-
     /// A UUID identifying the saga currently holding the update lock on this
     /// instance. If this is [`None`] the instance is not locked. Otherwise, if
     /// this is [`Some`], the instance is locked by the saga owning this UUID.
@@ -76,6 +69,13 @@ pub struct Instance {
     /// This field is guarded by the instance's `updater_gen`
     #[diesel(column_name = updater_id)]
     pub updater_id: Option<Uuid>,
+
+    /// The generation number for the updater lock. This is updated whenever the
+    /// lock is acquired or released, and is used in attempts to set the
+    /// `updater_id` field to ensure that the snapshot which indicated that the
+    /// lock was not held is still valid when setting the lock ID.
+    #[diesel(column_name = updater_gen)]
+    pub updater_gen: Generation,
 }
 
 impl Instance {
