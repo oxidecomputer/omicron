@@ -1421,7 +1421,7 @@ impl ServiceManager {
     fn zone_network_setup_install(
         gw_addr: &Ipv6Addr,
         zone: &InstalledZone,
-        static_addrs: &Vec<Ipv6Addr>,
+        static_addrs: &[Ipv6Addr],
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
         let gateway = &gw_addr.to_string();
@@ -1604,7 +1604,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![listen_addr],
+                    &[listen_addr],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1657,7 +1657,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![listen_addr],
+                    &[listen_addr],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1720,7 +1720,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![crdb_listen_ip],
+                    &[crdb_listen_ip],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, &None).await?;
@@ -1784,7 +1784,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![listen_addr],
+                    &[listen_addr],
                 )?;
 
                 let dataset_name = DatasetName::new(
@@ -1843,7 +1843,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![listen_addr],
+                    &[listen_addr],
                 )?;
 
                 let config = PropertyGroupBuilder::new("config")
@@ -1895,7 +1895,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &[*underlay_address],
                 )?;
 
                 let oximeter_config = PropertyGroupBuilder::new("config")
@@ -1936,7 +1936,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &[*underlay_address],
                 )?;
                 // Like Nexus, we need to be reachable externally via
                 // `dns_address` but we don't listen on that address
@@ -2023,7 +2023,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &[*underlay_address],
                 )?;
 
                 let is_boundary = matches!(
@@ -2116,7 +2116,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     gz_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &[*underlay_address],
                 )?;
 
                 // Internal DNS zones require a special route through
@@ -2199,7 +2199,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     &info.underlay_address,
                     &installed_zone,
-                    &vec![*underlay_address],
+                    &[*underlay_address],
                 )?;
 
                 // While Nexus will be reachable via `external_ip`, it
