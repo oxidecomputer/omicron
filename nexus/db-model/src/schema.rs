@@ -1769,6 +1769,7 @@ table! {
 table! {
     migration (id) {
         id -> Uuid,
+        instance_id -> Uuid,
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         source_state -> crate::MigrationStateEnum,

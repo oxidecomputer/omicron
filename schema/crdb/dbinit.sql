@@ -4090,6 +4090,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.migration (
     id UUID PRIMARY KEY,
 
+    /* The ID of the instance that was migrated */
+    instance_id UUID NOT NULL,
+
     /* The time this migration record was created. */
     time_created TIMESTAMPTZ NOT NULL,
 
@@ -4127,6 +4130,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.migration (
      * update.
      */
     time_target_updated TIMESTAMPTZ
+);
+
+/* Lookup migrations by instance ID */
+CREATE INDEX IF NOT EXISTS lookup_migrations_by_instance_id ON omicron.public.migration (
+    instance_id
 );
 
 /* Lookup region snapshot by snapshot id */

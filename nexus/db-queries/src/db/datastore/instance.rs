@@ -1343,7 +1343,12 @@ mod tests {
         let migration = datastore
             .migration_insert(
                 &opctx,
-                Migration::new(Uuid::new_v4(), active_vmm.id, target_vmm.id),
+                Migration::new(
+                    Uuid::new_v4(),
+                    instance_id,
+                    active_vmm.id,
+                    target_vmm.id,
+                ),
             )
             .await
             .expect("migration should be inserted successfully!");
