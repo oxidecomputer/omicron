@@ -20,10 +20,16 @@ pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 
 /// A [backend::Connector] which provides access to [PgConnection].
-pub struct DieselPgConnector {
+pub(crate) struct DieselPgConnector {
     log: Logger,
     prefix: String,
     suffix: String,
+}
+
+pub(crate) struct DieselPgConnectorArgs<'a> {
+    pub(crate) user: &'a str,
+    pub(crate) db: &'a str,
+    pub(crate) args: Option<&'a str>,
 }
 
 impl DieselPgConnector {
@@ -37,7 +43,8 @@ impl DieselPgConnector {
     /// Or, if arguments are supplied:
     ///
     /// - postgresql://{user}@{address}/{db}?{args}
-    pub fn new(log: &Logger, user: &str, db: &str, args: Option<&str>) -> Self {
+    pub(crate) fn new(log: &Logger, args: DieselPgConnectorArgs<'_>) -> Self {
+        let DieselPgConnectorArgs { user, db, args } = args;
         Self {
             log: log.clone(),
             prefix: format!("postgresql://{user}@"),

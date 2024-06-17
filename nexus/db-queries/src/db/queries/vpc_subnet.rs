@@ -437,7 +437,7 @@ mod test {
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool =
-            Arc::new(crate::db::Pool::new_qorb_single_host(&logctx.log, &cfg));
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
         let db_datastore = Arc::new(
             crate::db::DataStore::new(&log, Arc::clone(&pool), None)
                 .await

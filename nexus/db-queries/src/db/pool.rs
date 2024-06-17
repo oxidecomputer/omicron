@@ -6,7 +6,7 @@
 // TODO-design Need TLS support (the types below hardcode NoTls).
 
 use super::Config as DbConfig;
-use crate::db::pool_connection::DieselPgConnector;
+use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
 use qorb::backend;
 use qorb::policy::Policy;
@@ -32,7 +32,7 @@ pub struct Pool {
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
-// contact the pool directly.
+// contact the database without performing resolution.
 struct SingleHostResolver {
     tx: watch::Sender<AllBackends>,
 }
@@ -85,7 +85,10 @@ fn make_postgres_connector(
     let user = "root";
     let db = "omicron";
     let args = Some("sslmode=disable");
-    Arc::new(DieselPgConnector::new(log, user, db, args))
+    Arc::new(DieselPgConnector::new(
+        log,
+        DieselPgConnectorArgs { user, db, args },
+    ))
 }
 
 impl Pool {
@@ -93,7 +96,7 @@ impl Pool {
     ///
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
-    pub fn new_qorb(log: &Logger, bootstrap_dns: Vec<SocketAddr>) -> Self {
+    pub fn new(log: &Logger, bootstrap_dns: Vec<SocketAddr>) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
@@ -110,8 +113,8 @@ impl Pool {
     /// This is intended for tests that want to skip DNS resolution, relying
     /// on a single instance of the database.
     ///
-    /// In production, [Self::new_qorb] should be preferred.
-    pub fn new_qorb_single_host(log: &Logger, db_config: &DbConfig) -> Self {
+    /// In production, [Self::new] should be preferred.
+    pub fn new_single_host(log: &Logger, db_config: &DbConfig) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
@@ -126,7 +129,8 @@ impl Pool {
     /// if claims are not quickly available.
     ///
     /// This is intended for test-only usage.
-    pub fn new_qorb_single_host_failfast(
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_single_host_failfast(
         log: &Logger,
         db_config: &DbConfig,
     ) -> Self {
