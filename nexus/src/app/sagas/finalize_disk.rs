@@ -24,6 +24,7 @@ use serde::Serialize;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
+use steno::UndoActionPermanentError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -184,7 +185,7 @@ async fn sfd_set_finalizing_state(
 
 async fn sfd_set_finalizing_state_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;

@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
-use steno::UndoActionError;
+use steno::UndoActionPermanentError;
 use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -118,15 +118,17 @@ impl From<steno::SagaStateView> for SagaState {
                     },
                 ..
             } => {
-                let UndoActionError::PermanentFailure {
-                    source_error: undo_source_error,
-                } = undo_error;
-                SagaState::Stuck {
-                    error_node_name,
-                    error_info: SagaErrorInfo::from(error_source),
-                    undo_error_node_name: undo_node_name,
-                    undo_source_error,
-                }
+                // XXX-dap
+                todo!();
+                // let UndoActionPermanentError::PermanentFailure {
+                //     source_error: undo_source_error,
+                // } = undo_error;
+                // SagaState::Stuck {
+                //     error_node_name,
+                //     error_info: SagaErrorInfo::from(error_source),
+                //     undo_error_node_name: undo_node_name,
+                //     undo_source_error,
+                // }
             }
             steno::SagaStateView::Done {
                 result:

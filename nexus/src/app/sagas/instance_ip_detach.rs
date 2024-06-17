@@ -11,6 +11,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
+use anyhow::Context;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
@@ -145,7 +146,8 @@ async fn siid_begin_detach_ip_undo(
         IpAttachState::Attached,
         &new_ip,
     )
-    .await?
+    .await
+    .context("instance_ip_move_state")?
     {
         error!(log, "siid_begin_detach_ip_undo: external IP was deleted")
     }
@@ -194,6 +196,7 @@ async fn siid_nat_undo(
         target_ip,
     )
     .await
+    .context("instance_ip_add_nat")
     {
         error!(log, "siid_nat_undo: failed to notify DPD: {e}");
     }
@@ -230,6 +233,7 @@ async fn siid_update_opte_undo(
         target_ip,
     )
     .await
+    .context("instance_ip_add_opte")
     {
         error!(log, "siid_update_opte_undo: failed to notify sled-agent: {e}");
     }

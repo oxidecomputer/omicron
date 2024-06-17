@@ -10,6 +10,7 @@ use crate::app::{
     MAX_NICS_PER_INSTANCE,
 };
 use crate::external_api::params;
+use anyhow::{anyhow, Context};
 use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -29,8 +30,8 @@ use slog::warn;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use steno::ActionError;
 use steno::Node;
+use steno::{ActionError, UndoActionPermanentError};
 use steno::{DagBuilder, SagaName};
 use uuid::Uuid;
 
@@ -350,7 +351,7 @@ async fn sic_associate_ssh_keys(
 
 async fn sic_associate_ssh_keys_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params::<Params>()?;
@@ -363,7 +364,7 @@ async fn sic_associate_ssh_keys_undo(
     datastore
         .instance_ssh_keys_delete(&opctx, instance_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .context("instance_ssh_keys_delete")?;
     Ok(())
 }
 
@@ -411,7 +412,7 @@ async fn sic_create_network_interface(
 /// Delete one network interface, by interface id.
 async fn sic_create_network_interface_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let instance_id = repeat_saga_params.instance_id;
     let saga_params = repeat_saga_params.saga_params;
@@ -426,7 +427,7 @@ async fn sic_create_network_interface_undo(
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .context("instance lookup")?;
 
     let interface_deleted = match LookupPath::new(&opctx, &datastore)
         .instance_network_interface_id(interface_id)
@@ -443,10 +444,13 @@ async fn sic_create_network_interface_undo(
                     &authz_interface,
                 )
                 .await
-                .map_err(|e| e.into_external())?
+                .map_err(|e| {
+                    anyhow!(e.into_external())
+                        .context("instance_deletE_network_interface")
+                })?
         }
         Err(Error::ObjectNotFound { .. }) => false,
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(anyhow!(e).context("instance lookup").into()),
     };
 
     if !interface_deleted {
@@ -662,7 +666,7 @@ async fn sic_allocate_instance_snat_ip(
 /// Destroy an allocated SNAT IP address for the instance.
 async fn sic_allocate_instance_snat_ip_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params::<Params>()?;
@@ -671,7 +675,10 @@ async fn sic_allocate_instance_snat_ip_undo(
         &saga_params.serialized_authn,
     );
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
-    datastore.deallocate_external_ip(&opctx, ip_id).await?;
+    datastore
+        .deallocate_external_ip(&opctx, ip_id)
+        .await
+        .context("deallocate_external_ip")?;
     Ok(())
 }
 
@@ -781,7 +788,7 @@ async fn sic_allocate_instance_external_ip(
 
 async fn sic_allocate_instance_external_ip_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
@@ -808,13 +815,17 @@ async fn sic_allocate_instance_external_ip_undo(
 
     match ip_params {
         params::ExternalIpCreate::Ephemeral { .. } => {
-            datastore.deallocate_external_ip(&opctx, ip.id).await?;
+            datastore
+                .deallocate_external_ip(&opctx, ip.id)
+                .await
+                .context("deallocate_external_ip")?;
         }
         params::ExternalIpCreate::Floating { .. } => {
             let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .floating_ip_id(ip.id)
                 .lookup_for(authz::Action::Modify)
-                .await?;
+                .await
+                .context("lookup floating IP")?;
 
             datastore
                 .floating_ip_begin_detach(
@@ -823,7 +834,8 @@ async fn sic_allocate_instance_external_ip_undo(
                     repeat_saga_params.instance_id,
                     true,
                 )
-                .await?;
+                .await
+                .context("floating_ip_begin_detach")?;
 
             let n_rows = datastore
                 .external_ip_complete_op(
@@ -834,7 +846,7 @@ async fn sic_allocate_instance_external_ip_undo(
                     nexus_db_model::IpAttachState::Detached,
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .context("external_ip_complete_op")?;
 
             if n_rows != 1 {
                 error!(
@@ -857,8 +869,10 @@ async fn sic_attach_disk_to_instance(
 
 async fn sic_attach_disk_to_instance_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    Ok(ensure_instance_disk_attach_state(sagactx, false).await?)
+) -> Result<(), UndoActionPermanentError> {
+    Ok(ensure_instance_disk_attach_state(sagactx, false)
+        .await
+        .context("ensure_instance_disk_attach_state")?)
 }
 
 async fn ensure_instance_disk_attach_state(
@@ -954,7 +968,7 @@ async fn sic_create_instance_record(
 
 async fn sic_delete_instance_record(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
@@ -988,7 +1002,7 @@ async fn sic_delete_instance_record(
         Ok((.., authz_instance, db_instance)) => (authz_instance, db_instance),
         Err(err) => match err {
             Error::ObjectNotFound { .. } => return Ok(()),
-            _ => return Err(err.into()),
+            _ => return Err(anyhow!(err).context("instance lookup").into()),
         },
     };
 
@@ -1004,8 +1018,10 @@ async fn sic_delete_instance_record(
         ..db_instance.runtime_state
     };
 
-    let updated =
-        datastore.instance_update_runtime(&instance_id, &runtime_state).await?;
+    let updated = datastore
+        .instance_update_runtime(&instance_id, &runtime_state)
+        .await
+        .context("instance_update_runtime")?;
 
     if !updated {
         warn!(
@@ -1015,7 +1031,10 @@ async fn sic_delete_instance_record(
     }
 
     // Actually delete the record.
-    datastore.project_delete_instance(&opctx, &authz_instance).await?;
+    datastore
+        .project_delete_instance(&opctx, &authz_instance)
+        .await
+        .context("project_delete_instance")?;
 
     Ok(())
 }

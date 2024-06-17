@@ -13,6 +13,7 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
+use anyhow::Context;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
@@ -26,6 +27,7 @@ use std::convert::TryFrom;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
+use steno::UndoActionPermanentError;
 use uuid::Uuid;
 
 // disk create saga: input parameters
@@ -218,7 +220,7 @@ async fn sdc_create_disk_record(
 
 async fn sdc_create_disk_record_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
@@ -228,7 +230,9 @@ async fn sdc_create_disk_record_undo(
             &disk_id,
             &[DiskState::Detached, DiskState::Faulted, DiskState::Creating],
         )
-        .await?;
+        .await
+        .context("project_delete_disk_no_auth")
+        .map_err(UndoActionPermanentError::from)?;
     Ok(())
 }
 
@@ -273,7 +277,7 @@ async fn sdc_alloc_regions(
 
 async fn sdc_alloc_regions_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
@@ -285,7 +289,12 @@ async fn sdc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
-    osagactx.datastore().regions_hard_delete(log, region_ids).await?;
+    osagactx
+        .datastore()
+        .regions_hard_delete(log, region_ids)
+        .await
+        .context("regions_hard_delete")
+        .map_err(UndoActionPermanentError::from)?;
     Ok(())
 }
 
@@ -315,7 +324,7 @@ async fn sdc_account_space(
 
 async fn sdc_account_space_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -333,7 +342,7 @@ async fn sdc_account_space_undo(
             disk_created.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .context("virtual_provisioning_collection_delete_disk")?;
     Ok(())
 }
 
@@ -542,7 +551,7 @@ async fn sdc_regions_ensure(
 
 async fn sdc_regions_ensure_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
@@ -562,7 +571,8 @@ async fn sdc_regions_ensure_undo(
                 "datasets_and_regions",
             )?,
         )
-        .await;
+        .await
+        .context("delete_crucible_regions");
 
     match result {
         Err(e) => {
@@ -578,7 +588,7 @@ async fn sdc_regions_ensure_undo(
                 .disk_id(disk_id)
                 .fetch_for(authz::Action::Modify)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .context("lookup disk")?;
 
             datastore
                 .disk_update_runtime(
@@ -586,7 +596,8 @@ async fn sdc_regions_ensure_undo(
                     &authz_disk,
                     &db_disk.runtime().faulted(),
                 )
-                .await?;
+                .await
+                .context("disk_update_runtime")?;
 
             return Err(e.into());
         }
@@ -620,7 +631,7 @@ async fn sdc_create_volume_record(
 
 async fn sdc_create_volume_record_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
@@ -630,9 +641,14 @@ async fn sdc_create_volume_record_undo(
     osagactx
         .datastore()
         .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await?;
+        .await
+        .context("decrease_crucible_resource_count_and_soft_delete_volume")?;
 
-    osagactx.datastore().volume_hard_delete(volume_id).await?;
+    osagactx
+        .datastore()
+        .volume_hard_delete(volume_id)
+        .await
+        .context("volume_hard_delete")?;
 
     Ok(())
 }
@@ -758,7 +774,7 @@ async fn sdc_call_pantry_attach_for_disk(
 
 async fn sdc_call_pantry_attach_for_disk_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let log = sagactx.user_data().log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 

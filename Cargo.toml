@@ -459,7 +459,7 @@ static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.4.0"
+steno = "0.5.0-dev"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "3.0.0"
@@ -678,8 +678,8 @@ opt-level = 3
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
-#[patch.crates-io]
-#steno = { path = "../steno" }
+[patch.crates-io]
+steno = { path = "../steno-errors" }
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #propolis-mock-server = { path = "../propolis/bin/mock-server" }
