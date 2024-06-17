@@ -955,6 +955,7 @@ async fn dbinit_equals_sum_of_all_up() {
     // before applying the rest, and grab a connection from that pool. We'll use
     // it for an extra check later.
     let pool = nexus_db_queries::db::Pool::new_qorb_single_host(
+        log,
         &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
     );
     let conn_from_pool =

@@ -12,6 +12,7 @@ use diesel::Connection;
 use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
 use qorb::backend::{self, Backend, Error};
+use slog::Logger;
 
 pub type DbConnection = DTraceConnection<PgConnection>;
 
@@ -20,6 +21,7 @@ pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
 
 /// A [backend::Connector] which provides access to [PgConnection].
 pub struct DieselPgConnector {
+    log: Logger,
     prefix: String,
     suffix: String,
 }
@@ -35,8 +37,9 @@ impl DieselPgConnector {
     /// Or, if arguments are supplied:
     ///
     /// - postgresql://{user}@{address}/{db}?{args}
-    pub fn new(user: &str, db: &str, args: Option<&str>) -> Self {
+    pub fn new(log: &Logger, user: &str, db: &str, args: Option<&str>) -> Self {
         Self {
+            log: log.clone(),
             prefix: format!("postgresql://{user}@"),
             suffix: format!(
                 "/{db}{}",
@@ -70,7 +73,16 @@ impl backend::Connector for DieselPgConnector {
             Ok::<_, Error>(async_bb8_diesel::Connection::new(pg_conn))
         })
         .await
-        .expect("Task panicked establishing connection")?;
+        .expect("Task panicked establishing connection")
+        .map_err(|e| {
+            warn!(
+                self.log,
+                "Failed to make connection";
+                "error" => e.to_string(),
+                "backend" => backend.address,
+            );
+            e
+        })?;
         Ok(conn)
     }
 
@@ -78,17 +90,35 @@ impl backend::Connector for DieselPgConnector {
         &self,
         conn: &mut Self::Connection,
     ) -> Result<(), Error> {
-        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL)
-            .await
-            .map_err(|e| Error::Other(anyhow!(e)))?;
+        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL).await.map_err(
+            |e| {
+                warn!(
+                    self.log,
+                    "Failed on_acquire execution";
+                    "error" => e.to_string()
+                );
+                Error::Other(anyhow!(e))
+            },
+        )?;
         Ok(())
     }
 
     async fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Error> {
         let is_broken = conn.is_broken_async().await;
         if is_broken {
+            warn!(
+                self.log,
+                "Failed is_valid check; connection known to be broken"
+            );
             return Err(Error::Other(anyhow!("Connection broken")));
         }
-        conn.ping_async().await.map_err(|e| Error::Other(anyhow!(e)))
+        conn.ping_async().await.map_err(|e| {
+            warn!(
+                self.log,
+                "Failed is_valid check; connection failed ping";
+                "error" => e.to_string()
+            );
+            Error::Other(anyhow!(e))
+        })
     }
 }

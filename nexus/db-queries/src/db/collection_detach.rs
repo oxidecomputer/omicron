@@ -784,7 +784,7 @@ mod test {
             dev::test_setup_log("test_detach_missing_collection_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -812,7 +812,7 @@ mod test {
         let logctx = dev::test_setup_log("test_detach_missing_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -848,7 +848,7 @@ mod test {
         let logctx = dev::test_setup_log("test_detach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -888,7 +888,7 @@ mod test {
         let logctx = dev::test_setup_log("test_detach_while_already_detached");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -952,7 +952,7 @@ mod test {
         let logctx = dev::test_setup_log("test_detach_deleted_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -996,7 +996,7 @@ mod test {
         let logctx = dev::test_setup_log("test_detach_without_update_filter");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 

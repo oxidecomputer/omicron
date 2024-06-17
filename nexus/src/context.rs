@@ -254,11 +254,14 @@ impl ServerContext {
         let pool = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => {
                 info!(log, "Setting up qorb pool from a single host"; "url" => #?url);
-                db::Pool::new_qorb_single_host(&db::Config { url: url.clone() })
+                db::Pool::new_qorb_single_host(
+                    &log,
+                    &db::Config { url: url.clone() },
+                )
             }
             nexus_config::Database::FromDns => {
                 info!(log, "Setting up qorb pool from DNS"; "dns_addrs" => #?dns_addrs);
-                db::Pool::new_qorb(dns_addrs)
+                db::Pool::new_qorb(&log, dns_addrs)
             }
         };
 

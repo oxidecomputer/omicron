@@ -13,6 +13,7 @@ use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
 use qorb::resolvers::dns::{DnsResolver, DnsResolverConfig};
 use qorb::service;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -73,7 +74,9 @@ fn make_single_host_resolver(
     Box::new(SingleHostResolver::new(config))
 }
 
-fn make_postgres_connector() -> qorb::backend::SharedConnector<QorbConnection> {
+fn make_postgres_connector(
+    log: &Logger,
+) -> qorb::backend::SharedConnector<QorbConnection> {
     // Create postgres connections.
     //
     // We're currently relying on the DieselPgConnector doing the following:
@@ -82,7 +85,7 @@ fn make_postgres_connector() -> qorb::backend::SharedConnector<QorbConnection> {
     let user = "root";
     let db = "omicron";
     let args = Some("sslmode=disable");
-    Arc::new(DieselPgConnector::new(user, db, args))
+    Arc::new(DieselPgConnector::new(log, user, db, args))
 }
 
 impl Pool {
@@ -90,12 +93,12 @@ impl Pool {
     ///
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
-    pub fn new_qorb(bootstrap_dns: Vec<SocketAddr>) -> Self {
+    pub fn new_qorb(log: &Logger, bootstrap_dns: Vec<SocketAddr>) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
         let resolver = make_dns_resolver(bootstrap_dns);
-        let connector = make_postgres_connector();
+        let connector = make_postgres_connector(log);
 
         let policy = Policy::default();
         Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
@@ -108,12 +111,12 @@ impl Pool {
     /// on a single instance of the database.
     ///
     /// In production, [Self::new_qorb] should be preferred.
-    pub fn new_qorb_single_host(db_config: &DbConfig) -> Self {
+    pub fn new_qorb_single_host(log: &Logger, db_config: &DbConfig) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
         let resolver = make_single_host_resolver(db_config);
-        let connector = make_postgres_connector();
+        let connector = make_postgres_connector(log);
 
         let policy = Policy::default();
         Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
@@ -123,12 +126,15 @@ impl Pool {
     /// if claims are not quickly available.
     ///
     /// This is intended for test-only usage.
-    pub fn new_qorb_single_host_failfast(db_config: &DbConfig) -> Self {
+    pub fn new_qorb_single_host_failfast(
+        log: &Logger,
+        db_config: &DbConfig,
+    ) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
         let resolver = make_single_host_resolver(db_config);
-        let connector = make_postgres_connector();
+        let connector = make_postgres_connector(log);
 
         let policy = Policy {
             claim_timeout: tokio::time::Duration::from_millis(1),

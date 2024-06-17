@@ -1573,7 +1573,7 @@ mod test {
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_qorb_single_host(&cfg);
+        let pool = db::Pool::new_qorb_single_host(&logctx.log, &cfg);
         let datastore =
             DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -1622,7 +1622,7 @@ mod test {
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_qorb_single_host(&cfg));
+        let pool = Arc::new(db::Pool::new_qorb_single_host(&logctx.log, &cfg));
         let datastore =
             Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx = OpContext::for_tests(
