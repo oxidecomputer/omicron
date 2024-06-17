@@ -753,7 +753,7 @@ impl DataStore {
         // important than handling that extremely unlikely edge case.
         let mut did_lock = false;
         loop {
-            match instance.runtime_state.updater_id {
+            match instance.updater_id {
                 // If the `updater_id` field is not null and the ID equals this
                 // saga's ID, we already have the lock. We're done here!
                 Some(lock_id) if lock_id == saga_lock_id => {
@@ -766,7 +766,7 @@ impl DataStore {
                     );
                     return Ok(UpdaterLock {
                         saga_lock_id,
-                        locked_gen: instance.runtime_state.updater_gen,
+                        locked_gen: instance.updater_gen,
                     });
                 }
                 // The `updater_id` field is set, but it's not our ID. The instance
@@ -787,7 +787,7 @@ impl DataStore {
             }
 
             // Okay, now attempt to acquire the lock
-            let current_gen = instance.runtime_state.updater_gen;
+            let current_gen = instance.updater_gen;
             slog::debug!(
                 &opctx.log,
                 "attempting to acquire instance updater lock";
@@ -902,12 +902,12 @@ impl DataStore {
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
-            } if found.runtime_state.updater_gen > locked_gen => Ok(false),
+            } if found.updater_gen > locked_gen => Ok(false),
             // The instance exists, but the lock ID doesn't match our lock ID.
             // This means we were trying to release a lock we never held, whcih
             // is almost certainly a programmer error.
             UpdateAndQueryResult { ref found, .. } => {
-                match found.runtime_state.updater_id {
+                match found.updater_id {
                     Some(lock_holder) => {
                         debug_assert_ne!(lock_holder, saga_lock_id);
                         Err(Error::internal_error(
