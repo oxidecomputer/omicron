@@ -197,6 +197,8 @@ impl RackInitializeRequest {
             return Ok(v1.into());
         }
 
+        // If we fail to parse the request as any known version, we return the
+        // error corresponding to the parse failure of the newest schema.
         Err(v2_err.into())
     }
 }

@@ -770,6 +770,8 @@ impl FromStr for EarlyNetworkConfig {
             }
             Err(e) => format!("unable to parse EarlyNetworkConfig: {e:?}"),
         };
+        // If we fail to parse the config as any known version, we return the
+        // error corresponding to the parse failure of the newest schema.
         serde_json::from_str::<back_compat::EarlyNetworkConfigV1>(&value)
             .map(|v1| EarlyNetworkConfig {
                 generation: v1.generation,
@@ -861,8 +863,8 @@ impl EarlyNetworkConfig {
             }
         };
 
-        // Return the v2 error preferentially over subsequent errors as it's
-        // more likely to be useful.
+        // If we fail to parse the config as any known version, we return the
+        // error corresponding to the parse failure of the newest schema.
         Err(v2_error)
     }
 }
