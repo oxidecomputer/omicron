@@ -114,82 +114,57 @@ impl ObservedPropolisState {
     /// runtime state and an instance state monitor response received from
     /// Propolis.
     pub fn new(
-        instance_runtime: &InstanceRuntimeState,
-        propolis_id: PropolisUuid,
+        migration: Option<&MigrationRuntimeState>,
         propolis_state: &InstanceStateMonitorResponse,
     ) -> Self {
-        // Decide which of Propolis's reported migrations to pay attention to.
-        // If this Propolis is currently a migration target (evidenced by its ID
-        // appearing in the `dst_propolis_id` field in the instance record),
-        // look at the current migration in. Otherwise, look at the reported
-        // migration out.
-        let role = if instance_runtime
-            .dst_propolis_id
-            .is_some_and(|id| id == propolis_id)
-        {
-            MigrationRole::Target
-        } else {
-            MigrationRole::Source
-        };
-
-        let propolis_migration = match role {
-            MigrationRole::Source => &propolis_state.migration.migration_out,
-            MigrationRole::Target => &propolis_state.migration.migration_in,
-        };
-
-        // Determine the status of the current active migration, if there is
-        // one. This procedure assumes that when a Propolis participates in a
-        // migration, its sled agent learns about that migration (and records
-        // the migration ID in its runtime state) before Propolis itself starts
-        // reporting that migration's status.
-        let migration_status =
-            match (instance_runtime.migration_id, propolis_migration) {
-                // If the runtime state and Propolis state agree that there's
-                // a migration in progress, and they agree on its ID, the
-                // Propolis migration state determines the migration status.
-                (Some(this_id), Some(propolis_migration))
-                    if this_id == propolis_migration.id =>
-                {
-                    match propolis_migration.state {
-                        PropolisMigrationState::Finish => {
-                            ObservedMigrationStatus::Succeeded
-                        }
-                        PropolisMigrationState::Error => {
-                            ObservedMigrationStatus::Failed
-                        }
-                        _ => ObservedMigrationStatus::InProgress,
-                    }
-                }
-
-                // Propolis continues to report the status of failed migrations
-                // until they are supplanted by new attempts to migrate. If both
-                // sides have a migration ID, but the IDs don't match, assume
-                // that Propolis is reporting stale status from an earlier
-                // migration and that a new migration is about to begin.
-                (Some(_), Some(_)) => ObservedMigrationStatus::Pending,
-
-                // A migration source's migration IDs get set before its
-                // Propolis actually gets asked to migrate, so it's possible for
-                // the runtime state to contain an ID while the Propolis has
-                // none, in which case the migration is pending.
-                (Some(_), None) => ObservedMigrationStatus::Pending,
-
-                // If the instance runtime state has no migration ID, don't
-                // report any migration status, even if Propolis had some status
-                // to report. (Nexus and sled agent won't remove migration IDs
-                // from an instance's runtime state until the migration is
-                // actually finished, so the migration Propolis is reporting in
-                // this case must be stale.)
-                (None, Some(_)) => ObservedMigrationStatus::NoMigration,
-
-                // If neither side has a migration ID, then there's clearly no
-                // migration.
-                (None, None) => ObservedMigrationStatus::NoMigration,
+        // If there's no migration currently registered with this sled, report
+        // the current state and that no migration is currently in progress,
+        // even if Propolis has some migration data to share. (This case arises
+        // when Propolis returns state from a previous migration that sled agent
+        // has already retired.)
+        let Some(migration) = migration else {
+            return Self {
+                vmm_state: PropolisInstanceState(propolis_state.state),
+                migration_status: ObservedMigrationStatus::NoMigration,
+                time: Utc::now(),
             };
+        };
+
+        // Sled agent believes a live migration may be in progress. See if
+        // either of the Propolis migrations corresponds to it.
+        let propolis_migration = match (
+            &propolis_state.migration.migration_in,
+            &propolis_state.migration.migration_out,
+        ) {
+            (Some(inbound), _) if inbound.id == migration.migration_id => {
+                inbound
+            }
+            (_, Some(outbound)) if outbound.id == migration.migration_id => {
+                outbound
+            }
+            _ => {
+                // Sled agent believes this instance should be migrating, but
+                // Propolis isn't reporting a matching migration yet, so assume
+                // the migration is still pending.
+                return Self {
+                    vmm_state: PropolisInstanceState(propolis_state.state),
+                    migration_status: ObservedMigrationStatus::Pending,
+                    time: Utc::now(),
+                };
+            }
+        };
 
         Self {
             vmm_state: PropolisInstanceState(propolis_state.state),
-            migration_status,
+            migration_status: match propolis_migration.state {
+                PropolisMigrationState::Finish => {
+                    ObservedMigrationStatus::Succeeded
+                }
+                PropolisMigrationState::Error => {
+                    ObservedMigrationStatus::Failed
+                }
+                _ => ObservedMigrationStatus::InProgress,
+            },
             time: Utc::now(),
         }
     }

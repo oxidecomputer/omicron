@@ -373,8 +373,7 @@ impl InstanceRunner {
                     match request {
                         Some(Update { state, tx }) => {
                             let observed = ObservedPropolisState::new(
-                                self.state.instance(),
-                                self.state.propolis_id(),
+                                self.state.migration(),
                                 &state,
                             );
                             let reaction = self.observe_state(&observed).await;
