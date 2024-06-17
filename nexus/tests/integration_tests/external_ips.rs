@@ -49,6 +49,8 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -653,6 +655,7 @@ async fn test_floating_ip_create_attachment(
         &FIP_NAMES[..1],
     )
     .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Reacquire FIP: parent ID must have updated to match instance.
     let fetched_fip =
@@ -673,8 +676,8 @@ async fn test_floating_ip_create_attachment(
     );
 
     // Stop and delete the instance.
-    instance_simulate(nexus, &instance.identity.id).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_simulate(nexus, &instance_id).await;
 
     let _: Instance = NexusRequest::new(
         RequestBuilder::new(
@@ -692,7 +695,7 @@ async fn test_floating_ip_create_attachment(
     .parsed_body()
     .unwrap();
 
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
 
     NexusRequest::object_delete(
         &client,
@@ -762,10 +765,11 @@ async fn test_external_ip_live_attach_detach(
             &[],
         )
         .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
         if *start {
-            instance_simulate(nexus, &instance.identity.id).await;
-            instance_simulate(nexus, &instance.identity.id).await;
+            instance_simulate(nexus, &instance_id).await;
+            instance_simulate(nexus, &instance_id).await;
         }
 
         // Verify that each instance has no external IPs.
@@ -1035,9 +1039,10 @@ async fn test_external_ip_attach_fail_if_in_use_by_other(
             &[FIP_NAMES[i]],
         )
         .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
-        instance_simulate(nexus, &instance.identity.id).await;
-        instance_simulate(nexus, &instance.identity.id).await;
+        instance_simulate(nexus, &instance_id).await;
+        instance_simulate(nexus, &instance_id).await;
 
         instances.push(instance);
         fips.push(fip);

@@ -54,6 +54,8 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
 use uuid::Uuid;
 
@@ -1254,6 +1256,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     const INSTANCE_NAME: &str = "myinst";
     create_project(client, PROJECT_NAME).await;
     let instance = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // We should not be able to delete the range, since there's an external IP
     // address in use out of it.
@@ -1293,7 +1296,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 
     // Simulate the transition, wait until it is in fact stopped.
     let sa = nexus
-        .instance_sled_by_id(&instance.identity.id)
+        .instance_sled_by_id(&instance_id)
         .await
         .unwrap()
         .expect("running instance should be on a sled");

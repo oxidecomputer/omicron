@@ -25,6 +25,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_storage::resources::DisksManagementResult;
@@ -77,7 +78,7 @@ pub fn api() -> SledApiDescription {
 /// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
 }
 
 #[endpoint {
@@ -309,7 +310,7 @@ async fn instance_issue_disk_snapshot_request(
     let body = body.into_inner();
 
     sa.instance_issue_disk_snapshot_request(
-        path_params.instance_id,
+        InstanceUuid::from_untyped_uuid(path_params.instance_id),
         path_params.disk_id,
         body.snapshot_id,
     )

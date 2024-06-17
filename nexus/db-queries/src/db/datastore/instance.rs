@@ -49,6 +49,10 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::MigrationRuntimeState;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -68,8 +72,8 @@ impl InstanceAndActiveVmm {
         &self.vmm
     }
 
-    pub fn sled_id(&self) -> Option<Uuid> {
-        self.vmm.as_ref().map(|v| v.sled_id)
+    pub fn sled_id(&self) -> Option<SledUuid> {
+        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
     }
 
     pub fn effective_state(
@@ -446,21 +450,21 @@ impl DataStore {
     // to explicitly fetch the state if they want that.
     pub async fn instance_update_runtime(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         new_runtime: &InstanceRuntimeState,
     ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*instance_id))
+            .filter(dsl::id.eq(instance_id.into_untyped_uuid()))
             // Runtime state updates are allowed if either:
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists::<Instance>(*instance_id)
+            .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|r| match r.status {
@@ -472,7 +476,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
-                        LookupType::ById(*instance_id),
+                        LookupType::ById(instance_id.into_untyped_uuid()),
                     ),
                 )
             })?;
@@ -507,9 +511,9 @@ impl DataStore {
     /// - `Err` if another error occurred while accessing the database.
     pub async fn instance_and_vmm_update_runtime(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         new_instance: &InstanceRuntimeState,
-        vmm_id: &Uuid,
+        vmm_id: &PropolisUuid,
         new_vmm: &VmmRuntimeState,
         migration: &Option<MigrationRuntimeState>,
     ) -> Result<InstanceUpdateResult, Error> {
@@ -694,7 +698,11 @@ impl DataStore {
                 }
             })?;
 
-        self.instance_ssh_keys_delete(opctx, authz_instance.id()).await?;
+        self.instance_ssh_keys_delete(
+            opctx,
+            InstanceUuid::from_untyped_uuid(authz_instance.id()),
+        )
+        .await?;
 
         Ok(())
     }
@@ -943,7 +951,7 @@ mod tests {
     ) -> authz::Instance {
         let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
 
         let (authz_project, _project) = datastore
             .project_create(
@@ -990,7 +998,7 @@ mod tests {
             .expect("instance must be created successfully");
 
         let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await
             .expect("instance must exist");
@@ -1270,9 +1278,11 @@ mod tests {
             )
             .await
             .expect("active VMM should be inserted successfully!");
+
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         datastore
             .instance_update_runtime(
-                &authz_instance.id(),
+                &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
                     gen: Generation(
@@ -1339,7 +1349,7 @@ mod tests {
             .expect("migration should be inserted successfully!");
         datastore
             .instance_update_runtime(
-                &authz_instance.id(),
+                &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
                     gen: Generation(

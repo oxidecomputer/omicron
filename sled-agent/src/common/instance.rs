@@ -11,18 +11,18 @@ use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, MigrationRole, MigrationRuntimeState, MigrationState,
     SledInstanceState, VmmRuntimeState, VmmState,
 };
+use omicron_uuid_kinds::PropolisUuid;
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
     MigrationState as PropolisMigrationState,
 };
-use uuid::Uuid;
 
 /// The instance and VMM state that sled agent maintains on a per-VMM basis.
 #[derive(Clone, Debug)]
 pub struct InstanceStates {
     instance: InstanceRuntimeState,
     vmm: VmmRuntimeState,
-    propolis_id: Uuid,
+    propolis_id: PropolisUuid,
     migration: Option<MigrationRuntimeState>,
 }
 
@@ -209,7 +209,7 @@ impl InstanceStates {
     pub fn new(
         instance: InstanceRuntimeState,
         vmm: VmmRuntimeState,
-        propolis_id: Uuid,
+        propolis_id: PropolisUuid,
     ) -> Self {
         let migration = instance.migration_id.map(|migration_id| {
             let dst_propolis_id = instance.dst_propolis_id.expect("if an instance has a migration ID, it should also have a target VMM ID");
@@ -237,7 +237,7 @@ impl InstanceStates {
         &self.vmm
     }
 
-    pub fn propolis_id(&self) -> Uuid {
+    pub fn propolis_id(&self) -> PropolisUuid {
         self.propolis_id
     }
 
@@ -602,7 +602,7 @@ mod test {
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {
-        let propolis_id = Uuid::new_v4();
+        let propolis_id = PropolisUuid::new_v4();
         let now = Utc::now();
         let instance = InstanceRuntimeState {
             propolis_id: Some(propolis_id),
@@ -626,7 +626,7 @@ mod test {
         state.vmm.state = VmmState::Migrating;
         let migration_id = Uuid::new_v4();
         state.instance.migration_id = Some(migration_id);
-        state.instance.dst_propolis_id = Some(Uuid::new_v4());
+        state.instance.dst_propolis_id = Some(PropolisUuid::new_v4());
         state.migration = Some(MigrationRuntimeState {
             migration_id,
             state: MigrationState::InProgress,
@@ -636,6 +636,7 @@ mod test {
             gen: Generation::new().next(),
             time_updated: Utc::now(),
         });
+
         state
     }
 
@@ -644,7 +645,7 @@ mod test {
         state.vmm.state = VmmState::Migrating;
         let migration_id = Uuid::new_v4();
         state.instance.migration_id = Some(migration_id);
-        state.propolis_id = Uuid::new_v4();
+        state.propolis_id = PropolisUuid::new_v4();
         state.instance.dst_propolis_id = Some(state.propolis_id);
         state.migration = Some(MigrationRuntimeState {
             migration_id,
@@ -935,7 +936,7 @@ mod test {
         state.set_migration_ids(
             &Some(InstanceMigrationSourceParams {
                 migration_id,
-                dst_propolis_id: Uuid::new_v4(),
+                dst_propolis_id: PropolisUuid::new_v4(),
             }),
             Utc::now(),
         );
@@ -1020,7 +1021,7 @@ mod test {
         // new IDs are present should indicate that they are indeed present.
         let migration_ids = InstanceMigrationSourceParams {
             migration_id: Uuid::new_v4(),
-            dst_propolis_id: Uuid::new_v4(),
+            dst_propolis_id: PropolisUuid::new_v4(),
         };
 
         new_instance.set_migration_ids(&Some(migration_ids), Utc::now());
@@ -1056,7 +1057,7 @@ mod test {
         ));
 
         new_instance.instance.migration_id = Some(migration_ids.migration_id);
-        new_instance.instance.dst_propolis_id = Some(Uuid::new_v4());
+        new_instance.instance.dst_propolis_id = Some(PropolisUuid::new_v4());
         assert!(!new_instance.migration_ids_already_set(
             old_instance.instance(),
             &Some(migration_ids)

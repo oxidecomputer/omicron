@@ -51,6 +51,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
 use sled_agent_client::ZoneKind;
@@ -65,12 +67,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         pool_id: Uuid,
     ) -> CreateResult<ExternalIp> {
         let data = IncompleteExternalIp::for_instance_source_nat(
             ip_id,
-            instance_id,
+            instance_id.into_untyped_uuid(),
             pool_id,
         );
         self.allocate_external_ip(opctx, data).await
@@ -109,7 +111,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         pool: Option<authz::IpPool>,
         creating_instance: bool,
     ) -> CreateResult<(ExternalIp, bool)> {
@@ -385,7 +387,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         kind: IpKind,
         creating_instance: bool,
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
@@ -403,7 +405,7 @@ impl DataStore {
         };
 
         let query = Instance::attach_resource(
-            instance_id,
+            instance_id.into_untyped_uuid(),
             ip_id,
             inst_table
                 .into_boxed()
@@ -416,7 +418,7 @@ impl DataStore {
                 .filter(dsl::parent_id.is_null()),
             MAX_EXTERNAL_IPS_PLUS_SNAT,
             diesel::update(dsl::external_ip).set((
-                dsl::parent_id.eq(Some(instance_id)),
+                dsl::parent_id.eq(Some(instance_id.into_untyped_uuid())),
                 dsl::time_modified.eq(Utc::now()),
                 dsl::state.eq(IpAttachState::Attaching),
             )),
@@ -430,7 +432,7 @@ impl DataStore {
             AttachError::CollectionNotFound => {
                 Err(Error::not_found_by_id(
                     ResourceType::Instance,
-                    &instance_id,
+                    &instance_id.into_untyped_uuid(),
                 ))
             },
             AttachError::ResourceNotFound => {
@@ -446,9 +448,9 @@ impl DataStore {
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 match resource.state {
                     // Idempotent errors: is in progress or complete for same resource pair -- this is fine.
-                    IpAttachState::Attaching if resource.parent_id == Some(instance_id) =>
+                    IpAttachState::Attaching if resource.parent_id == Some(instance_id.into_untyped_uuid()) =>
                         return Ok(Some(resource)),
-                    IpAttachState::Attached if resource.parent_id == Some(instance_id) => {
+                    IpAttachState::Attached if resource.parent_id == Some(instance_id.into_untyped_uuid()) => {
                         do_saga = false;
                         return Ok(Some(resource))
                     },
@@ -518,7 +520,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         kind: IpKind,
         creating_instance: bool,
     ) -> UpdateResult<Option<(ExternalIp, bool)>> {
@@ -534,7 +536,7 @@ impl DataStore {
         };
 
         let query = Instance::detach_resource(
-            instance_id,
+            instance_id.into_untyped_uuid(),
             ip_id,
             inst_table
                 .into_boxed()
@@ -558,7 +560,7 @@ impl DataStore {
             DetachError::CollectionNotFound => {
                 Error::not_found_by_id(
                     ResourceType::Instance,
-                    &instance_id,
+                    &instance_id.into_untyped_uuid(),
                 )
             },
             DetachError::ResourceNotFound => {
@@ -572,7 +574,7 @@ impl DataStore {
                 }
             },
             DetachError::NoUpdate { resource, collection } => {
-                let parent_match = resource.parent_id == Some(instance_id);
+                let parent_match = resource.parent_id == Some(instance_id.into_untyped_uuid());
                 match resource.state {
                     // Idempotent cases: already detached OR detaching from same instance.
                     IpAttachState::Detached => {
@@ -660,10 +662,10 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<Option<ExternalIp>, Error> {
         let _ = LookupPath::new(&opctx, self)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 
@@ -763,13 +765,13 @@ impl DataStore {
     pub async fn instance_lookup_external_ips(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> LookupResult<Vec<ExternalIp>> {
         use db::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(false))
             .filter(dsl::is_probe.eq(false))
-            .filter(dsl::parent_id.eq(instance_id))
+            .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -782,7 +784,7 @@ impl DataStore {
     pub async fn instance_lookup_ephemeral_ip(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> LookupResult<Option<ExternalIp>> {
         Ok(self
             .instance_lookup_external_ips(opctx, instance_id)
@@ -915,11 +917,11 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
         let (.., authz_instance) = LookupPath::new(&opctx, self)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 
@@ -957,11 +959,11 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
         let (.., authz_instance) = LookupPath::new(&opctx, self)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 

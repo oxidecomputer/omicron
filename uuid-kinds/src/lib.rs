@@ -57,6 +57,7 @@ impl_typed_uuid_kind! {
     LoopbackAddress => "loopback_address",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
+    Propolis => "propolis",
     Sled => "sled",
     TufRepo => "tuf_repo",
     Upstairs => "upstairs",
