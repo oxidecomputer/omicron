@@ -3357,10 +3357,9 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#943c4bbe6b50d1ab635d085d6204895fb4154e79"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#73cd5a84689d59ecce9da66ad4389c540d315168"
 dependencies = [
- "hex",
  "lpc55_areas",
  "lpc55_sign",
  "object 0.30.4",
@@ -4274,8 +4273,8 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "lpc55_areas"
-version = "0.2.5"
-source = "git+https://github.com/oxidecomputer/lpc55_support#131520fc913ecce9b80557e854751953f743a7d2"
+version = "0.2.4"
+source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
 dependencies = [
  "bitfield",
  "clap",
@@ -4285,8 +4284,8 @@ dependencies = [
 
 [[package]]
 name = "lpc55_sign"
-version = "0.3.4"
-source = "git+https://github.com/oxidecomputer/lpc55_support#131520fc913ecce9b80557e854751953f743a7d2"
+version = "0.3.3"
+source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
 dependencies = [
  "byteorder",
  "const-oid",
@@ -7474,7 +7473,7 @@ dependencies = [
 [[package]]
 name = "qorb"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=master#bb432c9574c393bf2eb7b19516b996aa5584573e"
+source = "git+https://github.com/oxidecomputer/qorb?branch=master#bacbcd46ba0a8c81034db16cdfa5becc43b617f5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7490,7 +7489,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.23.0",
+ "tokio-tungstenite 0.23.1",
  "tracing",
 ]
 
@@ -10079,9 +10078,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.23.0"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "becd34a233e7e31a3dbf7c7241b38320f57393dcae8e7324b0167d21b8e320b0"
+checksum = "c6989540ced10490aaf14e6bad2e3d33728a2813310a0c71d1574304c49631cd"
 dependencies = [
  "futures-util",
  "log",
