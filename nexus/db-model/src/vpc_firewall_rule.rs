@@ -14,7 +14,6 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::json;
 use std::collections::HashSet;
 use std::io::Write;
 use uuid::Uuid;
@@ -279,14 +278,16 @@ fn ensure_no_duplicates(
         }
     }
 
-    if !dupes.is_empty() {
-        return Err(external::Error::invalid_value(
-            "rules",
-            format!("Rule names must be unique. Duplicates: {}", json!(dupes)),
-        ));
+    if dupes.is_empty() {
+        return Ok(());
     }
 
-    Ok(())
+    let dupes_str =
+        dupes.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(", ");
+    return Err(external::Error::invalid_value(
+        "rules",
+        format!("Rule names must be unique. Duplicates: [{}]", dupes_str),
+    ));
 }
 
 impl Into<external::VpcFirewallRule> for VpcFirewallRule {
