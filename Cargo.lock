@@ -464,9 +464,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "libc",
  "strum",
 ]
@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "libc",
  "strum",
@@ -3471,7 +3471,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -5526,7 +5526,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
@@ -5776,7 +5776,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -7207,7 +7207,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7221,7 +7221,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "uuid",
 ]
 
@@ -7249,7 +7249,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "anyhow",
  "atty",
@@ -7259,7 +7259,7 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7272,7 +7272,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "uuid",
 ]
 
@@ -7291,7 +7291,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "schemars",
  "serde",
