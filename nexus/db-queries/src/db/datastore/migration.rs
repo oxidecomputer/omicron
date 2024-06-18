@@ -22,6 +22,8 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -54,6 +56,23 @@ impl DataStore {
             .filter(dsl::instance_id.eq(authz_instance.id()))
             .select(Migration::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Mark *all* migrations for the provided instance as deleted.
+    ///
+    /// This should be called when deleting an instance.
+    pub(crate) async fn migration_mark_deleted_by_instance(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+    ) -> UpdateResult<usize> {
+        diesel::update(dsl::migration)
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -186,34 +205,39 @@ mod tests {
         authz_instance
     }
 
+    async fn insert_migration(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+    ) -> Migration {
+        let migration = Migration::new(
+            Uuid::new_v4(),
+            instance_id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        );
+
+        datastore
+            .migration_insert(&opctx, migration.clone())
+            .await
+            .expect("must insert migration successfully");
+
+        migration
+    }
+
     #[tokio::test]
-    async fn test_migration_list_by_instance() {
+    async fn test_migration_query_by_instance() {
         // Setup
-        let logctx = dev::test_setup_log("test_instance_fetch_all");
+        let logctx = dev::test_setup_log("test_migration_query_by_instance");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let authz_instance = create_test_instance(&datastore, &opctx).await;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
-        let migration1 = Migration::new(
-            Uuid::new_v4(),
-            instance_id,
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-        );
-        datastore
-            .migration_insert(&opctx, migration1.clone())
-            .await
-            .expect("must insert migration 1");
-        let migration2 = Migration::new(
-            Uuid::new_v4(),
-            instance_id,
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-        );
-        datastore
-            .migration_insert(&opctx, migration2.clone())
-            .await
-            .expect("must insert migration 2");
+
+        let migration1 =
+            insert_migration(&datastore, &opctx, instance_id).await;
+        let migration2 =
+            insert_migration(&datastore, &opctx, instance_id).await;
 
         let list = datastore
             .migration_list_by_instance(
@@ -225,16 +249,8 @@ mod tests {
             .expect("must list migrations");
         assert_all_migrations_found(&[&migration1, &migration2], &list[..]);
 
-        let migration3 = Migration::new(
-            Uuid::new_v4(),
-            instance_id,
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-        );
-        datastore
-            .migration_insert(&opctx, migration3.clone())
-            .await
-            .expect("must insert migration 3");
+        let migration3 =
+            insert_migration(&datastore, &opctx, instance_id).await;
 
         let list = datastore
             .migration_list_by_instance(
@@ -262,6 +278,34 @@ mod tests {
             .await
             .expect("must list migrations");
         assert_all_migrations_found(&[&migration1, &migration2], &list[..]);
+
+        let deleted = datastore
+            .migration_mark_deleted_by_instance(&opctx, instance_id)
+            .await
+            .expect("must delete remaining migrations");
+        assert_eq!(
+            deleted, 2,
+            "should not delete migration that was already marked as deleted"
+        );
+
+        let list = datastore
+            .migration_list_by_instance(
+                &opctx,
+                &authz_instance,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("list must succeed");
+        assert!(list.is_empty(), "all migrations must be deleted");
+
+        let deleted = datastore
+            .migration_mark_deleted_by_instance(&opctx, instance_id)
+            .await
+            .expect("must delete remaining migrations");
+        assert_eq!(
+            deleted, 0,
+            "should not delete migration that was already marked as deleted"
+        );
 
         // Clean up.
         db.cleanup().await.unwrap();
