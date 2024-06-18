@@ -7,7 +7,7 @@
 //! Crucible's Upstairs has two methods of swapping in a new downstairs to a
 //! region set:
 //!
-//! - A running Upstairs that has previously activated can be sent a request to
+//! - A running Upstairs that is currently activated can be sent a request to
 //!   replace a downstairs with a new one - this can be done while accepting all
 //!   the usual IO requests. This is called _Live Repair_.
 //!
@@ -47,11 +47,15 @@
 //! determination that a Volume is no longer degraded. Nexus should not be
 //! assuming anything. This is the _golden rule_ that this saga must follow.
 //!
-//! Volumes are put into a degraded state when the region replacement start saga
-//! modifies them: a blank region is swapped in one of the members of a region
-//! set. An Upstairs can still accept reads, writes, and flushes with only two
-//! out of three present in the set, but it's operating with a reduced
-//! redundancy.
+//! Volumes are in this degraded state the moment one or more targets in a
+//! region set is no longer functional. An Upstairs can still accept reads,
+//! writes, and flushes with only two out of three present in the set, but it's
+//! operating with a reduced redundancy.
+//!
+//! Through disk expungement, an operator has told Nexus that failure is not
+//! transient. The region replacement start saga then modifies them: a blank
+//! region is swapped in to replace one of the regions that are gone. Then this
+//! saga triggers either Live Repair or Reconciliation, and that's it right?
 //!
 //! Volumes back higher level objects that users interact with: disks,
 //! snapshots, images, etc. Users can start and stop Upstairs by starting and
