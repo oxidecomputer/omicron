@@ -16,6 +16,8 @@ use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use chrono::Utc;
+use diesel::pg::sql_types;
+use diesel::IntoSql;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
@@ -27,23 +29,15 @@ use omicron_common::api::external::{
     LookupResult, ResourceType,
 };
 use ref_cast::RefCast;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AddressLotCreateResult {
-    pub lot: AddressLot,
-    pub blocks: Vec<AddressLotBlock>,
-}
 
 impl DataStore {
     pub async fn address_lot_create(
         &self,
         opctx: &OpContext,
         params: &params::AddressLotCreate,
-    ) -> CreateResult<AddressLotCreateResult> {
+    ) -> CreateResult<AddressLot> {
         use db::schema::address_lot::dsl as lot_dsl;
-        use db::schema::address_lot_block::dsl as block_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -81,63 +75,7 @@ impl DataStore {
                     }
                 };
 
-                let desired_blocks: Vec<AddressLotBlock> = params
-                    .blocks
-                    .iter()
-                    .map(|b| {
-                        AddressLotBlock::new(
-                            db_lot.id(),
-                            b.first_address.into(),
-                            b.last_address.into(),
-                        )
-                    })
-                    .collect();
-
-                let found_blocks: Vec<AddressLotBlock> =
-                    block_dsl::address_lot_block
-                        .filter(block_dsl::address_lot_id.eq(db_lot.id()))
-                        .filter(
-                            block_dsl::first_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.first_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
-                        .filter(
-                            block_dsl::last_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.last_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
-                        .get_results_async(&conn)
-                        .await?;
-
-                let mut blocks = vec![];
-
-                // If the block is found in the database, use the found block.
-                // If the block is not found in the database, insert it.
-                for desired_block in desired_blocks {
-                    let block = match found_blocks.iter().find(|db_b| {
-                        db_b.first_address == desired_block.first_address
-                            && db_b.last_address == desired_block.last_address
-                    }) {
-                        Some(block) => block.clone(),
-                        None => {
-                            diesel::insert_into(block_dsl::address_lot_block)
-                                .values(desired_block)
-                                .returning(AddressLotBlock::as_returning())
-                                .get_results_async(&conn)
-                                .await?[0]
-                                .clone()
-                        }
-                    };
-                    blocks.push(block);
-                }
-
-                Ok(AddressLotCreateResult { lot: db_lot, blocks })
+                Ok(db_lot)
             })
             .await
             .map_err(|e| {
@@ -261,6 +199,69 @@ impl DataStore {
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn address_lot_block_create(
+        &self,
+        opctx: &OpContext,
+        address_lot_id: Uuid,
+        params: params::AddressLotBlockCreate,
+    ) -> CreateResult<AddressLotBlock> {
+        use db::schema::address_lot_block::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("address_lot_create")
+            .transaction(&conn, |conn| async move {
+                let found_block: Option<AddressLotBlock> =
+                    dsl::address_lot_block
+                        .filter(dsl::address_lot_id.eq(address_lot_id))
+                        .filter(
+                            dsl::first_address
+                                .eq(IpNetwork::from(params.first_address)),
+                        )
+                        .filter(
+                            dsl::last_address
+                                .eq(IpNetwork::from(params.last_address)),
+                        )
+                        .select(AddressLotBlock::as_select())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await
+                        .ok();
+
+                let new_block = AddressLotBlock::new(
+                    address_lot_id,
+                    IpNetwork::from(params.first_address),
+                    IpNetwork::from(params.last_address),
+                );
+
+                let db_block = match found_block {
+                    Some(v) => v,
+                    None => {
+                        diesel::insert_into(dsl::address_lot_block)
+                            .values(new_block)
+                            .returning(AddressLotBlock::as_returning())
+                            .get_result_async(&conn)
+                            .await?
+                    }
+                };
+
+                Ok(db_block)
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::AddressLotBlock,
+                        &format!(
+                            "block covering range {} - {}",
+                            params.first_address, params.last_address
+                        ),
+                    ),
+                )
+            })
     }
 
     pub async fn address_lot_id_for_block_id(

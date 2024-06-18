@@ -1408,8 +1408,6 @@ pub struct AddressLotCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The kind of address lot to create.
     pub kind: AddressLotKind,
-    /// The blocks to add along with the new address lot.
-    pub blocks: Vec<AddressLotBlockCreate>,
 }
 
 /// Parameters for creating an address lot block. Fist and last addresses are

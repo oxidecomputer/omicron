@@ -40,17 +40,18 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![
-            AddressLotBlockCreate {
-                first_address: "203.0.113.10".parse().unwrap(),
-                last_address: "203.0.113.20".parse().unwrap(),
-            },
-            AddressLotBlockCreate {
-                first_address: "1.2.3.0".parse().unwrap(),
-                last_address: "1.2.3.255".parse().unwrap(),
-            },
-        ],
     };
+
+    let block_params = vec![
+        AddressLotBlockCreate {
+            first_address: "203.0.113.10".parse().unwrap(),
+            last_address: "203.0.113.20".parse().unwrap(),
+        },
+        AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        },
+    ];
 
     NexusRequest::objects_post(
         client,
@@ -61,6 +62,21 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+
+    for params in block_params {
+        NexusRequest::objects_post(
+            client,
+            &format!(
+                "/v1/system/networking/address-lot/{}/blocks",
+                lot_params.identity.name
+            ),
+            &params,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
 
     // Create BGP announce set
     let announce_set = BgpAnnounceSetCreate {

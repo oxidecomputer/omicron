@@ -6303,6 +6303,99 @@
         "x-dropshot-pagination": {
           "required": []
         }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add block to address lot",
+        "operationId": "networking_address_lot_block_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressLotBlockCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotBlock"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/address-lot/{address_lot}/blocks/{block}": {
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove block from address lot",
+        "operationId": "networking_address_lot_block_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "The address lot the block belongs to",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "block",
+            "description": "The block to delete from the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotBlockResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/networking/allow-list": {
@@ -9146,13 +9239,6 @@
         "description": "Parameters for creating an address lot.",
         "type": "object",
         "properties": {
-          "blocks": {
-            "description": "The blocks to add along with the new address lot.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AddressLotBlockCreate"
-            }
-          },
           "description": {
             "type": "string"
           },
@@ -9169,7 +9255,6 @@
           }
         },
         "required": [
-          "blocks",
           "description",
           "kind",
           "name"
@@ -9179,13 +9264,6 @@
         "description": "An address lot and associated blocks resulting from creating an address lot.",
         "type": "object",
         "properties": {
-          "blocks": {
-            "description": "The address lot blocks that were created.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AddressLotBlock"
-            }
-          },
           "lot": {
             "description": "The address lot that was created.",
             "allOf": [
@@ -9196,7 +9274,6 @@
           }
         },
         "required": [
-          "blocks",
           "lot"
         ]
       },

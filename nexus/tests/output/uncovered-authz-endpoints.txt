@@ -1,5 +1,6 @@
 API endpoints with no coverage in authz tests:
 probe_delete                             (delete "/experimental/v1/probes/{probe}")
+networking_address_lot_block_remove      (delete "/v1/system/networking/address-lot/{address_lot}/blocks/{block}")
 probe_list                               (get    "/experimental/v1/probes")
 probe_view                               (get    "/experimental/v1/probes/{probe}")
 ping                                     (get    "/v1/ping")

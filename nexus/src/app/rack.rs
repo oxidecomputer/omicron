@@ -382,7 +382,7 @@ impl super::Nexus {
 
         let blocks = vec![ipv4_block];
 
-        let address_lot_params = AddressLotCreate { identity, kind, blocks };
+        let address_lot_params = AddressLotCreate { identity, kind };
 
         match self
             .db_datastore
@@ -425,14 +425,15 @@ impl super::Nexus {
                             ),
                         },
                         kind: AddressLotKind::Infra,
-                        blocks: bgp_config
-                            .originate
-                            .iter()
-                            .map(|o| AddressLotBlockCreate {
-                                first_address: o.first_addr().into(),
-                                last_address: o.last_addr().into(),
-                            })
-                            .collect(),
+                        // TODO: Levon - Move to new creation logic
+                        // blocks: bgp_config
+                        // .originate
+                        // .iter()
+                        // .map(|o| AddressLotBlockCreate {
+                        // first_address: o.first_addr().into(),
+                        // last_address: o.last_addr().into(),
+                        // })
+                        // .collect(),
                     },
                 )
                 .await

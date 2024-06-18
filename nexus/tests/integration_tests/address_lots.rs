@@ -45,10 +45,6 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
-            first_address: "203.0.113.10".parse().unwrap(),
-            last_address: "203.0.113.20".parse().unwrap(),
-        }],
     };
 
     let response: AddressLotCreateResponse = NexusRequest::objects_post(
@@ -64,11 +60,36 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let address_lot = response.lot;
-    let blocks = response.blocks;
+
+    let block_params = AddressLotBlockCreate {
+        first_address: "203.0.113.10".parse().unwrap(),
+        last_address: "203.0.113.20".parse().unwrap(),
+    };
+
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot/parkinglot/blocks",
+        &block_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Verify there are lot blocks
+    let blocks = NexusRequest::iter_collection_authn::<AddressLotBlock>(
+        client,
+        "/v1/system/networking/address-lot/parkinglot/blocks",
+        "",
+        None,
+    )
+    .await
+    .expect("Failed to list address lot blocks")
+    .all_items;
 
     assert_eq!(address_lot.identity.name, params.identity.name);
     assert_eq!(address_lot.identity.description, params.identity.description);
-    assert_eq!(blocks.len(), params.blocks.len());
+    assert_eq!(blocks.len(), 1, "Expected 1 address lot block");
     assert_eq!(
         blocks[0].first_address,
         "203.0.113.10".parse::<IpAddr>().unwrap()
@@ -91,20 +112,6 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
 
     assert_eq!(lots.len(), 2, "Expected 2 lots");
     assert_eq!(lots[1], address_lot);
-
-    // Verify there are lot blocks
-    let blist = NexusRequest::iter_collection_authn::<AddressLotBlock>(
-        client,
-        "/v1/system/networking/address-lot/parkinglot/blocks",
-        "",
-        None,
-    )
-    .await
-    .expect("Failed to list address lot blocks")
-    .all_items;
-
-    assert_eq!(blist.len(), 1, "Expected 1 address lot block");
-    assert_eq!(blist[0], blocks[0]);
 }
 
 #[nexus_test]
@@ -114,52 +121,75 @@ async fn test_address_lot_invalid_range(ctx: &ControlPlaneTestContext) {
     let mut params = Vec::new();
 
     // Try to create a lot with different address families
-    params.push(AddressLotCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "family".parse().unwrap(),
-            description: "an address parking lot".into(),
+    params.push((
+        AddressLotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "family".parse().unwrap(),
+                description: "an address parking lot".into(),
+            },
+            kind: AddressLotKind::Infra,
         },
-        kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
+        AddressLotBlockCreate {
             first_address: "203.0.113.10".parse().unwrap(),
             last_address: "fd00:1701::d".parse().unwrap(),
-        }],
-    });
+        },
+    ));
 
     // Try to create an IPv4 lot where the first address comes after the second.
-    params.push(AddressLotCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "v4".parse().unwrap(),
-            description: "an address parking lot".into(),
+    params.push((
+        AddressLotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "v4".parse().unwrap(),
+                description: "an address parking lot".into(),
+            },
+            kind: AddressLotKind::Infra,
         },
-        kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
+        AddressLotBlockCreate {
             first_address: "203.0.113.20".parse().unwrap(),
             last_address: "203.0.113.10".parse().unwrap(),
-        }],
-    });
+        },
+    ));
 
     // Try to create an IPv6 lot where the first address comes after the second.
-    params.push(AddressLotCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "v6".parse().unwrap(),
-            description: "an address parking lot".into(),
+    params.push((
+        AddressLotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "v6".parse().unwrap(),
+                description: "an address parking lot".into(),
+            },
+            kind: AddressLotKind::Infra,
         },
-        kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
+        AddressLotBlockCreate {
             first_address: "fd00:1701::d".parse().unwrap(),
             last_address: "fd00:1701::a".parse().unwrap(),
-        }],
-    });
+        },
+    ));
 
-    for params in &params {
+    for (lot_params, block_params) in &params {
         NexusRequest::new(
             RequestBuilder::new(
                 client,
                 Method::POST,
                 "/v1/system/networking/address-lot",
             )
-            .body(Some(&params))
+            .body(Some(&lot_params))
+            .expect_status(Some(StatusCode::CREATED)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                &format!(
+                    "/v1/system/networking/address-lot/{}/blocks",
+                    lot_params.identity.name
+                ),
+            )
+            .body(Some(&block_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
         )
         .authn_as(AuthnMode::PrivilegedUser)
