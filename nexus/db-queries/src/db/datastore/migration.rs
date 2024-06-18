@@ -5,7 +5,6 @@
 //! [`DataStore`] methods on [`Migration`]s.
 
 use super::DataStore;
-use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
