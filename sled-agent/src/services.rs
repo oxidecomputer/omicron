@@ -2359,7 +2359,6 @@ impl ServiceManager {
                 let mut mgd_service = ServiceBuilder::new("oxide/mgd");
                 let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
                 let mut uplink_service = ServiceBuilder::new("oxide/uplink");
-                let mut sp_sim_service = ServiceBuilder::new("oxide/sp-sim");
 
                 let mut switch_zone_setup_config =
                     PropertyGroupBuilder::new("config");
@@ -2422,9 +2421,6 @@ impl ServiceManager {
                             info!(
                                 self.inner.log,
                                 "Setting up Simulated SP service"
-                            );
-                            sp_sim_service = sp_sim_service.add_instance(
-                                ServiceInstanceBuilder::new("default"),
                             );
                         }
                         SwitchService::Wicketd { baseboard } => {
@@ -2965,7 +2961,6 @@ impl ServiceManager {
                     .add_service(pumpkind_service)
                     .add_service(mgd_service)
                     .add_service(mg_ddm_service)
-                    .add_service(sp_sim_service)
                     .add_service(uplink_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
