@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.migration (
     /* The time this migration record was deleted. */
     time_deleted TIMESTAMPTZ,
 
+    /* Note that there's no `time_modified/time_updated` timestamp for migration
+     * records. This is because we track updated time separately for the source
+     * and target sides of the migration, using separate `time_source_updated`
+     * and time_target_updated` columns.
+    */
+
     /* The state of the migration source */
     source_state omicron.public.migration_state NOT NULL,
 
