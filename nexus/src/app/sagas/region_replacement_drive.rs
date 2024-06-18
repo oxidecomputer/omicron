@@ -77,7 +77,7 @@
 //! start its own Reconciliation. Again, the user may then stop the Instance,
 //! halting progress.
 //!
-//! This saga is responsible for driving forward th Volume repair process, by
+//! This saga is responsible for driving forward the Volume repair process, by
 //! initiating repair operations. One invocation of this saga is not enough to
 //! repair a Volume: Nexus must continuously monitor the degraded Volumes and
 //! initiate the necessary operation (LR or Reconciliation) until those Volumes
