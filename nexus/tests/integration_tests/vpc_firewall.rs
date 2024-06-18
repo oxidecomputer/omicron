@@ -6,7 +6,7 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{
-    create_project, create_vpc, object_get, object_put_error,
+    create_project, create_vpc, object_get, object_put, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Vpc;
@@ -320,4 +320,245 @@ async fn test_firewall_rules_same_name(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
     assert_eq!(error.message, "unsupported value for \"rules\": Rule names must be unique. Duplicates: [\"dupe\"]");
+}
+
+#[nexus_test]
+async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let project_name = "my-project";
+    create_project(&client, &project_name).await;
+
+    let base_rule = VpcFirewallRuleUpdate {
+        name: "my-rule".parse().unwrap(),
+        description: "".to_string(),
+        status: VpcFirewallRuleStatus::Enabled,
+        direction: VpcFirewallRuleDirection::Inbound,
+        targets: vec![],
+        filters: VpcFirewallRuleFilter {
+            hosts: None,
+            protocols: None,
+            ports: None,
+        },
+        action: VpcFirewallRuleAction::Allow,
+        priority: VpcFirewallRulePriority(65534),
+    };
+
+    let rule_n = |i: usize| VpcFirewallRuleUpdate {
+        name: format!("rule{}", i).parse().unwrap(),
+        ..base_rule.clone()
+    };
+
+    let url =
+        format!("/v1/vpc-firewall-rules?vpc=default&project={}", project_name);
+
+    // fine with max count
+    let max: usize = 512;
+    let rules: VpcFirewallRules = object_put(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: (0..max).map(rule_n).collect::<Vec<_>>(),
+        },
+    )
+    .await;
+    assert_eq!(rules.rules.len(), max);
+
+    // fails with max + 1
+    let error = object_put_error(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: (0..max + 1).map(rule_n).collect::<Vec<_>>(),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        format!("unsupported value for \"rules\": max length {max}")
+    );
+
+    ///////////////////////
+    // TARGETS
+    ///////////////////////
+
+    let target = VpcFirewallRuleTarget::Vpc("default".parse().unwrap());
+
+    // fine with max
+    let rules: VpcFirewallRules = object_put(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                targets: (0..max).map(|_i| target.clone()).collect(),
+                ..base_rule.clone()
+            }],
+        },
+    )
+    .await;
+    assert_eq!(rules.rules[0].targets.len(), max);
+
+    // fails with max + 1
+    let error = object_put_error(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                targets: (0..max + 1).map(|_i| target.clone()).collect(),
+                ..base_rule.clone()
+            }],
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        format!("unsupported value for \"targets\": max length {max}")
+    );
+
+    ///////////////////////
+    // HOST FILTERS
+    ///////////////////////
+
+    let host = VpcFirewallRuleHostFilter::Vpc("default".parse().unwrap());
+
+    // fine with max
+    let rules: VpcFirewallRules = object_put(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                filters: VpcFirewallRuleFilter {
+                    hosts: Some((0..max).map(|_i| host.clone()).collect()),
+                    protocols: None,
+                    ports: None,
+                },
+                ..base_rule.clone()
+            }],
+        },
+    )
+    .await;
+    assert_eq!(rules.rules[0].filters.hosts.as_ref().unwrap().len(), max);
+
+    // fails with max + 1
+    let error = object_put_error(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                filters: VpcFirewallRuleFilter {
+                    hosts: Some((0..max + 1).map(|_i| host.clone()).collect()),
+                    protocols: None,
+                    ports: None,
+                },
+                ..base_rule.clone()
+            }],
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        format!("unsupported value for \"filters.hosts\": max length {max}")
+    );
+
+    ///////////////////////
+    // PORT FILTERS
+    ///////////////////////
+
+    let port: L4PortRange = "1234".parse().unwrap();
+
+    // fine with max
+    let rules: VpcFirewallRules = object_put(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                filters: VpcFirewallRuleFilter {
+                    ports: Some((0..max).map(|_i| port).collect()),
+                    protocols: None,
+                    hosts: None,
+                },
+                ..base_rule.clone()
+            }],
+        },
+    )
+    .await;
+    assert_eq!(rules.rules[0].filters.ports.as_ref().unwrap().len(), max);
+
+    // fails with max + 1
+    let error = object_put_error(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                filters: VpcFirewallRuleFilter {
+                    ports: Some((0..max + 1).map(|_i| port).collect()),
+                    protocols: None,
+                    hosts: None,
+                },
+                ..base_rule.clone()
+            }],
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        format!("unsupported value for \"filters.ports\": max length {max}")
+    );
+
+    ///////////////////////
+    // PROTOCOL FILTERS
+    ///////////////////////
+
+    let protocol = VpcFirewallRuleProtocol::Tcp;
+
+    // fine with max
+    let rules: VpcFirewallRules = object_put(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                filters: VpcFirewallRuleFilter {
+                    protocols: Some((0..max).map(|_i| protocol).collect()),
+                    ports: None,
+                    hosts: None,
+                },
+                ..base_rule.clone()
+            }],
+        },
+    )
+    .await;
+    assert_eq!(rules.rules[0].filters.protocols.as_ref().unwrap().len(), max);
+
+    // fails with max + 1
+    let error = object_put_error(
+        client,
+        &url,
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![VpcFirewallRuleUpdate {
+                filters: VpcFirewallRuleFilter {
+                    protocols: Some((0..max + 1).map(|_i| protocol).collect()),
+                    ports: None,
+                    hosts: None,
+                },
+                ..base_rule.clone()
+            }],
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"filters.protocols\": max length {max}"
+        )
+    );
 }
