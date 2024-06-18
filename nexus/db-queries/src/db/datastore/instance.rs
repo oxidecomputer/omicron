@@ -1359,7 +1359,6 @@ mod tests {
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
                     migration_id: Some(migration.id),
-                    ..snapshot.instance.runtime_state.clone()
                 },
             )
             .await
