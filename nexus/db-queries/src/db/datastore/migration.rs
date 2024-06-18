@@ -132,6 +132,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authz;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
     use crate::db::model::Instance;
